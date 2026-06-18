@@ -1,0 +1,24 @@
+mode: set
+healthlogin/backend/service/auth.go:24.66,26.18 2 0
+healthlogin/backend/service/auth.go:26.18,28.3 1 0
+healthlogin/backend/service/auth.go:29.2,29.47 1 0
+healthlogin/backend/service/auth.go:34.91,36.2 1 1
+healthlogin/backend/service/auth.go:40.82,41.35 1 1
+healthlogin/backend/service/auth.go:41.35,43.3 1 1
+healthlogin/backend/service/auth.go:45.2,46.50 2 1
+healthlogin/backend/service/auth.go:46.50,48.3 1 1
+healthlogin/backend/service/auth.go:49.2,49.21 1 1
+healthlogin/backend/service/auth.go:49.21,51.3 1 1
+healthlogin/backend/service/auth.go:53.2,54.16 2 1
+healthlogin/backend/service/auth.go:54.16,56.3 1 0
+healthlogin/backend/service/auth.go:58.2,65.44 2 1
+healthlogin/backend/service/auth.go:65.44,67.3 1 1
+healthlogin/backend/service/auth.go:69.2,69.34 1 1
+healthlogin/backend/service/auth.go:73.86,74.35 1 1
+healthlogin/backend/service/auth.go:74.35,76.3 1 1
+healthlogin/backend/service/auth.go:78.2,79.16 2 1
+healthlogin/backend/service/auth.go:79.16,81.3 1 1
+healthlogin/backend/service/auth.go:83.2,83.95 1 1
+healthlogin/backend/service/auth.go:83.95,85.3 1 1
+healthlogin/backend/service/auth.go:87.2,87.18 1 1
+healthlogin/backend/service/auth.go:91.74,99.2 2 1
