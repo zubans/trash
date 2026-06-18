@@ -46,6 +46,38 @@ func (m *mockRepo) Create(user *repository.User) error {
 	return nil
 }
 
+func (m *mockRepo) FindByID(id uuid.UUID) (*repository.User, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	for _, u := range m.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (m *mockRepo) UpdateStatus(id uuid.UUID, status string) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Status = status
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
+func (m *mockRepo) UpdateBalance(id uuid.UUID, balance float64) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Balance = balance
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
 func TestRegister_Success(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
 	phone := "+79001234567"

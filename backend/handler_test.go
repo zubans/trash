@@ -39,6 +39,35 @@ func (m *mockUserRepo) Create(user *repository.User) error {
 	return nil
 }
 
+func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error) {
+	for _, u := range m.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Status = status
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
+func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance float64) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Balance = balance
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
 func newTestHandler() *Handler {
 	repo := newMockUserRepo()
 	return NewHandler(service.NewAuthService(repo))
