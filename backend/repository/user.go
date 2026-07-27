@@ -9,13 +9,13 @@ import (
 
 // User represents a user record in the database.
 type User struct {
-	ID        uuid.UUID
-	Role      string
-	Phone     string
-	Password  string // bcrypt hash, managed by the service layer
-	Balance   float64
-	Status    string
-	CreatedAt time.Time
+	ID        uuid.UUID `json:"id"`
+	Role      string    `json:"role"`
+	Phone     string    `json:"phone"`
+	Password  string    `json:"-"` // bcrypt hash, managed by the service layer
+	Balance   float64   `json:"balance"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // UserRepository defines storage operations for users.
@@ -24,7 +24,9 @@ type UserRepository interface {
 	Create(user *User) error
 	FindByID(id uuid.UUID) (*User, error)
 	UpdateStatus(id uuid.UUID, status string) error
+	UpdateRole(id uuid.UUID, role string) error
 	UpdateBalance(id uuid.UUID, balance float64) error
+	UpdateLastGeo(id uuid.UUID, lastGeo string) error
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -75,7 +77,22 @@ func (r *repo) UpdateStatus(id uuid.UUID, status string) error {
 	return err
 }
 
+func (r *repo) UpdateRole(id uuid.UUID, role string) error {
+	_, err := r.db.Exec(`UPDATE users SET role = $1 WHERE id = $2`, role, id)
+	return err
+}
+
 func (r *repo) UpdateBalance(id uuid.UUID, balance float64) error {
 	_, err := r.db.Exec(`UPDATE users SET balance = $1 WHERE id = $2`, balance, id)
+	return err
+}
+
+func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
+		 VALUES ($1, '', '{}'::jsonb, $2)
+		 ON CONFLICT (user_id) DO UPDATE SET last_geo = $2`,
+		id, lastGeo,
+	)
 	return err
 }

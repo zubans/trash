@@ -1,20 +1,20 @@
 <template>
   <div class="user-list">
-    <h1 class="va-h3 mb-4">User Management</h1>
+    <h1 class="va-h3 mb-4">{{ $t('users.title') }}</h1>
 
     <!-- Filters and Search -->
     <div class="row g-3 mb-4 align-items-end">
       <div class="col-md-4">
-        <va-input v-model="searchQuery" placeholder="Search by phone..." label="Search" @input="debouncedFetch" />
+        <va-input v-model="searchQuery" :placeholder="$t('users.searchPlaceholder')" :label="$t('users.search')" @input="debouncedFetch" />
       </div>
       <div class="col-md-3">
-        <va-select v-model="selectedRole" :options="roleOptions" label="Role" @update:modelValue="fetchUsers" />
+        <va-select v-model="selectedRole" :options="roleOptions" :label="$t('users.role')" @update:modelValue="fetchUsers" />
       </div>
       <div class="col-md-3">
-        <va-select v-model="selectedStatus" :options="statusOptions" label="Status" @update:modelValue="fetchUsers" />
+        <va-select v-model="selectedStatus" :options="statusOptions" :label="$t('users.status')" @update:modelValue="fetchUsers" />
       </div>
       <div class="col-md-2">
-        <va-button color="secondary" outline @click="clearFilters">Clear</va-button>
+        <va-button color="secondary" outline @click="clearFilters">{{ $t('users.clear') }}</va-button>
       </div>
     </div>
 
@@ -29,28 +29,46 @@
       </template>
 
       <template #cell(actions)="{ rowData }">
-        <va-button
-          v-if="rowData.status === 'ACTIVE'"
-          color="danger"
-          size="small"
-          @click="toggleUserStatus(rowData)"
-        >
-          Ban
-        </va-button>
-        <va-button
-          v-else
-          color="success"
-          size="small"
-          @click="toggleUserStatus(rowData)"
-        >
-          Activate
-        </va-button>
+        <div class="actions-container">
+          <va-button
+            color="primary"
+            size="small"
+            class="mr-2"
+            @click="openTopUpModal(rowData)"
+          >
+            {{ $t('users.topUp') }}
+          </va-button>
+          <va-button
+            color="info"
+            size="small"
+            class="mr-2"
+            @click="openRoleModal(rowData)"
+          >
+            {{ $t('users.roleBtn') }}
+          </va-button>
+          <va-button
+            v-if="rowData.status === 'ACTIVE'"
+            color="danger"
+            size="small"
+            @click="toggleUserStatus(rowData)"
+          >
+            {{ $t('users.ban') }}
+          </va-button>
+          <va-button
+            v-else
+            color="success"
+            size="small"
+            @click="toggleUserStatus(rowData)"
+          >
+            {{ $t('users.activate') }}
+          </va-button>
+        </div>
       </template>
     </va-data-table>
 
     <!-- Pagination -->
     <div class="d-flex justify-content-between align-items-center">
-      <span>Total: {{ totalUsers }} users</span>
+      <span>{{ $t('users.total', { count: totalUsers }) }}</span>
       <va-pagination
         v-model="page"
         :pages="totalPages"
@@ -58,48 +76,93 @@
         @update:modelValue="fetchUsers"
       />
     </div>
+
+    <!-- Change Role Modal -->
+    <va-modal
+      v-model="showRoleModal"
+      :title="$t('users.changeRoleTitle')"
+      :ok-text="$t('users.save')"
+      :cancel-text="$t('users.cancel')"
+      @ok="saveRole"
+      @cancel="closeRoleModal"
+    >
+      <p class="mb-2">{{ $t('users.user') }}: <strong>{{ selectedUser?.phone }}</strong></p>
+      <va-select
+        v-model="newRole"
+        :options="editableRoleOptions"
+        :label="$t('users.newRole')"
+      />
+    </va-modal>
+
+    <!-- Top Up Balance Modal -->
+    <va-modal
+      v-model="showTopUpModal"
+      :title="$t('users.topUpTitle')"
+      :ok-text="$t('users.topUp')"
+      :cancel-text="$t('users.cancel')"
+      @ok="submitTopUp"
+      @cancel="closeTopUpModal"
+    >
+      <p class="mb-2">{{ $t('users.user') }}: <strong>{{ selectedUser?.phone }}</strong></p>
+      <va-input
+        v-model.number="topUpAmount"
+        type="number"
+        :label="$t('users.amount')"
+        min="0.01"
+        step="0.01"
+        required
+      />
+    </va-modal>
   </div>
 </template>
 
 <script lang="ts">
 import { defineComponent, ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import api from '../../services/api'
 
 export default defineComponent({
   name: 'UserList',
   setup() {
+    const { t } = useI18n()
+
     const users = ref([])
     const totalUsers = ref(0)
     const page = ref(1)
     const limit = ref(10)
     const loading = ref(false)
 
-    // Search and Filters
     const searchQuery = ref('')
     const selectedRole = ref('')
     const selectedStatus = ref('')
 
-    const roleOptions = [
-      { text: 'All', value: '' },
-      { text: 'Customer', value: 'CUSTOMER' },
-      { text: 'Executor', value: 'EXECUTOR' },
-      { text: 'Admin', value: 'ADMIN' },
-    ]
+    const roleOptions = computed(() => [
+      { text: t('roles.all'), value: '' },
+      { text: t('roles.customer'), value: 'CUSTOMER' },
+      { text: t('roles.executor'), value: 'EXECUTOR' },
+      { text: t('roles.admin'), value: 'ADMIN' },
+    ])
 
-    const statusOptions = [
-      { text: 'All', value: '' },
-      { text: 'Active', value: 'ACTIVE' },
-      { text: 'Banned', value: 'BANNED' },
-    ]
+    const editableRoleOptions = computed(() => [
+      { text: t('roles.customer'), value: 'CUSTOMER' },
+      { text: t('roles.executor'), value: 'EXECUTOR' },
+      { text: t('roles.admin'), value: 'ADMIN' },
+    ])
 
-    const columns = [
-      { key: 'phone', label: 'Phone', sortable: true },
-      { key: 'role', label: 'Role', sortable: true },
-      { key: 'balance', label: 'Balance', sortable: true },
-      { key: 'status', label: 'Status', sortable: true },
-      { key: 'created_at', label: 'Joined At', sortable: true },
-      { key: 'actions', label: 'Actions' },
-    ]
+    const statusOptions = computed(() => [
+      { text: t('statuses.all'), value: '' },
+      { text: t('statuses.active'), value: 'ACTIVE' },
+      { text: t('statuses.banned'), value: 'BANNED' },
+    ])
+
+    const columns = computed(() => [
+      { key: 'phone', label: t('users.phone'), sortable: true },
+      { key: 'role', label: t('users.role'), sortable: true },
+      { key: 'balance', label: t('users.balance'), sortable: true },
+      { key: 'status', label: t('users.status'), sortable: true },
+      { key: 'created_at', label: t('users.joinedAt'), sortable: true },
+      { key: 'actions', label: t('users.actions') },
+    ])
 
     const totalPages = computed(() => Math.ceil(totalUsers.value / limit.value) || 1)
 
@@ -145,9 +208,68 @@ export default defineComponent({
       const newStatus = user.status === 'ACTIVE' ? 'BANNED' : 'ACTIVE'
       try {
         await api.post(`/admin/users/${user.id}/status`, { status: newStatus })
-        user.status = newStatus // reactive update
+        user.status = newStatus
       } catch (err) {
-        alert('Failed to update user status')
+        alert(t('users.updateStatusError'))
+        console.error(err)
+      }
+    }
+
+    const showRoleModal = ref(false)
+    const selectedUser = ref<any>(null)
+    const newRole = ref<{ text: string; value: string } | string>('CUSTOMER')
+
+    const openRoleModal = (user: any) => {
+      selectedUser.value = user
+      const option = editableRoleOptions.value.find((o) => o.value === user.role)
+      newRole.value = option || user.role
+      showRoleModal.value = true
+    }
+
+    const closeRoleModal = () => {
+      showRoleModal.value = false
+      selectedUser.value = null
+    }
+
+    const saveRole = async () => {
+      if (!selectedUser.value) return
+      const roleValue = typeof newRole.value === 'object' ? (newRole.value as any).value : newRole.value
+      try {
+        await api.post(`/admin/users/${selectedUser.value.id}/role`, { role: roleValue })
+        selectedUser.value.role = roleValue
+        closeRoleModal()
+      } catch (err: any) {
+        alert(err.response?.data || t('users.updateRoleError'))
+        console.error(err)
+      }
+    }
+
+    const showTopUpModal = ref(false)
+    const topUpAmount = ref(0)
+
+    const openTopUpModal = (user: any) => {
+      selectedUser.value = user
+      topUpAmount.value = 100
+      showTopUpModal.value = true
+    }
+
+    const closeTopUpModal = () => {
+      showTopUpModal.value = false
+      selectedUser.value = null
+      topUpAmount.value = 0
+    }
+
+    const submitTopUp = async () => {
+      if (!selectedUser.value || !topUpAmount.value || topUpAmount.value <= 0) {
+        alert(t('users.positiveAmount'))
+        return
+      }
+      try {
+        await api.post(`/admin/users/${selectedUser.value.id}/balance`, { amount: topUpAmount.value })
+        selectedUser.value.balance = (selectedUser.value.balance || 0) + topUpAmount.value
+        closeTopUpModal()
+      } catch (err: any) {
+        alert(err.response?.data || t('users.topUpError'))
         console.error(err)
       }
     }
@@ -172,6 +294,7 @@ export default defineComponent({
       selectedRole,
       selectedStatus,
       roleOptions,
+      editableRoleOptions,
       statusOptions,
       columns,
       totalPages,
@@ -180,6 +303,17 @@ export default defineComponent({
       clearFilters,
       toggleUserStatus,
       formatDate,
+      showRoleModal,
+      showTopUpModal,
+      selectedUser,
+      newRole,
+      topUpAmount,
+      openRoleModal,
+      closeRoleModal,
+      saveRole,
+      openTopUpModal,
+      closeTopUpModal,
+      submitTopUp,
     }
   },
 })
@@ -211,5 +345,10 @@ export default defineComponent({
 }
 .align-items-center {
   align-items: center;
+}
+.actions-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>

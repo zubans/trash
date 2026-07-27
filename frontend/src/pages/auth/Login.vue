@@ -12,20 +12,23 @@
           :class="['tab-btn', { active: mode === 'login' }]"
           @click="mode = 'login'"
         >
-          Sign In
+          {{ $t('login.signIn') }}
         </button>
         <button 
           :class="['tab-btn', { active: mode === 'register' }]"
           @click="mode = 'register'"
         >
-          Register
+          {{ $t('login.register') }}
         </button>
       </div>
 
       <div class="card-content p-4">
+        <div class="d-flex justify-content-end mb-2">
+          <LanguageSwitcher />
+        </div>
         <!-- Title -->
         <h2 class="auth-title text-center mb-4">
-          {{ mode === 'login' ? 'Welcome Back' : 'Create Account' }}
+          {{ mode === 'login' ? $t('login.welcomeBack') : $t('login.createAccount') }}
         </h2>
 
         <!-- Alert messages -->
@@ -46,7 +49,7 @@
         <!-- Forms -->
         <va-form @submit.prevent="handleSubmit">
           <div class="form-group mb-3">
-            <label class="form-label">Phone Number</label>
+            <label class="form-label">{{ $t('login.phone') }}</label>
             <div class="input-wrapper">
               <span class="material-icons input-icon">phone</span>
               <input 
@@ -60,7 +63,7 @@
           </div>
 
           <div class="form-group mb-4">
-            <label class="form-label">Password</label>
+            <label class="form-label">{{ $t('login.password') }}</label>
             <div class="input-wrapper">
               <span class="material-icons input-icon">lock</span>
               <input 
@@ -75,7 +78,7 @@
 
           <button type="submit" class="submit-btn" :disabled="loading">
             <span v-if="loading" class="spinner"></span>
-            <span v-else>{{ mode === 'login' ? 'Sign In' : 'Sign Up' }}</span>
+            <span v-else>{{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}</span>
           </button>
         </va-form>
       </div>
@@ -86,8 +89,10 @@
 <script lang="ts">
 import { defineComponent, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
+import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 
 // Helper to decode JWT token
 function parseJwt(token: string) {
@@ -108,9 +113,11 @@ function parseJwt(token: string) {
 
 export default defineComponent({
   name: 'Login',
+  components: { LanguageSwitcher },
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()
+    const { t } = useI18n()
     
     const mode = ref<'login' | 'register'>('login')
     const phone = ref('')
@@ -140,7 +147,7 @@ export default defineComponent({
           const claims = parseJwt(token)
 
           if (!claims) {
-            error.value = 'Failed to parse user session. Try again.'
+            error.value = t('login.failedParse')
             return
           }
 
@@ -154,7 +161,7 @@ export default defineComponent({
           } else if (claims.role === 'EXECUTOR') {
             router.push('/executor')
           } else {
-            error.value = 'Role not supported.'
+            error.value = t('login.roleNotSupported')
           }
         } else {
           // Registration
@@ -162,15 +169,15 @@ export default defineComponent({
             phone: phone.value,
             password: password.value,
           })
-          message.value = 'Registration successful! You can now log in.'
+          message.value = t('login.registrationSuccess')
           mode.value = 'login'
           password.value = ''
         }
       } catch (err: any) {
         if (err.response && err.response.data) {
-          error.value = typeof err.response.data === 'string' ? err.response.data : 'Request failed.'
+          error.value = typeof err.response.data === 'string' ? err.response.data : t('login.networkError')
         } else {
-          error.value = 'Network error. Please try again.'
+          error.value = t('login.networkError')
         }
       } finally {
         loading.value = false

@@ -41,6 +41,7 @@ type AdminRepository interface {
 	CreateTopUpRequest(userID uuid.UUID, amount float64) (*TopUpRequest, error)
 	ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error
 	RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error
+	TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error
 	GetTransactions() ([]*Transaction, error)
 }
 
@@ -252,6 +253,30 @@ func (r *adminRepo) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) e
 		SET status = 'REJECTED', admin_id = $1, updated_at = now() 
 		WHERE id = $2`
 	_, err = tx.Exec(queryUpdateReq, adminID, requestID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Update user balance
+	_, err = tx.Exec(`UPDATE users SET balance = balance + $1 WHERE id = $2`, amount, userID)
+	if err != nil {
+		return err
+	}
+
+	// Log the transaction
+	_, err = tx.Exec(`
+		INSERT INTO transactions (user_id, type, amount, admin_id, created_at)
+		VALUES ($1, 'TOP_UP', $2, $3, now())`, userID, amount, adminID)
 	if err != nil {
 		return err
 	}

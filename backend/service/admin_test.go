@@ -92,6 +92,18 @@ func (m *mockAdminRepo) GetTransactions() ([]*repository.Transaction, error) {
 	return m.transactions, nil
 }
 
+func (m *mockAdminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+	m.transactions = append(m.transactions, &repository.Transaction{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Type:      "TOP_UP",
+		Amount:    amount,
+		AdminID:   &adminID,
+		CreatedAt: time.Now(),
+	})
+	return nil
+}
+
 // mockSettingsRepo mocks repository.SettingsRepository.
 type mockSettingsRepo struct {
 	settings map[string]float64

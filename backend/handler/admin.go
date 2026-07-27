@@ -76,6 +76,64 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]string{"message": "status updated successfully"})
 }
 
+// UpdateUserRoleHandler changes a user's role.
+func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.adminService.UpdateUserRole(userID, req.Role); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "role updated successfully"})
+}
+
+// TopUpUserBalanceHandler adds funds directly to a user's balance.
+func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Amount float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.adminService.TopUpUserBalance(userID, adminUser.ID, req.Amount); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "balance topped up successfully"})
+}
+
 // GetTopUpRequestsHandler lists all manual balance top-up requests.
 func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	reqs, err := h.adminService.GetTopUpRequests()

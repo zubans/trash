@@ -95,6 +95,29 @@ func (s *AdminService) UpdateUserStatus(userID uuid.UUID, status string) error {
 	return s.userRepo.UpdateStatus(userID, status)
 }
 
+// UpdateUserRole updates a user's role.
+func (s *AdminService) UpdateUserRole(userID uuid.UUID, role string) error {
+	if role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
+		return errors.New("invalid role")
+	}
+	return s.userRepo.UpdateRole(userID, role)
+}
+
+// TopUpUserBalance adds funds directly to a user's balance.
+func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+	if amount <= 0 {
+		return errors.New("amount must be greater than zero")
+	}
+
+	// Verify user exists
+	_, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	return s.adminRepo.TopUpUserBalance(userID, adminID, amount)
+}
+
 // GetTopUpRequests lists all balance top-up requests.
 func (s *AdminService) GetTopUpRequests() ([]*repository.TopUpRequest, error) {
 	return s.adminRepo.GetTopUpRequests()

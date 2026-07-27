@@ -53,10 +53,21 @@ func (m *mockUserRepository) UpdateStatus(id uuid.UUID, status string) error {
 	return nil
 }
 
+func (m *mockUserRepository) UpdateRole(id uuid.UUID, role string) error {
+	if u, ok := m.users[id]; ok {
+		u.Role = role
+	}
+	return nil
+}
+
 func (m *mockUserRepository) UpdateBalance(id uuid.UUID, balance float64) error {
 	if u, ok := m.users[id]; ok {
 		u.Balance = balance
 	}
+	return nil
+}
+
+func (m *mockUserRepository) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
@@ -118,6 +129,10 @@ func (m *mockAdminRepository) RejectTopUpRequest(requestID uuid.UUID, adminID uu
 
 func (m *mockAdminRepository) GetTransactions() ([]*repository.Transaction, error) {
 	return nil, nil
+}
+
+func (m *mockAdminRepository) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+	return nil
 }
 
 // mockSettingsRepository implements repository.SettingsRepository.

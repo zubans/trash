@@ -68,6 +68,16 @@ func (m *mockRepo) UpdateStatus(id uuid.UUID, status string) error {
 	return sql.ErrNoRows
 }
 
+func (m *mockRepo) UpdateRole(id uuid.UUID, role string) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Role = role
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
 func (m *mockRepo) UpdateBalance(id uuid.UUID, balance float64) error {
 	for _, u := range m.users {
 		if u.ID == id {
@@ -76,6 +86,10 @@ func (m *mockRepo) UpdateBalance(id uuid.UUID, balance float64) error {
 		}
 	}
 	return sql.ErrNoRows
+}
+
+func (m *mockRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
+	return nil
 }
 
 func TestRegister_Success(t *testing.T) {
@@ -297,7 +311,7 @@ func TestGenerateJWT_Success(t *testing.T) {
 	if !ok {
 		t.Fatalf("exp claim type mismatch: %T", claims["exp"])
 	}
-	wantExp := time.Now().Add(24 * time.Hour).Unix()
+	wantExp := time.Now().Add(15 * time.Minute).Unix()
 	if int64(exp) < wantExp-5 || int64(exp) > wantExp+5 {
 		t.Errorf("exp mismatch: got %v want around %v", int64(exp), wantExp)
 	}

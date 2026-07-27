@@ -17,6 +17,7 @@ import (
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
+	"healthlogin/backend/worker"
 )
 
 func main() {
@@ -46,10 +47,31 @@ func main() {
 	adminRepo := repository.NewAdminRepository(db)
 	settingsRepo := repository.NewSettingsRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
+	orderRepo := repository.NewOrderRepository(db)
+	shiftRepo := repository.NewShiftRepository(db)
+	geozoneRepo := repository.NewGeozoneRepository(db)
+	transactionRepo := repository.NewTransactionRepository(db)
+	bidRepo := repository.NewBidRepository(db)
+	chatRepo := repository.NewChatRepository(db)
 
 	// Services
 	authService := service.NewAuthService(userRepo)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
+	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo)
+	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, db)
+	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
+	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
+	chatService := service.NewChatService(chatRepo, orderRepo)
+
+	// Start background order matcher
+	matchingService.StartMatchingWorker(5 * time.Second)
+
+	// Start background workers
+	slaWorker := worker.NewSLAWorker(db, orderService, chatService)
+	slaWorker.Start(30 * time.Second)
+
+	auctionWorker := worker.NewAuctionWorker(db)
+	auctionWorker.Start(1 * time.Minute)
 
 	// Middleware
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, adminService, jwtSecret)
@@ -57,6 +79,10 @@ func main() {
 	// Handlers
 	h := NewHandler(authService)
 	ah := adminHandler.NewAdminHandler(adminService)
+	oh := adminHandler.NewOrderHandler(orderService)
+	sh := adminHandler.NewShiftHandler(shiftService)
+	bh := adminHandler.NewBidHandler(bidService, orderService)
+	ch := adminHandler.NewChatHandler(chatService)
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -73,14 +99,39 @@ func main() {
 		r.Use(authMiddleware.RequireAuth)
 		r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
 		r.Get("/customer/profile", ah.GetProfileHandler)
+		r.Post("/customer/orders", oh.CreateOrderHandler)
+		r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
+		r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
+		r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
+		r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
+		r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)
+		r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
+		r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
+		r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
 		r.Post("/logout", ah.LogoutHandler)
+	})
+
+	// Authenticated executor routes
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware.RequireAuth)
+		r.Post("/executor/shifts", sh.StartShiftHandler)
+		r.Post("/executor/shifts/end", sh.EndShiftHandler)
+		r.Post("/executor/shifts/location", sh.UploadLocationHandler)
+		r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
+		r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
+		r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
+		r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
+		r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 	})
 
 	// Authenticated admin routes
 	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware.RequireAuth)
 		r.Use(authMiddleware.RequireAdmin)
 		r.Get("/admin/users", ah.GetUsersHandler)
 		r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
+		r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
+		r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
 		r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
 		r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
 		r.Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"healthlogin/backend/repository"
@@ -16,6 +17,13 @@ import (
 type AuthService struct {
 	repo   repository.UserRepository
 	secret []byte
+}
+
+// JWTClaims contains the data extracted from a validated access token.
+type JWTClaims struct {
+	UserID uuid.UUID
+	Phone  string
+	Role   string
 }
 
 // NewAuthService creates an AuthService using the provided repository.
@@ -93,7 +101,46 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error) {
 		"sub":   user.ID.String(),
 		"phone": user.Phone,
 		"role":  user.Role,
-		"exp":   time.Now().Add(24 * time.Hour).Unix(),
+		"exp":   time.Now().Add(15 * time.Minute).Unix(),
 	})
 	return token.SignedString(s.secret)
+}
+
+// ParseJWT validates a token string and returns the extracted claims.
+func (s *AuthService) ParseJWT(tokenStr string) (*JWTClaims, error) {
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return s.secret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid claims")
+	}
+
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return nil, errors.New("missing sub claim")
+	}
+	userID, err := uuid.Parse(sub)
+	if err != nil {
+		return nil, err
+	}
+
+	phone, _ := claims["phone"].(string)
+	role, _ := claims["role"].(string)
+
+	return &JWTClaims{
+		UserID: userID,
+		Phone:  phone,
+		Role:   role,
+	}, nil
 }

@@ -1,0 +1,725 @@
+{
+  "info": {
+    "name": "HealthLogin Backend API",
+    "description": "Postman collection for the HealthLogin backend. Public routes do not require authentication. Customer, executor and admin routes need a valid JWT obtained via /login. Default seeded users: admin phone 79999999999 / password admin, executor phone 79991111111 / password admin.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Public",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"79990000000\",\n  \"password\": \"password\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["register"]
+            },
+            "description": "Creates a new user account. Default role on registration is CUSTOMER."
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"79990000000\",\n  \"password\": \"password\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["login"]
+            },
+            "description": "Returns a JWT token. Copy the token from the response and set it in the folder/collection authorization or in the corresponding token variable."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Customer",
+      "item": [
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customer/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "profile"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create top-up request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customer/finances/topup",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "finances", "topup"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create regular order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"volume_type\": \"STANDARD\",\n  \"speed_tariff\": \"REGULAR\",\n  \"photo_url\": \"https://example.com/photo.jpg\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customer/orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "orders"]
+            },
+            "description": "volume_type: STANDARD, LARGE, CONSTRUCTION. speed_tariff: REGULAR, URGENT, ASAP, CUSTOM."
+          },
+          "response": []
+        },
+        {
+          "name": "Create construction order (auction)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"photo_url\": \"https://example.com/construction.jpg\",\n  \"last_geo\": \"55.7558,37.6173\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customer/orders/construction",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "orders", "construction"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customer/orders/{{orderId}}/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "orders", "{{orderId}}", "confirm"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customer/orders/{{orderId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "orders", "{{orderId}}", "cancel"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List my orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customer/orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "orders"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get order bids",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customer/orders/{{orderId}}/bids",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "orders", "{{orderId}}", "bids"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Accept bid",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customer/bids/{{bidId}}/accept",
+              "host": ["{{baseUrl}}"],
+              "path": ["customer", "bids", "{{bidId}}", "accept"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get chat messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{orderId}}/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{orderId}}", "messages"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Chat WebSocket",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{orderId}}/ws",
+              "host": ["{{baseUrl}}"],
+              "path": ["chats", "{{orderId}}", "ws"]
+            },
+            "description": "WebSocket endpoint. Use Postman's WebSocket request type or a dedicated WS client to connect."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCustomer}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["logout"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Executor",
+      "item": [
+        {
+          "name": "Start shift",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"duration_hours\": 8\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/executor/shifts",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "shifts"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "End shift",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/executor/shifts/end",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "shifts", "end"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upload location",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 55.7558,\n  \"longitude\": 37.6173\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/executor/shifts/location",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "shifts", "location"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get active shift",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/executor/shifts/active",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "shifts", "active"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List assigned orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/executor/orders/assigned",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "orders", "assigned"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List available construction orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/executor/orders/available",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "orders", "available"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Accept assigned order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/executor/orders/{{orderId}}/accept",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "orders", "{{orderId}}", "accept"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create bid",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExecutor}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"offered_price\": 750\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/executor/orders/{{orderId}}/bids",
+              "host": ["{{baseUrl}}"],
+              "path": ["executor", "orders", "{{orderId}}", "bids"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users?page=1&limit=20&role=&status=&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "users"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "role",
+                  "value": ""
+                },
+                {
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Filters are optional. role: CUSTOMER, EXECUTOR, ADMIN. status: ACTIVE, BANNED."
+          },
+          "response": []
+        },
+        {
+          "name": "Update user status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"BANNED\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "users", "{{userId}}", "status"]
+            },
+            "description": "status: ACTIVE or BANNED."
+          },
+          "response": []
+        },
+        {
+          "name": "List top-up requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/finances/topups",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "finances", "topups"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Approve top-up request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/finances/topups/{{topupId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "finances", "topups", "{{topupId}}", "approve"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reject top-up request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/finances/topups/{{topupId}}/reject",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "finances", "topups", "{{topupId}}", "reject"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/transactions",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "transactions"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/settings",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "settings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update settings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"standard_tariff_coeff\": 1.0,\n  \"increased_tariff_coeff\": 2.0,\n  \"urgent_tariff_coeff\": 3.0,\n  \"asap_tariff_coeff\": 8.0,\n  \"fine_amount\": 500.0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/settings",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "settings"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "tokenCustomer",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenExecutor",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenAdmin",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "00000000-0000-4000-a000-000000000000",
+      "type": "string"
+    },
+    {
+      "key": "bidId",
+      "value": "00000000-0000-4000-a000-000000000000",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "00000000-0000-4000-a000-000000000000",
+      "type": "string"
+    },
+    {
+      "key": "topupId",
+      "value": "00000000-0000-4000-a000-000000000000",
+      "type": "string"
+    }
+  ]
+}

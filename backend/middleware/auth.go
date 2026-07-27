@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -13,143 +12,142 @@ import (
 	"healthlogin/backend/service"
 )
 
+// Context keys used by the middleware.
 type contextKey string
 
 const (
-	UserKey   contextKey = "user"
-	TokenKey  contextKey = "token"
-	ClaimsKey contextKey = "claims"
+	// UserKey stores the authenticated *repository.User in the request context.
+	UserKey contextKey = "user"
+	// TokenKey stores the raw JWT token string in the request context.
+	TokenKey contextKey = "token"
+	// RoleKey stores the user role string in the request context.
+	RoleKey contextKey = "role"
 )
 
-// AuthMiddleware holds dependencies for auth checking.
+// AuthMiddleware validates JWTs and injects user information into the request context.
 type AuthMiddleware struct {
-	userRepo     repository.UserRepository
+	userRepo    repository.UserRepository
 	adminService *service.AdminService
-	jwtSecret    []byte
+	secret      []byte
 }
 
-// NewAuthMiddleware creates a new AuthMiddleware.
+// NewAuthMiddleware creates an AuthMiddleware.
 func NewAuthMiddleware(userRepo repository.UserRepository, adminService *service.AdminService, jwtSecret string) *AuthMiddleware {
-	secret := jwtSecret
-	if secret == "" {
-		secret = "dev-secret-change-me"
+	if jwtSecret == "" {
+		jwtSecret = "dev-secret-change-me"
 	}
 	return &AuthMiddleware{
 		userRepo:     userRepo,
 		adminService: adminService,
-		jwtSecret:    []byte(secret),
+		secret:       []byte(jwtSecret),
 	}
 }
 
-// CustomClaims defines JWT claims structure.
-type CustomClaims struct {
-	UserID string `json:"sub"`
-	Phone  string `json:"phone"`
-	Role   string `json:"role"`
-	jwt.RegisteredClaims
-}
-
-// Authenticate verifies the token and user status, returning claims and user.
-func (m *AuthMiddleware) Authenticate(r *http.Request) (*CustomClaims, *repository.User, string, error) {
-	var tokenStr string
-	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
-	} else {
-		cookie, err := r.Cookie("token")
-		if err == nil {
-			tokenStr = cookie.Value
-		}
-	}
-
-	if tokenStr == "" {
-		return nil, nil, "", errors.New("unauthorized: missing token")
-	}
-
-	// 1. Check if token is revoked in blacklist
-	revoked, err := m.adminService.IsTokenRevoked(tokenStr)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	if revoked {
-		return nil, nil, "", errors.New("unauthorized: token is blacklisted")
-	}
-
-	// 2. Parse and validate JWT
-	token, err := jwt.ParseWithClaims(tokenStr, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return m.jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		return nil, nil, "", errors.New("unauthorized: invalid token")
-	}
-
-	claims, ok := token.Claims.(*CustomClaims)
-	if !ok {
-		return nil, nil, "", errors.New("unauthorized: invalid claims")
-	}
-
-	userUUID, err := uuid.Parse(claims.UserID)
-	if err != nil {
-		return nil, nil, "", errors.New("unauthorized: invalid user ID format")
-	}
-
-	// 3. Fetch user status from DB (covers instant ban revocation)
-	user, err := m.userRepo.FindByID(userUUID)
-	if err != nil {
-		return nil, nil, "", errors.New("unauthorized: user not found")
-	}
-
-	if user.Status == "BANNED" {
-		return nil, nil, "", errors.New("forbidden: account is banned")
-	}
-
-	return claims, user, tokenStr, nil
-}
-
-// RequireAuth ensures a valid user token is present.
+// RequireAuth ensures the request contains a valid non-revoked JWT.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, user, token, err := m.Authenticate(r)
-		if err != nil {
-			if strings.Contains(err.Error(), "forbidden") {
-				http.Error(w, err.Error(), http.StatusForbidden)
-			} else {
-				http.Error(w, err.Error(), http.StatusUnauthorized)
-			}
+		header := r.Header.Get("Authorization")
+		if header == "" {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), UserKey, user)
-		ctx = context.WithValue(ctx, TokenKey, token)
-		ctx = context.WithValue(ctx, ClaimsKey, claims)
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			http.Error(w, "Invalid authorization header", http.StatusUnauthorized)
+			return
+		}
+		tokenStr := parts[1]
+
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return m.secret, nil
+		})
+		if err != nil || !token.Valid {
+			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		// Check revocation if admin service is available.
+		if m.adminService != nil {
+			revoked, err := m.adminService.IsTokenRevoked(tokenStr)
+			if err != nil {
+				http.Error(w, "Token check failed", http.StatusInternalServerError)
+				return
+			}
+			if revoked {
+				http.Error(w, "Token has been revoked", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+			return
+		}
+
+		sub, ok := claims["sub"].(string)
+		if !ok {
+			http.Error(w, "Invalid token subject", http.StatusUnauthorized)
+			return
+		}
+
+		userID, err := uuid.Parse(sub)
+		if err != nil {
+			http.Error(w, "Invalid token subject", http.StatusUnauthorized)
+			return
+		}
+
+		user, err := m.userRepo.FindByID(userID)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusUnauthorized)
+			return
+		}
+
+		role, _ := claims["role"].(string)
+
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, UserKey, user)
+		ctx = context.WithValue(ctx, TokenKey, tokenStr)
+		ctx = context.WithValue(ctx, RoleKey, role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// RequireAdmin restricts route to ADMIN role only.
+// RequireAdmin restricts access to users with the ADMIN role.
 func (m *AuthMiddleware) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, user, token, err := m.Authenticate(r)
-		if err != nil {
-			if strings.Contains(err.Error(), "forbidden") {
-				http.Error(w, err.Error(), http.StatusForbidden)
-			} else {
-				http.Error(w, err.Error(), http.StatusUnauthorized)
-			}
+		role, ok := r.Context().Value(RoleKey).(string)
+		if !ok || role != "ADMIN" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-
-		if claims.Role != "ADMIN" {
-			http.Error(w, "forbidden: admin role required", http.StatusForbidden)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), UserKey, user)
-		ctx = context.WithValue(ctx, TokenKey, token)
-		ctx = context.WithValue(ctx, ClaimsKey, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r)
 	})
+}
+
+// RequireRole restricts access to users with one of the allowed roles.
+func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedRoles))
+	for _, role := range allowedRoles {
+		allowed[role] = struct{}{}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			role, ok := r.Context().Value(RoleKey).(string)
+			if !ok {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if _, ok := allowed[role]; !ok {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

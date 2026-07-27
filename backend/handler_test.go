@@ -58,6 +58,16 @@ func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error {
 	return sql.ErrNoRows
 }
 
+func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Role = role
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
 func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance float64) error {
 	for _, u := range m.users {
 		if u.ID == id {
@@ -66,6 +76,10 @@ func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance float64) error {
 		}
 	}
 	return sql.ErrNoRows
+}
+
+func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
+	return nil
 }
 
 func newTestHandler() *Handler {

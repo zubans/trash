@@ -4,43 +4,44 @@
     <va-navbar color="primary" class="app-layout__navbar">
       <template #left>
         <div class="logo">
-          <strong>TRASH DISPOSAL ADMIN</strong>
+          <strong>{{ $t('app.adminTitle') }}</strong>
         </div>
       </template>
       <template #right>
-        <span class="user-info mr-3">Admin: {{ phone }}</span>
-        <va-button color="danger" size="small" @click="doLogout">Logout</va-button>
+        <LanguageSwitcher class="mr-3" />
+        <span class="user-info mr-3">{{ $t('app.admin') }}: {{ phone }}</span>
+        <va-button color="danger" size="small" @click="doLogout">{{ $t('app.logout') }}</va-button>
       </template>
     </va-navbar>
 
     <!-- Sidebar and Main Panel -->
     <div class="app-layout__container">
       <va-sidebar v-slot="{ sidebarVisible }" class="app-layout__sidebar">
-        <va-sidebar-item :active="currentRouteName === 'admin-users'" @click="$router.push('/admin/users')">
+        <va-sidebar-item :active="currentRouteName === 'admin-users'" to="/admin/users">
           <va-sidebar-item-content>
             <va-icon name="people" />
-            <va-sidebar-item-title>Users</va-sidebar-item-title>
+            <va-sidebar-item-title>{{ $t('app.users') }}</va-sidebar-item-title>
           </va-sidebar-item-content>
         </va-sidebar-item>
 
-        <va-sidebar-item :active="currentRouteName === 'admin-topups'" @click="$router.push('/admin/topups')">
+        <va-sidebar-item :active="currentRouteName === 'admin-topups'" to="/admin/topups">
           <va-sidebar-item-content>
             <va-icon name="account_balance_wallet" />
-            <va-sidebar-item-title>Top-Up Requests</va-sidebar-item-title>
+            <va-sidebar-item-title>{{ $t('app.topups') }}</va-sidebar-item-title>
           </va-sidebar-item-content>
         </va-sidebar-item>
 
-        <va-sidebar-item :active="currentRouteName === 'admin-transactions'" @click="$router.push('/admin/transactions')">
+        <va-sidebar-item :active="currentRouteName === 'admin-transactions'" to="/admin/transactions">
           <va-sidebar-item-content>
             <va-icon name="history" />
-            <va-sidebar-item-title>Transactions</va-sidebar-item-title>
+            <va-sidebar-item-title>{{ $t('app.transactions') }}</va-sidebar-item-title>
           </va-sidebar-item-content>
         </va-sidebar-item>
 
-        <va-sidebar-item :active="currentRouteName === 'admin-settings'" @click="$router.push('/admin/settings')">
+        <va-sidebar-item :active="currentRouteName === 'admin-settings'" to="/admin/settings">
           <va-sidebar-item-content>
             <va-icon name="settings" />
-            <va-sidebar-item-title>Settings</va-sidebar-item-title>
+            <va-sidebar-item-title>{{ $t('app.settings') }}</va-sidebar-item-title>
           </va-sidebar-item-content>
         </va-sidebar-item>
       </va-sidebar>
@@ -59,9 +60,11 @@ import { defineComponent, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
+import LanguageSwitcher from './components/LanguageSwitcher.vue'
 
 export default defineComponent({
   name: 'AppLayout',
+  components: { LanguageSwitcher },
   setup() {
     const router = useRouter()
     const route = useRoute()

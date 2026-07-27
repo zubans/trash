@@ -44,8 +44,10 @@ CREATE TABLE IF NOT EXISTS orders (
     is_downgraded BOOLEAN NOT NULL DEFAULT FALSE,
     photo_url VARCHAR,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    assigned_at TIMESTAMP WITH TIME ZONE,
     deadline_at TIMESTAMP WITH TIME ZONE,
     completed_at TIMESTAMP WITH TIME ZONE,
+    canceled_at TIMESTAMP WITH TIME ZONE,
     CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_orders_executor FOREIGN KEY (executor_id) REFERENCES users(id) ON DELETE SET NULL
 );
