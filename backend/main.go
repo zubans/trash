@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 
-	adminHandler "healthlogin/backend/handler"
+	"healthlogin/backend/handler"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
@@ -78,13 +78,13 @@ func main() {
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, adminService, jwtSecret)
 
 	// Handlers
-	h := NewHandler(authService)
-	ah := adminHandler.NewAdminHandler(adminService)
-	oh := adminHandler.NewOrderHandler(orderService)
-	sh := adminHandler.NewShiftHandler(shiftService)
-	bh := adminHandler.NewBidHandler(bidService, orderService)
-	ch := adminHandler.NewChatHandler(chatService)
-	gh := adminHandler.NewGeoHandler(geocoder)
+	ph := handler.NewPublicHandler(authService)
+	ah := handler.NewAdminHandler(adminService)
+	oh := handler.NewOrderHandler(orderService)
+	sh := handler.NewShiftHandler(shiftService)
+	bh := handler.NewBidHandler(bidService, orderService)
+	ch := handler.NewChatHandler(chatService)
+	gh := handler.NewGeoHandler(geocoder)
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -92,10 +92,11 @@ func main() {
 	r.Use(chiMiddleware.Logger)
 
 	// Public routes
-	r.Get("/health", h.HealthHandler)
-	r.Post("/register", h.RegisterHandler)
-	r.Post("/login", h.LoginHandler)
+	r.Get("/health", ph.HealthHandler)
+	r.Post("/register", ph.RegisterHandler)
+	r.Post("/login", ph.LoginHandler)
 	r.Get("/geo/geocode", gh.Geocode)
+	r.Get("/settings", ah.GetPublicSettingsHandler)
 
 	// Authenticated customer routes
 	r.Group(func(r chi.Router) {
@@ -135,6 +136,7 @@ func main() {
 		r.Get("/admin/users", ah.GetUsersHandler)
 		r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
 		r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
+		r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
 		r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
 		r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
 		r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)

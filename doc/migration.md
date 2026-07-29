@@ -1,50 +1,37 @@
 # Database Migrations
 
 ## Overview
-The project uses PostgreSQL with `uuid-ossp` for generating UUIDs. The migrations are split into two files:
 
-1. **001_create_enums.sql** – defines all ENUM types used by the schema.
-2. **002_create_tables.sql** – creates tables, constraints and indexes.
+The project uses PostgreSQL 16. Migrations are applied automatically when the database container starts via `docker-entrypoint-initdb.d`. They can also be applied manually with `psql` or `make migrate`.
 
-Run them in order (e.g., with `psql` or a migration tool) to initialise the database.
+## Migration files
 
-## 001_create_enums.sql
-Creates ENUM types for user roles, statuses, order volume, tariffs, etc. These are referenced throughout the schema.
+| File | Purpose |
+| :--- | :--- |
+| `001_create_enums.sql` | ENUM types for roles, statuses, order volumes, tariffs, etc. |
+| `002_create_tables.sql` | Core tables: `users`, `customer_profiles`, `executor_profiles`, `orders`, `shifts`, `transactions`, `bids`, `chats`, `messages`, `system_settings`. |
+| `003_admin_finances.sql` | Top-up requests, transactions, admin user seed, initial settings. |
+| `004_geozones_and_orders.sql` | Geozones, order extensions, GPS logs, shift fines. |
+| `005_order_pickup_and_executor_radius.sql` | Order address and coordinates, executor search radius. |
+| `006_settings_currency.sql` | Convert `system_settings.value` to `VARCHAR`, seed `currency`. |
+| `007_customer_address_string.sql` | Convert `customer_profiles.address` to `VARCHAR`. |
+| `008_rename_fine_amount.sql` | Rename `fine_amount` setting to `geofence_fine_amount`. |
 
-## 002_create_tables.sql
-Creates tables for:
-- `users` (includes `password` for hashed authentication credentials)
-- `customer_profiles`
-- `executor_profiles`
-- `orders`
-- `shifts`
-- `transactions`
-- `bids`
-- `chats`
-- `messages`
-- `system_settings`
+## How to run manually
 
-All foreign keys use `ON DELETE` rules to maintain referential integrity.
-
-## How to run
 ```bash
-# Ensure uuid-ossp extension is available
-psql -d yourdb -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
+# Local development
+make migrate
 
-# Apply migrations
-psql -d yourdb -f trash/migrations/001_create_enums.sql
-psql -d yourdb -f trash/migrations/002_create_tables.sql
+# Or directly with psql
+for f in backend/migrations/*.sql; do
+  psql "postgres://healthlogin:healthlogin@localhost:5432/healthlogin" -f "$f"
+done
 ```
 
-Adjust paths according to your environment.
-
 ## Notes
-- All timestamps use `TIMESTAMP WITH TIME ZONE` for consistency.
-- `balance` and other numeric columns use `NUMERIC(18,2)` to avoid floating‑point errors.
-- `system_settings` stores decimal values; change precision if needed.
-- The `users.password` column stores a bcrypt hash; plain text must never be persisted.
-- The backend signs JWTs with the secret from the `JWT_SECRET` environment variable. Set a strong, unique secret in production.
 
----
-
-Feel free to extend or modify these migrations to suit additional requirements.
+* All timestamps use `TIMESTAMP WITH TIME ZONE`.
+* Monetary values use `NUMERIC(18,2)` to avoid floating-point errors.
+* `system_settings.value` is `VARCHAR` and supports both numeric and string settings.
+* `users.password` stores a bcrypt hash; plain text must never be persisted.

@@ -1,6 +1,6 @@
 <template>
   <div class="transactions-history">
-    <h1 class="va-h3 mb-4">Transaction History</h1>
+    <h1 class="va-h3 mb-4">{{ $t('transactions.title') }}</h1>
 
     <!-- Transactions Table -->
     <va-data-table :items="transactions" :columns="columns" :loading="loading">
@@ -9,7 +9,7 @@
       </template>
 
       <template #cell(amount)="{ value }">
-        <strong>${{ Number(value).toFixed(2) }}</strong>
+        <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
       </template>
 
       <template #cell(order_id)="{ value }">
@@ -32,22 +32,30 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted } from 'vue'
+import { defineComponent, ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 
 export default defineComponent({
   name: 'TransactionHistory',
   setup() {
+    const { t } = useI18n()
+    const authStore = useAuthStore()
     const transactions = ref([])
     const loading = ref(false)
 
+    const currencySymbol = computed(() => {
+      return authStore.currency === 'RUB' ? '₽' : '$'
+    })
+
     const columns = [
-      { key: 'user_phone', label: 'User Phone' },
-      { key: 'type', label: 'Type' },
-      { key: 'amount', label: 'Amount' },
-      { key: 'order_id', label: 'Order ID' },
-      { key: 'admin_id', label: 'Admin ID' },
-      { key: 'created_at', label: 'Processed At' },
+      { key: 'user_phone', label: t('transactions.userPhone') },
+      { key: 'type', label: t('transactions.type') },
+      { key: 'amount', label: t('transactions.amount') },
+      { key: 'order_id', label: t('transactions.orderId') },
+      { key: 'admin_id', label: t('transactions.adminId') },
+      { key: 'created_at', label: t('transactions.processedAt') },
     ]
 
     const fetchTransactions = async () => {

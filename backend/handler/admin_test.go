@@ -19,7 +19,8 @@ import (
 
 // mockUserRepository implements repository.UserRepository for testing.
 type mockUserRepository struct {
-	users map[uuid.UUID]*repository.User
+	users     map[uuid.UUID]*repository.User
+	addresses map[uuid.UUID]string
 }
 
 func (m *mockUserRepository) FindByPhone(phone string) (*repository.User, error) {
@@ -68,6 +69,22 @@ func (m *mockUserRepository) UpdateBalance(id uuid.UUID, balance float64) error 
 }
 
 func (m *mockUserRepository) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
+	return nil
+}
+
+func (m *mockUserRepository) CreateCustomerProfile(userID uuid.UUID, address string) error {
+	return nil
+}
+
+func (m *mockUserRepository) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
+	return &repository.CustomerProfile{UserID: userID}, nil
+}
+
+func (m *mockUserRepository) UpdateCustomerAddress(userID uuid.UUID, address string) error {
+	if m.addresses == nil {
+		m.addresses = make(map[uuid.UUID]string)
+	}
+	m.addresses[userID] = address
 	return nil
 }
 

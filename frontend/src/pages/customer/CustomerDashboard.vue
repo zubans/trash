@@ -8,7 +8,8 @@
           <span class="text-secondary text-sm">{{ $t('customer.title') }}</span>
         </div>
         <div class="text-right">
-          <div class="balance-amount">${{ Number(balance).toFixed(2) }}</div>
+          <LanguageSwitcher class="mb-2" />
+          <div class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</div>
           <div class="text-secondary text-xs">{{ $t('customer.balance') }}</div>
         </div>
       </div>
@@ -64,7 +65,7 @@
         </template>
 
         <template #cell(hold_amount)="{ value }">
-          <strong>${{ Number(value).toFixed(2) }}</strong>
+          <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
         </template>
 
         <template #cell(status)="{ value }">
@@ -112,20 +113,13 @@
     >
       <div class="p-2">
         <div class="mb-4">
-          <va-input
-            v-model="orderAddress"
-            :label="$t('customer.address')"
-            class="mb-2"
-          />
-          <va-button
-            color="secondary"
-            size="small"
-            outline
-            :loading="geocoding"
-            @click="geocodeAddress"
-          >
-            {{ $t('customer.geocodeAddress') }}
-          </va-button>
+          <div class="text-secondary text-sm mb-2">
+            {{ $t('customer.pickupAddress') }}
+          </div>
+          <div class="font-medium mb-2">{{ orderAddress }}</div>
+          <div class="text-secondary text-xs">
+            {{ $t('customer.addressChangeHint') }}
+          </div>
           <div v-if="orderLat !== null && orderLon !== null" class="text-secondary text-xs mt-2">
             {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
           </div>
@@ -141,10 +135,11 @@
             :label="$t('customer.orderType')"
             text-by="label"
             value-by="value"
+            track-by="value"
             class="mb-2"
           />
           <div class="text-secondary text-sm mt-2">
-            {{ $t('customer.price') }}: <strong class="text-primary">${{ Number(selectedPrice).toFixed(2) }}</strong>
+            {{ $t('customer.price') }}: <strong class="text-primary">{{ currencySymbol }}{{ Number(selectedPrice).toFixed(2) }}</strong>
           </div>
         </div>
 
@@ -224,10 +219,12 @@ import { defineComponent, ref, onMounted, onUnmounted, computed, nextTick } from
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
+import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import api from '../../services/api'
 
 export default defineComponent({
   name: 'CustomerDashboard',
+  components: { LanguageSwitcher },
   setup() {
     const router = useRouter()
     const { t } = useI18n()
@@ -253,20 +250,27 @@ export default defineComponent({
     const geocoding = ref(false)
     const geocodeError = ref('')
 
-    // Order type options with prices
+    // Order type options with prices (string values to work reliably with va-select)
     const orderTypeOptions = [
-      { label: t('customer.types.standardRegular'), value: { volume_type: 'STANDARD', speed_tariff: 'REGULAR' }, price: 100 },
-      { label: t('customer.types.standardUrgent'), value: { volume_type: 'STANDARD', speed_tariff: 'URGENT' }, price: 300 },
-      { label: t('customer.types.standardAsap'), value: { volume_type: 'STANDARD', speed_tariff: 'ASAP' }, price: 800 },
-      { label: t('customer.types.largeRegular'), value: { volume_type: 'LARGE', speed_tariff: 'REGULAR' }, price: 200 },
-      { label: t('customer.types.largeUrgent'), value: { volume_type: 'LARGE', speed_tariff: 'URGENT' }, price: 600 },
-      { label: t('customer.types.largeAsap'), value: { volume_type: 'LARGE', speed_tariff: 'ASAP' }, price: 1600 },
+      { label: t('customer.types.standardRegular'), value: 'STANDARD_REGULAR', volume_type: 'STANDARD', speed_tariff: 'REGULAR', price: 100 },
+      { label: t('customer.types.standardUrgent'), value: 'STANDARD_URGENT', volume_type: 'STANDARD', speed_tariff: 'URGENT', price: 300 },
+      { label: t('customer.types.standardAsap'), value: 'STANDARD_ASAP', volume_type: 'STANDARD', speed_tariff: 'ASAP', price: 800 },
+      { label: t('customer.types.largeRegular'), value: 'LARGE_REGULAR', volume_type: 'LARGE', speed_tariff: 'REGULAR', price: 200 },
+      { label: t('customer.types.largeUrgent'), value: 'LARGE_URGENT', volume_type: 'LARGE', speed_tariff: 'URGENT', price: 600 },
+      { label: t('customer.types.largeAsap'), value: 'LARGE_ASAP', volume_type: 'LARGE', speed_tariff: 'ASAP', price: 1600 },
     ]
     const selectedOrderType = ref(orderTypeOptions[0].value)
 
+    const selectedOrderOption = computed(() =>
+      orderTypeOptions.find((o) => o.value === selectedOrderType.value)
+    )
+
     const selectedPrice = computed(() => {
-      const option = orderTypeOptions.find((o) => o.value === selectedOrderType.value)
-      return option ? option.price : 0
+      return selectedOrderOption.value ? selectedOrderOption.value.price : 0
+    })
+
+    const currencySymbol = computed(() => {
+      return authStore.currency === 'RUB' ? '₽' : '$'
     })
 
     // Bids cache
@@ -298,6 +302,9 @@ export default defineComponent({
         if (response.data) {
           phone.value = response.data.phone
           balance.value = response.data.balance
+          if (response.data.address) {
+            defaultAddress.value = response.data.address
+          }
         }
       } catch (err) {
         console.error('Failed to load profile details:', err)
@@ -327,12 +334,13 @@ export default defineComponent({
       }
     }
 
-    const openCreateOrderModal = () => {
+    const openCreateOrderModal = async () => {
       orderAddress.value = defaultAddress.value
       orderLat.value = null
       orderLon.value = null
       geocodeError.value = ''
       showCreateOrderModal.value = true
+      await geocodeAddress()
     }
 
     const geocodeAddress = async () => {
@@ -375,9 +383,14 @@ export default defineComponent({
       errorMsg.value = ''
       creatingOrder.value = true
       try {
+        const option = selectedOrderOption.value
+        if (!option) {
+          errorMsg.value = t('customer.errorInvalidOrderType')
+          return
+        }
         const payload: any = {
-          volume_type: selectedOrderType.value.volume_type,
-          speed_tariff: selectedOrderType.value.speed_tariff,
+          volume_type: option.volume_type,
+          speed_tariff: option.speed_tariff,
           address: orderAddress.value,
         }
         if (orderLat.value !== null && orderLon.value !== null) {
@@ -387,7 +400,6 @@ export default defineComponent({
         await api.post('/customer/orders', payload)
         successMsg.value = t('customer.successOrderCreated')
         showCreateOrderModal.value = false
-        defaultAddress.value = orderAddress.value
         await fetchProfile()
         await fetchOrders()
       } catch (err: any) {

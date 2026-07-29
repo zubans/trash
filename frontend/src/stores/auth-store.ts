@@ -14,6 +14,7 @@ export const useAuthStore = defineStore('auth', {
     token: getCookie('token') || '',
     role: getCookie('role') || '',
     phone: getCookie('phone') || '',
+    currency: 'RUB',
   }),
   getters: {
     isAuthenticated: (state) => !!state.token,
@@ -34,9 +35,13 @@ export const useAuthStore = defineStore('auth', {
       this.token = ''
       this.role = ''
       this.phone = ''
+      this.currency = 'RUB'
       document.cookie = 'token=; Max-Age=0; path=/;'
       document.cookie = 'role=; Max-Age=0; path=/;'
       document.cookie = 'phone=; Max-Age=0; path=/;'
+    },
+    setCurrency(currency: string) {
+      this.currency = currency || 'RUB'
     },
   },
 })

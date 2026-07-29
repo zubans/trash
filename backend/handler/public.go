@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"encoding/json"
@@ -7,20 +7,27 @@ import (
 	"healthlogin/backend/service"
 )
 
-// Handler holds HTTP handlers and their dependencies.
-type Handler struct {
+// PublicHandler holds public HTTP handlers (health, registration, login).
+type PublicHandler struct {
 	authService *service.AuthService
 }
 
-// NewHandler creates a Handler with the provided AuthService.
-func NewHandler(authService *service.AuthService) *Handler {
-	return &Handler{authService: authService}
+// NewPublicHandler creates a PublicHandler with the provided AuthService.
+func NewPublicHandler(authService *service.AuthService) *PublicHandler {
+	return &PublicHandler{authService: authService}
 }
 
-// AuthRequest is used for both registration and login.
+// AuthRequest is used for login.
 type AuthRequest struct {
 	Phone    string `json:"phone"`
 	Password string `json:"password"`
+}
+
+// RegisterRequest extends AuthRequest with the required pickup address.
+type RegisterRequest struct {
+	Phone    string `json:"phone"`
+	Password string `json:"password"`
+	Address  string `json:"address"`
 }
 
 // AuthResponse returns a JWT after successful login.
@@ -36,7 +43,7 @@ type RegisterResponse struct {
 }
 
 // HealthHandler returns the service health status.
-func (h *Handler) HealthHandler(w http.ResponseWriter, r *http.Request) {
+func (h *PublicHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -47,19 +54,19 @@ func (h *Handler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // RegisterHandler creates a new user account.
-func (h *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
+func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req AuthRequest
+	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
-	user, err := h.authService.Register(req.Phone, req.Password)
+	user, err := h.authService.Register(req.Phone, req.Password, req.Address)
 	if err != nil {
 		if err.Error() == "user already exists" {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -80,7 +87,7 @@ func (h *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // LoginHandler authenticates a user and returns a JWT.
-func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

@@ -102,6 +102,32 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"message": "role updated successfully"})
 }
 
+// UpdateUserAddressHandler updates a customer's pickup address (admin-only).
+func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.adminService.UpdateUserAddress(userID, req.Address); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "address updated successfully"})
+}
+
 // TopUpUserBalanceHandler adds funds directly to a user's balance.
 func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
@@ -206,6 +232,20 @@ func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(txs)
 }
 
+// GetPublicSettingsHandler returns public system settings (e.g. currency).
+func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.adminService.GetSettings()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"currency": settings["currency"],
+	})
+}
+
 // GetSettingsHandler retrieves system settings.
 func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.adminService.GetSettings()
@@ -279,7 +319,7 @@ func (h *AdminHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "logged out successfully"})
 }
 
-// GetProfileHandler returns the authenticated user's profile info (for testing).
+// GetProfileHandler returns the authenticated user's profile info including customer address.
 func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -287,9 +327,12 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Remove sensitive info
-	user.Password = ""
+	profile, err := h.adminService.GetProfile(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(profile)
 }

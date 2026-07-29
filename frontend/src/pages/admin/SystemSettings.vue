@@ -1,6 +1,6 @@
 <template>
   <div class="system-settings">
-    <h1 class="va-h3 mb-4">System Settings</h1>
+    <h1 class="va-h3 mb-4">{{ $t('settings.title') }}</h1>
 
     <!-- Success/Error Messages -->
     <va-alert v-if="successMsg" color="success" class="mb-4" closeable @dismissed="successMsg = ''">
@@ -14,9 +14,9 @@
       <va-form @submit.prevent="saveSettings">
         <!-- Standard Tariff Coeff -->
         <va-input
-          v-model.number="settings.standard_tariff_coeff"
+          v-model="values.standard_tariff_coeff"
           type="number"
-          label="Standard Tariff Coefficient (x)"
+          :label="$t('settings.standardTariffCoeff')"
           step="0.01"
           min="0"
           class="mb-4"
@@ -25,9 +25,9 @@
 
         <!-- Increased Tariff Coeff -->
         <va-input
-          v-model.number="settings.increased_tariff_coeff"
+          v-model="values.increased_tariff_coeff"
           type="number"
-          label="Increased Tariff Coefficient (x)"
+          :label="$t('settings.increasedTariffCoeff')"
           step="0.01"
           min="0"
           class="mb-4"
@@ -36,9 +36,9 @@
 
         <!-- Urgent Tariff Coeff -->
         <va-input
-          v-model.number="settings.urgent_tariff_coeff"
+          v-model="values.urgent_tariff_coeff"
           type="number"
-          label="Urgent Tariff Coefficient (x)"
+          :label="$t('settings.urgentTariffCoeff')"
           step="0.01"
           min="0"
           class="mb-4"
@@ -47,9 +47,9 @@
 
         <!-- ASAP Tariff Coeff -->
         <va-input
-          v-model.number="settings.asap_tariff_coeff"
+          v-model="values.asap_tariff_coeff"
           type="number"
-          label="ASAP Tariff Coefficient (x)"
+          :label="$t('settings.asapTariffCoeff')"
           step="0.01"
           min="0"
           class="mb-4"
@@ -58,19 +58,29 @@
 
         <!-- Fine Amount -->
         <va-input
-          v-model.number="settings.fine_amount"
+          v-model="values.geofence_fine_amount"
           type="number"
-          label="SLA Violation Fine Amount ($)"
+          :label="$t('settings.fineAmount')"
           step="1"
           min="0"
           class="mb-4"
           required
         />
 
+        <!-- Currency -->
+        <va-select
+          v-model="values.currency"
+          :options="currencyOptions"
+          :label="$t('settings.currency')"
+          text-by="label"
+          value-by="value"
+          class="mb-4"
+        />
+
         <!-- Actions -->
         <div class="d-flex gap-3">
-          <va-button type="submit" color="primary">Save Changes</va-button>
-          <va-button color="secondary" outline @click="loadSettings">Reset</va-button>
+          <va-button type="submit" color="primary">{{ $t('settings.save') }}</va-button>
+          <va-button color="secondary" outline @click="loadSettings">{{ $t('settings.reset') }}</va-button>
         </div>
       </va-form>
     </va-card>
@@ -79,18 +89,28 @@
 
 <script lang="ts">
 import { defineComponent, ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import api from '../../services/api'
 
 export default defineComponent({
   name: 'SystemSettings',
   setup() {
-    const settings = ref<Record<string, number>>({
-      standard_tariff_coeff: 1.0,
-      increased_tariff_coeff: 2.0,
-      urgent_tariff_coeff: 3.0,
-      asap_tariff_coeff: 8.0,
-      fine_amount: 500,
+    const { t } = useI18n()
+
+    const values = ref<Record<string, string>>({
+      standard_tariff_coeff: '1.0',
+      increased_tariff_coeff: '2.0',
+      urgent_tariff_coeff: '3.0',
+      asap_tariff_coeff: '8.0',
+      geofence_fine_amount: '500',
+      currency: 'RUB',
     })
+
+    const currencyOptions = [
+      { label: '₽ RUB', value: 'RUB' },
+      { label: '$ USD', value: 'USD' },
+      { label: '€ EUR', value: 'EUR' },
+    ]
 
     const loading = ref(false)
     const successMsg = ref('')
@@ -102,10 +122,14 @@ export default defineComponent({
       try {
         const response = await api.get('/admin/settings')
         if (response.data) {
-          settings.value = response.data
+          for (const key of Object.keys(values.value)) {
+            if (response.data[key] !== undefined) {
+              values.value[key] = String(response.data[key])
+            }
+          }
         }
       } catch (err) {
-        errorMsg.value = 'Failed to load system settings.'
+        errorMsg.value = t('settings.loadError')
         console.error(err)
       } finally {
         loading.value = false
@@ -116,10 +140,10 @@ export default defineComponent({
       successMsg.value = ''
       errorMsg.value = ''
       try {
-        await api.post('/admin/settings', settings.value)
-        successMsg.value = 'Settings saved successfully.'
+        await api.post('/admin/settings', values.value)
+        successMsg.value = t('settings.saveSuccess')
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to save settings.'
+        errorMsg.value = err.response?.data || t('settings.saveError')
         console.error(err)
       }
     }
@@ -129,7 +153,8 @@ export default defineComponent({
     })
 
     return {
-      settings,
+      values,
+      currencyOptions,
       loading,
       successMsg,
       errorMsg,

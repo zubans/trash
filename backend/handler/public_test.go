@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"bytes"
@@ -82,13 +82,25 @@ func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
-func newTestHandler() *Handler {
+func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address string) error {
+	return nil
+}
+
+func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
+	return &repository.CustomerProfile{UserID: userID}, nil
+}
+
+func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
+	return nil
+}
+
+func newTestPublicHandler() *PublicHandler {
 	repo := newMockUserRepo()
-	return NewHandler(service.NewAuthService(repo))
+	return NewPublicHandler(service.NewAuthService(repo))
 }
 
 func TestHealthHandler(t *testing.T) {
-	h := newTestHandler()
+	h := newTestPublicHandler()
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 
@@ -112,8 +124,8 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestRegisterHandler(t *testing.T) {
-	h := newTestHandler()
-	body, _ := json.Marshal(AuthRequest{Phone: "+79001234567", Password: "secret123"})
+	h := newTestPublicHandler()
+	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Password: "secret123", Address: "Moscow"})
 	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 
@@ -133,8 +145,8 @@ func TestRegisterHandler(t *testing.T) {
 }
 
 func TestRegisterHandlerDuplicate(t *testing.T) {
-	h := newTestHandler()
-	body, _ := json.Marshal(AuthRequest{Phone: "+79001234567", Password: "secret123"})
+	h := newTestPublicHandler()
+	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Password: "secret123", Address: "Moscow"})
 
 	req1 := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
 	h.RegisterHandler(httptest.NewRecorder(), req1)
@@ -149,7 +161,7 @@ func TestRegisterHandlerDuplicate(t *testing.T) {
 }
 
 func TestLoginHandler(t *testing.T) {
-	h := newTestHandler()
+	h := newTestPublicHandler()
 	phone := "+79001234567"
 	password := "secret123"
 
@@ -157,7 +169,7 @@ func TestLoginHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to hash password: %v", err)
 	}
-	h.authService.Register(phone, password)
+	h.authService.Register(phone, password, "Moscow")
 
 	body, _ := json.Marshal(AuthRequest{Phone: phone, Password: password})
 	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
@@ -180,8 +192,8 @@ func TestLoginHandler(t *testing.T) {
 }
 
 func TestLoginHandlerInvalidCredentials(t *testing.T) {
-	h := newTestHandler()
-	h.authService.Register("+79001234567", "secret123")
+	h := newTestPublicHandler()
+	h.authService.Register("+79001234567", "secret123", "Moscow")
 
 	body, _ := json.Marshal(AuthRequest{Phone: "+79001234567", Password: "wrongpassword"})
 	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))

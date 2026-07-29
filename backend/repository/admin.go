@@ -91,9 +91,12 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 		return nil, 0, err
 	}
 
-	// Get paginated list
+	// Get paginated list with customer address
 	listQuery := fmt.Sprintf(
-		"SELECT id, role, phone, password, balance, status, created_at FROM users %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
+		`SELECT u.id, u.role, u.phone, u.password, u.balance, u.status, u.created_at, COALESCE(cp.address, '') as address
+		 FROM users u
+		 LEFT JOIN customer_profiles cp ON cp.user_id = u.id
+		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argCount, argCount+1,
 	)
 	queryArgs := append(args, limit, offset)
@@ -107,7 +110,7 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 	var users []*User
 	for rows.Next() {
 		var u User
-		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Password, &u.Balance, &u.Status, &u.CreatedAt, &u.Address)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -123,7 +126,7 @@ func (r *adminRepo) GetTopUpRequests() ([]*TopUpRequest, error) {
 		FROM balance_topup_requests r
 		JOIN users u ON r.user_id = u.id
 		ORDER BY r.created_at DESC`
-	
+
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -162,7 +165,7 @@ func (r *adminRepo) CreateTopUpRequest(userID uuid.UUID, amount float64) (*TopUp
 		INSERT INTO balance_topup_requests (id, user_id, amount, status, created_at)
 		VALUES ($1, $2, $3, 'PENDING', now())
 		RETURNING id, user_id, amount, status, created_at`
-	
+
 	var req TopUpRequest
 	err := r.db.QueryRow(query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
 	if err != nil {
@@ -183,8 +186,8 @@ func (r *adminRepo) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) 
 	var amount float64
 	var userID uuid.UUID
 	queryLock := `
-		SELECT status, amount, user_id 
-		FROM balance_topup_requests 
+		SELECT status, amount, user_id
+		FROM balance_topup_requests
 		WHERE id = $1 FOR UPDATE`
 	err = tx.QueryRow(queryLock, requestID).Scan(&status, &amount, &userID)
 	if err != nil {
@@ -197,8 +200,8 @@ func (r *adminRepo) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) 
 
 	// 2. Update status of the request
 	queryUpdateReq := `
-		UPDATE balance_topup_requests 
-		SET status = 'APPROVED', admin_id = $1, updated_at = now() 
+		UPDATE balance_topup_requests
+		SET status = 'APPROVED', admin_id = $1, updated_at = now()
 		WHERE id = $2`
 	_, err = tx.Exec(queryUpdateReq, adminID, requestID)
 	if err != nil {
@@ -207,8 +210,8 @@ func (r *adminRepo) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) 
 
 	// 3. Update user's balance
 	queryUpdateUser := `
-		UPDATE users 
-		SET balance = balance + $1 
+		UPDATE users
+		SET balance = balance + $1
 		WHERE id = $2`
 	_, err = tx.Exec(queryUpdateUser, amount, userID)
 	if err != nil {
@@ -217,7 +220,7 @@ func (r *adminRepo) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) 
 
 	// 4. Log the transaction
 	queryLogTx := `
-		INSERT INTO transactions (user_id, type, amount, admin_id, created_at) 
+		INSERT INTO transactions (user_id, type, amount, admin_id, created_at)
 		VALUES ($1, 'TOP_UP', $2, $3, now())`
 	_, err = tx.Exec(queryLogTx, userID, amount, adminID)
 	if err != nil {
@@ -236,8 +239,8 @@ func (r *adminRepo) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) e
 
 	var status string
 	queryLock := `
-		SELECT status 
-		FROM balance_topup_requests 
+		SELECT status
+		FROM balance_topup_requests
 		WHERE id = $1 FOR UPDATE`
 	err = tx.QueryRow(queryLock, requestID).Scan(&status)
 	if err != nil {
@@ -249,8 +252,8 @@ func (r *adminRepo) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) e
 	}
 
 	queryUpdateReq := `
-		UPDATE balance_topup_requests 
-		SET status = 'REJECTED', admin_id = $1, updated_at = now() 
+		UPDATE balance_topup_requests
+		SET status = 'REJECTED', admin_id = $1, updated_at = now()
 		WHERE id = $2`
 	_, err = tx.Exec(queryUpdateReq, adminID, requestID)
 	if err != nil {
@@ -290,7 +293,7 @@ func (r *adminRepo) GetTransactions() ([]*Transaction, error) {
 		FROM transactions t
 		JOIN users u ON t.user_id = u.id
 		ORDER BY t.created_at DESC`
-	
+
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err

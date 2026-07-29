@@ -43,11 +43,14 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string) *Au
 	return &AuthService{repo: repo, secret: []byte(secret)}
 }
 
-// Register creates a new user with the given phone and password.
+// Register creates a new user with the given phone, password and pickup address.
 // The password is hashed before persisting. Role defaults to CUSTOMER.
-func (s *AuthService) Register(phone, password string) (*repository.User, error) {
+func (s *AuthService) Register(phone, password, address string) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
+	}
+	if address == "" {
+		return nil, errors.New("address is required")
 	}
 
 	existing, err := s.repo.FindByPhone(phone)
@@ -74,7 +77,16 @@ func (s *AuthService) Register(phone, password string) (*repository.User, error)
 		return nil, err
 	}
 
-	return s.repo.FindByPhone(phone)
+	created, err := s.repo.FindByPhone(phone)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.CreateCustomerProfile(created.ID, address); err != nil {
+		return nil, err
+	}
+
+	return created, nil
 }
 
 // Authenticate verifies phone/password and returns the matching user.

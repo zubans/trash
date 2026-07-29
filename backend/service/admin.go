@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log"
 	"strconv"
 	"time"
 
@@ -104,6 +105,17 @@ func (s *AdminService) UpdateUserRole(userID uuid.UUID, role string) error {
 	return s.userRepo.UpdateRole(userID, role)
 }
 
+// UpdateUserAddress updates a customer's pickup address (admin-only).
+func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error {
+	if address == "" {
+		return errors.New("address is required")
+	}
+	if _, err := s.userRepo.FindByID(userID); err != nil {
+		return errors.New("user not found")
+	}
+	return s.userRepo.UpdateCustomerAddress(userID, address)
+}
+
 // TopUpUserBalance adds funds directly to a user's balance.
 func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
 	if amount <= 0 {
@@ -174,6 +186,34 @@ func (s *AdminService) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID
 // GetTransactions retrieves transaction history.
 func (s *AdminService) GetTransactions() ([]*repository.Transaction, error) {
 	return s.adminRepo.GetTransactions()
+}
+
+// GetProfile returns the authenticated user's profile including customer address.
+func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, error) {
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	user.Password = ""
+
+	profile := map[string]interface{}{
+		"id":         user.ID,
+		"role":       user.Role,
+		"phone":      user.Phone,
+		"balance":    user.Balance,
+		"status":     user.Status,
+		"created_at": user.CreatedAt,
+		"address":    "",
+	}
+
+	cp, err := s.userRepo.GetCustomerProfile(userID)
+	if err != nil {
+		log.Printf("[GetProfile] failed to load customer profile for %s: %v", userID, err)
+	} else if cp != nil {
+		profile["address"] = cp.Address
+	}
+
+	return profile, nil
 }
 
 // GetSettings retrieves global settings.

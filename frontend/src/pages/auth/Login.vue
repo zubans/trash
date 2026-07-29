@@ -76,6 +76,21 @@
             </div>
           </div>
 
+          <div v-if="mode === 'register'" class="form-group mb-4">
+            <label class="form-label">{{ $t('login.pickupAddress') }}</label>
+            <div class="input-wrapper">
+              <span class="material-icons input-icon">location_on</span>
+              <input 
+                v-model="address" 
+                type="text" 
+                :placeholder="$t('login.pickupAddressPlaceholder')" 
+                class="custom-input" 
+                required 
+              />
+            </div>
+            <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
+          </div>
+
           <button type="submit" class="submit-btn" :disabled="loading">
             <span v-if="loading" class="spinner"></span>
             <span v-else>{{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}</span>
@@ -122,6 +137,7 @@ export default defineComponent({
     const mode = ref<'login' | 'register'>('login')
     const phone = ref('')
     const password = ref('')
+    const address = ref('')
     const error = ref('')
     const message = ref('')
     const loading = ref(false)
@@ -168,10 +184,12 @@ export default defineComponent({
           await api.post('/register', {
             phone: phone.value,
             password: password.value,
+            address: address.value,
           })
           message.value = t('login.registrationSuccess')
           mode.value = 'login'
           password.value = ''
+          address.value = ''
         }
       } catch (err: any) {
         error.value = formatApiError(err, t('login.networkError'))
@@ -184,6 +202,7 @@ export default defineComponent({
       mode,
       phone,
       password,
+      address,
       error,
       message,
       loading,

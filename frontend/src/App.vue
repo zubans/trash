@@ -4,12 +4,32 @@
 </template>
 
 <script lang="ts">
-import { defineComponent } from 'vue'
+import { defineComponent, onMounted } from 'vue'
 import ServerStatusIndicator from './components/ServerStatusIndicator.vue'
+import { useAuthStore } from './stores/auth-store'
+import api from './services/api'
 
 export default defineComponent({
   name: 'App',
   components: { ServerStatusIndicator },
+  setup() {
+    const authStore = useAuthStore()
+
+    const loadCurrency = async () => {
+      try {
+        const response = await api.get('/settings')
+        if (response.data?.currency) {
+          authStore.setCurrency(response.data.currency)
+        }
+      } catch (err) {
+        console.error('Failed to load public settings:', err)
+      }
+    }
+
+    onMounted(() => {
+      loadCurrency()
+    })
+  },
 })
 </script>
 

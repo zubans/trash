@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,15 @@ type User struct {
 	Balance   float64   `json:"balance"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
+	Address   string    `json:"address,omitempty"`
+}
+
+// CustomerProfile holds customer-specific profile data.
+type CustomerProfile struct {
+	UserID   uuid.UUID      `json:"user_id"`
+	FullName string         `json:"full_name"`
+	Address  string         `json:"address"`
+	LastGeo  sql.NullString `json:"last_geo"`
 }
 
 // UserRepository defines storage operations for users.
@@ -27,6 +37,9 @@ type UserRepository interface {
 	UpdateRole(id uuid.UUID, role string) error
 	UpdateBalance(id uuid.UUID, balance float64) error
 	UpdateLastGeo(id uuid.UUID, lastGeo string) error
+	CreateCustomerProfile(userID uuid.UUID, address string) error
+	GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
+	UpdateCustomerAddress(userID uuid.UUID, address string) error
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -90,9 +103,44 @@ func (r *repo) UpdateBalance(id uuid.UUID, balance float64) error {
 func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	_, err := r.db.Exec(
 		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
-		 VALUES ($1, '', '{}'::jsonb, $2)
+		 VALUES ($1, '', '', $2)
 		 ON CONFLICT (user_id) DO UPDATE SET last_geo = $2`,
 		id, lastGeo,
+	)
+	return err
+}
+
+func (r *repo) CreateCustomerProfile(userID uuid.UUID, address string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO customer_profiles (user_id, full_name, address)
+		 VALUES ($1, '', $2)
+		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
+		userID, address,
+	)
+	return err
+}
+
+func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
+	var p CustomerProfile
+	err := r.db.QueryRow(
+		`SELECT user_id, full_name, address, last_geo FROM customer_profiles WHERE user_id = $1`,
+		userID,
+	).Scan(&p.UserID, &p.FullName, &p.Address, &p.LastGeo)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &CustomerProfile{UserID: userID}, nil
+		}
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO customer_profiles (user_id, full_name, address)
+		 VALUES ($1, '', $2)
+		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
+		userID, address,
 	)
 	return err
 }

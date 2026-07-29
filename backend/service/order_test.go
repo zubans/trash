@@ -175,6 +175,10 @@ func (m *mockOrderRepo) Cancel(orderID uuid.UUID) error {
 	return m.CancelOrder(orderID)
 }
 
+func (m *mockOrderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+	return nil, nil
+}
+
 type mockUserRepo struct {
 	lastGeo map[uuid.UUID]string
 }
@@ -193,6 +197,11 @@ func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	m.lastGeo[id] = lastGeo
 	return nil
 }
+func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address string) error { return nil }
+func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
+	return &repository.CustomerProfile{UserID: userID}, nil
+}
+func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error { return nil }
 
 type mockTransactionRepo struct{}
 
@@ -220,7 +229,7 @@ func TestOrderService_CalculatePrice(t *testing.T) {
 			"asap_tariff_coeff":     "8.0",
 		},
 	}
-	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{})
+	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{}, nil)
 
 	// Case 1: Standard Regular
 	p, err := srv.CalculatePrice("STANDARD", "REGULAR")
@@ -249,10 +258,10 @@ func TestOrderService_CreateOrder(t *testing.T) {
 	}
 	orderRepo := &mockOrderRepo{}
 	userRepo := newMockUserRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, userRepo, &mockShiftRepo{})
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, userRepo, &mockShiftRepo{}, nil)
 
 	customerID := uuid.New()
-	order, err := srv.CreateOrder(customerID, "STANDARD", "REGULAR", "55.7558,37.6173")
+	order, err := srv.CreateOrder(customerID, "STANDARD", "REGULAR", "55.7558,37.6173", nil, nil)
 	if userRepo.lastGeo[customerID] != "55.7558,37.6173" {
 		t.Errorf("expected last_geo to be saved")
 	}
@@ -276,10 +285,10 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 		},
 	}
 	orderRepo := &mockOrderRepo{}
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{})
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{}, nil)
 
 	customerID := uuid.New()
-	order, _ := srv.CreateOrder(customerID, "STANDARD", "REGULAR", "")
+	order, _ := srv.CreateOrder(customerID, "STANDARD", "REGULAR", "", nil, nil)
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(order.ID, executorID)
 
@@ -295,7 +304,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	}
 
 	// Cancel a different order
-	order2, _ := srv.CreateOrder(customerID, "LARGE", "REGULAR", "")
+	order2, _ := srv.CreateOrder(customerID, "LARGE", "REGULAR", "", nil, nil)
 	err = srv.CancelOrder(order2.ID)
 	if err != nil {
 		t.Errorf("expected success canceling order, got err: %v", err)
@@ -304,15 +313,15 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 
 func TestOrderService_CreateConstructionOrder(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &mockShiftRepo{})
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &mockShiftRepo{}, nil)
 
 	customerID := uuid.New()
-	_, err := srv.CreateConstructionOrder(customerID, "", "")
+	_, err := srv.CreateConstructionOrder(customerID, "", "", nil, nil)
 	if err == nil {
 		t.Error("expected error creating construction order without photo URL")
 	}
 
-	order, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61")
+	order, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating construction order: %v", err)
 	}

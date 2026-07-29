@@ -21,7 +21,11 @@
     <!-- Data Table -->
     <va-data-table :items="users" :columns="columns" :loading="loading" class="mb-4">
       <template #cell(balance)="{ value }">
-        <strong>${{ Number(value).toFixed(2) }}</strong>
+        <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
+      </template>
+
+      <template #cell(address)="{ value }">
+        <span class="text-sm">{{ value || '-' }}</span>
       </template>
 
       <template #cell(created_at)="{ value }">
@@ -45,6 +49,14 @@
             @click="openRoleModal(rowData)"
           >
             {{ $t('users.roleBtn') }}
+          </va-button>
+          <va-button
+            color="secondary"
+            size="small"
+            class="mr-2"
+            @click="openAddressModal(rowData)"
+          >
+            {{ $t('users.addressBtn') }}
           </va-button>
           <va-button
             v-if="rowData.status === 'ACTIVE'"
@@ -113,18 +125,37 @@
         required
       />
     </va-modal>
+
+    <!-- Change Address Modal -->
+    <va-modal
+      v-model="showAddressModal"
+      :title="$t('users.changeAddressTitle')"
+      :ok-text="$t('users.save')"
+      :cancel-text="$t('users.cancel')"
+      @ok="saveAddress"
+      @cancel="closeAddressModal"
+    >
+      <p class="mb-2">{{ $t('users.user') }}: <strong>{{ selectedUser?.phone }}</strong></p>
+      <va-input
+        v-model="newAddress"
+        :label="$t('users.newAddress')"
+        required
+      />
+    </va-modal>
   </div>
 </template>
 
 <script lang="ts">
 import { defineComponent, ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 
 export default defineComponent({
   name: 'UserList',
   setup() {
     const { t } = useI18n()
+    const authStore = useAuthStore()
 
     const users = ref([])
     const totalUsers = ref(0)
@@ -159,10 +190,15 @@ export default defineComponent({
       { key: 'phone', label: t('users.phone'), sortable: true },
       { key: 'role', label: t('users.role'), sortable: true },
       { key: 'balance', label: t('users.balance'), sortable: true },
+      { key: 'address', label: t('users.address'), sortable: true },
       { key: 'status', label: t('users.status'), sortable: true },
       { key: 'created_at', label: t('users.joinedAt'), sortable: true },
       { key: 'actions', label: t('users.actions') },
     ])
+
+    const currencySymbol = computed(() => {
+      return authStore.currency === 'RUB' ? '₽' : '$'
+    })
 
     const totalPages = computed(() => Math.ceil(totalUsers.value / limit.value) || 1)
 
@@ -246,6 +282,8 @@ export default defineComponent({
 
     const showTopUpModal = ref(false)
     const topUpAmount = ref(0)
+    const showAddressModal = ref(false)
+    const newAddress = ref('')
 
     const openTopUpModal = (user: any) => {
       selectedUser.value = user
@@ -274,6 +312,34 @@ export default defineComponent({
       }
     }
 
+    const openAddressModal = (user: any) => {
+      selectedUser.value = user
+      newAddress.value = user.address || ''
+      showAddressModal.value = true
+    }
+
+    const closeAddressModal = () => {
+      showAddressModal.value = false
+      selectedUser.value = null
+      newAddress.value = ''
+    }
+
+    const saveAddress = async () => {
+      if (!selectedUser.value) return
+      if (!newAddress.value.trim()) {
+        alert(t('users.addressRequired'))
+        return
+      }
+      try {
+        await api.post(`/admin/users/${selectedUser.value.id}/address`, { address: newAddress.value.trim() })
+        selectedUser.value.address = newAddress.value.trim()
+        closeAddressModal()
+      } catch (err: any) {
+        alert(err.response?.data || t('users.updateAddressError'))
+        console.error(err)
+      }
+    }
+
     const formatDate = (dateStr: string) => {
       if (!dateStr) return '-'
       const d = new Date(dateStr)
@@ -297,6 +363,7 @@ export default defineComponent({
       editableRoleOptions,
       statusOptions,
       columns,
+      currencySymbol,
       totalPages,
       fetchUsers,
       debouncedFetch,
@@ -305,15 +372,20 @@ export default defineComponent({
       formatDate,
       showRoleModal,
       showTopUpModal,
+      showAddressModal,
       selectedUser,
       newRole,
       topUpAmount,
+      newAddress,
       openRoleModal,
       closeRoleModal,
       saveRole,
       openTopUpModal,
       closeTopUpModal,
       submitTopUp,
+      openAddressModal,
+      closeAddressModal,
+      saveAddress,
     }
   },
 })

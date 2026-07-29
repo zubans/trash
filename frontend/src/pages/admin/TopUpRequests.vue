@@ -1,17 +1,17 @@
 <template>
   <div class="topup-requests">
-    <h1 class="va-h3 mb-4">Balance Top-Up Requests</h1>
+    <h1 class="va-h3 mb-4">{{ $t('topups.title') }}</h1>
 
     <!-- Requests Table -->
     <va-data-table :items="requests" :columns="columns" :loading="loading" class="mb-4">
       <template #cell(amount)="{ value }">
-        <strong>${{ Number(value).toFixed(2) }}</strong>
+        <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
       </template>
 
       <template #cell(status)="{ value }">
-        <va-badge v-if="value === 'PENDING'" color="warning">Pending</va-badge>
-        <va-badge v-else-if="value === 'APPROVED'" color="success">Approved</va-badge>
-        <va-badge v-else color="danger">Rejected</va-badge>
+        <va-badge v-if="value === 'PENDING'" color="warning">{{ $t('topups.pending') }}</va-badge>
+        <va-badge v-else-if="value === 'APPROVED'" color="success">{{ $t('topups.approved') }}</va-badge>
+        <va-badge v-else color="danger">{{ $t('topups.rejected') }}</va-badge>
       </template>
 
       <template #cell(created_at)="{ value }">
@@ -26,14 +26,14 @@
             class="mr-2"
             @click="confirmAction(rowData, 'APPROVE')"
           >
-            Approve
+            {{ $t('topups.approve') }}
           </va-button>
           <va-button
             color="danger"
             size="small"
             @click="confirmAction(rowData, 'REJECT')"
           >
-            Reject
+            {{ $t('topups.reject') }}
           </va-button>
         </div>
         <span v-else>-</span>
@@ -44,23 +44,31 @@
     <va-modal
       v-model="showConfirm"
       :title="modalTitle"
-      message="Are you sure you want to proceed? This action cannot be undone."
-      ok-text="Confirm"
-      cancel-text="Cancel"
+      :message="$t('topups.confirmMessage')"
+      :ok-text="$t('common.confirm')"
+      :cancel-text="$t('common.cancel')"
       @ok="executeAction"
     />
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted } from 'vue'
+import { defineComponent, ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 
 export default defineComponent({
   name: 'TopUpRequests',
   setup() {
+    const { t } = useI18n()
+    const authStore = useAuthStore()
     const requests = ref([])
     const loading = ref(false)
+
+    const currencySymbol = computed(() => {
+      return authStore.currency === 'RUB' ? '₽' : '$'
+    })
 
     // Modal Control
     const showConfirm = ref(false)
@@ -69,11 +77,11 @@ export default defineComponent({
     const modalTitle = ref('')
 
     const columns = [
-      { key: 'user_phone', label: 'User Phone' },
-      { key: 'amount', label: 'Amount' },
-      { key: 'status', label: 'Status' },
-      { key: 'created_at', label: 'Requested At' },
-      { key: 'actions', label: 'Actions' },
+      { key: 'user_phone', label: t('topups.userPhone') },
+      { key: 'amount', label: t('topups.amount') },
+      { key: 'status', label: t('topups.status') },
+      { key: 'created_at', label: t('topups.requestedAt') },
+      { key: 'actions', label: t('topups.actions') },
     ]
 
     const fetchRequests = async () => {
@@ -91,7 +99,7 @@ export default defineComponent({
     const confirmAction = (req: any, type: 'APPROVE' | 'REJECT') => {
       selectedRequest.value = req
       actionType.value = type
-      modalTitle.value = type === 'APPROVE' ? 'Approve Top-Up' : 'Reject Top-Up'
+      modalTitle.value = type === 'APPROVE' ? t('topups.confirmApprove') : t('topups.confirmReject')
       showConfirm.value = true
     }
 
@@ -104,7 +112,7 @@ export default defineComponent({
         await api.post(`/admin/finances/topups/${reqId}/${endpoint}`)
         fetchRequests() // Reload
       } catch (err: any) {
-        alert(err.response?.data || 'Operation failed')
+        alert(err.response?.data || t('topups.operationFailed'))
       } finally {
         selectedRequest.value = null
         showConfirm.value = false
@@ -125,6 +133,7 @@ export default defineComponent({
       requests,
       loading,
       columns,
+      currencySymbol,
       showConfirm,
       modalTitle,
       confirmAction,
