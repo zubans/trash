@@ -155,9 +155,67 @@
             </va-button>
           </div>
 
+          <div class="d-flex mb-4">
+            <va-button 
+              color="primary" 
+              outline 
+              size="small" 
+              @click="getCurrentLocation"
+              class="mr-2"
+            >
+              <va-icon name="my_location" class="mr-1" /> {{ $t('executor.myLocation') }}
+            </va-button>
+          </div>
+
           <va-button block :loading="sendingLocation" @click="sendLocation">
             {{ $t('executor.sendGPSLocation') }}
           </va-button>
+
+          <!-- Nearby Orders -->
+          <div class="mt-4 pt-4 border-top">
+            <h4 class="va-h6 text-secondary mb-2">{{ $t('executor.nearbyOrders') }}</h4>
+            <va-button
+              color="success"
+              outline
+              size="small"
+              :loading="searchingNearby"
+              @click="findNearbyOrders"
+              class="mb-3"
+            >
+              {{ $t('executor.findNearbyOrders') }}
+            </va-button>
+
+            <div v-if="nearbyOrders.length === 0" class="text-xs text-secondary text-center py-2">
+              {{ $t('executor.noAvailableOrders') }}
+            </div>
+            <div v-else class="nearby-orders-list">
+              <va-card
+                v-for="order in nearbyOrders"
+                :key="order.id"
+                class="order-item-card p-2 mb-2"
+                outlined
+              >
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <div class="font-bold text-sm">#{{ order.id.slice(0, 8) }}</div>
+                    <div class="text-xs text-secondary">{{ order.volume_type }} / {{ order.speed_tariff }}</div>
+                    <div class="text-xs text-secondary" v-if="order.address">{{ order.address }}</div>
+                  </div>
+                  <div class="text-right">
+                    <strong class="text-primary">${{ Number(order.hold_amount).toFixed(2) }}</strong>
+                    <va-button
+                      color="success"
+                      size="small"
+                      class="d-block mt-1"
+                      @click="acceptOrder(order.id)"
+                    >
+                      {{ $t('executor.acceptOrder') }}
+                    </va-button>
+                  </div>
+                </div>
+              </va-card>
+            </div>
+          </div>
 
           <!-- Local logs list of sent coordinates -->
           <div v-if="telemetryLogs.length > 0" class="mt-4">
@@ -382,6 +440,10 @@ export default defineComponent({
     const availableOrders = ref<any[]>([])
     const bidsInputs = ref<Record<string, number>>({})
 
+    // Nearby standard/large orders
+    const nearbyOrders = ref<any[]>([])
+    const searchingNearby = ref(false)
+
     // Chat state
     const selectedChatOrder = ref<any>(null)
     const chatMessages = ref<any[]>([])
@@ -495,6 +557,58 @@ export default defineComponent({
         console.error(err)
       } finally {
         sendingLocation.value = false
+      }
+    }
+
+    const getCurrentLocation = () => {
+      if (!navigator.geolocation) {
+        errorMsg.value = 'Geolocation is not supported by your device'
+        return
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latInput.value = position.coords.latitude
+          lonInput.value = position.coords.longitude
+          successMsg.value = `Location updated: ${latInput.value.toFixed(5)}, ${lonInput.value.toFixed(5)}`
+        },
+        (err) => {
+          errorMsg.value = `Failed to get location: ${err.message}`
+        }
+      )
+    }
+
+    const findNearbyOrders = async () => {
+      successMsg.value = ''
+      errorMsg.value = ''
+      searchingNearby.value = true
+      try {
+        const response = await api.get('/executor/orders/nearby', {
+          params: {
+            lat: latInput.value,
+            lon: lonInput.value,
+            radius: 2000,
+          },
+        })
+        nearbyOrders.value = response.data || []
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Failed to fetch nearby orders'
+        console.error(err)
+      } finally {
+        searchingNearby.value = false
+      }
+    }
+
+    const acceptOrder = async (orderId: string) => {
+      successMsg.value = ''
+      errorMsg.value = ''
+      try {
+        await api.post(`/executor/orders/${orderId}/accept`)
+        successMsg.value = 'Order accepted successfully!'
+        await fetchAssignedOrders()
+        await findNearbyOrders()
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Failed to accept order'
+        console.error(err)
       }
     }
 
@@ -647,6 +761,11 @@ export default defineComponent({
       assignedOrders,
       availableOrders,
       bidsInputs,
+      nearbyOrders,
+      searchingNearby,
+      getCurrentLocation,
+      findNearbyOrders,
+      acceptOrder,
       selectedChatOrder,
       chatMessages,
       chatText,

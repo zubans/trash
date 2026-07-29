@@ -57,7 +57,8 @@ func main() {
 	// Services
 	authService := service.NewAuthService(userRepo)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
-	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo)
+	geocoder := service.NewGeocoder()
+	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
@@ -83,6 +84,7 @@ func main() {
 	sh := adminHandler.NewShiftHandler(shiftService)
 	bh := adminHandler.NewBidHandler(bidService, orderService)
 	ch := adminHandler.NewChatHandler(chatService)
+	gh := adminHandler.NewGeoHandler(geocoder)
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -93,6 +95,7 @@ func main() {
 	r.Get("/health", h.HealthHandler)
 	r.Post("/register", h.RegisterHandler)
 	r.Post("/login", h.LoginHandler)
+	r.Get("/geo/geocode", gh.Geocode)
 
 	// Authenticated customer routes
 	r.Group(func(r chi.Router) {
@@ -120,6 +123,7 @@ func main() {
 		r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
 		r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
 		r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
+		r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
 		r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
 		r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 	})

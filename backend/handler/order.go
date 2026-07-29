@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +42,10 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	var req service.CreateOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Address == "" {
+		http.Error(w, "address is required", http.StatusBadRequest)
 		return
 	}
 
@@ -155,6 +160,48 @@ func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(orders)
+}
+
+// GetNearbyOrdersHandler handles GET /executor/orders/nearby?lat=...&lon=...&radius=2000.
+func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lat, lon, radius, err := parseCoords(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	orders, err := h.orderService.FindNearbyOrders(lat, lon, radius)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(orders)
+}
+
+func parseCoords(r *http.Request) (float64, float64, int, error) {
+	var lat, lon float64
+	var radius int
+	if _, err := fmt.Sscanf(r.URL.Query().Get("lat"), "%f", &lat); err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid lat")
+	}
+	if _, err := fmt.Sscanf(r.URL.Query().Get("lon"), "%f", &lon); err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid lon")
+	}
+	if _, err := fmt.Sscanf(r.URL.Query().Get("radius"), "%d", &radius); err != nil {
+		radius = 2000
+	}
+	if radius <= 0 || radius > 50000 {
+		radius = 2000
+	}
+	return lat, lon, radius, nil
 }
 
 // Alias method names expected by main.go.

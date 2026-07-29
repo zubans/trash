@@ -17,18 +17,22 @@ type OrderService struct {
 	settingsRepo    repository.SettingsRepository
 	userRepo        repository.UserRepository
 	shiftRepo       repository.ShiftRepository
+	geocoder        *Geocoder
 }
 
 // NewOrderService creates an OrderService.
-func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository) *OrderService {
-	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo}
+func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, geocoder *Geocoder) *OrderService {
+	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, geocoder: geocoder}
 }
 
 // CreateOrderRequest contains the data needed to create an order.
 type CreateOrderRequest struct {
-	VolumeType  string  `json:"volume_type"`
-	SpeedTariff string  `json:"speed_tariff"`
-	PhotoURL    *string `json:"photo_url,omitempty"`
+	VolumeType  string   `json:"volume_type"`
+	SpeedTariff string   `json:"speed_tariff"`
+	PhotoURL    *string  `json:"photo_url,omitempty"`
+	Address     string   `json:"address"`
+	Lat         *float64 `json:"lat,omitempty"`
+	Lon         *float64 `json:"lon,omitempty"`
 }
 
 func basePriceByVolume(volumeType string) float64 {
@@ -83,7 +87,7 @@ func (s *OrderService) CalculatePrice(volumeType, speedTariff string) (float64, 
 }
 
 // CreateOrder creates a standard order and holds customer balance.
-func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff, lastGeo string) (*repository.Order, error) {
+func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff, address string, lat, lon *float64) (*repository.Order, error) {
 	holdAmount, err := s.CalculatePrice(volumeType, speedTariff)
 	if err != nil {
 		return nil, err
@@ -115,8 +119,21 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff
 		Status:      repository.OrderStatusSearching,
 		HoldAmount:  holdAmount,
 		FinalAmount: holdAmount,
+		Address:     &address,
 		CreatedAt:   now,
 		DeadlineAt:  deadline,
+	}
+
+	// Resolve coordinates: prefer provided lat/lon, otherwise geocode the address.
+	if lat != nil && lon != nil {
+		order.PickupLat = lat
+		order.PickupLon = lon
+	} else if s.geocoder != nil && address != "" {
+		geo, err := s.geocoder.Geocode(address)
+		if err == nil {
+			order.PickupLat = &geo.Lat
+			order.PickupLon = &geo.Lon
+		}
 	}
 
 	// Persist the order first; financial operations are wrapped in a transaction.
@@ -138,8 +155,8 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff
 		return nil, err
 	}
 
-	if s.userRepo != nil && lastGeo != "" {
-		if err := s.userRepo.UpdateLastGeo(customerID, lastGeo); err != nil {
+	if s.userRepo != nil && address != "" {
+		if err := s.userRepo.UpdateLastGeo(customerID, address); err != nil {
 			// Non-fatal: order is already created, log and continue.
 			_ = err
 		}
@@ -150,7 +167,7 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff
 
 // Create creates a new order for a customer (alias compatible with handler).
 func (s *OrderService) Create(customerID uuid.UUID, req CreateOrderRequest) (*repository.Order, error) {
-	return s.CreateOrder(customerID, req.VolumeType, req.SpeedTariff, "")
+	return s.CreateOrder(customerID, req.VolumeType, req.SpeedTariff, req.Address, req.Lat, req.Lon)
 }
 
 // Accept allows an executor to take an order from the queue.
@@ -282,7 +299,7 @@ func (s *OrderService) Cancel(customerID, orderID uuid.UUID) error {
 }
 
 // CreateConstructionOrder creates a construction waste auction order.
-func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, lastGeo string) (*repository.Order, error) {
+func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, address string, lat, lon *float64) (*repository.Order, error) {
 	if photoURL == "" {
 		return nil, errors.New("photo URL is required")
 	}
@@ -295,10 +312,23 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, l
 		HoldAmount:  0,
 		FinalAmount: 0,
 		PhotoURL:    &photoURL,
+		Address:     &address,
 		CreatedAt:   time.Now(),
 	}
-	if s.userRepo != nil && lastGeo != "" {
-		if err := s.userRepo.UpdateLastGeo(customerID, lastGeo); err != nil {
+
+	if lat != nil && lon != nil {
+		order.PickupLat = lat
+		order.PickupLon = lon
+	} else if s.geocoder != nil && address != "" {
+		geo, err := s.geocoder.Geocode(address)
+		if err == nil {
+			order.PickupLat = &geo.Lat
+			order.PickupLon = &geo.Lon
+		}
+	}
+
+	if s.userRepo != nil && address != "" {
+		if err := s.userRepo.UpdateLastGeo(customerID, address); err != nil {
 			// Non-fatal: order is already created, log and continue.
 			_ = err
 		}
@@ -312,6 +342,11 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, l
 // GetAvailableConstructionOrders returns open construction waste orders.
 func (s *OrderService) GetAvailableConstructionOrders() ([]*repository.Order, error) {
 	return s.orderRepo.GetAvailableConstructionOrders()
+}
+
+// FindNearbyOrders returns searching standard/large orders near the given coordinates within radiusMeters.
+func (s *OrderService) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+	return s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
 }
 
 // ListAssigned returns orders assigned to an executor.

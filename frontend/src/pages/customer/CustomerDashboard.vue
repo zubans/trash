@@ -1,261 +1,181 @@
 <template>
   <div class="customer-dashboard">
-    <div class="dashboard-header mb-5">
+    <!-- Header: phone + balance -->
+    <div class="dashboard-header mb-4">
       <div class="d-flex justify-content-between align-items-center">
         <div>
-          <h1 class="va-h3 m-0">{{ $t('customer.title') }}</h1>
-          <span class="text-secondary text-sm">{{ $t('customer.subtitle') }}</span>
+          <h1 class="va-h5 m-0">{{ phone }}</h1>
+          <span class="text-secondary text-sm">{{ $t('customer.title') }}</span>
         </div>
-        <va-button color="danger" outline size="small" @click="handleLogout">
-          <va-icon name="logout" class="mr-2" /> {{ $t('app.logout') }}
-        </va-button>
+        <div class="text-right">
+          <div class="balance-amount">${{ Number(balance).toFixed(2) }}</div>
+          <div class="text-secondary text-xs">{{ $t('customer.balance') }}</div>
+        </div>
       </div>
     </div>
 
     <!-- Alert messages -->
-    <va-alert v-if="successMsg" color="success" class="mb-4" closeable @dismissed="successMsg = ''">
+    <va-alert v-if="successMsg" color="success" class="mb-3" closeable @dismissed="successMsg = ''">
       {{ successMsg }}
     </va-alert>
-    <va-alert v-if="errorMsg" color="danger" class="mb-4" closeable @dismissed="errorMsg = ''">
+    <va-alert v-if="errorMsg" color="danger" class="mb-3" closeable @dismissed="errorMsg = ''">
       {{ errorMsg }}
     </va-alert>
 
-    <div class="row g-4">
-      <!-- Left Column: Profile, Top-up, and Order Creation -->
-      <div class="col-md-5">
-        <!-- Profile Card -->
-        <va-card class="p-4 mb-4 shadow-card">
-          <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="account_circle" class="mr-2" /> {{ $t('customer.accountDetails') }}
-          </h3>
-          <div class="info-list">
-            <div class="info-item mb-3">
-              <span class="info-label">{{ $t('customer.phone') }}</span>
-              <span class="info-val">{{ phone }}</span>
-            </div>
-            <div class="info-item mb-3">
-              <span class="info-label">{{ $t('customer.status') }}</span>
-              <span class="info-val">
-                <va-badge color="success">{{ status }}</va-badge>
-              </span>
-            </div>
-          </div>
-
-          <div class="balance-box mt-4 p-3 text-center">
-            <span class="balance-label d-block text-secondary text-sm mb-1">{{ $t('customer.balance') }}</span>
-            <span class="balance-amount">${{ Number(balance).toFixed(2) }}</span>
-          </div>
-        </va-card>
-
-        <!-- Top-up Card -->
-        <va-card class="p-4 mb-4 shadow-card">
-          <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="payment" class="mr-2" /> {{ $t('customer.requestWalletTopUp') }}
-          </h3>
-          <p class="text-secondary text-sm mb-4">
-            {{ $t('customer.topUpDescription') }}
-          </p>
-
-          <va-form @submit.prevent="submitTopUp">
-            <va-input
-              v-model.number="topUpAmount"
-              type="number"
-              :label="$t('customer.amountWithCurrency')"
-              placeholder="100"
-              min="1"
-              step="any"
-              class="mb-4"
-              required
-            >
-              <template #prependInner>
-                <va-icon name="attach_money" />
-              </template>
-            </va-input>
-            
-            <va-button type="submit" block :loading="submitting">
-              {{ $t('customer.submitRequest') }}
-            </va-button>
-          </va-form>
-        </va-card>
-
-        <!-- Create Order Card -->
-        <va-card class="p-4 mb-4 shadow-card">
-          <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="shopping_cart" class="mr-2" /> {{ $t('customer.createNewOrder') }}
-          </h3>
-          <p class="text-secondary text-sm mb-4">
-            {{ $t('customer.createOrderDescription') }}
-          </p>
-
-          <va-form @submit.prevent="submitOrder">
-            <va-select
-              v-model="orderVolume"
-              :options="volumeOptions"
-              :label="$t('customer.volumeType')"
-              class="mb-4"
-              required
-            />
-            
-            <va-select
-              v-if="orderVolume !== 'CONSTRUCTION'"
-              v-model="orderTariff"
-              :options="tariffOptions"
-              :label="$t('customer.speedTariff')"
-              class="mb-4"
-              required
-            />
-
-            <va-input
-              v-if="orderVolume === 'CONSTRUCTION'"
-              v-model="orderPhoto"
-              :label="$t('customer.photoUrl')"
-              placeholder="https://example.com/photo.jpg"
-              class="mb-4"
-              required
-            >
-              <template #prependInner>
-                <va-icon name="image" />
-              </template>
-            </va-input>
-
-            <va-input
-              v-model="orderGeo"
-              :label="$t('customer.coordinates')"
-              placeholder="55.7558, 37.6173"
-              class="mb-4"
-              required
-            >
-              <template #prependInner>
-                <va-icon name="location_on" />
-              </template>
-            </va-input>
-
-            <div class="price-preview mb-4 p-3 text-center" v-if="orderVolume !== 'CONSTRUCTION'">
-              <span class="price-label d-block text-secondary text-sm mb-1">{{ $t('customer.estimatedHoldAmount') }}</span>
-              <span class="price-amount-preview text-primary font-bold">${{ Number(estimatedPrice).toFixed(2) }}</span>
-            </div>
-            
-            <div class="price-preview mb-4 p-3 text-center" v-else>
-              <span class="price-label d-block text-secondary text-sm mb-1">{{ $t('customer.estimatedHoldAmount') }}</span>
-              <span class="price-amount-preview text-warning font-bold">{{ $t('customer.biddingAuction') }}</span>
-            </div>
-
-            <va-button type="submit" block :loading="creatingOrder">
-              {{ $t('customer.createOrder') }}
-            </va-button>
-          </va-form>
-        </va-card>
-      </div>
-
-      <!-- Right Column: Active Orders & History -->
-      <div class="col-md-7">
-        <va-card class="p-4 shadow-card">
-          <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3 class="va-h5 m-0 text-primary d-flex align-items-center">
-              <va-icon name="list_alt" class="mr-2" /> {{ $t('customer.yourOrders') }}
-            </h3>
-            <va-button icon="refresh" color="secondary" size="small" flat @click="fetchOrders" />
-          </div>
-
-          <div v-if="orders.length === 0" class="text-center py-5">
-            <va-icon name="inbox" size="large" color="secondary" class="mb-3" />
-            <p class="text-secondary">{{ $t('customer.noOrders') }}</p>
-          </div>
-
-          <div v-else class="orders-list">
-            <va-card 
-              v-for="order in orders" 
-              :key="order.id" 
-              class="order-item-card p-3 mb-3"
-              outlined
-            >
-              <div class="d-flex justify-content-between align-items-start mb-2">
-                <div>
-                  <span class="order-id font-bold text-sm">{{ $t('customer.orderId') }}{{ order.id.slice(0, 8) }}...</span>
-                  <span v-if="order.is_downgraded" class="ml-2">
-                    <va-badge color="danger">{{ $t('customer.slaDowngraded') }}</va-badge>
-                  </span>
-                  <div class="text-xs text-secondary mt-1">
-                    Created: {{ formatDate(order.created_at) }}
-                  </div>
-                </div>
-                <va-badge :color="getStatusColor(order.status)" class="text-uppercase">
-                  {{ order.status }}
-                </va-badge>
-              </div>
-
-              <div class="row text-sm mb-3">
-                <div class="col-6">
-                  <strong>{{ $t('customer.volume') }}:</strong> {{ order.volume_type }}
-                </div>
-                <div class="col-6">
-                  <strong>{{ $t('customer.tariff') }}:</strong> {{ order.speed_tariff }}
-                </div>
-                <div class="col-6 mt-1">
-                  <strong>{{ $t('customer.hold') }}:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
-                </div>
-                <div class="col-6 mt-1" v-if="order.executor_phone">
-                  <strong>{{ $t('customer.executor') }}:</strong> {{ order.executor_phone }}
-                </div>
-                <div class="col-12 mt-1" v-if="order.photo_url">
-                  <strong>{{ $t('customer.photo') }}:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
-                </div>
-              </div>
-
-              <!-- Bids for this order (Auctions) -->
-              <div v-if="order.volume_type === 'CONSTRUCTION' && order.status === 'SEARCHING'" class="bids-section mt-3 p-2 bg-light rounded">
-                <span class="text-xs font-bold text-secondary d-block mb-2">{{ $t('customer.receivedBids') }} ({{ (bidsMap[order.id] || []).length }}):</span>
-                <div v-if="!(bidsMap[order.id] || []).length" class="text-xs text-secondary text-center py-2">
-                  {{ $t('customer.noBids') }}
-                </div>
-                <div v-else>
-                  <div 
-                    v-for="bid in bidsMap[order.id]" 
-                    :key="bid.id" 
-                    class="d-flex justify-content-between align-items-center mb-1 py-1 border-bottom"
-                  >
-                    <span class="text-xs">{{ $t('customer.offers', { phone: bid.executor_phone, price: bid.offered_price }) }}</span>
-                    <va-button color="success" size="small" @click="acceptBid(bid.id)">{{ $t('common.accept') }}</va-button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Action Buttons -->
-              <div class="d-flex justify-content-end gap-2 mt-2">
-                <va-button 
-                  v-if="order.status === 'ASSIGNED'" 
-                  color="info" 
-                  outline 
-                  size="small" 
-                  @click="openChat(order)"
-                  class="mr-2"
-                >
-                  <va-icon name="chat" class="mr-1" /> {{ $t('common.chat') }}
-                </va-button>
-                <va-button 
-                  v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'" 
-                  color="danger" 
-                  outline 
-                  size="small" 
-                  @click="cancelOrder(order.id)"
-                  class="mr-2"
-                >
-                  {{ $t('customer.cancelOrder') }}
-                </va-button>
-                <va-button 
-                  v-if="order.status === 'ASSIGNED'" 
-                  color="success" 
-                  size="small" 
-                  @click="confirmOrder(order.id)"
-                >
-                  {{ $t('customer.confirmDelivery') }}
-                </va-button>
-              </div>
-            </va-card>
-          </div>
-        </va-card>
-      </div>
+    <!-- Top-up button (small, left aligned) -->
+    <div class="mb-3">
+      <va-button color="primary" outline size="small" @click="showTopUpModal = true">
+        <va-icon name="payment" class="mr-1" /> {{ $t('customer.requestWalletTopUp') }}
+      </va-button>
     </div>
+
+    <!-- Create order button (large) -->
+    <div class="mb-4">
+      <va-button color="success" block size="large" @click="openCreateOrderModal">
+        <va-icon name="shopping_cart" class="mr-2" /> {{ $t('customer.createOrder') }}
+      </va-button>
+    </div>
+
+    <!-- Orders table -->
+    <va-card class="shadow-card">
+      <div class="d-flex justify-content-between align-items-center mb-3 p-3 pb-0">
+        <h3 class="va-h6 m-0">{{ $t('customer.yourOrders') }}</h3>
+        <va-button icon="refresh" color="secondary" size="small" flat @click="fetchOrders" />
+      </div>
+
+      <div v-if="orders.length === 0" class="text-center py-5">
+        <va-icon name="inbox" size="large" color="secondary" class="mb-3" />
+        <p class="text-secondary">{{ $t('customer.noOrders') }}</p>
+      </div>
+
+      <va-data-table
+        v-else
+        :items="orders"
+        :columns="orderColumns"
+        striped
+        hoverable
+      >
+        <template #cell(id)="{ rowData }">
+          <span class="font-bold text-sm">#{{ rowData.id.slice(0, 8) }}</span>
+        </template>
+
+        <template #cell(type)="{ rowData }">
+          {{ $t(`customer.types.${getTypeKey(rowData.volume_type, rowData.speed_tariff)}`) }}
+        </template>
+
+        <template #cell(hold_amount)="{ value }">
+          <strong>${{ Number(value).toFixed(2) }}</strong>
+        </template>
+
+        <template #cell(status)="{ value }">
+          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
+        </template>
+
+        <template #cell(actions)="{ rowData }">
+          <div class="d-flex gap-1">
+            <va-button
+              v-if="rowData.status === 'ASSIGNED'"
+              color="info"
+              outline
+              size="small"
+              @click="openChat(rowData)"
+            >
+              <va-icon name="chat" />
+            </va-button>
+            <va-button
+              v-if="rowData.status === 'ASSIGNED'"
+              color="success"
+              size="small"
+              @click="confirmOrder(rowData.id)"
+            >
+              <va-icon name="check" />
+            </va-button>
+            <va-button
+              v-if="rowData.status === 'SEARCHING' || rowData.status === 'ASSIGNED'"
+              color="danger"
+              outline
+              size="small"
+              @click="cancelOrder(rowData.id)"
+            >
+              <va-icon name="close" />
+            </va-button>
+          </div>
+        </template>
+      </va-data-table>
+    </va-card>
+
+    <!-- Create Order Modal -->
+    <va-modal
+      v-model="showCreateOrderModal"
+      :title="$t('customer.createNewOrder')"
+      hide-default-actions
+    >
+      <div class="p-2">
+        <div class="mb-4">
+          <va-input
+            v-model="orderAddress"
+            :label="$t('customer.address')"
+            class="mb-2"
+          />
+          <va-button
+            color="secondary"
+            size="small"
+            outline
+            :loading="geocoding"
+            @click="geocodeAddress"
+          >
+            {{ $t('customer.geocodeAddress') }}
+          </va-button>
+          <div v-if="orderLat !== null && orderLon !== null" class="text-secondary text-xs mt-2">
+            {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
+          </div>
+          <div v-if="geocodeError" class="text-danger text-xs mt-2">
+            {{ geocodeError }}
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <va-select
+            v-model="selectedOrderType"
+            :options="orderTypeOptions"
+            :label="$t('customer.orderType')"
+            text-by="label"
+            value-by="value"
+            class="mb-2"
+          />
+          <div class="text-secondary text-sm mt-2">
+            {{ $t('customer.price') }}: <strong class="text-primary">${{ Number(selectedPrice).toFixed(2) }}</strong>
+          </div>
+        </div>
+
+        <va-button color="success" block :loading="creatingOrder" @click="submitOrder">
+          {{ $t('customer.createOrder') }}
+        </va-button>
+      </div>
+    </va-modal>
+
+    <!-- Top-up Modal -->
+    <va-modal
+      v-model="showTopUpModal"
+      :title="$t('customer.requestWalletTopUp')"
+      hide-default-actions
+    >
+      <div class="p-2">
+        <va-form @submit.prevent="submitTopUp">
+          <va-input
+            v-model.number="topUpAmount"
+            type="number"
+            :label="$t('customer.amountWithCurrency')"
+            class="mb-4"
+            min="1"
+            required
+          />
+          <va-button type="submit" block :loading="submitting">
+            {{ $t('customer.submitRequest') }}
+          </va-button>
+        </va-form>
+      </div>
+    </va-modal>
 
     <!-- Sliding Chat Panel -->
     <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
@@ -272,9 +192,9 @@
           {{ $t('customer.chatLocked') }}
         </div>
 
-        <div 
-          v-for="msg in chatMessages" 
-          :key="msg.id" 
+        <div
+          v-for="msg in chatMessages"
+          :key="msg.id"
           :class="['message-bubble mb-2 p-2 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto bg-primary text-white' : 'their-message mr-auto bg-light']"
         >
           <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">{{ $t('common.executor') }}</div>
@@ -285,10 +205,10 @@
 
       <div class="chat-input-area p-3 bg-white border-top">
         <va-form @submit.prevent="sendChatMessage" class="d-flex">
-          <va-input 
-            v-model="chatText" 
-            :placeholder="$t('customer.typeMessage')" 
-            class="flex-grow-1 mr-2" 
+          <va-input
+            v-model="chatText"
+            :placeholder="$t('customer.typeMessage')"
+            class="flex-grow-1 mr-2"
             :disabled="chatLocked"
             required
           />
@@ -315,7 +235,6 @@ export default defineComponent({
 
     const phone = ref('')
     const balance = ref(0)
-    const status = ref('ACTIVE')
 
     const topUpAmount = ref(100)
     const submitting = ref(false)
@@ -324,14 +243,31 @@ export default defineComponent({
 
     // Orders state
     const orders = ref<any[]>([])
-    const orderVolume = ref('STANDARD')
-    const orderTariff = ref('REGULAR')
-    const orderGeo = ref('55.7558, 37.6173')
-    const orderPhoto = ref('https://example.com/mock-construction.jpg')
     const creatingOrder = ref(false)
 
-    const volumeOptions = ['STANDARD', 'LARGE', 'CONSTRUCTION']
-    const tariffOptions = ['REGULAR', 'URGENT', 'ASAP']
+    // Default address for the user
+    const defaultAddress = ref('Москва, ул. Тверская, д. 1')
+    const orderAddress = ref(defaultAddress.value)
+    const orderLat = ref<number | null>(null)
+    const orderLon = ref<number | null>(null)
+    const geocoding = ref(false)
+    const geocodeError = ref('')
+
+    // Order type options with prices
+    const orderTypeOptions = [
+      { label: t('customer.types.standardRegular'), value: { volume_type: 'STANDARD', speed_tariff: 'REGULAR' }, price: 100 },
+      { label: t('customer.types.standardUrgent'), value: { volume_type: 'STANDARD', speed_tariff: 'URGENT' }, price: 300 },
+      { label: t('customer.types.standardAsap'), value: { volume_type: 'STANDARD', speed_tariff: 'ASAP' }, price: 800 },
+      { label: t('customer.types.largeRegular'), value: { volume_type: 'LARGE', speed_tariff: 'REGULAR' }, price: 200 },
+      { label: t('customer.types.largeUrgent'), value: { volume_type: 'LARGE', speed_tariff: 'URGENT' }, price: 600 },
+      { label: t('customer.types.largeAsap'), value: { volume_type: 'LARGE', speed_tariff: 'ASAP' }, price: 1600 },
+    ]
+    const selectedOrderType = ref(orderTypeOptions[0].value)
+
+    const selectedPrice = computed(() => {
+      const option = orderTypeOptions.find((o) => o.value === selectedOrderType.value)
+      return option ? option.price : 0
+    })
 
     // Bids cache
     const bidsMap = ref<Record<string, any[]>>({})
@@ -344,23 +280,17 @@ export default defineComponent({
     const ws = ref<WebSocket | null>(null)
     const messagesContainer = ref<any>(null)
 
-    const estimatedPrice = computed(() => {
-      let basePrice = 100.0
-      if (orderVolume.value === 'LARGE') {
-        basePrice = 200.0
-      } else if (orderVolume.value === 'CONSTRUCTION') {
-        basePrice = 500.0
-      }
+    // Modals
+    const showCreateOrderModal = ref(false)
+    const showTopUpModal = ref(false)
 
-      let coeff = 1.0
-      if (orderTariff.value === 'URGENT') {
-        coeff = 3.0
-      } else if (orderTariff.value === 'ASAP') {
-        coeff = 8.0
-      }
-
-      return basePrice * coeff
-    })
+    const orderColumns = [
+      { key: 'id', label: 'ID' },
+      { key: 'type', label: t('customer.orderType') },
+      { key: 'hold_amount', label: t('customer.price') },
+      { key: 'status', label: t('customer.status') },
+      { key: 'actions', label: '' },
+    ]
 
     const fetchProfile = async () => {
       try {
@@ -368,7 +298,6 @@ export default defineComponent({
         if (response.data) {
           phone.value = response.data.phone
           balance.value = response.data.balance
-          status.value = response.data.status
         }
       } catch (err) {
         console.error('Failed to load profile details:', err)
@@ -398,6 +327,31 @@ export default defineComponent({
       }
     }
 
+    const openCreateOrderModal = () => {
+      orderAddress.value = defaultAddress.value
+      orderLat.value = null
+      orderLon.value = null
+      geocodeError.value = ''
+      showCreateOrderModal.value = true
+    }
+
+    const geocodeAddress = async () => {
+      geocoding.value = true
+      geocodeError.value = ''
+      orderLat.value = null
+      orderLon.value = null
+      try {
+        const response = await api.get('/geo/geocode', { params: { q: orderAddress.value } })
+        orderLat.value = response.data.lat
+        orderLon.value = response.data.lon
+        orderAddress.value = response.data.address || orderAddress.value
+      } catch (err: any) {
+        geocodeError.value = err.response?.data || t('customer.topUpError')
+      } finally {
+        geocoding.value = false
+      }
+    }
+
     const submitTopUp = async () => {
       successMsg.value = ''
       errorMsg.value = ''
@@ -406,6 +360,7 @@ export default defineComponent({
         await api.post('/customer/finances/topup', { amount: topUpAmount.value })
         successMsg.value = t('customer.topUpSuccess', { amount: topUpAmount.value.toFixed(2) })
         topUpAmount.value = 100
+        showTopUpModal.value = false
         await fetchProfile()
       } catch (err: any) {
         errorMsg.value = err.response?.data || t('customer.topUpError')
@@ -420,19 +375,19 @@ export default defineComponent({
       errorMsg.value = ''
       creatingOrder.value = true
       try {
-        if (orderVolume.value === 'CONSTRUCTION') {
-          await api.post('/customer/orders/construction', {
-            photo_url: orderPhoto.value,
-            last_geo: orderGeo.value,
-          })
-        } else {
-          await api.post('/customer/orders', {
-            volume_type: orderVolume.value,
-            speed_tariff: orderTariff.value,
-            last_geo: orderGeo.value,
-          })
+        const payload: any = {
+          volume_type: selectedOrderType.value.volume_type,
+          speed_tariff: selectedOrderType.value.speed_tariff,
+          address: orderAddress.value,
         }
+        if (orderLat.value !== null && orderLon.value !== null) {
+          payload.lat = orderLat.value
+          payload.lon = orderLon.value
+        }
+        await api.post('/customer/orders', payload)
         successMsg.value = t('customer.successOrderCreated')
+        showCreateOrderModal.value = false
+        defaultAddress.value = orderAddress.value
         await fetchProfile()
         await fetchOrders()
       } catch (err: any) {
@@ -491,6 +446,18 @@ export default defineComponent({
       }
     }
 
+    const getTypeKey = (volumeType: string, speedTariff: string) => {
+      const map: Record<string, string> = {
+        'STANDARD_REGULAR': 'standardRegular',
+        'STANDARD_URGENT': 'standardUrgent',
+        'STANDARD_ASAP': 'standardAsap',
+        'LARGE_REGULAR': 'largeRegular',
+        'LARGE_URGENT': 'largeUrgent',
+        'LARGE_ASAP': 'largeAsap',
+      }
+      return map[`${volumeType}_${speedTariff}`] || 'standardRegular'
+    }
+
     // Chat operations
     const openChat = async (order: any) => {
       selectedChatOrder.value = order
@@ -522,7 +489,6 @@ export default defineComponent({
         if (data.type === 'system' && data.action === 'lock') {
           chatLocked.value = true
         } else if (data.type === 'system' && data.action === 'downgrade') {
-          // Live SLA tariff downgrade sync
           order.speed_tariff = data.speed_tariff
           order.final_amount = data.final_amount
           order.is_downgraded = true
@@ -567,12 +533,6 @@ export default defineComponent({
       }
     }
 
-    const formatDate = (dateStr: string) => {
-      if (!dateStr) return ''
-      const d = new Date(dateStr)
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString()
-    }
-
     const formatTime = (dateStr: string) => {
       if (!dateStr) return ''
       const d = new Date(dateStr)
@@ -610,39 +570,46 @@ export default defineComponent({
       authStore,
       phone,
       balance,
-      status,
       topUpAmount,
       submitting,
       successMsg,
       errorMsg,
       orders,
-      orderVolume,
-      orderTariff,
-      orderGeo,
-      orderPhoto,
-      volumeOptions,
-      tariffOptions,
-      estimatedPrice,
       creatingOrder,
+      defaultAddress,
+      orderTypeOptions,
+      selectedOrderType,
+      selectedPrice,
       bidsMap,
       selectedChatOrder,
       chatMessages,
       chatText,
       chatLocked,
       messagesContainer,
+      showCreateOrderModal,
+      showTopUpModal,
+      orderColumns,
+      orderAddress,
+      orderLat,
+      orderLon,
+      geocoding,
+      geocodeError,
+      geocodeAddress,
+      fetchProfile,
+      fetchOrders,
       submitTopUp,
       submitOrder,
       confirmOrder,
       cancelOrder,
       acceptBid,
+      openCreateOrderModal,
       openChat,
       sendChatMessage,
       closeChat,
+      getTypeKey,
       getStatusColor,
-      formatDate,
       formatTime,
       handleLogout,
-      fetchOrders,
     }
   },
 })
@@ -651,91 +618,28 @@ export default defineComponent({
 <style scoped>
 .customer-dashboard {
   max-width: 1200px;
-  margin: 40px auto;
-  padding: 0 20px;
+  margin: 20px auto;
+  padding: 0 16px;
   position: relative;
+}
+
+.dashboard-header {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.balance-amount {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #2b6cb0;
+  line-height: 1.2;
 }
 
 .shadow-card {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
   border-radius: 12px !important;
-  padding: 24px !important;
-}
-
-.info-list {
-  border-top: 1px solid #edf2f7;
-  padding-top: 15px;
-}
-
-.info-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.info-label {
-  color: #718096;
-  font-weight: 500;
-}
-
-.info-val {
-  font-weight: 600;
-  color: #2d3748;
-}
-
-.balance-box {
-  background: #ebf8ff;
-  border: 1px solid #bee3f8;
-  border-radius: 8px;
-}
-
-.balance-amount {
-  font-size: 2.2rem;
-  font-weight: 800;
-  color: #2b6cb0;
-}
-
-.price-preview {
-  background: #f7fafc;
-  border: 1px dashed #e2e8f0;
-  border-radius: 8px;
-}
-
-.price-amount-preview {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #2b6cb0;
-}
-
-.order-item-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #ffffff;
-  transition: all 0.2s ease;
-}
-
-.order-item-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.order-id {
-  color: #2d3748;
-}
-
-.bg-light {
-  background-color: #f8fafc;
-}
-
-.bg-danger-light {
-  background-color: #fff5f5;
-}
-
-.rounded {
-  border-radius: 8px;
-}
-
-.border-bottom {
-  border-bottom: 1px solid #edf2f7;
 }
 
 /* Chat panel sliding out from the right */
@@ -776,159 +680,127 @@ export default defineComponent({
   border-radius: 12px 12px 12px 0;
 }
 
-.truncate {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: block;
+.bg-light {
+  background-color: #f8fafc;
 }
 
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  margin-right: -15px;
-  margin-left: -15px;
+.bg-danger-light {
+  background-color: #fff5f5;
 }
 
-.col-md-5 {
-  flex: 0 0 41.666667%;
-  max-width: 41.666667%;
-  padding: 0 15px;
-  box-sizing: border-box;
-}
-
-.col-md-7 {
-  flex: 0 0 58.333333%;
-  max-width: 58.333333%;
-  padding: 0 15px;
-  box-sizing: border-box;
-}
-
-.col-6 {
-  flex: 0 0 50%;
-  max-width: 50%;
-  padding: 0 8px;
-  box-sizing: border-box;
-}
-
-.col-12 {
-  flex: 0 0 100%;
-  max-width: 100%;
-  padding: 0 8px;
-  box-sizing: border-box;
-}
-
-@media (max-width: 992px) {
-  .col-md-5, .col-md-7 {
-    flex: 0 0 100%;
-    max-width: 100%;
-    margin-bottom: 20px;
-  }
-  .chat-panel {
-    width: 100%;
-  }
+.rounded {
+  border-radius: 8px;
 }
 
 .d-flex {
   display: flex;
 }
+
 .flex-column {
   flex-direction: column;
 }
+
 .flex-grow-1 {
   flex-grow: 1;
 }
+
 .justify-content-between {
   justify-content: space-between;
 }
-.justify-content-end {
-  justify-content: flex-end;
-}
+
 .align-items-center {
   align-items: center;
 }
-.align-items-start {
-  align-items: flex-start;
-}
-.h-100 {
-  height: 100%;
-}
-.mr-1 {
-  margin-right: 4px;
-}
-.mr-2 {
-  margin-right: 8px;
-}
-.ml-2 {
-  margin-left: 8px;
-}
-.ml-auto {
-  margin-left: auto;
-}
-.mr-auto {
-  margin-right: auto;
-}
+
 .m-0 {
   margin: 0;
 }
+
+.mr-1 {
+  margin-right: 4px;
+}
+
+.mr-2 {
+  margin-right: 8px;
+}
+
+.ml-auto {
+  margin-left: auto;
+}
+
 .mb-1 {
   margin-bottom: 4px;
 }
+
 .mb-2 {
   margin-bottom: 8px;
 }
+
 .mb-3 {
   margin-bottom: 12px;
 }
+
 .mb-4 {
   margin-bottom: 16px;
 }
-.mb-5 {
-  margin-bottom: 24px;
-}
+
 .mt-1 {
   margin-top: 4px;
 }
+
 .mt-2 {
   margin-top: 8px;
 }
-.mt-3 {
-  margin-top: 12px;
-}
-.mt-4 {
-  margin-top: 16px;
-}
-.py-1 {
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-.py-2 {
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-.py-5 {
-  padding-top: 32px;
-  padding-bottom: 32px;
-}
+
 .p-2 {
   padding: 8px;
 }
+
 .p-3 {
   padding: 12px;
 }
-.border-top {
-  border-top: 1px solid #edf2f7;
+
+.text-right {
+  text-align: right;
 }
-.font-bold {
-  font-weight: 700;
+
+.text-secondary {
+  color: #718096;
 }
-.text-uppercase {
-  text-transform: uppercase;
+
+.text-primary {
+  color: #2b6cb0;
 }
+
 .text-xs {
   font-size: 0.75rem;
 }
+
+.text-sm {
+  font-size: 0.875rem;
+}
+
 .text-xxs {
   font-size: 0.65rem;
+}
+
+.font-bold {
+  font-weight: 700;
+}
+
+.border-top {
+  border-top: 1px solid #edf2f7;
+}
+
+@media (max-width: 992px) {
+  .chat-panel {
+    width: 100%;
+  }
+}
+
+@media (max-width: 576px) {
+  .balance-amount {
+    font-size: 1.4rem;
+  }
 }
 </style>

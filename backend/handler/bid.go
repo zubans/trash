@@ -35,15 +35,17 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 	}
 
 	var req struct {
-		PhotoURL string `json:"photo_url"`
-		LastGeo  string `json:"last_geo"`
+		PhotoURL string   `json:"photo_url"`
+		Address  string   `json:"address"`
+		Lat      *float64 `json:"lat,omitempty"`
+		Lon      *float64 `json:"lon,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	order, err := h.orderService.CreateConstructionOrder(user.ID, req.PhotoURL, req.LastGeo)
+	order, err := h.orderService.CreateConstructionOrder(user.ID, req.PhotoURL, req.Address, req.Lat, req.Lon)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

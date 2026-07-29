@@ -153,7 +153,7 @@
     "amountWithCurrency": "Сумма ($)",
     "createNewOrder": "Создать новый заказ",
     "createOrderDescription": "Разместите заказ на вывоз мусора. Средства будут заморожены на балансе.",
-    "coordinates": "Координаты доставки (шир, дол)",
+    "coordinates": "Координаты",
     "estimatedHoldAmount": "Ориентировочная сумма холда",
     "biddingAuction": "Торги / Аукцион",
     "orderChatTitle": "Заказ #{id} Чат",
@@ -167,7 +167,19 @@
     "successOrderCancelled": "Заказ отменён!",
     "errorOrderCancelled": "Не удалось отменить заказ.",
     "successBidAccepted": "Ставка принята, исполнитель назначен!",
-    "errorBidAccepted": "Не удалось принять ставку."
+    "errorBidAccepted": "Не удалось принять ставку.",
+    "address": "Адрес",
+    "orderType": "Тип заказа",
+    "price": "Цена",
+    "types": {
+      "standardRegular": "Стандартный обычный",
+      "standardUrgent": "Стандартный срочный",
+      "standardAsap": "Стандартный ASAP",
+      "largeRegular": "Большой обычный",
+      "largeUrgent": "Большой срочный",
+      "largeAsap": "Большой ASAP"
+    },
+    "geocodeAddress": "Найти координаты"
   },
   "executor": {
     "title": "Личный кабинет исполнителя",
@@ -224,7 +236,14 @@
     "errorBidSubmitted": "Не удалось сделать ставку.",
     "inside": "ВНУТРИ",
     "outside": "ВНЕ",
-    "chatSubtitle": "Прямая связь с заказчиком"
+    "chatSubtitle": "Прямая связь с заказчиком",
+    "myLocation": "Моё местоположение",
+    "useManualCoordinates": "Задать вручную",
+    "findNearbyOrders": "Найти заказы рядом",
+    "radius": "Радиус поиска",
+    "nearbyOrders": "Заказы поблизости",
+    "searchOnMap": "Поиск на карте",
+    "searchAddressPlaceholder": "Введите город, улицу..."
   },
   "common": {
     "loading": "Загрузка...",

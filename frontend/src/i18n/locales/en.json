@@ -153,7 +153,7 @@
     "amountWithCurrency": "Amount ($)",
     "createNewOrder": "Create New Order",
     "createOrderDescription": "Place an order for waste removal. Funds will be held from your wallet balance.",
-    "coordinates": "Delivery Coordinates (lat, lon)",
+    "coordinates": "Coordinates",
     "estimatedHoldAmount": "Estimated Hold Amount",
     "biddingAuction": "Bidding / Auction",
     "orderChatTitle": "Order #{id} Chat",
@@ -167,7 +167,19 @@
     "successOrderCancelled": "Order cancelled!",
     "errorOrderCancelled": "Failed to cancel order.",
     "successBidAccepted": "Bid accepted and executor assigned successfully!",
-    "errorBidAccepted": "Failed to accept bid."
+    "errorBidAccepted": "Failed to accept bid.",
+    "address": "Address",
+    "orderType": "Order Type",
+    "price": "Price",
+    "types": {
+      "standardRegular": "Standard Regular",
+      "standardUrgent": "Standard Urgent",
+      "standardAsap": "Standard ASAP",
+      "largeRegular": "Large Regular",
+      "largeUrgent": "Large Urgent",
+      "largeAsap": "Large ASAP"
+    },
+    "geocodeAddress": "Find coordinates"
   },
   "executor": {
     "title": "Executor Dashboard",
@@ -224,7 +236,14 @@
     "errorBidSubmitted": "Failed to submit bid.",
     "inside": "INSIDE",
     "outside": "OUTSIDE",
-    "chatSubtitle": "Direct connection with Customer"
+    "chatSubtitle": "Direct connection with Customer",
+    "myLocation": "My location",
+    "useManualCoordinates": "Set manually",
+    "findNearbyOrders": "Find nearby orders",
+    "radius": "Search radius",
+    "nearbyOrders": "Nearby orders",
+    "searchOnMap": "Search on map",
+    "searchAddressPlaceholder": "Enter city, street..."
   },
   "common": {
     "loading": "Loading...",

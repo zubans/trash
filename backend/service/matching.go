@@ -91,41 +91,51 @@ func (s *MatchingService) MatchOrders() error {
 
 	// 4. Match each order
 	for _, order := range orders {
-		// Get customer's geo
-		var lastGeo string
-		err = s.db.QueryRow(`SELECT last_geo FROM customer_profiles WHERE user_id = $1`, order.CustomerID).Scan(&lastGeo)
-		if err != nil && err != sql.ErrNoRows {
-			log.Printf("[MatchingWorker] Failed to query last_geo for customer %s: %v", order.CustomerID, err)
-			continue
+		// Prefer order pickup coordinates; fall back to customer profile last_geo.
+		var lat, lon float64
+		hasCoords := false
+		if order.PickupLat != nil && order.PickupLon != nil {
+			lat = *order.PickupLat
+			lon = *order.PickupLon
+			hasCoords = true
+		} else {
+			var lastGeo string
+			err = s.db.QueryRow(`SELECT last_geo FROM customer_profiles WHERE user_id = $1`, order.CustomerID).Scan(&lastGeo)
+			if err != nil && err != sql.ErrNoRows {
+				log.Printf("[MatchingWorker] Failed to query last_geo for customer %s: %v", order.CustomerID, err)
+				continue
+			}
+			if lastGeo != "" {
+				parts := strings.Split(lastGeo, ",")
+				if len(parts) == 2 {
+					var err1, err2 error
+					lat, err1 = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+					lon, err2 = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+					hasCoords = err1 == nil && err2 == nil
+				}
+			}
 		}
 
 		// Resolve Customer Geozone ID (default to Geozone 1 if empty or unparseable)
 		geozoneID := 1
-		if lastGeo != "" {
-			parts := strings.Split(lastGeo, ",")
-			if len(parts) == 2 {
-				lat, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-				lon, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-				if err1 == nil && err2 == nil {
-					for _, zone := range zones {
-						isInside := false
-						if zone.Type == "CIRCLE" {
-							if zone.CenterLatitude != nil && zone.CenterLongitude != nil && zone.RadiusMeters != nil {
-								isInside = IsWithinRadius(lat, lon, *zone.CenterLatitude, *zone.CenterLongitude, int(*zone.RadiusMeters))
-							}
-						} else if zone.Type == "POLYGON" {
-							if zone.Coordinates != nil {
-								poly, err := parsePolygon(*zone.Coordinates)
-								if err == nil {
-									isInside = IsPointInPolygon(Point{Lat: lat, Lon: lon}, poly)
-								}
-							}
-						}
-						if isInside {
-							geozoneID = zone.ID
-							break
+		if hasCoords {
+			for _, zone := range zones {
+				isInside := false
+				if zone.Type == "CIRCLE" {
+					if zone.CenterLatitude != nil && zone.CenterLongitude != nil && zone.RadiusMeters != nil {
+						isInside = IsWithinRadius(lat, lon, *zone.CenterLatitude, *zone.CenterLongitude, int(*zone.RadiusMeters))
+					}
+				} else if zone.Type == "POLYGON" {
+					if zone.Coordinates != nil {
+						poly, err := parsePolygon(*zone.Coordinates)
+						if err == nil {
+							isInside = IsPointInPolygon(Point{Lat: lat, Lon: lon}, poly)
 						}
 					}
+				}
+				if isInside {
+					geozoneID = zone.ID
+					break
 				}
 			}
 		}
@@ -145,10 +155,10 @@ func (s *MatchingService) MatchOrders() error {
 				var hasAssigned bool
 				err = s.db.QueryRow(`
 					SELECT EXISTS(
-						SELECT 1 FROM orders 
+						SELECT 1 FROM orders
 						WHERE executor_id = $1 AND status = 'ASSIGNED'
 					)`, execID).Scan(&hasAssigned)
-				
+
 				if err == nil && !hasAssigned {
 					matchedExecutorID = execID
 					break

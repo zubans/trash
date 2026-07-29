@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +30,9 @@ type Order struct {
 	FinalAmount  float64      `json:"final_amount"`
 	IsDowngraded bool         `json:"is_downgraded"`
 	PhotoURL     *string      `json:"photo_url,omitempty"`
+	Address      *string      `json:"address,omitempty"`
+	PickupLat    *float64     `json:"pickup_lat,omitempty"`
+	PickupLon    *float64     `json:"pickup_lon,omitempty"`
 	CreatedAt    time.Time    `json:"created_at"`
 	AssignedAt   *time.Time   `json:"assigned_at,omitempty"`
 	DeadlineAt   *time.Time   `json:"deadline_at,omitempty"`
@@ -44,6 +48,7 @@ type OrderRepository interface {
 	FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error)
 	FindByCustomer(customerID uuid.UUID) ([]Order, error)
 	GetPendingOrders() ([]*Order, error)
+	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
 	Assign(orderID, executorID uuid.UUID) error
 	AssignOrder(orderID, executorID uuid.UUID) error
 	Confirm(orderID uuid.UUID, finalAmount float64) error
@@ -69,11 +74,24 @@ func NewOrderRepository(db *sql.DB) OrderRepository {
 	return &orderRepo{db: db}
 }
 
+func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
+	const EarthRadius = 6371000.0
+	dLat := (lat2 - lat1) * math.Pi / 180.0
+	dLon := (lon2 - lon1) * math.Pi / 180.0
+	lat1Rad := lat1 * math.Pi / 180.0
+	lat2Rad := lat2 * math.Pi / 180.0
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return EarthRadius * c
+}
+
 func scanOrderRow(row *sql.Row) (Order, error) {
 	var o Order
 	err := row.Scan(
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
-		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.CreatedAt,
+		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
+		&o.PickupLat, &o.PickupLon, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
 	)
 	return o, err
@@ -83,7 +101,8 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 	var o Order
 	err := rows.Scan(
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
-		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.CreatedAt,
+		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
+		&o.PickupLat, &o.PickupLon, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
 	)
 	return o, err
@@ -91,10 +110,11 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 
 func (r *orderRepo) Create(order *Order) error {
 	_, err := r.db.Exec(
-		`INSERT INTO orders (id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, created_at, deadline_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		`INSERT INTO orders (id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, deadline_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		order.ID, order.CustomerID, order.ExecutorID, order.VolumeType, order.SpeedTariff,
 		order.Status, order.HoldAmount, order.FinalAmount, order.IsDowngraded, order.PhotoURL,
+		order.Address, order.PickupLat, order.PickupLon,
 		order.CreatedAt, order.DeadlineAt,
 	)
 	return err
@@ -102,7 +122,7 @@ func (r *orderRepo) Create(order *Order) error {
 
 func (r *orderRepo) FindByID(id uuid.UUID) (*Order, error) {
 	row := r.db.QueryRow(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, created_at, assigned_at, deadline_at, completed_at, canceled_at
+		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
 		 FROM orders WHERE id = $1`, id,
 	)
 	o, err := scanOrderRow(row)
@@ -118,7 +138,7 @@ func (r *orderRepo) GetOrderByID(id uuid.UUID) (*Order, error) {
 
 func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, created_at, assigned_at, deadline_at, completed_at, canceled_at
+		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
 		 FROM orders WHERE executor_id = $1 AND status = $2`,
 		executorID, OrderStatusAssigned,
 	)
@@ -140,7 +160,7 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 
 func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, created_at, assigned_at, deadline_at, completed_at, canceled_at
+		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
 		 FROM orders WHERE customer_id = $1`,
 		customerID,
 	)
@@ -162,7 +182,7 @@ func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 
 func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, created_at, assigned_at, deadline_at, completed_at, canceled_at
+		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
 		 FROM orders WHERE status = $1`,
 		OrderStatusSearching,
 	)
@@ -180,6 +200,45 @@ func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 		orders = append(orders, &o)
 	}
 	return orders, rows.Err()
+}
+
+// FindNearbyOrders returns searching orders with pickup coordinates within radiusMeters of (lat, lon).
+// Uses the Haversine formula approximation via the earth-distance cube operator is not available,
+// so we filter with a bounding box first and then compute exact distance in code.
+func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error) {
+	// Approximate degrees for the bounding box: 1 degree lat ~ 111 km.
+	deltaLat := float64(radiusMeters) / 111000.0
+	deltaLon := float64(radiusMeters) / (111000.0 * math.Cos(lat*math.Pi/180.0))
+
+	rows, err := r.db.Query(
+		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
+		 FROM orders
+		 WHERE status = $1
+		   AND pickup_lat BETWEEN $2 AND $3
+		   AND pickup_lon BETWEEN $4 AND $5`,
+		OrderStatusSearching,
+		lat-deltaLat, lat+deltaLat,
+		lon-deltaLon, lon+deltaLon,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*Order
+	for rows.Next() {
+		o, err := scanOrderRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		if o.PickupLat != nil && o.PickupLon != nil {
+			dist := haversineDistance(lat, lon, *o.PickupLat, *o.PickupLon)
+			if dist <= float64(radiusMeters) {
+				result = append(result, &o)
+			}
+		}
+	}
+	return result, rows.Err()
 }
 
 func (r *orderRepo) Assign(orderID, executorID uuid.UUID) error {
@@ -287,7 +346,7 @@ func (r *orderRepo) CreateConstructionOrder(customerID uuid.UUID, photoURL, last
 // GetAvailableConstructionOrders returns open construction orders.
 func (r *orderRepo) GetAvailableConstructionOrders() ([]*Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, created_at, assigned_at, deadline_at, completed_at, canceled_at
+		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
 		 FROM orders WHERE volume_type = 'CONSTRUCTION' AND status = $1`,
 		OrderStatusSearching,
 	)
