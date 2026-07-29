@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android clean
+.PHONY: setup-android build-android clean start stop logs migrate migrate-docker
 
 ANDROID_SDK_PATH ?= $(HOME)/Library/Android/sdk
 
@@ -20,3 +20,47 @@ build-android:
 	@echo "Copying APK to project root..."
 	cp frontend/android/app/build/outputs/apk/debug/app-debug.apk ./healthlogin-app.apk
 	@echo "APK built successfully! You can find it at: ./healthlogin-app.apk"
+
+# Start backend, frontend and database via Docker Compose
+start:
+	@echo "Starting backend, frontend and database..."
+	$(call compose,up -d)
+	@echo "Services started."
+	@echo "  Backend:  http://localhost:8080"
+	@echo "  Frontend: http://localhost:3000"
+
+# Stop all running services
+stop:
+	@echo "Stopping all services..."
+	$(call compose,down)
+	@echo "Services stopped."
+
+# Show logs from all services
+logs:
+	$(call compose,logs -f)
+
+# Run database migrations manually
+# Uses psql if available locally, otherwise falls back to docker exec
+migrate:
+	@echo "Running database migrations..."
+	@if command -v psql >/dev/null 2>&1; then \
+		for f in backend/migrations/*.sql; do \
+			echo "Applying $$f..."; \
+			psql "postgres://healthlogin:healthlogin@localhost:5432/healthlogin" -f "$$f"; \
+		done; \
+	else \
+		echo "psql not found, applying migrations via docker exec..."; \
+		for f in backend/migrations/*.sql; do \
+			echo "Applying $$f..."; \
+			docker exec -i healthlogin_db psql -U healthlogin -d healthlogin < "$$f"; \
+		done; \
+	fi
+	@echo "Migrations applied."
+
+clean:
+	rm -f healthlogin-app.apk
+
+# Helper: use docker compose if available, fall back to docker-compose
+define compose
+$(if $(shell docker compose version >/dev/null 2>&1 && echo ok),docker compose $(1),docker-compose $(1))
+endef
