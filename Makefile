@@ -12,7 +12,7 @@ setup-android:
 
 build-android:
 	@echo "Building frontend for Android..."
-	cd frontend && VITE_API_URL=http://10.0.2.2:8080 npm run build
+	cd frontend && npm run build -- --mode android
 	@echo "Syncing assets to Android project..."
 	cd frontend && npx cap sync
 	@echo "Building APK..."
