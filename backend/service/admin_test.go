@@ -106,14 +106,14 @@ func (m *mockAdminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float
 
 // mockSettingsRepo mocks repository.SettingsRepository.
 type mockSettingsRepo struct {
-	settings map[string]float64
+	settings map[string]string
 }
 
-func (m *mockSettingsRepo) GetSettings() (map[string]float64, error) {
+func (m *mockSettingsRepo) GetSettings() (map[string]string, error) {
 	return m.settings, nil
 }
 
-func (m *mockSettingsRepo) UpdateSettings(settings map[string]float64) error {
+func (m *mockSettingsRepo) UpdateSettings(settings map[string]string) error {
 	for k, v := range settings {
 		m.settings[k] = v
 	}
@@ -144,7 +144,7 @@ func (m *mockTokenRepo) RevokeToken(tokenHash string, expiresAt time.Time) error
 func TestAdminService_UpdateUserStatus(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
-	settingsRepo := &mockSettingsRepo{settings: make(map[string]float64)}
+	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
 
 	svc := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "secret")
@@ -180,7 +180,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 func TestAdminService_TopUpRequests(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
-	settingsRepo := &mockSettingsRepo{settings: make(map[string]float64)}
+	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
 
 	svc := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "secret")
@@ -226,14 +226,15 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 func TestAdminService_Settings(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
-	settingsRepo := &mockSettingsRepo{settings: make(map[string]float64)}
+	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
 
 	svc := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "secret")
 
-	newSettings := map[string]float64{
-		"standard_tariff_coeff": 1.5,
-		"fine_amount":            200.0,
+	newSettings := map[string]string{
+		"standard_tariff_coeff": "1.5",
+		"geofence_fine_amount":  "200.0",
+		"currency":              "RUB",
 	}
 
 	err := svc.UpdateSettings(newSettings)
@@ -246,7 +247,7 @@ func TestAdminService_Settings(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if current["standard_tariff_coeff"] != 1.5 || current["fine_amount"] != 200.0 {
+	if current["standard_tariff_coeff"] != "1.5" || current["geofence_fine_amount"] != "200.0" || current["currency"] != "RUB" {
 		t.Errorf("settings mismatch: got %+v", current)
 	}
 }

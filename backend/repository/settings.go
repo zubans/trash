@@ -6,8 +6,8 @@ import (
 
 // SettingsRepository defines database operations for system settings.
 type SettingsRepository interface {
-	GetSettings() (map[string]float64, error)
-	UpdateSettings(settings map[string]float64) error
+	GetSettings() (map[string]string, error)
+	UpdateSettings(settings map[string]string) error
 }
 
 type settingsRepo struct {
@@ -19,26 +19,26 @@ func NewSettingsRepository(db *sql.DB) SettingsRepository {
 	return &settingsRepo{db: db}
 }
 
-func (r *settingsRepo) GetSettings() (map[string]float64, error) {
+func (r *settingsRepo) GetSettings() (map[string]string, error) {
 	rows, err := r.db.Query(`SELECT key, value FROM system_settings`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	settings := make(map[string]float64)
+	settings := make(map[string]string)
 	for rows.Next() {
 		var key string
-		var value float64
+		var value sql.NullString
 		if err := rows.Scan(&key, &value); err != nil {
 			return nil, err
 		}
-		settings[key] = value
+		settings[key] = value.String
 	}
 	return settings, nil
 }
 
-func (r *settingsRepo) UpdateSettings(settings map[string]float64) error {
+func (r *settingsRepo) UpdateSettings(settings map[string]string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -46,9 +46,9 @@ func (r *settingsRepo) UpdateSettings(settings map[string]float64) error {
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO system_settings (key, value) 
+		INSERT INTO system_settings (key, value)
 		VALUES ($1, $2)
-		ON CONFLICT (key) 
+		ON CONFLICT (key)
 		DO UPDATE SET value = EXCLUDED.value`
 
 	for k, v := range settings {

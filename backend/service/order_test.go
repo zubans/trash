@@ -214,10 +214,10 @@ func (m *mockTransactionRepo) RunInTx(fn func(*sql.Tx) error) error {
 
 func TestOrderService_CalculatePrice(t *testing.T) {
 	setRepo := &mockSettingsRepo{
-		settings: map[string]float64{
-			"standard_tariff_coeff": 1.0,
-			"urgent_tariff_coeff":   3.0,
-			"asap_tariff_coeff":     8.0,
+		settings: map[string]string{
+			"standard_tariff_coeff": "1.0",
+			"urgent_tariff_coeff":   "3.0",
+			"asap_tariff_coeff":     "8.0",
 		},
 	}
 	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{})
@@ -243,8 +243,8 @@ func TestOrderService_CalculatePrice(t *testing.T) {
 
 func TestOrderService_CreateOrder(t *testing.T) {
 	setRepo := &mockSettingsRepo{
-		settings: map[string]float64{
-			"standard_tariff_coeff": 1.0,
+		settings: map[string]string{
+			"standard_tariff_coeff": "1.0",
 		},
 	}
 	orderRepo := &mockOrderRepo{}
@@ -271,8 +271,8 @@ func TestOrderService_CreateOrder(t *testing.T) {
 
 func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	setRepo := &mockSettingsRepo{
-		settings: map[string]float64{
-			"standard_tariff_coeff": 1.0,
+		settings: map[string]string{
+			"standard_tariff_coeff": "1.0",
 		},
 	}
 	orderRepo := &mockOrderRepo{}

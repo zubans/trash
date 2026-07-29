@@ -220,7 +220,7 @@ func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request
 
 // UpdateSettingsHandler updates system settings.
 func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	var req map[string]float64
+	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return

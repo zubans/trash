@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,7 +72,12 @@ func (s *OrderService) loadSettings() map[string]float64 {
 		repoSettings, err := s.settingsRepo.GetSettings()
 		if err == nil {
 			for k, v := range repoSettings {
-				settings[k] = v
+				if k == "currency" {
+					continue
+				}
+				if f, err := strconv.ParseFloat(v, 64); err == nil {
+					settings[k] = f
+				}
 			}
 		}
 	}

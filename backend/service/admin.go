@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -176,16 +177,29 @@ func (s *AdminService) GetTransactions() ([]*repository.Transaction, error) {
 }
 
 // GetSettings retrieves global settings.
-func (s *AdminService) GetSettings() (map[string]float64, error) {
+func (s *AdminService) GetSettings() (map[string]string, error) {
 	return s.settingsRepo.GetSettings()
 }
 
 // UpdateSettings updates global settings.
-func (s *AdminService) UpdateSettings(settings map[string]float64) error {
-	// Validate settings if necessary (e.g. non-negative coefficients)
+func (s *AdminService) UpdateSettings(settings map[string]string) error {
+	// Numeric settings must be non-negative when applicable.
+	numericKeys := map[string]bool{
+		"standard_tariff_coeff":  true,
+		"increased_tariff_coeff": true,
+		"urgent_tariff_coeff":    true,
+		"asap_tariff_coeff":      true,
+		"geofence_fine_amount":   true,
+	}
 	for key, value := range settings {
-		if value < 0 {
-			return errors.New("setting " + key + " value cannot be negative")
+		if numericKeys[key] {
+			v, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return errors.New("setting " + key + " must be numeric")
+			}
+			if v < 0 {
+				return errors.New("setting " + key + " value cannot be negative")
+			}
 		}
 	}
 	return s.settingsRepo.UpdateSettings(settings)

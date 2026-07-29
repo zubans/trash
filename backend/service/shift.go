@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"strconv"
 
 	"github.com/google/uuid"
 
@@ -69,7 +70,9 @@ func (s *ShiftService) geofenceFineAmount() float64 {
 		return 500.0
 	}
 	if v, ok := settings["geofence_fine_amount"]; ok {
-		return v
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
 	}
 	return 500.0
 }

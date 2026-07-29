@@ -137,14 +137,14 @@ func (m *mockAdminRepository) TopUpUserBalance(userID, adminID uuid.UUID, amount
 
 // mockSettingsRepository implements repository.SettingsRepository.
 type mockSettingsRepository struct {
-	settings map[string]float64
+	settings map[string]string
 }
 
-func (m *mockSettingsRepository) GetSettings() (map[string]float64, error) {
+func (m *mockSettingsRepository) GetSettings() (map[string]string, error) {
 	return m.settings, nil
 }
 
-func (m *mockSettingsRepository) UpdateSettings(settings map[string]float64) error {
+func (m *mockSettingsRepository) UpdateSettings(settings map[string]string) error {
 	for k, v := range settings {
 		m.settings[k] = v
 	}
@@ -165,7 +165,7 @@ func (m *mockTokenRepository) RevokeToken(tokenHash string, expiresAt time.Time)
 func setupTestHandler() (*AdminHandler, *mockUserRepository, *mockAdminRepository, *mockSettingsRepository) {
 	ur := &mockUserRepository{users: make(map[uuid.UUID]*repository.User)}
 	ar := &mockAdminRepository{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
-	sr := &mockSettingsRepository{settings: make(map[string]float64)}
+	sr := &mockSettingsRepository{settings: make(map[string]string)}
 	tr := &mockTokenRepository{}
 
 	svc := service.NewAdminService(ur, ar, sr, tr, "secret")
