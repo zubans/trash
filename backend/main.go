@@ -161,16 +161,22 @@ func waitForDB(db *sql.DB) error {
 	return err
 }
 
-var allowedOrigins = map[string]bool{
-	"http://localhost:3000": true,
-	"http://localhost":      true,
-	"https://localhost":     true,
-	"capacitor://localhost": true,
-	"ionic://localhost":     true,
+func buildAllowedOrigins() map[string]bool {
+	origins := map[string]bool{
+		"http://localhost:3000": true,
+		"http://localhost":      true,
+		"https://localhost":     true,
+		"capacitor://localhost": true,
+		"ionic://localhost":     true,
+	}
+	if corsOrigin := getEnv("CORS_ORIGIN", ""); corsOrigin != "" {
+		origins[corsOrigin] = true
+	}
+	return origins
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
-	allowedOrigin := getEnv("CORS_ORIGIN", "http://localhost:3000")
+	allowedOrigins := buildAllowedOrigins()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if allowedOrigins[origin] {
