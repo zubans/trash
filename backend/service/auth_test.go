@@ -92,7 +92,7 @@ func (m *mockRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
-func (m *mockRepo) CreateCustomerProfile(userID uuid.UUID, address string) error {
+func (m *mockRepo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
 	return nil
 }
 
@@ -105,7 +105,7 @@ func (m *mockRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error
 }
 
 func TestRegister_Success(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	phone := "+79001234567"
 	password := "strong-password"
 
@@ -134,7 +134,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_EmptyPhone(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	_, err := svc.Register("", "password", "Moscow")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
@@ -145,7 +145,7 @@ func TestRegister_EmptyPhone(t *testing.T) {
 }
 
 func TestRegister_EmptyPassword(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	_, err := svc.Register("+79001234567", "", "Moscow")
 	if err == nil {
 		t.Fatal("expected error for empty password")
@@ -154,7 +154,7 @@ func TestRegister_EmptyPassword(t *testing.T) {
 
 func TestRegister_UserAlreadyExists(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewAuthServiceWithSecret(repo, "test-secret")
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 	phone := "+79001234567"
 
 	if _, err := svc.Register(phone, "password-one", "Moscow"); err != nil {
@@ -173,7 +173,7 @@ func TestRegister_UserAlreadyExists(t *testing.T) {
 func TestRegister_FindByPhoneError(t *testing.T) {
 	repo := newMockRepo()
 	repo.findErr = errors.New("db is down")
-	svc := NewAuthServiceWithSecret(repo, "test-secret")
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 
 	_, err := svc.Register("+79001234567", "password", "Moscow")
 	if err == nil {
@@ -187,7 +187,7 @@ func TestRegister_FindByPhoneError(t *testing.T) {
 func TestRegister_CreateError(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = errors.New("insert failed")
-	svc := NewAuthServiceWithSecret(repo, "test-secret")
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 
 	_, err := svc.Register("+79001234567", "password", "Moscow")
 	if err == nil {
@@ -200,7 +200,7 @@ func TestRegister_CreateError(t *testing.T) {
 
 func TestAuthenticate_Success(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewAuthServiceWithSecret(repo, "test-secret")
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 	phone := "+79001234567"
 	password := "correct-password"
 
@@ -218,7 +218,7 @@ func TestAuthenticate_Success(t *testing.T) {
 }
 
 func TestAuthenticate_EmptyPhone(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	_, err := svc.Authenticate("", "password")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
@@ -226,7 +226,7 @@ func TestAuthenticate_EmptyPhone(t *testing.T) {
 }
 
 func TestAuthenticate_EmptyPassword(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	_, err := svc.Authenticate("+79001234567", "")
 	if err == nil {
 		t.Fatal("expected error for empty password")
@@ -234,7 +234,7 @@ func TestAuthenticate_EmptyPassword(t *testing.T) {
 }
 
 func TestAuthenticate_UserNotFound(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	_, err := svc.Authenticate("+79001234567", "password")
 	if err == nil {
 		t.Fatal("expected error for unknown user")
@@ -246,7 +246,7 @@ func TestAuthenticate_UserNotFound(t *testing.T) {
 
 func TestAuthenticate_WrongPassword(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewAuthServiceWithSecret(repo, "test-secret")
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 	phone := "+79001234567"
 
 	if _, err := svc.Register(phone, "correct-password", "Moscow"); err != nil {
@@ -265,7 +265,7 @@ func TestAuthenticate_WrongPassword(t *testing.T) {
 func TestAuthenticate_RepositoryError(t *testing.T) {
 	repo := newMockRepo()
 	repo.findErr = errors.New("db error")
-	svc := NewAuthServiceWithSecret(repo, "test-secret")
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 
 	_, err := svc.Authenticate("+79001234567", "password")
 	if err == nil {
@@ -277,7 +277,7 @@ func TestAuthenticate_RepositoryError(t *testing.T) {
 }
 
 func TestGenerateJWT_Success(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
 	user := &repository.User{
 		ID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		Phone: "+79001234567",
@@ -330,7 +330,7 @@ func TestGenerateJWT_Success(t *testing.T) {
 }
 
 func TestGenerateJWT_InvalidWithWrongSecret(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "secret-a")
+	svc := NewAuthServiceWithSecret(newMockRepo(), "secret-a", nil)
 	user := &repository.User{
 		ID:    uuid.New(),
 		Phone: "+79001234567",

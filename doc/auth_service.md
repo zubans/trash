@@ -16,6 +16,7 @@
 backend/
 ├── service/
 │   ├── auth.go       # реализация AuthService
+│   ├── geocoder.go   # геокодирование адресов
 │   └── auth_test.go  # юнит-тесты
 ├── repository/
 │   └── user.go       # контракт UserRepository и реализация на SQL
@@ -34,7 +35,7 @@ type UserRepository interface {
     UpdateRole(id uuid.UUID, role string) error
     UpdateBalance(id uuid.UUID, balance float64) error
     UpdateLastGeo(id uuid.UUID, lastGeo string) error
-    CreateCustomerProfile(userID uuid.UUID, address string) error
+    CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
     GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
     UpdateCustomerAddress(userID uuid.UUID, address string) error
 }
@@ -44,7 +45,8 @@ type UserRepository interface {
 
 ```go
 repo := repository.New(db)
-authSvc := service.NewAuthService(repo) // читает JWT_SECRET из env
+geocoder := service.NewGeocoder(db)
+authSvc := service.NewAuthService(repo, geocoder) // читает JWT_SECRET из env
 ```
 
 ## Публичные методы
@@ -62,7 +64,8 @@ func (s *AuthService) Register(phone, password, address string) (*repository.Use
 2. Проверяет уникальность телефона.
 3. Хеширует пароль `bcrypt`.
 4. Создаёт запись в `users` (роль `CUSTOMER`, статус `ACTIVE`).
-5. Создаёт профиль в `customer_profiles` с указанным адресом.
+5. Геокодирует адрес через `GeoCoder` для получения координат.
+6. Создаёт профиль в `customer_profiles` с адресом и координатами (`last_geo`).
 
 **Возвращаемые ошибки:**
 - `phone and password are required`

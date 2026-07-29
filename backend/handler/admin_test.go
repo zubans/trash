@@ -72,7 +72,7 @@ func (m *mockUserRepository) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
-func (m *mockUserRepository) CreateCustomerProfile(userID uuid.UUID, address string) error {
+func (m *mockUserRepository) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
 	return nil
 }
 

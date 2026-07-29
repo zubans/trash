@@ -55,9 +55,9 @@ func main() {
 	chatRepo := repository.NewChatRepository(db)
 
 	// Services
-	authService := service.NewAuthService(userRepo)
+	geocoder := service.NewGeocoder(db)
+	authService := service.NewAuthService(userRepo, geocoder)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
-	geocoder := service.NewGeocoder()
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
@@ -96,6 +96,7 @@ func main() {
 	r.Post("/register", ph.RegisterHandler)
 	r.Post("/login", ph.LoginHandler)
 	r.Get("/geo/geocode", gh.Geocode)
+	r.Get("/geo/autocomplete", gh.Autocomplete)
 	r.Get("/settings", ah.GetPublicSettingsHandler)
 
 	// Authenticated customer routes

@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 
 // AuthService handles user registration and authentication.
 type AuthService struct {
-	repo   repository.UserRepository
-	secret []byte
+	repo     repository.UserRepository
+	geocoder GeoCoder
+	secret   []byte
 }
 
 // JWTClaims contains the data extracted from a validated access token.
@@ -29,18 +31,18 @@ type JWTClaims struct {
 // NewAuthService creates an AuthService using the provided repository.
 // The JWT signing secret is read from JWT_SECRET; a development default is used
 // if the variable is not set.
-func NewAuthService(repo repository.UserRepository) *AuthService {
+func NewAuthService(repo repository.UserRepository, geocoder GeoCoder) *AuthService {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
 		secret = "dev-secret-change-me"
 	}
-	return NewAuthServiceWithSecret(repo, secret)
+	return NewAuthServiceWithSecret(repo, secret, geocoder)
 }
 
 // NewAuthServiceWithSecret creates an AuthService with an explicit JWT secret.
 // Useful for tests and for environments where the secret is injected directly.
-func NewAuthServiceWithSecret(repo repository.UserRepository, secret string) *AuthService {
-	return &AuthService{repo: repo, secret: []byte(secret)}
+func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geocoder GeoCoder) *AuthService {
+	return &AuthService{repo: repo, geocoder: geocoder, secret: []byte(secret)}
 }
 
 // Register creates a new user with the given phone, password and pickup address.
@@ -82,7 +84,15 @@ func (s *AuthService) Register(phone, password, address string) (*repository.Use
 		return nil, err
 	}
 
-	if err := s.repo.CreateCustomerProfile(created.ID, address); err != nil {
+	var lastGeo string
+	if s.geocoder != nil {
+		geo, err := s.geocoder.Geocode(address)
+		if err == nil && geo != nil {
+			lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
+		}
+	}
+
+	if err := s.repo.CreateCustomerProfile(created.ID, address, lastGeo); err != nil {
 		return nil, err
 	}
 

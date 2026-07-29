@@ -211,6 +211,7 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 		log.Printf("[GetProfile] failed to load customer profile for %s: %v", userID, err)
 	} else if cp != nil {
 		profile["address"] = cp.Address
+		profile["last_geo"] = cp.LastGeo.String
 	}
 
 	return profile, nil

@@ -16,6 +16,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `006_settings_currency.sql` | Convert `system_settings.value` to `VARCHAR`, seed `currency`. |
 | `007_customer_address_string.sql` | Convert `customer_profiles.address` to `VARCHAR`. |
 | `008_rename_fine_amount.sql` | Rename `fine_amount` setting to `geofence_fine_amount`. |
+| `009_geocoding_cache.sql` | Cache for geocoding queries (`query`, `address`, `lat`, `lon`). |
 
 ## How to run manually
 

@@ -197,7 +197,9 @@ func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	m.lastGeo[id] = lastGeo
 	return nil
 }
-func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address string) error { return nil }
+func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
+	return nil
+}
 func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
 	return &repository.CustomerProfile{UserID: userID}, nil
 }

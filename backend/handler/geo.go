@@ -34,3 +34,21 @@ func (h *GeoHandler) Geocode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
+
+// Autocomplete handles GET /geo/autocomplete?q=query.
+func (h *GeoHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "missing q parameter", http.StatusBadRequest)
+		return
+	}
+
+	suggestions, err := h.geocoder.Autocomplete(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}

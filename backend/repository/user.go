@@ -37,7 +37,7 @@ type UserRepository interface {
 	UpdateRole(id uuid.UUID, role string) error
 	UpdateBalance(id uuid.UUID, balance float64) error
 	UpdateLastGeo(id uuid.UUID, lastGeo string) error
-	CreateCustomerProfile(userID uuid.UUID, address string) error
+	CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
 	GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
 	UpdateCustomerAddress(userID uuid.UUID, address string) error
 }
@@ -110,12 +110,12 @@ func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return err
 }
 
-func (r *repo) CreateCustomerProfile(userID uuid.UUID, address string) error {
+func (r *repo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
 	_, err := r.db.Exec(
-		`INSERT INTO customer_profiles (user_id, full_name, address)
-		 VALUES ($1, '', $2)
-		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
-		userID, address,
+		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
+		 VALUES ($1, '', $2, $3)
+		 ON CONFLICT (user_id) DO UPDATE SET address = $2, last_geo = $3`,
+		userID, address, lastGeo,
 	)
 	return err
 }

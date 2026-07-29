@@ -76,7 +76,7 @@
             </div>
           </div>
 
-          <div v-if="mode === 'register'" class="form-group mb-4">
+          <div v-if="mode === 'register'" class="form-group mb-4 address-autocomplete">
             <label class="form-label">{{ $t('login.pickupAddress') }}</label>
             <div class="input-wrapper">
               <span class="material-icons input-icon">location_on</span>
@@ -86,7 +86,20 @@
                 :placeholder="$t('login.pickupAddressPlaceholder')" 
                 class="custom-input" 
                 required 
+                autocomplete="off"
+                @input="onAddressInput"
               />
+              <span v-if="autocompleteLoading" class="input-spinner" />
+            </div>
+            <div v-if="addressSuggestions.length > 0" class="suggestions-dropdown">
+              <div
+                v-for="(suggestion, index) in addressSuggestions"
+                :key="index"
+                class="suggestion-item"
+                @click="selectAddress(suggestion)"
+              >
+                {{ suggestion.address }}
+              </div>
             </div>
             <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
           </div>
@@ -138,14 +151,45 @@ export default defineComponent({
     const phone = ref('')
     const password = ref('')
     const address = ref('')
+    const addressSuggestions = ref<any[]>([])
+    const autocompleteLoading = ref(false)
     const error = ref('')
     const message = ref('')
     const loading = ref(false)
+    let autocompleteTimeout: any = null
 
     watch(mode, () => {
       error.value = ''
       message.value = ''
+      addressSuggestions.value = []
+      autocompleteLoading.value = false
     })
+
+    const onAddressInput = () => {
+      addressSuggestions.value = []
+      clearTimeout(autocompleteTimeout)
+      const query = address.value.trim()
+      if (query.length < 3) {
+        autocompleteLoading.value = false
+        return
+      }
+      autocompleteLoading.value = true
+      autocompleteTimeout = setTimeout(async () => {
+        try {
+          const response = await api.get('/geo/autocomplete', { params: { q: query } })
+          addressSuggestions.value = response.data || []
+        } catch (err) {
+          console.error('Autocomplete failed:', err)
+        } finally {
+          autocompleteLoading.value = false
+        }
+      }, 400)
+    }
+
+    const selectAddress = (suggestion: any) => {
+      address.value = suggestion.address
+      addressSuggestions.value = []
+    }
 
     const handleSubmit = async () => {
       error.value = ''
@@ -203,10 +247,14 @@ export default defineComponent({
       phone,
       password,
       address,
+      addressSuggestions,
+      autocompleteLoading,
       error,
       message,
       loading,
       handleSubmit,
+      onAddressInput,
+      selectAddress,
     }
   },
 })
@@ -456,5 +504,53 @@ export default defineComponent({
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Address autocomplete */
+.address-autocomplete {
+  position: relative;
+}
+
+.input-spinner {
+  position: absolute;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 0.8s linear infinite;
+}
+
+.suggestions-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  background: rgba(30, 35, 50, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  margin-top: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.suggestion-item {
+  padding: 10px 14px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover {
+  background: rgba(49, 130, 206, 0.2);
+  color: #fff;
 }
 </style>

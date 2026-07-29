@@ -82,7 +82,7 @@ func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
-func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address string) error {
+func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
 	return nil
 }
 
@@ -96,7 +96,7 @@ func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) e
 
 func newTestPublicHandler() *PublicHandler {
 	repo := newMockUserRepo()
-	return NewPublicHandler(service.NewAuthService(repo))
+	return NewPublicHandler(service.NewAuthService(repo, nil))
 }
 
 func TestHealthHandler(t *testing.T) {
