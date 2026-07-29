@@ -1,8 +1,26 @@
 import axios from 'axios'
 
-const apiUrl = import.meta.env.VITE_API_URL
+export const apiUrl = import.meta.env.VITE_API_URL
 if (!apiUrl) {
   throw new Error('VITE_API_URL is not defined. Please check your .env file.')
+}
+
+export const isDebug = import.meta.env.VITE_DEBUG === 'true'
+
+export function formatApiError(err: any, fallbackMessage: string): string {
+  if (isDebug) {
+    const baseURL = err.config?.baseURL || ''
+    const url = err.config?.url || ''
+    const fullURL = url.startsWith('http') ? url : `${baseURL}${url}`
+    const status = err.response?.status ? `HTTP ${err.response.status}` : 'no response'
+    const errorText = err.message || 'Unknown error'
+    return `Request failed\nURL: ${fullURL || 'unknown'}\nStatus: ${status}\nError: ${errorText}`
+  }
+
+  if (err.response && err.response.data) {
+    return typeof err.response.data === 'string' ? err.response.data : fallbackMessage
+  }
+  return fallbackMessage
 }
 
 const api = axios.create({

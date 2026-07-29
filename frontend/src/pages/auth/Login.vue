@@ -35,7 +35,7 @@
         <transition name="fade">
           <div v-if="error" class="custom-alert error-alert mb-4">
             <span class="material-icons alert-icon">error_outline</span>
-            <span class="alert-text">{{ error }}</span>
+            <span class="alert-text" style="white-space: pre-wrap;">{{ error }}</span>
           </div>
         </transition>
 
@@ -91,7 +91,7 @@ import { defineComponent, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 
 // Helper to decode JWT token
@@ -174,11 +174,7 @@ export default defineComponent({
           password.value = ''
         }
       } catch (err: any) {
-        if (err.response && err.response.data) {
-          error.value = typeof err.response.data === 'string' ? err.response.data : t('login.networkError')
-        } else {
-          error.value = t('login.networkError')
-        }
+        error.value = formatApiError(err, t('login.networkError'))
       } finally {
         loading.value = false
       }

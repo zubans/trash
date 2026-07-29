@@ -3,11 +3,11 @@
     <div class="dashboard-header mb-5">
       <div class="d-flex justify-content-between align-items-center">
         <div>
-          <h1 class="va-h3 m-0">Executor Dashboard</h1>
-          <span class="text-secondary text-sm">Manage your shifts, GPS telemetry, and assignments</span>
+          <h1 class="va-h3 m-0">{{ $t('executor.title') }}</h1>
+          <span class="text-secondary text-sm">{{ $t('executor.subtitle') }}</span>
         </div>
         <va-button color="danger" outline size="small" @click="handleLogout">
-          <va-icon name="logout" class="mr-2" /> Logout
+          <va-icon name="logout" class="mr-2" /> {{ $t('app.logout') }}
         </va-button>
       </div>
     </div>
@@ -26,15 +26,15 @@
         <!-- Profile Card -->
         <va-card class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="account_circle" class="mr-2" /> Account Details
+            <va-icon name="account_circle" class="mr-2" /> {{ $t('executor.accountDetails') }}
           </h3>
           <div class="info-list">
             <div class="info-item mb-3">
-              <span class="info-label">Phone</span>
+              <span class="info-label">{{ $t('customer.phone') }}</span>
               <span class="info-val">{{ phone }}</span>
             </div>
             <div class="info-item mb-3">
-              <span class="info-label">Status</span>
+              <span class="info-label">{{ $t('customer.status') }}</span>
               <span class="info-val">
                 <va-badge color="success">{{ status }}</va-badge>
               </span>
@@ -42,7 +42,7 @@
           </div>
 
           <div class="balance-box mt-4 p-3 text-center">
-            <span class="balance-label d-block text-secondary text-sm mb-1">Your Wallet Balance</span>
+            <span class="balance-label d-block text-secondary text-sm mb-1">{{ $t('executor.yourWalletBalance') }}</span>
             <span class="balance-amount">${{ Number(balance).toFixed(2) }}</span>
           </div>
         </va-card>
@@ -50,23 +50,23 @@
         <!-- Shift Controls Card -->
         <va-card class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="schedule" class="mr-2" /> Shift Status
+            <va-icon name="schedule" class="mr-2" /> {{ $t('executor.shiftStatus') }}
           </h3>
 
           <div v-if="!activeShift" class="no-shift-container">
             <p class="text-secondary text-sm mb-4">
-              You do not have an active work shift. Select duration and start your shift to accept orders.
+              {{ $t('executor.noActiveShift') }}
             </p>
             <va-form @submit.prevent="startShift">
               <va-select
                 v-model="shiftDuration"
                 :options="durationOptions"
-                label="Shift Duration (Hours)"
+                :label="$t('executor.shiftDurationHours')"
                 class="mb-4"
                 required
               />
               <va-button type="submit" block :loading="startingShift">
-                Start Work Shift
+                {{ $t('executor.startShift') }}
               </va-button>
             </va-form>
           </div>
@@ -74,7 +74,7 @@
           <div v-else class="active-shift-container">
             <div class="info-list mb-4">
               <div class="info-item mb-2">
-                <span class="info-label">Shift Status</span>
+                <span class="info-label">{{ $t('executor.shiftStatus') }}</span>
                 <span>
                   <va-badge :color="getShiftStatusColor(activeShift.status)" class="text-uppercase">
                     {{ activeShift.status }}
@@ -82,21 +82,21 @@
                 </span>
               </div>
               <div class="info-item mb-2">
-                <span class="info-label">Duration</span>
+                <span class="info-label">{{ $t('executor.duration') }}</span>
                 <span class="info-val">{{ activeShift.duration_hours }} hours</span>
               </div>
               <div class="info-item mb-2">
-                <span class="info-label">Started At</span>
+                <span class="info-label">{{ $t('executor.startedAt') }}</span>
                 <span class="info-val text-xs">{{ formatDate(activeShift.started_at) }}</span>
               </div>
               <div class="info-item mb-2">
-                <span class="info-label">Planned End</span>
+                <span class="info-label">{{ $t('executor.plannedEnd') }}</span>
                 <span class="info-val text-xs">{{ formatDate(activeShift.planned_end_at) }}</span>
               </div>
             </div>
 
             <va-alert v-if="activeShift.status === 'PENALIZED'" color="danger" class="mb-0">
-              Shift penalized due to SLA geofence violation! A fine has been deducted.
+              {{ $t('executor.shiftPenalized') }}
             </va-alert>
           </div>
         </va-card>
@@ -107,10 +107,10 @@
         <!-- Telemetry Simulator -->
         <va-card v-if="activeShift" class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="gps_fixed" class="mr-2" /> GPS Telemetry Simulator
+            <va-icon name="gps_fixed" class="mr-2" /> {{ $t('executor.gpsTelemetrySimulator') }}
           </h3>
           <p class="text-secondary text-sm mb-4">
-            Simulate your location coordinates to test circle and polygon geofences.
+            {{ $t('executor.gpsTelemetryDescription') }}
           </p>
 
           <div class="row g-2 mb-4">
@@ -119,7 +119,7 @@
                 v-model.number="latInput"
                 type="number"
                 step="any"
-                label="Latitude"
+                :label="$t('executor.latitude')"
                 required
               />
             </div>
@@ -128,7 +128,7 @@
                 v-model.number="lonInput"
                 type="number"
                 step="any"
-                label="Longitude"
+                :label="$t('executor.longitude')"
                 required
               />
             </div>
@@ -143,7 +143,7 @@
               @click="setCoordinates(55.7558, 37.6173)"
               class="mr-2"
             >
-              Inside Geofence (Moscow Center)
+              {{ $t('executor.insideGeofence') }}
             </va-button>
             <va-button 
               color="warning" 
@@ -151,17 +151,17 @@
               size="small" 
               @click="setCoordinates(56.0000, 38.0000)"
             >
-              Outside Geofence
+              {{ $t('executor.outsideGeofence') }}
             </va-button>
           </div>
 
           <va-button block :loading="sendingLocation" @click="sendLocation">
-            Send GPS Location
+            {{ $t('executor.sendGPSLocation') }}
           </va-button>
 
           <!-- Local logs list of sent coordinates -->
           <div v-if="telemetryLogs.length > 0" class="mt-4">
-            <h4 class="va-h6 text-secondary mb-2">Recent Telemetry Sent</h4>
+            <h4 class="va-h6 text-secondary mb-2">{{ $t('executor.recentTelemetrySent') }}</h4>
             <div class="telemetry-log-list p-2 bg-light rounded text-xs">
               <div 
                 v-for="(log, idx) in telemetryLogs" 
@@ -180,13 +180,13 @@
         <!-- Assigned Orders -->
         <va-card class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="assignment" class="mr-2" /> Assigned Orders
+            <va-icon name="assignment" class="mr-2" /> {{ $t('executor.assignedOrders') }}
           </h3>
 
           <div v-if="assignedOrders.length === 0" class="text-center py-5">
             <va-icon name="hourglass_empty" size="large" color="secondary" class="mb-3 spin-slow" />
-            <p class="text-secondary mb-0">Waiting for automatic matching...</p>
-            <span class="text-xs text-secondary">Keep your shift active and remain inside the zone.</span>
+            <p class="text-secondary mb-0">{{ $t('executor.waitingForMatching') }}</p>
+            <span class="text-xs text-secondary">{{ $t('executor.keepShiftActive') }}</span>
           </div>
 
           <div v-else class="orders-list">
@@ -198,9 +198,9 @@
             >
               <div class="d-flex justify-content-between align-items-start mb-2">
                 <div>
-                  <span class="font-bold text-sm">Order #{{ order.id.slice(0, 8) }}...</span>
+                  <span class="font-bold text-sm">{{ $t('customer.orderId') }}{{ order.id.slice(0, 8) }}...</span>
                   <span v-if="order.is_downgraded" class="ml-2">
-                    <va-badge color="danger">SLA Downgraded</va-badge>
+                    <va-badge color="danger">{{ $t('customer.slaDowngraded') }}</va-badge>
                   </span>
                   <div class="text-xs text-secondary mt-1">
                     Customer: {{ order.customer_phone }}
@@ -213,25 +213,25 @@
 
               <div class="row text-sm mt-3">
                 <div class="col-6">
-                  <strong>Volume:</strong> {{ order.volume_type }}
+                  <strong>{{ $t('customer.volume') }}:</strong> {{ order.volume_type }}
                 </div>
                 <div class="col-6">
-                  <strong>Tariff:</strong> {{ order.speed_tariff }}
+                  <strong>{{ $t('customer.tariff') }}:</strong> {{ order.speed_tariff }}
                 </div>
                 <div class="col-6 mt-1">
-                  <strong>Payout Reward:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
+                  <strong>{{ $t('executor.payout') }}:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
                 </div>
                 <div class="col-6 mt-1" v-if="order.deadline_at">
-                  <strong>Deadline:</strong> {{ formatDate(order.deadline_at) }}
+                  <strong>{{ $t('executor.deadline') }}:</strong> {{ formatDate(order.deadline_at) }}
                 </div>
                 <div class="col-12 mt-1" v-if="order.photo_url">
-                  <strong>Photo:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
+                  <strong>{{ $t('customer.photo') }}:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
                 </div>
               </div>
 
               <div class="d-flex justify-content-end mt-3">
                 <va-button color="info" outline size="small" @click="openChat(order)">
-                  <va-icon name="chat" class="mr-1" /> Chat
+                  <va-icon name="chat" class="mr-1" /> {{ $t('common.chat') }}
                 </va-button>
               </div>
             </va-card>
@@ -241,15 +241,15 @@
         <!-- Available Construction Auctions -->
         <va-card class="p-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="gavel" class="mr-2" /> Open Construction Auctions
+            <va-icon name="gavel" class="mr-2" /> {{ $t('executor.openConstructionAuctions') }}
           </h3>
           <p class="text-secondary text-sm mb-4">
-            Bid on construction orders to get assigned. You must have an active shift to bid.
+            {{ $t('executor.bidDescription') }}
           </p>
 
           <div v-if="availableOrders.length === 0" class="text-center py-5">
             <va-icon name="explore" size="large" color="secondary" class="mb-3" />
-            <p class="text-secondary mb-0">No construction auctions available</p>
+            <p class="text-secondary mb-0">{{ $t('executor.noAvailableOrders') }}</p>
           </div>
 
           <div v-else class="orders-list">
@@ -261,23 +261,23 @@
             >
               <div class="d-flex justify-content-between align-items-start mb-2">
                 <div>
-                  <span class="font-bold text-sm">Order #{{ order.id.slice(0, 8) }}...</span>
+                  <span class="font-bold text-sm">{{ $t('customer.orderId') }}{{ order.id.slice(0, 8) }}...</span>
                   <div class="text-xs text-secondary mt-1">
                     Customer: {{ order.customer_phone }}
                   </div>
                 </div>
-                <va-badge color="warning">SEARCHING</va-badge>
+                <va-badge color="warning">{{ $t('orderStatus.SEARCHING') }}</va-badge>
               </div>
 
               <div class="row text-sm mt-3">
                 <div class="col-12" v-if="order.photo_url">
-                  <strong>Photo:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
+                  <strong>{{ $t('customer.photo') }}:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
                 </div>
               </div>
 
               <!-- Place bid form -->
               <div class="bid-form mt-3 p-3 bg-light rounded" v-if="activeShift">
-                <h5 class="text-xs font-bold text-secondary mb-2">Offer your price:</h5>
+                <h5 class="text-xs font-bold text-secondary mb-2">{{ $t('executor.offerYourPrice') }}</h5>
                 <va-form @submit.prevent="submitBid(order.id)" class="d-flex align-items-center">
                   <va-input
                     v-model.number="bidsInputs[order.id]"
@@ -291,11 +291,11 @@
                       <va-icon name="attach_money" />
                     </template>
                   </va-input>
-                  <va-button type="submit" size="small">Place Bid</va-button>
+                  <va-button type="submit" size="small">{{ $t('executor.placeBid') }}</va-button>
                 </va-form>
               </div>
               <div v-else class="text-xs text-danger text-center mt-3 py-1 bg-light rounded">
-                Start shift to place bids on this order.
+                {{ $t('executor.startShiftToBid') }}
               </div>
             </va-card>
           </div>
@@ -307,15 +307,15 @@
     <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
       <div class="chat-header d-flex justify-content-between align-items-center bg-primary text-white p-3">
         <div>
-          <h4 class="m-0 text-white font-bold text-sm">Order #{{ selectedChatOrder?.id.slice(0, 8) }} Chat</h4>
-          <span class="text-xs opacity-75">Direct connection with Customer</span>
+          <h4 class="m-0 text-white font-bold text-sm">{{ $t('customer.orderChatTitle', { id: selectedChatOrder?.id.slice(0, 8) }) }}</h4>
+          <span class="text-xs opacity-75">{{ $t('executor.chatSubtitle') }}</span>
         </div>
-        <va-button color="warning" size="small" flat @click="closeChat">Close</va-button>
+        <va-button color="warning" size="small" flat @click="closeChat">{{ $t('common.close') }}</va-button>
       </div>
 
       <div class="chat-messages p-3 flex-grow-1" ref="messagesContainer">
         <div v-if="chatLocked" class="text-center py-2 mb-3 bg-danger-light text-danger rounded text-xs">
-          Chat session locked (Order completed/cancelled)
+          {{ $t('customer.chatLocked') }}
         </div>
 
         <div 
@@ -323,7 +323,7 @@
           :key="msg.id" 
           :class="['message-bubble mb-2 p-2 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto bg-primary text-white' : 'their-message mr-auto bg-light']"
         >
-          <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">Customer</div>
+          <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">{{ $t('common.customer') }}</div>
           <div class="text-sm message-text">{{ msg.text }}</div>
           <div class="text-xxs text-right mt-1 opacity-75">{{ formatTime(msg.created_at) }}</div>
         </div>
@@ -333,12 +333,12 @@
         <va-form @submit.prevent="sendChatMessage" class="d-flex">
           <va-input 
             v-model="chatText" 
-            placeholder="Type your message..." 
+            :placeholder="$t('customer.typeMessage')" 
             class="flex-grow-1 mr-2" 
             :disabled="chatLocked"
             required
           />
-          <va-button type="submit" color="primary" :disabled="chatLocked">Send</va-button>
+          <va-button type="submit" color="primary" :disabled="chatLocked">{{ $t('customer.send') }}</va-button>
         </va-form>
       </div>
     </div>
@@ -348,6 +348,7 @@
 <script lang="ts">
 import { defineComponent, ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 
@@ -355,6 +356,7 @@ export default defineComponent({
   name: 'ExecutorDashboard',
   setup() {
     const router = useRouter()
+    const { t } = useI18n()
     const authStore = useAuthStore()
 
     const phone = ref('')
@@ -446,11 +448,11 @@ export default defineComponent({
         const response = await api.post('/executor/shifts', {
           duration_hours: Number(shiftDuration.value),
         })
-        successMsg.value = 'Shift started successfully! You are now online.'
+        successMsg.value = t('executor.successShiftStarted')
         activeShift.value = response.data
         await fetchAssignedOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to start shift.'
+        errorMsg.value = err.response?.data || t('executor.errorShiftStarted')
         console.error(err)
       } finally {
         startingShift.value = false
@@ -484,12 +486,12 @@ export default defineComponent({
           telemetryLogs.value.pop()
         }
 
-        successMsg.value = `Location coordinate submitted! Geofence status: ${isInside ? 'INSIDE' : 'OUTSIDE'}`
+        successMsg.value = t('executor.successLocationSubmitted', { status: isInside ? t('executor.inside') : t('executor.outside') })
         
         await fetchActiveShift()
         await fetchProfile()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to submit location.'
+        errorMsg.value = err.response?.data || t('executor.errorLocationSubmitted')
         console.error(err)
       } finally {
         sendingLocation.value = false
@@ -506,7 +508,7 @@ export default defineComponent({
         })
         successMsg.value = `Placed bid of $${price} successfully!`
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to submit bid.'
+        errorMsg.value = err.response?.data || t('executor.errorBidSubmitted')
         console.error(err)
       }
     }

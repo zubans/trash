@@ -3,11 +3,11 @@
     <div class="dashboard-header mb-5">
       <div class="d-flex justify-content-between align-items-center">
         <div>
-          <h1 class="va-h3 m-0">Customer Dashboard</h1>
-          <span class="text-secondary text-sm">Manage profile, wallets, and orders</span>
+          <h1 class="va-h3 m-0">{{ $t('customer.title') }}</h1>
+          <span class="text-secondary text-sm">{{ $t('customer.subtitle') }}</span>
         </div>
         <va-button color="danger" outline size="small" @click="handleLogout">
-          <va-icon name="logout" class="mr-2" /> Logout
+          <va-icon name="logout" class="mr-2" /> {{ $t('app.logout') }}
         </va-button>
       </div>
     </div>
@@ -26,15 +26,15 @@
         <!-- Profile Card -->
         <va-card class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="account_circle" class="mr-2" /> Account Details
+            <va-icon name="account_circle" class="mr-2" /> {{ $t('customer.accountDetails') }}
           </h3>
           <div class="info-list">
             <div class="info-item mb-3">
-              <span class="info-label">Phone</span>
+              <span class="info-label">{{ $t('customer.phone') }}</span>
               <span class="info-val">{{ phone }}</span>
             </div>
             <div class="info-item mb-3">
-              <span class="info-label">Account Status</span>
+              <span class="info-label">{{ $t('customer.status') }}</span>
               <span class="info-val">
                 <va-badge color="success">{{ status }}</va-badge>
               </span>
@@ -42,7 +42,7 @@
           </div>
 
           <div class="balance-box mt-4 p-3 text-center">
-            <span class="balance-label d-block text-secondary text-sm mb-1">Available Balance</span>
+            <span class="balance-label d-block text-secondary text-sm mb-1">{{ $t('customer.balance') }}</span>
             <span class="balance-amount">${{ Number(balance).toFixed(2) }}</span>
           </div>
         </va-card>
@@ -50,17 +50,17 @@
         <!-- Top-up Card -->
         <va-card class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="payment" class="mr-2" /> Request Wallet Top-Up
+            <va-icon name="payment" class="mr-2" /> {{ $t('customer.requestWalletTopUp') }}
           </h3>
           <p class="text-secondary text-sm mb-4">
-            Enter the amount to add. An administrator will verify and approve your request.
+            {{ $t('customer.topUpDescription') }}
           </p>
 
           <va-form @submit.prevent="submitTopUp">
             <va-input
               v-model.number="topUpAmount"
               type="number"
-              label="Amount ($)"
+              :label="$t('customer.amountWithCurrency')"
               placeholder="100"
               min="1"
               step="any"
@@ -73,7 +73,7 @@
             </va-input>
             
             <va-button type="submit" block :loading="submitting">
-              Submit Request
+              {{ $t('customer.submitRequest') }}
             </va-button>
           </va-form>
         </va-card>
@@ -81,17 +81,17 @@
         <!-- Create Order Card -->
         <va-card class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="shopping_cart" class="mr-2" /> Create New Order
+            <va-icon name="shopping_cart" class="mr-2" /> {{ $t('customer.createNewOrder') }}
           </h3>
           <p class="text-secondary text-sm mb-4">
-            Place an order for waste removal. Funds will be held from your wallet balance.
+            {{ $t('customer.createOrderDescription') }}
           </p>
 
           <va-form @submit.prevent="submitOrder">
             <va-select
               v-model="orderVolume"
               :options="volumeOptions"
-              label="Volume Type"
+              :label="$t('customer.volumeType')"
               class="mb-4"
               required
             />
@@ -100,7 +100,7 @@
               v-if="orderVolume !== 'CONSTRUCTION'"
               v-model="orderTariff"
               :options="tariffOptions"
-              label="Speed Tariff"
+              :label="$t('customer.speedTariff')"
               class="mb-4"
               required
             />
@@ -108,7 +108,7 @@
             <va-input
               v-if="orderVolume === 'CONSTRUCTION'"
               v-model="orderPhoto"
-              label="Waste Photo URL"
+              :label="$t('customer.photoUrl')"
               placeholder="https://example.com/photo.jpg"
               class="mb-4"
               required
@@ -120,7 +120,7 @@
 
             <va-input
               v-model="orderGeo"
-              label="Delivery Coordinates (lat, lon)"
+              :label="$t('customer.coordinates')"
               placeholder="55.7558, 37.6173"
               class="mb-4"
               required
@@ -131,17 +131,17 @@
             </va-input>
 
             <div class="price-preview mb-4 p-3 text-center" v-if="orderVolume !== 'CONSTRUCTION'">
-              <span class="price-label d-block text-secondary text-sm mb-1">Estimated Hold Amount</span>
+              <span class="price-label d-block text-secondary text-sm mb-1">{{ $t('customer.estimatedHoldAmount') }}</span>
               <span class="price-amount-preview text-primary font-bold">${{ Number(estimatedPrice).toFixed(2) }}</span>
             </div>
             
             <div class="price-preview mb-4 p-3 text-center" v-else>
-              <span class="price-label d-block text-secondary text-sm mb-1">Estimated Hold Amount</span>
-              <span class="price-amount-preview text-warning font-bold">Bidding / Auction</span>
+              <span class="price-label d-block text-secondary text-sm mb-1">{{ $t('customer.estimatedHoldAmount') }}</span>
+              <span class="price-amount-preview text-warning font-bold">{{ $t('customer.biddingAuction') }}</span>
             </div>
 
             <va-button type="submit" block :loading="creatingOrder">
-              Create Order
+              {{ $t('customer.createOrder') }}
             </va-button>
           </va-form>
         </va-card>
@@ -152,14 +152,14 @@
         <va-card class="p-4 shadow-card">
           <div class="d-flex justify-content-between align-items-center mb-4">
             <h3 class="va-h5 m-0 text-primary d-flex align-items-center">
-              <va-icon name="list_alt" class="mr-2" /> Your Orders
+              <va-icon name="list_alt" class="mr-2" /> {{ $t('customer.yourOrders') }}
             </h3>
             <va-button icon="refresh" color="secondary" size="small" flat @click="fetchOrders" />
           </div>
 
           <div v-if="orders.length === 0" class="text-center py-5">
             <va-icon name="inbox" size="large" color="secondary" class="mb-3" />
-            <p class="text-secondary">No orders placed yet.</p>
+            <p class="text-secondary">{{ $t('customer.noOrders') }}</p>
           </div>
 
           <div v-else class="orders-list">
@@ -171,9 +171,9 @@
             >
               <div class="d-flex justify-content-between align-items-start mb-2">
                 <div>
-                  <span class="order-id font-bold text-sm">Order #{{ order.id.slice(0, 8) }}...</span>
+                  <span class="order-id font-bold text-sm">{{ $t('customer.orderId') }}{{ order.id.slice(0, 8) }}...</span>
                   <span v-if="order.is_downgraded" class="ml-2">
-                    <va-badge color="danger">SLA Downgraded</va-badge>
+                    <va-badge color="danger">{{ $t('customer.slaDowngraded') }}</va-badge>
                   </span>
                   <div class="text-xs text-secondary mt-1">
                     Created: {{ formatDate(order.created_at) }}
@@ -186,27 +186,27 @@
 
               <div class="row text-sm mb-3">
                 <div class="col-6">
-                  <strong>Volume:</strong> {{ order.volume_type }}
+                  <strong>{{ $t('customer.volume') }}:</strong> {{ order.volume_type }}
                 </div>
                 <div class="col-6">
-                  <strong>Tariff:</strong> {{ order.speed_tariff }}
+                  <strong>{{ $t('customer.tariff') }}:</strong> {{ order.speed_tariff }}
                 </div>
                 <div class="col-6 mt-1">
-                  <strong>Hold:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
+                  <strong>{{ $t('customer.hold') }}:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
                 </div>
                 <div class="col-6 mt-1" v-if="order.executor_phone">
-                  <strong>Executor:</strong> {{ order.executor_phone }}
+                  <strong>{{ $t('customer.executor') }}:</strong> {{ order.executor_phone }}
                 </div>
                 <div class="col-12 mt-1" v-if="order.photo_url">
-                  <strong>Photo:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
+                  <strong>{{ $t('customer.photo') }}:</strong> <a :href="order.photo_url" target="_blank" class="text-primary text-xs truncate">{{ order.photo_url }}</a>
                 </div>
               </div>
 
               <!-- Bids for this order (Auctions) -->
               <div v-if="order.volume_type === 'CONSTRUCTION' && order.status === 'SEARCHING'" class="bids-section mt-3 p-2 bg-light rounded">
-                <span class="text-xs font-bold text-secondary d-block mb-2">Received Bids ({{ (bidsMap[order.id] || []).length }}):</span>
+                <span class="text-xs font-bold text-secondary d-block mb-2">{{ $t('customer.receivedBids') }} ({{ (bidsMap[order.id] || []).length }}):</span>
                 <div v-if="!(bidsMap[order.id] || []).length" class="text-xs text-secondary text-center py-2">
-                  No bids placed yet
+                  {{ $t('customer.noBids') }}
                 </div>
                 <div v-else>
                   <div 
@@ -214,8 +214,8 @@
                     :key="bid.id" 
                     class="d-flex justify-content-between align-items-center mb-1 py-1 border-bottom"
                   >
-                    <span class="text-xs">Executor {{ bid.executor_phone }} offers <strong>${{ bid.offered_price }}</strong></span>
-                    <va-button color="success" size="small" @click="acceptBid(bid.id)">Accept</va-button>
+                    <span class="text-xs">{{ $t('customer.offers', { phone: bid.executor_phone, price: bid.offered_price }) }}</span>
+                    <va-button color="success" size="small" @click="acceptBid(bid.id)">{{ $t('common.accept') }}</va-button>
                   </div>
                 </div>
               </div>
@@ -230,7 +230,7 @@
                   @click="openChat(order)"
                   class="mr-2"
                 >
-                  <va-icon name="chat" class="mr-1" /> Chat
+                  <va-icon name="chat" class="mr-1" /> {{ $t('common.chat') }}
                 </va-button>
                 <va-button 
                   v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'" 
@@ -240,7 +240,7 @@
                   @click="cancelOrder(order.id)"
                   class="mr-2"
                 >
-                  Cancel Order
+                  {{ $t('customer.cancelOrder') }}
                 </va-button>
                 <va-button 
                   v-if="order.status === 'ASSIGNED'" 
@@ -248,7 +248,7 @@
                   size="small" 
                   @click="confirmOrder(order.id)"
                 >
-                  Confirm Delivery
+                  {{ $t('customer.confirmDelivery') }}
                 </va-button>
               </div>
             </va-card>
@@ -261,15 +261,15 @@
     <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
       <div class="chat-header d-flex justify-content-between align-items-center bg-primary text-white p-3">
         <div>
-          <h4 class="m-0 text-white font-bold text-sm">Order #{{ selectedChatOrder?.id.slice(0, 8) }} Chat</h4>
-          <span class="text-xs opacity-75">Direct connection with Executor</span>
+          <h4 class="m-0 text-white font-bold text-sm">{{ $t('customer.orderChatTitle', { id: selectedChatOrder?.id.slice(0, 8) }) }}</h4>
+          <span class="text-xs opacity-75">{{ $t('customer.chatSubtitle') }}</span>
         </div>
-        <va-button color="warning" size="small" flat @click="closeChat">Close</va-button>
+        <va-button color="warning" size="small" flat @click="closeChat">{{ $t('common.close') }}</va-button>
       </div>
 
       <div class="chat-messages p-3 flex-grow-1" ref="messagesContainer">
         <div v-if="chatLocked" class="text-center py-2 mb-3 bg-danger-light text-danger rounded text-xs">
-          Chat session locked (Order completed/cancelled)
+          {{ $t('customer.chatLocked') }}
         </div>
 
         <div 
@@ -277,7 +277,7 @@
           :key="msg.id" 
           :class="['message-bubble mb-2 p-2 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto bg-primary text-white' : 'their-message mr-auto bg-light']"
         >
-          <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">Executor</div>
+          <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">{{ $t('common.executor') }}</div>
           <div class="text-sm message-text">{{ msg.text }}</div>
           <div class="text-xxs text-right mt-1 opacity-75">{{ formatTime(msg.created_at) }}</div>
         </div>
@@ -287,12 +287,12 @@
         <va-form @submit.prevent="sendChatMessage" class="d-flex">
           <va-input 
             v-model="chatText" 
-            placeholder="Type your message..." 
+            :placeholder="$t('customer.typeMessage')" 
             class="flex-grow-1 mr-2" 
             :disabled="chatLocked"
             required
           />
-          <va-button type="submit" color="primary" :disabled="chatLocked">Send</va-button>
+          <va-button type="submit" color="primary" :disabled="chatLocked">{{ $t('customer.send') }}</va-button>
         </va-form>
       </div>
     </div>
@@ -302,6 +302,7 @@
 <script lang="ts">
 import { defineComponent, ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 
@@ -309,6 +310,7 @@ export default defineComponent({
   name: 'CustomerDashboard',
   setup() {
     const router = useRouter()
+    const { t } = useI18n()
     const authStore = useAuthStore()
 
     const phone = ref('')
@@ -402,11 +404,11 @@ export default defineComponent({
       submitting.value = true
       try {
         await api.post('/customer/finances/topup', { amount: topUpAmount.value })
-        successMsg.value = `Wallet top-up request for $${topUpAmount.value.toFixed(2)} submitted successfully!`
+        successMsg.value = t('customer.topUpSuccess', { amount: topUpAmount.value.toFixed(2) })
         topUpAmount.value = 100
         await fetchProfile()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to submit top-up request.'
+        errorMsg.value = err.response?.data || t('customer.topUpError')
         console.error(err)
       } finally {
         submitting.value = false
@@ -430,11 +432,11 @@ export default defineComponent({
             last_geo: orderGeo.value,
           })
         }
-        successMsg.value = 'Order created successfully!'
+        successMsg.value = t('customer.successOrderCreated')
         await fetchProfile()
         await fetchOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to create order.'
+        errorMsg.value = err.response?.data || t('customer.errorOrderCreated')
         console.error(err)
       } finally {
         creatingOrder.value = false
@@ -446,14 +448,14 @@ export default defineComponent({
       errorMsg.value = ''
       try {
         await api.post(`/customer/orders/${orderId}/confirm`)
-        successMsg.value = 'Delivery confirmed and payment released!'
+        successMsg.value = t('customer.successDeliveryConfirmed')
         await fetchProfile()
         await fetchOrders()
         if (selectedChatOrder.value && selectedChatOrder.value.id === orderId) {
           chatLocked.value = true
         }
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to confirm order.'
+        errorMsg.value = err.response?.data || t('customer.errorDeliveryConfirmed')
         console.error(err)
       }
     }
@@ -463,14 +465,14 @@ export default defineComponent({
       errorMsg.value = ''
       try {
         await api.post(`/customer/orders/${orderId}/cancel`)
-        successMsg.value = 'Order cancelled!'
+        successMsg.value = t('customer.successOrderCancelled')
         await fetchProfile()
         await fetchOrders()
         if (selectedChatOrder.value && selectedChatOrder.value.id === orderId) {
           chatLocked.value = true
         }
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to cancel order.'
+        errorMsg.value = err.response?.data || t('customer.errorOrderCancelled')
         console.error(err)
       }
     }
@@ -480,11 +482,11 @@ export default defineComponent({
       errorMsg.value = ''
       try {
         await api.post(`/customer/bids/${bidId}/accept`)
-        successMsg.value = 'Bid accepted and executor assigned successfully!'
+        successMsg.value = t('customer.successBidAccepted')
         await fetchProfile()
         await fetchOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Failed to accept bid.'
+        errorMsg.value = err.response?.data || t('customer.errorBidAccepted')
         console.error(err)
       }
     }

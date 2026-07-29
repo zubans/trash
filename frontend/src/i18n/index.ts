@@ -7,7 +7,19 @@ export const AVAILABLE_LOCALES = [
   { code: 'ru', name: 'Русский' },
 ]
 
-const savedLocale = localStorage.getItem('locale') || 'ru'
+function getSavedLocale(): string {
+  try {
+    const saved = localStorage.getItem('locale')
+    if (saved === 'ru' || saved === 'en') {
+      return saved
+    }
+  } catch (e) {
+    console.warn('Failed to read locale from localStorage', e)
+  }
+  return 'ru'
+}
+
+const savedLocale = getSavedLocale()
 
 export const i18n = createI18n({
   legacy: false,
