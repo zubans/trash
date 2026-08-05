@@ -17,7 +17,7 @@ build-android:
 	@echo "Syncing assets to Android project..."
 	cd frontend && npx cap sync
 	@echo "Building APK..."
-	cd frontend/android && ANDROID_HOME=$(ANDROID_SDK_PATH) ./gradlew assembleDebug
+	cd frontend/android && ANDROID_HOME=$(ANDROID_SDK_PATH) JAVA_HOME=$(JAVA_HOME) ./gradlew assembleDebug
 	@echo "Copying APK to project root..."
 	cp frontend/android/app/build/outputs/apk/debug/app-debug.apk ./healthlogin-app.apk
 	@echo "APK built successfully! You can find it at: ./healthlogin-app.apk"

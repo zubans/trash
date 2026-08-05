@@ -158,17 +158,30 @@ func main() {
 	certFile := getEnv("TLS_CERT_FILE", "")
 	keyFile := getEnv("TLS_KEY_FILE", "")
 
+	errChan := make(chan error, 2)
+
 	if certFile != "" && keyFile != "" {
-		log.Printf("Starting HTTPS server on %s", addr)
-		if err := http.ListenAndServeTLS(addr, certFile, keyFile, r); err != nil {
-			log.Fatalf("Could not start HTTPS server: %v", err)
-		}
+		go func() {
+			log.Printf("Starting HTTPS server on %s", addr)
+			errChan <- http.ListenAndServeTLS(addr, certFile, keyFile, r)
+		}()
 	} else {
-		log.Printf("Starting HTTP server on %s", addr)
-		if err := http.ListenAndServe(addr, r); err != nil {
-			log.Fatalf("Could not start server: %v", err)
-		}
+		go func() {
+			log.Printf("Starting HTTP server on %s", addr)
+			errChan <- http.ListenAndServe(addr, r)
+		}()
 	}
+
+	// Optional plain HTTP server for mobile/debug clients on the same network.
+	// Set MOBILE_HTTP_ADDR (e.g. :8081) to enable. Disabled by default.
+	if mobileAddr := getEnv("MOBILE_HTTP_ADDR", ""); mobileAddr != "" {
+		go func() {
+			log.Printf("Starting mobile HTTP server on %s", mobileAddr)
+			errChan <- http.ListenAndServe(mobileAddr, r)
+		}()
+	}
+
+	log.Fatalf("Server error: %v", <-errChan)
 }
 
 // waitForDB retries db.Ping with a short backoff until the database is ready.
