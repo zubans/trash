@@ -13,6 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 
+	_ "net/http/pprof"
+
 	"healthlogin/backend/handler"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/repository"
@@ -147,10 +149,25 @@ func main() {
 		r.Post("/admin/settings", ah.UpdateSettingsHandler)
 	})
 
+	// Register pprof handlers for debugging (only exposed locally)
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	addr := getEnv("HTTP_ADDR", ":8080")
-	log.Printf("Starting server on %s", addr)
-	if err := http.ListenAndServe(addr, r); err != nil {
-		log.Fatalf("Could not start server: %v", err)
+	certFile := getEnv("TLS_CERT_FILE", "")
+	keyFile := getEnv("TLS_KEY_FILE", "")
+
+	if certFile != "" && keyFile != "" {
+		log.Printf("Starting HTTPS server on %s", addr)
+		if err := http.ListenAndServeTLS(addr, certFile, keyFile, r); err != nil {
+			log.Fatalf("Could not start HTTPS server: %v", err)
+		}
+	} else {
+		log.Printf("Starting HTTP server on %s", addr)
+		if err := http.ListenAndServe(addr, r); err != nil {
+			log.Fatalf("Could not start server: %v", err)
+		}
 	}
 }
 
@@ -170,11 +187,12 @@ func waitForDB(db *sql.DB) error {
 
 func buildAllowedOrigins() map[string]bool {
 	origins := map[string]bool{
-		"http://localhost:3000": true,
-		"http://localhost":      true,
-		"https://localhost":     true,
-		"capacitor://localhost": true,
-		"ionic://localhost":     true,
+		"https://localhost":      true,
+		"https://localhost:443":  true,
+		"https://localhost:8443": true,
+		"http://localhost":       true,
+		"capacitor://localhost":  true,
+		"ionic://localhost":      true,
 	}
 	if corsOrigin := getEnv("CORS_ORIGIN", ""); corsOrigin != "" {
 		origins[corsOrigin] = true

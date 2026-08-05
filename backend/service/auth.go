@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,6 +14,22 @@ import (
 
 	"healthlogin/backend/repository"
 )
+
+var addressRegex = regexp.MustCompile(`^Россия,\s*Москва,\s*ул\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$`)
+
+// normalizeAddress validates and canonicalizes the pickup address.
+// Expected input: "Россия, Москва, ул.#### [кв. ###]" where # are digits.
+// The flat number is optional.
+func normalizeAddress(address string) (string, error) {
+	matches := addressRegex.FindStringSubmatch(address)
+	if matches == nil {
+		return "", errors.New("address must match format: Россия, Москва, ул.#### [кв. ###]")
+	}
+	if matches[2] != "" {
+		return fmt.Sprintf("Россия, Москва, ул.%s кв. %s", matches[1], matches[2]), nil
+	}
+	return fmt.Sprintf("Россия, Москва, ул.%s", matches[1]), nil
+}
 
 // AuthService handles user registration and authentication.
 type AuthService struct {
@@ -48,11 +65,22 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geo
 // Register creates a new user with the given phone, password and pickup address.
 // The password is hashed before persisting. Role defaults to CUSTOMER.
 func (s *AuthService) Register(phone, password, address string) (*repository.User, error) {
+	return s.RegisterWithCoordinates(phone, password, address, nil, nil)
+}
+
+// RegisterWithCoordinates creates a new user with the given phone, password,
+// pickup address and optional coordinates. When coordinates are provided they
+// are used for last_geo, otherwise the address is geocoded normally.
+func (s *AuthService) RegisterWithCoordinates(phone, password, address string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
 	if address == "" {
 		return nil, errors.New("address is required")
+	}
+	normalizedAddress, err := normalizeAddress(address)
+	if err != nil {
+		return nil, err
 	}
 
 	existing, err := s.repo.FindByPhone(phone)
@@ -85,14 +113,20 @@ func (s *AuthService) Register(phone, password, address string) (*repository.Use
 	}
 
 	var lastGeo string
-	if s.geocoder != nil {
-		geo, err := s.geocoder.Geocode(address)
+	if lat != nil && lon != nil {
+		lastGeo = fmt.Sprintf("%f,%f", *lat, *lon)
+		// Cache the coordinates for the normalized address so the geocoder knows this point.
+		if gc, ok := s.geocoder.(*Geocoder); ok && gc != nil {
+			_ = gc.saveCache(normalizedAddress, *lat, *lon)
+		}
+	} else if s.geocoder != nil {
+		geo, err := s.geocoder.Geocode(normalizedAddress)
 		if err == nil && geo != nil {
 			lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
 		}
 	}
 
-	if err := s.repo.CreateCustomerProfile(created.ID, address, lastGeo); err != nil {
+	if err := s.repo.CreateCustomerProfile(created.ID, normalizedAddress, lastGeo); err != nil {
 		return nil, err
 	}
 

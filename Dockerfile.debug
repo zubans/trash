@@ -1,0 +1,27 @@
+FROM golang:1.26-alpine AS build
+WORKDIR /app
+
+# Install Delve
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+# Copy module files from backend
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+# Copy backend source files, including nested packages
+COPY backend/ .
+
+# Build the binary with disabled optimizations for debugging
+RUN go build -gcflags="all=-N -l" -o /app/healthlogin .
+
+# Runtime image
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates libc6-compat
+WORKDIR /app
+COPY --from=build /go/bin/dlv /usr/local/bin/dlv
+COPY --from=build /app/healthlogin .
+COPY certs /app/certs
+
+EXPOSE 8080 40000
+
+CMD ["dlv", "--listen=0.0.0.0:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "--continue", "--log", "exec", "/app/healthlogin"]

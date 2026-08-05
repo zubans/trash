@@ -1,6 +1,7 @@
-.PHONY: setup-android build-android clean start stop logs migrate migrate-docker
+.PHONY: setup-android build-android clean start start-debug stop logs migrate migrate-docker
 
-ANDROID_SDK_PATH ?= $(HOME)/Library/Android/sdk
+ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
+JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
 
 setup-android:
 	@echo "Setting up Capacitor and Android platform..."
@@ -24,10 +25,19 @@ build-android:
 # Start backend, frontend and database via Docker Compose
 start:
 	@echo "Starting backend, frontend and database..."
-	$(call compose,up -d)
+	$(call compose,up -d --build)
 	@echo "Services started."
-	@echo "  Backend:  http://localhost:8080"
-	@echo "  Frontend: http://localhost:3000"
+	@echo "  Backend:  https://localhost:8088"
+	@echo "  Frontend: https://localhost:8443"
+
+# Start backend with Delve remote debugger, frontend and database via Docker Compose
+start-debug:
+	@echo "Starting backend with Delve debugger, frontend and database..."
+	$(call compose,-f docker-compose.debug.yml up -d --build)
+	@echo "Debug services started."
+	@echo "  Backend:  https://localhost:8088"
+	@echo "  Frontend: https://localhost:8443"
+	@echo "  Delve:    localhost:40000"
 
 # Stop all running services
 stop:

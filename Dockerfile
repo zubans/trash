@@ -16,5 +16,6 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=build /app/healthlogin .
+COPY certs /app/certs
 EXPOSE 8080
 CMD ["./healthlogin"]

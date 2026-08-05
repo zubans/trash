@@ -6,9 +6,90 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// stringField extracts a string value from a JSON object decoded into map[string]interface{}.
+func stringField(m map[string]interface{}, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	case float64:
+		return strconv.Itoa(int(s))
+	case int:
+		return strconv.Itoa(s)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// formatCanonicalAddress builds a standardized Russian address from a Nominatim result.
+// It prefers structured address components over the free-form display name.
+func formatCanonicalAddress(addr map[string]interface{}) string {
+	country := strings.TrimSpace(stringField(addr, "country"))
+	if country == "" {
+		country = "Россия"
+	}
+
+	city := strings.TrimSpace(stringField(addr, "city"))
+	if city == "" {
+		city = strings.TrimSpace(stringField(addr, "town"))
+	}
+	if city == "" {
+		city = strings.TrimSpace(stringField(addr, "village"))
+	}
+	if city == "" {
+		city = strings.TrimSpace(stringField(addr, "hamlet"))
+	}
+	if city == "" {
+		city = strings.TrimSpace(stringField(addr, "county"))
+	}
+	if city == "" {
+		city = strings.TrimSpace(stringField(addr, "state"))
+	}
+	// Nominatim often returns administrative wrappers like
+	// "городской округ Курск" or "муниципальное образование Москва".
+	// Strip the wrapper to keep the canonical address readable.
+	city = strings.TrimPrefix(city, "городской округ ")
+	city = strings.TrimPrefix(city, "муниципальное образование ")
+	city = strings.TrimPrefix(city, "городское поселение ")
+	city = strings.TrimSpace(city)
+
+	road := strings.TrimSpace(stringField(addr, "road"))
+	if road == "" {
+		road = strings.TrimSpace(stringField(addr, "street"))
+	}
+	if road == "" {
+		road = strings.TrimSpace(stringField(addr, "pedestrian"))
+	}
+	if road == "" {
+		road = strings.TrimSpace(stringField(addr, "footway"))
+	}
+
+	houseNumber := strings.TrimSpace(stringField(addr, "house_number"))
+
+	if road == "" {
+		if city == "" {
+			return country
+		}
+		return fmt.Sprintf("%s, %s", country, city)
+	}
+
+	if houseNumber == "" {
+		return fmt.Sprintf("%s, %s, %s", country, city, road)
+	}
+
+	return fmt.Sprintf("%s, %s, %s, д. %s", country, city, road, houseNumber)
+}
 
 // GeocodingResult contains coordinates and a formatted address for a geocoded place.
 type GeocodingResult struct {
@@ -25,15 +106,17 @@ type GeoCoder interface {
 // AutocompleteResult is a single suggestion returned by the geocoder.
 type AutocompleteResult struct {
 	Address string  `json:"address"`
+	Display string  `json:"display"`
 	Lat     float64 `json:"lat,omitempty"`
 	Lon     float64 `json:"lon,omitempty"`
 }
 
 // NominatimResponse is a simplified view of a Nominatim JSON result.
 type NominatimResponse struct {
-	Lat         string `json:"lat"`
-	Lon         string `json:"lon"`
-	DisplayName string `json:"display_name"`
+	Lat         string                 `json:"lat"`
+	Lon         string                 `json:"lon"`
+	DisplayName string                 `json:"display_name"`
+	Address     map[string]interface{} `json:"address"`
 }
 
 // Geocoder provides address-to-coordinate resolution and autocomplete
@@ -78,6 +161,8 @@ func (g *Geocoder) Autocomplete(query string) ([]AutocompleteResult, error) {
 	q.Set("format", "json")
 	q.Set("limit", "5")
 	q.Set("addressdetails", "1")
+	q.Set("countrycodes", "ru")
+	q.Set("accept-language", "ru")
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
@@ -110,13 +195,21 @@ func (g *Geocoder) Autocomplete(query string) ([]AutocompleteResult, error) {
 		if _, err := fmt.Sscanf(r.Lon, "%f", &lon); err != nil {
 			continue
 		}
+
+		canonical := formatCanonicalAddress(r.Address)
+
+		// Use the canonical form for both the stored address and the UI display,
+		// so the user sees a clean "Country, City, Street, House" format instead
+		// of Nominatim's free-form display_name.
 		suggestions = append(suggestions, AutocompleteResult{
-			Address: r.DisplayName,
+			Address: canonical,
+			Display: canonical,
 			Lat:     lat,
 			Lon:     lon,
 		})
 		// Cache each suggestion for later use.
 		_ = g.saveCache(r.DisplayName, lat, lon)
+		_ = g.saveCache(canonical, lat, lon)
 	}
 
 	return suggestions, nil
@@ -145,6 +238,8 @@ func (g *Geocoder) Geocode(address string) (*GeocodingResult, error) {
 	q.Set("q", address)
 	q.Set("format", "json")
 	q.Set("limit", "1")
+	q.Set("countrycodes", "ru")
+	q.Set("accept-language", "ru")
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)

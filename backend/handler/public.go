@@ -23,11 +23,13 @@ type AuthRequest struct {
 	Password string `json:"password"`
 }
 
-// RegisterRequest extends AuthRequest with the required pickup address.
+// RegisterRequest extends AuthRequest with the required pickup address and optional coordinates.
 type RegisterRequest struct {
-	Phone    string `json:"phone"`
-	Password string `json:"password"`
-	Address  string `json:"address"`
+	Phone    string   `json:"phone"`
+	Password string   `json:"password"`
+	Address  string   `json:"address"`
+	Lat      *float64 `json:"lat,omitempty"`
+	Lon      *float64 `json:"lon,omitempty"`
 }
 
 // AuthResponse returns a JWT after successful login.
@@ -66,7 +68,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := h.authService.Register(req.Phone, req.Password, req.Address)
+	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Password, req.Address, req.Lat, req.Lon)
 	if err != nil {
 		if err.Error() == "user already exists" {
 			http.Error(w, err.Error(), http.StatusConflict)

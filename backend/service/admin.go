@@ -110,10 +110,14 @@ func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error
 	if address == "" {
 		return errors.New("address is required")
 	}
+	normalizedAddress, err := normalizeAddress(address)
+	if err != nil {
+		return err
+	}
 	if _, err := s.userRepo.FindByID(userID); err != nil {
 		return errors.New("user not found")
 	}
-	return s.userRepo.UpdateCustomerAddress(userID, address)
+	return s.userRepo.UpdateCustomerAddress(userID, normalizedAddress)
 }
 
 // TopUpUserBalance adds funds directly to a user's balance.

@@ -1,0 +1,38 @@
+[
+  {
+    "label": "Launch Backend",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "debug",
+    "program": "./backend",
+    "cwd": "${ZED_WORKTREE_ROOT}/backend",
+    "env": {
+      "DB_HOST": "localhost",
+      "DB_PORT": "5432",
+      "DB_USER": "healthlogin",
+      "DB_PASSWORD": "healthlogin",
+      "DB_NAME": "healthlogin",
+      "JWT_SECRET": "dev-secret-change-me",
+      "CORS_ORIGIN": "https://localhost:8443"
+    },
+    "args": []
+  },
+  {
+    "label": "Launch Tests (Current File)",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "test",
+    "program": "${ZED_DIRNAME}",
+    "cwd": "${ZED_WORKTREE_ROOT}/backend",
+    "args": ["-test.run", "${ZED_SYMBOL}"]
+  },
+  {
+    "label": "Attach to Docker Delve",
+    "adapter": "Delve",
+    "request": "attach",
+    "mode": "remote",
+    "host": "localhost",
+    "port": 40000,
+    "cwd": "${ZED_WORKTREE_ROOT}/backend"
+  }
+]

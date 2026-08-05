@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Backend",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/backend",
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "DB_HOST": "localhost",
+        "DB_PORT": "5432",
+        "DB_USER": "healthlogin",
+        "DB_PASSWORD": "healthlogin",
+        "DB_NAME": "healthlogin",
+        "JWT_SECRET": "dev-secret-change-me",
+        "CORS_ORIGIN": "https://localhost:8443"
+      },
+      "args": []
+    },
+    {
+      "name": "Launch Backend Tests (Package)",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/backend/${input:testPackage}",
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "name": "Attach to Docker Delve",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "port": 40000,
+      "host": "localhost",
+      "cwd": "${workspaceFolder}/backend",
+      "substitutePath": [
+        { "from": "${workspaceFolder}/backend", "to": "/app" }
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "testPackage",
+      "type": "pickString",
+      "description": "Select test package",
+      "options": [
+        "handler",
+        "service"
+      ],
+      "default": "service"
+    }
+  ]
+}

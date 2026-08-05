@@ -11,6 +11,9 @@
           <LanguageSwitcher class="mb-2" />
           <div class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</div>
           <div class="text-secondary text-xs">{{ $t('customer.balance') }}</div>
+          <va-button color="danger" outline size="small" class="mt-2" @click="handleLogout">
+            <va-icon name="logout" class="mr-1" /> {{ $t('app.logout') }}
+          </va-button>
         </div>
       </div>
     </div>

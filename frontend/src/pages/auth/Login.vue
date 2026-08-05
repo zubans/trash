@@ -98,10 +98,24 @@
                 class="suggestion-item"
                 @click="selectAddress(suggestion)"
               >
-                {{ suggestion.address }}
+                {{ suggestion.display }}
               </div>
             </div>
             <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
+          </div>
+
+          <div v-if="mode === 'register'" class="form-group mb-4">
+            <label class="form-label">{{ $t('login.flatNumber') }}</label>
+            <div class="input-wrapper">
+              <span class="material-icons input-icon">apartment</span>
+              <input 
+                v-model="flatNumber" 
+                type="text" 
+                :placeholder="$t('login.flatNumberPlaceholder')" 
+                class="custom-input" 
+                autocomplete="off"
+              />
+            </div>
           </div>
 
           <button type="submit" class="submit-btn" :disabled="loading">
@@ -151,8 +165,10 @@ export default defineComponent({
     const phone = ref('')
     const password = ref('')
     const address = ref('')
+    const flatNumber = ref('')
     const addressSuggestions = ref<any[]>([])
     const autocompleteLoading = ref(false)
+    const selectedCoords = ref<{ lat: number; lon: number } | null>(null)
     const error = ref('')
     const message = ref('')
     const loading = ref(false)
@@ -163,10 +179,13 @@ export default defineComponent({
       message.value = ''
       addressSuggestions.value = []
       autocompleteLoading.value = false
+      flatNumber.value = ''
+      selectedCoords.value = null
     })
 
     const onAddressInput = () => {
       addressSuggestions.value = []
+      selectedCoords.value = null
       clearTimeout(autocompleteTimeout)
       const query = address.value.trim()
       if (query.length < 3) {
@@ -188,7 +207,26 @@ export default defineComponent({
 
     const selectAddress = (suggestion: any) => {
       address.value = suggestion.address
+      selectedCoords.value = { lat: suggestion.lat, lon: suggestion.lon }
       addressSuggestions.value = []
+    }
+
+    function normalizeAddress(streetAddress: string, flat?: string): string {
+      const flatPart = flat && flat.trim() ? ` кв. ${flat.trim()}` : ''
+      const full = `${streetAddress.trim()}${flatPart}`
+      const match = full.match(/^Россия,\s*([^,]+?),\s*([^,]+?),\s*д\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$/i)
+      if (!match) {
+        throw new Error(t('login.addressFormatError'))
+      }
+      const city = match[1].trim()
+      const road = match[2].trim()
+      const house = match[3].trim()
+      const flatNum = match[4] ? match[4].trim() : (flat && flat.trim() ? flat.trim() : '')
+      let result = `Россия, ${city}, ${road}, д. ${house}`
+      if (flatNum) {
+        result += ` кв. ${flatNum}`
+      }
+      return result
     }
 
     const handleSubmit = async () => {
@@ -225,15 +263,29 @@ export default defineComponent({
           }
         } else {
           // Registration
-          await api.post('/register', {
+          let normalizedAddress: string
+          try {
+            normalizedAddress = normalizeAddress(address.value, flatNumber.value)
+          } catch (addrErr: any) {
+            error.value = addrErr.message || t('login.addressFormatError')
+            return
+          }
+          const payload: any = {
             phone: phone.value,
             password: password.value,
-            address: address.value,
-          })
+            address: normalizedAddress,
+          }
+          if (selectedCoords.value) {
+            payload.lat = selectedCoords.value.lat
+            payload.lon = selectedCoords.value.lon
+          }
+          await api.post('/register', payload)
           message.value = t('login.registrationSuccess')
           mode.value = 'login'
           password.value = ''
           address.value = ''
+          flatNumber.value = ''
+          selectedCoords.value = null
         }
       } catch (err: any) {
         error.value = formatApiError(err, t('login.networkError'))
@@ -247,6 +299,7 @@ export default defineComponent({
       phone,
       password,
       address,
+      flatNumber,
       addressSuggestions,
       autocompleteLoading,
       error,
