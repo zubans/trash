@@ -15,7 +15,7 @@ import (
 	"healthlogin/backend/repository"
 )
 
-var addressRegex = regexp.MustCompile(`^Россия,\s*Москва,\s*ул\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$`)
+var addressRegex = regexp.MustCompile(`^Россия,\s*,\s*ул\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$`)
 
 // normalizeAddress validates and canonicalizes the pickup address.
 // Expected input: "Россия, Москва, ул.#### [кв. ###]" where # are digits.
