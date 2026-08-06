@@ -28,7 +28,7 @@ const api = axios.create({
 })
 
 // Helper to retrieve cookie by name
-function getCookie(name: string): string {
+export function getCookie(name: string): string {
   const value = `; ${document.cookie}`
   const parts = value.split(`; ${name}=`)
   if (parts.length === 2) {
@@ -37,9 +37,19 @@ function getCookie(name: string): string {
   return ''
 }
 
-// Inject JWT token from cookies into every API request
+// Helper to retrieve the auth token. localStorage is used as the primary
+// source because mobile WebViews cannot read cookies set for the API origin.
+function getAuthToken(): string {
+  try {
+    return localStorage.getItem('token') || getCookie('token') || ''
+  } catch {
+    return getCookie('token') || ''
+  }
+}
+
+// Inject JWT token into every API request
 api.interceptors.request.use((config) => {
-  const token = getCookie('token')
+  const token = getAuthToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -51,12 +61,20 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && [401, 403].includes(error.response.status)) {
-      // Clear authentication cookies
+      // Clear authentication cookies and localStorage
       document.cookie = 'token=; Max-Age=0; path=/;'
       document.cookie = 'userID=; Max-Age=0; path=/;'
       document.cookie = 'role=; Max-Age=0; path=/;'
       document.cookie = 'phone=; Max-Age=0; path=/;'
-      
+      try {
+        localStorage.removeItem('token')
+        localStorage.removeItem('userID')
+        localStorage.removeItem('role')
+        localStorage.removeItem('phone')
+      } catch {
+        // localStorage may be unavailable in some environments
+      }
+
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }
@@ -66,4 +84,3 @@ api.interceptors.response.use(
 )
 
 export default api
-export { getCookie }
