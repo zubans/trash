@@ -492,7 +492,7 @@ export default defineComponent({
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://backend:8080'
       const wsHost = apiBaseUrl.replace('http://', '').replace('https://', '')
-      const wsUrl = `${protocol}//${wsHost}/chats/${order.id}/ws`
+      const wsUrl = `${protocol}//${wsHost}/chats/${order.id}/ws?token=${encodeURIComponent(authStore.token)}`
 
       if (ws.value) {
         ws.value.close()

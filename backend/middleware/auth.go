@@ -43,21 +43,34 @@ func NewAuthMiddleware(userRepo repository.UserRepository, adminService *service
 	}
 }
 
+func extractBearerToken(r *http.Request) string {
+	header := r.Header.Get("Authorization")
+	if header != "" {
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && parts[1] != "" {
+			return parts[1]
+		}
+	}
+
+	if cookie, err := r.Cookie("token"); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+
+	if token := r.URL.Query().Get("token"); token != "" {
+		return token
+	}
+
+	return ""
+}
+
 // RequireAuth ensures the request contains a valid non-revoked JWT.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if header == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		tokenStr := extractBearerToken(r)
+		if tokenStr == "" {
+			http.Error(w, "Authorization required", http.StatusUnauthorized)
 			return
 		}
-
-		parts := strings.SplitN(header, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			http.Error(w, "Invalid authorization header", http.StatusUnauthorized)
-			return
-		}
-		tokenStr := parts[1]
 
 		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

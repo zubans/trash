@@ -53,6 +53,7 @@ api.interceptors.response.use(
     if (error.response && [401, 403].includes(error.response.status)) {
       // Clear authentication cookies
       document.cookie = 'token=; Max-Age=0; path=/;'
+      document.cookie = 'userID=; Max-Age=0; path=/;'
       document.cookie = 'role=; Max-Age=0; path=/;'
       document.cookie = 'phone=; Max-Age=0; path=/;'
       

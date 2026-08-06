@@ -249,7 +249,7 @@ export default defineComponent({
             return
           }
 
-          authStore.login(token, claims.role, claims.phone)
+          authStore.login(token, claims.role, claims.phone, claims.sub)
 
           // Role-based redirection
           if (claims.role === 'ADMIN') {
