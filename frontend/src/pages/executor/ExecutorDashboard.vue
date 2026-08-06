@@ -587,14 +587,14 @@ export default defineComponent({
     const earlyEndShift = async () => {
       successMsg.value = ''
       errorMsg.value = ''
-      const confirmed = confirm(t('executor.endShiftEarlyConfirm', { amount: '$' + Number(earlyExitPenalty.value).toFixed(2) }))
+      const confirmed = confirm(t('executor.endShiftEarlyConfirm', { amount: 'РУБ' + Number(earlyExitPenalty.value).toFixed(2) }))
       if (!confirmed) return
 
       endingShiftEarly.value = true
       try {
         const response = await api.post('/executor/shifts/early-end')
         activeShift.value = response.data
-        successMsg.value = t('executor.shiftEndedEarly', { amount: '$' + Number(activeShift.value.fine_amount).toFixed(2) })
+        successMsg.value = t('executor.shiftEndedEarly', { amount: 'РУБ' + Number(activeShift.value.fine_amount).toFixed(2) })
         await fetchProfile()
       } catch (err: any) {
         errorMsg.value = err.response?.data || t('executor.errorShiftStarted')

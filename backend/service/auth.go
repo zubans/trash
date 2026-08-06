@@ -67,21 +67,31 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geo
 	return &AuthService{repo: repo, geocoder: geocoder, secret: []byte(secret)}
 }
 
-// Register creates a new user with the given phone, password and pickup address.
-// The password is hashed before persisting. Role defaults to CUSTOMER.
-func (s *AuthService) Register(phone, password, address string) (*repository.User, error) {
-	return s.RegisterWithCoordinates(phone, password, address, nil, nil)
+// validRegistrationRole reports whether a role may be chosen during registration.
+// ADMIN is explicitly forbidden; only CUSTOMER and EXECUTOR are allowed.
+func validRegistrationRole(role string) bool {
+	return role == "CUSTOMER" || role == "EXECUTOR"
+}
+
+// Register creates a new user with the given phone, password, pickup address and role.
+// The password is hashed before persisting. Role must be CUSTOMER or EXECUTOR.
+func (s *AuthService) Register(phone, password, address, role string) (*repository.User, error) {
+	return s.RegisterWithCoordinates(phone, password, address, role, nil, nil)
 }
 
 // RegisterWithCoordinates creates a new user with the given phone, password,
-// pickup address and optional coordinates. When coordinates are provided they
+// pickup address, role and optional coordinates. When coordinates are provided they
 // are used for last_geo, otherwise the address is geocoded normally.
-func (s *AuthService) RegisterWithCoordinates(phone, password, address string, lat, lon *float64) (*repository.User, error) {
+// Role must be CUSTOMER or EXECUTOR; ADMIN is rejected.
+func (s *AuthService) RegisterWithCoordinates(phone, password, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
 	if address == "" {
 		return nil, errors.New("address is required")
+	}
+	if !validRegistrationRole(role) {
+		return nil, errors.New("invalid role: must be CUSTOMER or EXECUTOR")
 	}
 	normalizedAddress, err := normalizeAddress(address)
 	if err != nil {
@@ -102,7 +112,7 @@ func (s *AuthService) RegisterWithCoordinates(phone, password, address string, l
 	}
 
 	user := &repository.User{
-		Role:     "CUSTOMER",
+		Role:     role,
 		Phone:    phone,
 		Password: string(hash),
 		Balance:  0,
@@ -117,22 +127,25 @@ func (s *AuthService) RegisterWithCoordinates(phone, password, address string, l
 		return nil, err
 	}
 
-	var lastGeo string
-	if lat != nil && lon != nil {
-		lastGeo = fmt.Sprintf("%f,%f", *lat, *lon)
-		// Cache the coordinates for the normalized address so the geocoder knows this point.
-		if gc, ok := s.geocoder.(*Geocoder); ok && gc != nil {
-			_ = gc.saveCache(normalizedAddress, *lat, *lon)
+	// Customer profile is only needed for CUSTOMER accounts.
+	if role == "CUSTOMER" {
+		var lastGeo string
+		if lat != nil && lon != nil {
+			lastGeo = fmt.Sprintf("%f,%f", *lat, *lon)
+			// Cache the coordinates for the normalized address so the geocoder knows this point.
+			if gc, ok := s.geocoder.(*Geocoder); ok && gc != nil {
+				_ = gc.saveCache(normalizedAddress, *lat, *lon)
+			}
+		} else if s.geocoder != nil {
+			geo, err := s.geocoder.Geocode(normalizedAddress)
+			if err == nil && geo != nil {
+				lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
+			}
 		}
-	} else if s.geocoder != nil {
-		geo, err := s.geocoder.Geocode(normalizedAddress)
-		if err == nil && geo != nil {
-			lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
-		}
-	}
 
-	if err := s.repo.CreateCustomerProfile(created.ID, normalizedAddress, lastGeo); err != nil {
-		return nil, err
+		if err := s.repo.CreateCustomerProfile(created.ID, normalizedAddress, lastGeo); err != nil {
+			return nil, err
+		}
 	}
 
 	return created, nil

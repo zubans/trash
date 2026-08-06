@@ -76,6 +76,17 @@
             </div>
           </div>
 
+          <div v-if="mode === 'register'" class="form-group mb-4">
+            <label class="form-label">{{ $t('login.role') }}</label>
+            <div class="input-wrapper">
+              <span class="material-icons input-icon">person_outline</span>
+              <select v-model="role" class="custom-input custom-select" required>
+                <option value="CUSTOMER">{{ $t('roles.customer') }}</option>
+                <option value="EXECUTOR">{{ $t('roles.executor') }}</option>
+              </select>
+            </div>
+          </div>
+
           <div v-if="mode === 'register'" class="form-group mb-4 address-autocomplete">
             <label class="form-label">{{ $t('login.pickupAddress') }}</label>
             <div class="input-wrapper">
@@ -164,6 +175,7 @@ export default defineComponent({
     const mode = ref<'login' | 'register'>('login')
     const phone = ref('')
     const password = ref('')
+    const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
     const address = ref('')
     const flatNumber = ref('')
     const addressSuggestions = ref<any[]>([])
@@ -179,6 +191,7 @@ export default defineComponent({
       message.value = ''
       addressSuggestions.value = []
       autocompleteLoading.value = false
+      role.value = 'CUSTOMER'
       flatNumber.value = ''
       selectedCoords.value = null
     })
@@ -274,6 +287,7 @@ export default defineComponent({
             phone: phone.value,
             password: password.value,
             address: normalizedAddress,
+            role: role.value,
           }
           if (selectedCoords.value) {
             payload.lat = selectedCoords.value.lat
@@ -283,6 +297,7 @@ export default defineComponent({
           message.value = t('login.registrationSuccess')
           mode.value = 'login'
           password.value = ''
+          role.value = 'CUSTOMER'
           address.value = ''
           flatNumber.value = ''
           selectedCoords.value = null
@@ -298,6 +313,7 @@ export default defineComponent({
       mode,
       phone,
       password,
+      role,
       address,
       flatNumber,
       addressSuggestions,
@@ -473,6 +489,21 @@ export default defineComponent({
 
 .custom-input::placeholder {
   color: rgba(255, 255, 255, 0.35);
+}
+
+.custom-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.custom-select option {
+  background: #1e2332;
+  color: #fff;
 }
 
 /* Premium gradient button */
