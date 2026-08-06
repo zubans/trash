@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -25,7 +26,7 @@ func NewChatHandler(chatService *service.ChatService) *ChatHandler {
 // GetMessagesHandler retrieves history of messages.
 func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
+	if !ok || user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -39,6 +40,7 @@ func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request)
 
 	messages, err := h.chatService.GetMessages(orderID, user.ID)
 	if err != nil {
+		log.Printf("[GetMessagesHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}

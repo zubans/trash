@@ -44,6 +44,27 @@
             <va-sidebar-item-title>{{ $t('app.settings') }}</va-sidebar-item-title>
           </va-sidebar-item-content>
         </va-sidebar-item>
+
+        <va-sidebar-item :active="currentRouteName === 'admin-shifts'" to="/admin/shifts">
+          <va-sidebar-item-content>
+            <va-icon name="schedule" />
+            <va-sidebar-item-title>{{ $t('app.activeShifts') }}</va-sidebar-item-title>
+          </va-sidebar-item-content>
+        </va-sidebar-item>
+
+        <va-sidebar-item :active="currentRouteName === 'admin-active-orders'" to="/admin/orders/active">
+          <va-sidebar-item-content>
+            <va-icon name="pending_actions" />
+            <va-sidebar-item-title>{{ $t('app.activeOrders') }}</va-sidebar-item-title>
+          </va-sidebar-item-content>
+        </va-sidebar-item>
+
+        <va-sidebar-item :active="currentRouteName === 'admin-completed-orders'" to="/admin/orders/completed">
+          <va-sidebar-item-content>
+            <va-icon name="check_circle" />
+            <va-sidebar-item-title>{{ $t('app.completedOrders') }}</va-sidebar-item-title>
+          </va-sidebar-item-content>
+        </va-sidebar-item>
       </va-sidebar>
 
       <main class="app-layout__main">

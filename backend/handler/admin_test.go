@@ -152,6 +152,18 @@ func (m *mockAdminRepository) TopUpUserBalance(userID, adminID uuid.UUID, amount
 	return nil
 }
 
+func (m *mockAdminRepository) GetActiveShifts() ([]*repository.AdminShift, error) {
+	return nil, nil
+}
+
+func (m *mockAdminRepository) GetActiveOrders() ([]*repository.AdminOrder, error) {
+	return nil, nil
+}
+
+func (m *mockAdminRepository) GetCompletedOrders() ([]*repository.AdminOrder, error) {
+	return nil, nil
+}
+
 // mockSettingsRepository implements repository.SettingsRepository.
 type mockSettingsRepository struct {
 	settings map[string]string

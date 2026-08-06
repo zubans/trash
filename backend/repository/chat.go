@@ -91,7 +91,7 @@ func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	}
 	defer rows.Close()
 
-	var messages []*Message
+	messages := make([]*Message, 0)
 	for rows.Next() {
 		var m Message
 		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.CreatedAt)

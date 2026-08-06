@@ -192,6 +192,21 @@ func (s *AdminService) GetTransactions() ([]*repository.Transaction, error) {
 	return s.adminRepo.GetTransactions()
 }
 
+// GetActiveShifts returns all currently active executor shifts.
+func (s *AdminService) GetActiveShifts() ([]*repository.AdminShift, error) {
+	return s.adminRepo.GetActiveShifts()
+}
+
+// GetActiveOrders returns customer orders that are still active (searching or assigned).
+func (s *AdminService) GetActiveOrders() ([]*repository.AdminOrder, error) {
+	return s.adminRepo.GetActiveOrders()
+}
+
+// GetCompletedOrders returns completed customer orders.
+func (s *AdminService) GetCompletedOrders() ([]*repository.AdminOrder, error) {
+	return s.adminRepo.GetCompletedOrders()
+}
+
 // GetProfile returns the authenticated user's profile including customer address.
 func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, error) {
 	user, err := s.userRepo.FindByID(userID)

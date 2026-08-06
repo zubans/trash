@@ -90,7 +90,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 
 // LoginHandler authenticates a user and returns a JWT.
 func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}

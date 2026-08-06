@@ -18,12 +18,13 @@ type OrderService struct {
 	settingsRepo    repository.SettingsRepository
 	userRepo        repository.UserRepository
 	shiftRepo       repository.ShiftRepository
+	chatRepo        repository.ChatRepository
 	geocoder        *Geocoder
 }
 
 // NewOrderService creates an OrderService.
-func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, geocoder *Geocoder) *OrderService {
-	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, geocoder: geocoder}
+func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, geocoder *Geocoder) *OrderService {
+	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, geocoder: geocoder}
 }
 
 // CreateOrderRequest contains the data needed to create an order.
@@ -145,6 +146,14 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff
 	// Persist the order first; financial operations are wrapped in a transaction.
 	if err := s.orderRepo.Create(order); err != nil {
 		return nil, err
+	}
+
+	// Create the chat room for the new order. Non-fatal if it fails.
+	if s.chatRepo != nil {
+		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
+			// Log and continue; order is already created.
+			_ = err
+		}
 	}
 
 	if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
@@ -342,6 +351,15 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 	if err := s.orderRepo.Create(order); err != nil {
 		return nil, err
 	}
+
+	// Create the chat room for the new order. Non-fatal if it fails.
+	if s.chatRepo != nil {
+		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
+			// Log and continue; order is already created.
+			_ = err
+		}
+	}
+
 	return order, nil
 }
 

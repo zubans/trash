@@ -1,4 +1,4 @@
-плpackage main
+package main
 
 import (
 	"database/sql"
@@ -60,7 +60,7 @@ func main() {
 	geocoder := service.NewGeocoder(db)
 	authService := service.NewAuthService(userRepo, geocoder)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
-	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, geocoder)
+	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
@@ -97,6 +97,7 @@ func main() {
 	r.Get("/health", ph.HealthHandler)
 	r.Post("/register", ph.RegisterHandler)
 	r.Post("/login", ph.LoginHandler)
+	r.Get("/login", ph.LoginHandler)
 	r.Get("/geo/geocode", gh.Geocode)
 	r.Get("/geo/autocomplete", gh.Autocomplete)
 	r.Get("/settings", ah.GetPublicSettingsHandler)
@@ -113,6 +114,12 @@ func main() {
 		r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
 		r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)
 		r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
+	})
+
+	// Authenticated shared routes (customer + executor)
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware.RequireAuth)
+		r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 		r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 		r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
 		r.Post("/logout", ah.LogoutHandler)
@@ -147,6 +154,9 @@ func main() {
 		r.Get("/admin/transactions", ah.GetTransactionsHandler)
 		r.Get("/admin/settings", ah.GetSettingsHandler)
 		r.Post("/admin/settings", ah.UpdateSettingsHandler)
+		r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
+		r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
+		r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
 	})
 
 	// Register pprof handlers for debugging (only exposed locally)

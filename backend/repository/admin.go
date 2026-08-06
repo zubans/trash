@@ -33,6 +33,19 @@ type Transaction struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+// AdminShift extends Shift with executor phone for admin views.
+type AdminShift struct {
+	Shift
+	ExecutorPhone string `json:"executor_phone"`
+}
+
+// AdminOrder extends Order with customer/executor phone for admin views.
+type AdminOrder struct {
+	Order
+	CustomerPhone string `json:"customer_phone"`
+	ExecutorPhone string `json:"executor_phone,omitempty"`
+}
+
 // AdminRepository defines admin database operations.
 type AdminRepository interface {
 	GetUsers(page, limit int, role, status, search string) ([]*User, int, error)
@@ -43,6 +56,9 @@ type AdminRepository interface {
 	RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error
 	TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error
 	GetTransactions() ([]*Transaction, error)
+	GetActiveShifts() ([]*AdminShift, error)
+	GetActiveOrders() ([]*AdminOrder, error)
+	GetCompletedOrders() ([]*AdminOrder, error)
 }
 
 type adminRepo struct {
@@ -310,4 +326,104 @@ func (r *adminRepo) GetTransactions() ([]*Transaction, error) {
 		txs = append(txs, &tx)
 	}
 	return txs, nil
+}
+
+func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
+	query := `
+		SELECT s.id, s.executor_id, s.duration_hours, s.started_at, s.planned_end_at, s.actual_end_at, s.status, s.fine_amount,
+		       u.phone
+		FROM shifts s
+		JOIN users u ON s.executor_id = u.id
+		WHERE s.status = $1
+		ORDER BY s.started_at DESC`
+
+	rows, err := r.db.Query(query, ShiftStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shifts []*AdminShift
+	for rows.Next() {
+		var s AdminShift
+		err := rows.Scan(
+			&s.ID, &s.ExecutorID, &s.DurationHours, &s.StartedAt, &s.PlannedEndAt, &s.ActualEndAt, &s.Status, &s.FineAmount,
+			&s.ExecutorPhone,
+		)
+		if err != nil {
+			return nil, err
+		}
+		shifts = append(shifts, &s)
+	}
+	return shifts, rows.Err()
+}
+
+func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
+	query := `
+		SELECT o.id, o.customer_id, o.executor_id, o.volume_type, o.speed_tariff, o.status,
+		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
+		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
+		       cu.phone, eu.phone
+		FROM orders o
+		JOIN users cu ON o.customer_id = cu.id
+		LEFT JOIN users eu ON o.executor_id = eu.id
+		WHERE o.status IN ($1, $2)
+		ORDER BY o.created_at DESC`
+
+	rows, err := r.db.Query(query, OrderStatusSearching, OrderStatusAssigned)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*AdminOrder
+	for rows.Next() {
+		var o AdminOrder
+		err := rows.Scan(
+			&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
+			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
+			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
+			&o.CustomerPhone, &o.ExecutorPhone,
+		)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &o)
+	}
+	return orders, rows.Err()
+}
+
+func (r *adminRepo) GetCompletedOrders() ([]*AdminOrder, error) {
+	query := `
+		SELECT o.id, o.customer_id, o.executor_id, o.volume_type, o.speed_tariff, o.status,
+		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
+		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
+		       cu.phone, eu.phone
+		FROM orders o
+		JOIN users cu ON o.customer_id = cu.id
+		LEFT JOIN users eu ON o.executor_id = eu.id
+		WHERE o.status = $1
+		ORDER BY o.completed_at DESC, o.created_at DESC`
+
+	rows, err := r.db.Query(query, OrderStatusCompleted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*AdminOrder
+	for rows.Next() {
+		var o AdminOrder
+		err := rows.Scan(
+			&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
+			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
+			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
+			&o.CustomerPhone, &o.ExecutorPhone,
+		)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &o)
+	}
+	return orders, rows.Err()
 }

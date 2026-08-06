@@ -37,6 +37,21 @@ const routes: Array<RouteRecordRaw> = [
         name: 'admin-settings',
         component: () => import('../pages/admin/SystemSettings.vue'),
       },
+      {
+        path: 'shifts',
+        name: 'admin-shifts',
+        component: () => import('../pages/admin/ActiveShifts.vue'),
+      },
+      {
+        path: 'orders/active',
+        name: 'admin-active-orders',
+        component: () => import('../pages/admin/ActiveOrders.vue'),
+      },
+      {
+        path: 'orders/completed',
+        name: 'admin-completed-orders',
+        component: () => import('../pages/admin/CompletedOrders.vue'),
+      },
     ],
   },
   {

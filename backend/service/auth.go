@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -15,20 +16,24 @@ import (
 	"healthlogin/backend/repository"
 )
 
-var addressRegex = regexp.MustCompile(`^Россия,\s*,\s*ул\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$`)
+var addressRegex = regexp.MustCompile(`^Россия,\s*([^,]+?),\s*([^,]+?),\s*д\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$`)
 
 // normalizeAddress validates and canonicalizes the pickup address.
-// Expected input: "Россия, Москва, ул.#### [кв. ###]" where # are digits.
-// The flat number is optional.
+// Expected input: "Россия, Город, Улица, д.#### [кв. ###]" where # are digits.
+// The flat number is optional. City and street can be any Russian city/street.
 func normalizeAddress(address string) (string, error) {
 	matches := addressRegex.FindStringSubmatch(address)
 	if matches == nil {
-		return "", errors.New("address must match format: Россия, Москва, ул.#### [кв. ###]")
+		return "", errors.New("address must match format: Россия, Город, Улица, д.#### [кв. ###]")
 	}
-	if matches[2] != "" {
-		return fmt.Sprintf("Россия, Москва, ул.%s кв. %s", matches[1], matches[2]), nil
+	city := strings.TrimSpace(matches[1])
+	road := strings.TrimSpace(matches[2])
+	house := matches[3]
+	flat := matches[4]
+	if flat != "" {
+		return fmt.Sprintf("Россия, %s, %s, д. %s кв. %s", city, road, house, flat), nil
 	}
-	return fmt.Sprintf("Россия, Москва, ул.%s", matches[1]), nil
+	return fmt.Sprintf("Россия, %s, %s, д. %s", city, road, house), nil
 }
 
 // AuthService handles user registration and authentication.

@@ -140,7 +140,7 @@
               color="info" 
               outline 
               size="small" 
-              @click="setCoordinates(55.7558, 37.6173)"
+              @click="setCoordinates(51.7916886, 36.1908417)"
               class="mr-2"
             >
               {{ $t('executor.insideGeofence') }}
@@ -149,7 +149,7 @@
               color="warning" 
               outline 
               size="small" 
-              @click="setCoordinates(56.0000, 38.0000)"
+              @click="setCoordinates(51.8500, 36.2500)"
             >
               {{ $t('executor.outsideGeofence') }}
             </va-button>

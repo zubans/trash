@@ -336,3 +336,36 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(profile)
 }
+
+// GetActiveShiftsHandler lists all active executor shifts.
+func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Request) {
+	shifts, err := h.adminService.GetActiveShifts()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(shifts)
+}
+
+// GetActiveOrdersHandler lists active customer orders (searching or assigned).
+func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Request) {
+	orders, err := h.adminService.GetActiveOrders()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(orders)
+}
+
+// GetCompletedOrdersHandler lists completed customer orders.
+func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
+	orders, err := h.adminService.GetCompletedOrders()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(orders)
+}

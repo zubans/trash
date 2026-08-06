@@ -231,7 +231,7 @@ func TestOrderService_CalculatePrice(t *testing.T) {
 			"asap_tariff_coeff":     "8.0",
 		},
 	}
-	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{}, nil)
+	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{}, nil, nil)
 
 	// Case 1: Standard Regular
 	p, err := srv.CalculatePrice("STANDARD", "REGULAR")
@@ -260,7 +260,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 	}
 	orderRepo := &mockOrderRepo{}
 	userRepo := newMockUserRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, userRepo, &mockShiftRepo{}, nil)
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, userRepo, &mockShiftRepo{}, nil, nil)
 
 	customerID := uuid.New()
 	order, err := srv.CreateOrder(customerID, "STANDARD", "REGULAR", "55.7558,37.6173", nil, nil)
@@ -287,7 +287,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 		},
 	}
 	orderRepo := &mockOrderRepo{}
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{}, nil)
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &mockShiftRepo{}, nil, nil)
 
 	customerID := uuid.New()
 	order, _ := srv.CreateOrder(customerID, "STANDARD", "REGULAR", "", nil, nil)
@@ -315,7 +315,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 
 func TestOrderService_CreateConstructionOrder(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &mockShiftRepo{}, nil)
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &mockShiftRepo{}, nil, nil)
 
 	customerID := uuid.New()
 	_, err := srv.CreateConstructionOrder(customerID, "", "", nil, nil)

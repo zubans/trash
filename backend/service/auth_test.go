@@ -109,7 +109,7 @@ func TestRegister_Success(t *testing.T) {
 	phone := "+79001234567"
 	password := "strong-password"
 
-	user, err := svc.Register(phone, password, "Россия, Москва, ул.1234 кв. 567")
+	user, err := svc.Register(phone, password, "Россия, Москва, Тверская улица, д. 1234 кв. 567")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,9 +133,23 @@ func TestRegister_Success(t *testing.T) {
 	}
 }
 
+func TestRegister_Success_Kursk(t *testing.T) {
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	phone := "+79001234568"
+	password := "strong-password"
+
+	user, err := svc.Register(phone, password, "Россия, Курск, улица Генерала Григорова, д. 40 кв. 12")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if user.Phone != phone {
+		t.Errorf("phone mismatch: got %q want %q", user.Phone, phone)
+	}
+}
+
 func TestRegister_EmptyPhone(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
-	_, err := svc.Register("", "password", "Россия, Москва, ул.1234 кв. 567")
+	_, err := svc.Register("", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
 	}
@@ -146,7 +160,7 @@ func TestRegister_EmptyPhone(t *testing.T) {
 
 func TestRegister_EmptyPassword(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
-	_, err := svc.Register("+79001234567", "", "Россия, Москва, ул.1234 кв. 567")
+	_, err := svc.Register("+79001234567", "", "Россия, Москва, Тверская улица, д. 1234 кв. 567")
 	if err == nil {
 		t.Fatal("expected error for empty password")
 	}
@@ -157,11 +171,11 @@ func TestRegister_UserAlreadyExists(t *testing.T) {
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 	phone := "+79001234567"
 
-	if _, err := svc.Register(phone, "password-one", "Россия, Москва, ул.1234 кв. 567"); err != nil {
+	if _, err := svc.Register(phone, "password-one", "Россия, Москва, Тверская улица, д. 1234 кв. 567"); err != nil {
 		t.Fatalf("first registration failed: %v", err)
 	}
 
-	_, err := svc.Register(phone, "password-two", "Россия, Москва, ул.1234 кв. 567")
+	_, err := svc.Register(phone, "password-two", "Россия, Москва, Тверская улица, д. 1234 кв. 567")
 	if err == nil {
 		t.Fatal("expected error when registering existing user")
 	}
@@ -175,7 +189,7 @@ func TestRegister_FindByPhoneError(t *testing.T) {
 	repo.findErr = errors.New("db is down")
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 
-	_, err := svc.Register("+79001234567", "password", "Россия, Москва, ул.1234 кв. 567")
+	_, err := svc.Register("+79001234567", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567")
 	if err == nil {
 		t.Fatal("expected error from repository")
 	}
@@ -189,7 +203,7 @@ func TestRegister_CreateError(t *testing.T) {
 	repo.createErr = errors.New("insert failed")
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 
-	_, err := svc.Register("+79001234567", "password", "Россия, Москва, ул.1234 кв. 567")
+	_, err := svc.Register("+79001234567", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567")
 	if err == nil {
 		t.Fatal("expected error from Create")
 	}
@@ -204,7 +218,7 @@ func TestAuthenticate_Success(t *testing.T) {
 	phone := "+79001234567"
 	password := "correct-password"
 
-	if _, err := svc.Register(phone, password, "Россия, Москва, ул.1234 кв. 567"); err != nil {
+	if _, err := svc.Register(phone, password, "Россия, Москва, Тверская улица, д. 1234 кв. 567"); err != nil {
 		t.Fatalf("registration failed: %v", err)
 	}
 
@@ -249,7 +263,7 @@ func TestAuthenticate_WrongPassword(t *testing.T) {
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
 	phone := "+79001234567"
 
-	if _, err := svc.Register(phone, "correct-password", "Россия, Москва, ул.1234 кв. 567"); err != nil {
+	if _, err := svc.Register(phone, "correct-password", "Россия, Москва, Тверская улица, д. 1234 кв. 567"); err != nil {
 		t.Fatalf("registration failed: %v", err)
 	}
 
