@@ -130,6 +130,7 @@ func main() {
 		r.Use(authMiddleware.RequireAuth)
 		r.Post("/executor/shifts", sh.StartShiftHandler)
 		r.Post("/executor/shifts/end", sh.EndShiftHandler)
+		r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 		r.Post("/executor/shifts/location", sh.UploadLocationHandler)
 		r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
 		r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)

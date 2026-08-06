@@ -53,7 +53,34 @@
             <va-icon name="schedule" class="mr-2" /> {{ $t('executor.shiftStatus') }}
           </h3>
 
-          <div v-if="!activeShift" class="no-shift-container">
+          <div v-if="!activeShift || activeShift.status !== 'ACTIVE'" class="no-shift-container">
+            <div v-if="activeShift" class="info-list mb-4">
+              <div class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.shiftStatus') }}</span>
+                <span>
+                  <va-badge :color="getShiftStatusColor(activeShift.status)" class="text-uppercase">
+                    {{ activeShift.status }}
+                  </va-badge>
+                </span>
+              </div>
+              <div class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.duration') }}</span>
+                <span class="info-val">{{ activeShift.duration_hours }} hours</span>
+              </div>
+              <div class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.startedAt') }}</span>
+                <span class="info-val text-xs">{{ formatDate(activeShift.started_at) }}</span>
+              </div>
+              <div class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.actualEnd') }}</span>
+                <span class="info-val text-xs">{{ formatDate(activeShift.actual_end_at) }}</span>
+              </div>
+              <div v-if="activeShift.fine_amount > 0" class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.fine') }}</span>
+                <span class="info-val text-xs">${{ Number(activeShift.fine_amount).toFixed(2) }}</span>
+              </div>
+            </div>
+
             <p class="text-secondary text-sm mb-4">
               {{ $t('executor.noActiveShift') }}
             </p>
@@ -93,10 +120,33 @@
                 <span class="info-label">{{ $t('executor.plannedEnd') }}</span>
                 <span class="info-val text-xs">{{ formatDate(activeShift.planned_end_at) }}</span>
               </div>
+              <div v-if="activeShift.actual_end_at" class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.actualEnd') }}</span>
+                <span class="info-val text-xs">{{ formatDate(activeShift.actual_end_at) }}</span>
+              </div>
+              <div v-if="activeShift.status === 'ACTIVE'" class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.elapsed') }}</span>
+                <span class="info-val text-xs">{{ formatDuration(activeShift.started_at) }}</span>
+              </div>
+              <div v-if="activeShift.fine_amount > 0" class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.fine') || 'Штраф' }}</span>
+                <span class="info-val text-xs">${{ Number(activeShift.fine_amount).toFixed(2) }}</span>
+              </div>
             </div>
 
+            <va-button
+              v-if="activeShift.status === 'ACTIVE'"
+              color="warning"
+              block
+              :loading="endingShiftEarly"
+              class="mb-3"
+              @click="earlyEndShift"
+            >
+              {{ $t('executor.endShiftEarly') }}
+            </va-button>
+
             <va-alert v-if="activeShift.status === 'PENALIZED'" color="danger" class="mb-0">
-              {{ $t('executor.shiftPenalized') }}
+              {{ activeShift.actual_end_at ? $t('executor.shiftEndedEarly', { amount: '$' + Number(activeShift.fine_amount).toFixed(2) }) : $t('executor.shiftPenalized') }}
             </va-alert>
           </div>
         </va-card>
@@ -105,7 +155,7 @@
       <!-- Right Column: GPS Simulator, Assigned Orders, & Auctions Bidding -->
       <div class="col-md-7">
         <!-- Telemetry Simulator -->
-        <va-card v-if="activeShift" class="p-4 mb-4 shadow-card">
+        <va-card v-if="activeShift && activeShift.status === 'ACTIVE'" class="p-4 mb-4 shadow-card">
           <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
             <va-icon name="gps_fixed" class="mr-2" /> {{ $t('executor.gpsTelemetrySimulator') }}
           </h3>
@@ -334,7 +384,7 @@
               </div>
 
               <!-- Place bid form -->
-              <div class="bid-form mt-3 p-3 bg-light rounded" v-if="activeShift">
+              <div class="bid-form mt-3 p-3 bg-light rounded" v-if="activeShift && activeShift.status === 'ACTIVE'">
                 <h5 class="text-xs font-bold text-secondary mb-2">{{ $t('executor.offerYourPrice') }}</h5>
                 <va-form @submit.prevent="submitBid(order.id)" class="d-flex align-items-center">
                   <va-input
@@ -426,6 +476,8 @@ export default defineComponent({
     const shiftDuration = ref(1)
     const durationOptions = [1, 3, 5]
     const startingShift = ref(false)
+    const endingShiftEarly = ref(false)
+    const earlyExitPenalty = ref(50)
 
     // Location Simulator state
     const latInput = ref(55.7558)
@@ -518,6 +570,37 @@ export default defineComponent({
         console.error(err)
       } finally {
         startingShift.value = false
+      }
+    }
+
+    const fetchSettings = async () => {
+      try {
+        const response = await api.get('/settings')
+        if (response.data && response.data.shift_early_exit_penalty) {
+          earlyExitPenalty.value = Number(response.data.shift_early_exit_penalty)
+        }
+      } catch (err) {
+        console.error('Failed to fetch public settings:', err)
+      }
+    }
+
+    const earlyEndShift = async () => {
+      successMsg.value = ''
+      errorMsg.value = ''
+      const confirmed = confirm(t('executor.endShiftEarlyConfirm', { amount: '$' + Number(earlyExitPenalty.value).toFixed(2) }))
+      if (!confirmed) return
+
+      endingShiftEarly.value = true
+      try {
+        const response = await api.post('/executor/shifts/early-end')
+        activeShift.value = response.data
+        successMsg.value = t('executor.shiftEndedEarly', { amount: '$' + Number(activeShift.value.fine_amount).toFixed(2) })
+        await fetchProfile()
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || t('executor.errorShiftStarted')
+        console.error(err)
+      } finally {
+        endingShiftEarly.value = false
       }
     }
 
@@ -714,6 +797,16 @@ export default defineComponent({
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
+    const formatDuration = (dateStr: string) => {
+      if (!dateStr) return ''
+      const start = new Date(dateStr).getTime()
+      const diff = Date.now() - start
+      if (diff < 0) return ''
+      const hours = Math.floor(diff / 3600000)
+      const minutes = Math.floor((diff % 3600000) / 60000)
+      return `${hours}h ${minutes}m`
+    }
+
     const handleLogout = async () => {
       try {
         await api.post('/logout')
@@ -729,6 +822,7 @@ export default defineComponent({
 
     onMounted(() => {
       fetchProfile()
+      fetchSettings()
       fetchActiveShift()
       fetchAssignedOrders()
       fetchAvailableOrders()
@@ -754,6 +848,8 @@ export default defineComponent({
       shiftDuration,
       durationOptions,
       startingShift,
+      endingShiftEarly,
+      earlyExitPenalty,
       latInput,
       lonInput,
       sendingLocation,
@@ -774,6 +870,7 @@ export default defineComponent({
       successMsg,
       errorMsg,
       startShift,
+      earlyEndShift,
       setCoordinates,
       sendLocation,
       submitBid,
@@ -783,6 +880,7 @@ export default defineComponent({
       getShiftStatusColor,
       formatDate,
       formatTime,
+      formatDuration,
       handleLogout,
     }
   },

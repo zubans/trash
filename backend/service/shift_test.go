@@ -90,7 +90,51 @@ func (m *mockShiftRepo) End(shiftID uuid.UUID) error {
 }
 
 func (m *mockShiftRepo) Penalize(shiftID uuid.UUID, fine float64) error {
-	return m.UpdateShiftStatus(shiftID, string(repository.ShiftStatusPenalized))
+	for _, s := range m.shifts {
+		if s.ID == shiftID {
+			s.Status = repository.ShiftStatusPenalized
+			s.FineAmount += fine
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
+func (m *mockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine float64) error {
+	for _, s := range m.shifts {
+		if s.ID == shiftID {
+			now := time.Now()
+			s.Status = repository.ShiftStatusPenalized
+			s.ActualEndAt = &now
+			s.FineAmount += fine
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
+func (m *mockShiftRepo) GetShiftByID(shiftID uuid.UUID) (*repository.Shift, error) {
+	for _, s := range m.shifts {
+		if s.ID == shiftID {
+			return s, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
+func (m *mockShiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*repository.Shift, error) {
+	var last *repository.Shift
+	for _, s := range m.shifts {
+		if s.ExecutorID == executorID {
+			if last == nil || s.StartedAt.After(last.StartedAt) {
+				last = s
+			}
+		}
+	}
+	if last == nil {
+		return nil, errors.New("not found")
+	}
+	return last, nil
 }
 
 func (m *mockShiftRepo) SaveGPSLog(log *repository.GPSLog) error {
@@ -221,5 +265,34 @@ func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 	}
 	if shift.Status != repository.ShiftStatusPenalized {
 		t.Errorf("expected shift status PENALIZED, got %s", shift.Status)
+	}
+}
+
+func TestShiftService_EarlyEnd(t *testing.T) {
+	repo := &mockShiftRepo{}
+	txRepo := &mockShiftTransactionRepo{}
+	srv := NewShiftService(repo, nil, txRepo, nil, nil)
+
+	executorID := uuid.New()
+	shift, err := srv.StartShift(executorID, 3)
+	if err != nil {
+		t.Fatalf("unexpected error starting shift: %v", err)
+	}
+
+	ended, err := srv.EarlyEnd(executorID)
+	if err != nil {
+		t.Fatalf("unexpected error ending shift early: %v", err)
+	}
+	if ended.Status != repository.ShiftStatusPenalized {
+		t.Errorf("expected status PENALIZED, got %s", ended.Status)
+	}
+	if ended.ActualEndAt == nil {
+		t.Error("expected actual_end_at to be set")
+	}
+	if ended.FineAmount != 50.0 {
+		t.Errorf("expected fine amount 50.0, got %f", ended.FineAmount)
+	}
+	if shift.Status != repository.ShiftStatusPenalized {
+		t.Errorf("expected original shift status PENALIZED, got %s", shift.Status)
 	}
 }

@@ -79,6 +79,25 @@ func (h *ShiftHandler) EndShift(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// EarlyEndShift handles POST /executor/shifts/early-end.
+// It ends the active shift before its planned time and charges a penalty.
+func (h *ShiftHandler) EarlyEndShift(w http.ResponseWriter, r *http.Request) {
+	user := shiftUserFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	shift, err := h.shiftService.EarlyEnd(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(shift)
+}
+
 // RecordLocation handles POST /executor/shifts/location.
 func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
@@ -109,7 +128,7 @@ func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	shift, err := h.shiftService.GetActive(user.ID)
+	shift, err := h.shiftService.GetCurrent(user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -120,6 +139,11 @@ func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // Alias method names expected by main.go.
-func (h *ShiftHandler) StartShiftHandler(w http.ResponseWriter, r *http.Request)     { h.StartShift(w, r) }
-func (h *ShiftHandler) EndShiftHandler(w http.ResponseWriter, r *http.Request)       { h.EndShift(w, r) }
-func (h *ShiftHandler) UploadLocationHandler(w http.ResponseWriter, r *http.Request) { h.RecordLocation(w, r) }
+func (h *ShiftHandler) StartShiftHandler(w http.ResponseWriter, r *http.Request) { h.StartShift(w, r) }
+func (h *ShiftHandler) EndShiftHandler(w http.ResponseWriter, r *http.Request)   { h.EndShift(w, r) }
+func (h *ShiftHandler) EarlyEndShiftHandler(w http.ResponseWriter, r *http.Request) {
+	h.EarlyEndShift(w, r)
+}
+func (h *ShiftHandler) UploadLocationHandler(w http.ResponseWriter, r *http.Request) {
+	h.RecordLocation(w, r)
+}

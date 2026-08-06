@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -52,6 +53,17 @@ func (s *ShiftService) GetActive(executorID uuid.UUID) (*repository.Shift, error
 	return s.shiftRepo.GetActiveShift(executorID)
 }
 
+// GetCurrent returns the active shift, or the most recent shift if no active
+// shift exists. This is used by the executor dashboard to always display
+// current/last shift status.
+func (s *ShiftService) GetCurrent(executorID uuid.UUID) (*repository.Shift, error) {
+	shift, err := s.shiftRepo.GetActiveShift(executorID)
+	if err == nil {
+		return shift, nil
+	}
+	return s.shiftRepo.GetLastShiftByExecutor(executorID)
+}
+
 // End terminates the active shift for an executor.
 func (s *ShiftService) End(executorID uuid.UUID) error {
 	shift, err := s.shiftRepo.GetActiveShift(executorID)
@@ -61,20 +73,72 @@ func (s *ShiftService) End(executorID uuid.UUID) error {
 	return s.shiftRepo.UpdateShiftStatus(shift.ID, string(repository.ShiftStatusCompleted))
 }
 
+// EarlyEnd terminates the active shift before its planned end time and charges
+// a penalty configured in system_settings (default 50).
+func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error) {
+	shift, err := s.shiftRepo.GetActiveShift(executorID)
+	if err != nil {
+		return nil, errors.New("no active shift")
+	}
+
+	fine := s.earlyExitPenaltyAmount()
+
+	if s.transactionRepo != nil {
+		if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+			if err := s.transactionRepo.UpdateBalance(tx, executorID, -fine); err != nil {
+				return err
+			}
+			return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+				UserID: executorID,
+				Type:   string(repository.TransactionTypeFine),
+				Amount: fine,
+			})
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := s.shiftRepo.EarlyEnd(shift.ID, fine); err != nil {
+		return nil, err
+	}
+
+	// Return the updated shift for the response.
+	updated, err := s.shiftRepo.GetShiftByID(shift.ID)
+	if err != nil {
+		// Fallback to the original shift with the changes applied in memory.
+		now := time.Now()
+		shift.Status = repository.ShiftStatusPenalized
+		shift.ActualEndAt = &now
+		shift.FineAmount += fine
+		return shift, nil
+	}
+	return updated, nil
+}
+
 func (s *ShiftService) geofenceFineAmount() float64 {
+	return s.settingsFloat("geofence_fine_amount", 500.0)
+}
+
+// earlyExitPenaltyAmount returns the fine charged when an executor ends a
+// shift before its planned end time.
+func (s *ShiftService) earlyExitPenaltyAmount() float64 {
+	return s.settingsFloat("shift_early_exit_penalty", 50.0)
+}
+
+func (s *ShiftService) settingsFloat(key string, defaultValue float64) float64 {
 	if s.settingsRepo == nil {
-		return 500.0
+		return defaultValue
 	}
 	settings, err := s.settingsRepo.GetSettings()
 	if err != nil {
-		return 500.0
+		return defaultValue
 	}
-	if v, ok := settings["geofence_fine_amount"]; ok {
+	if v, ok := settings[key]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			return f
 		}
 	}
-	return 500.0
+	return defaultValue
 }
 
 // RecordLocation stores a GPS point, checks geofence compliance and penalizes

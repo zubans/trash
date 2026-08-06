@@ -19,14 +19,14 @@ const (
 
 // Shift represents an executor work shift.
 type Shift struct {
-	ID            uuid.UUID
-	ExecutorID    uuid.UUID
-	DurationHours int
-	StartedAt     time.Time
-	PlannedEndAt  time.Time
-	ActualEndAt   *time.Time
-	Status        ShiftStatus
-	FineAmount    float64
+	ID            uuid.UUID   `json:"id"`
+	ExecutorID    uuid.UUID   `json:"executor_id"`
+	DurationHours int         `json:"duration_hours"`
+	StartedAt     time.Time   `json:"started_at"`
+	PlannedEndAt  time.Time   `json:"planned_end_at"`
+	ActualEndAt   *time.Time  `json:"actual_end_at"`
+	Status        ShiftStatus `json:"status"`
+	FineAmount    float64     `json:"fine_amount"`
 }
 
 // GPSLog represents a single recorded coordinate.
@@ -44,10 +44,19 @@ type ShiftRepository interface {
 	Create(shift *Shift) error
 	FindActiveByExecutor(executorID uuid.UUID) (*Shift, error)
 	GetActiveShift(executorID uuid.UUID) (*Shift, error)
+	GetShiftByID(shiftID uuid.UUID) (*Shift, error)
 	GetActiveShifts() ([]*Shift, error)
 	End(shiftID uuid.UUID) error
 	Penalize(shiftID uuid.UUID, fine float64) error
 	SaveGPSLog(log *GPSLog) error
+
+	// EarlyEnd terminates a shift before its planned end time, records the
+	// penalty amount and marks the shift as PENALIZED.
+	EarlyEnd(shiftID uuid.UUID, fine float64) error
+
+	// GetLastShiftByExecutor returns the most recent shift for an executor,
+	// regardless of status (active, completed or penalized).
+	GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error)
 
 	// Legacy/test-compatible methods
 	StartShift(executorID uuid.UUID, durationHours int) (*Shift, error)
@@ -109,6 +118,19 @@ func (r *shiftRepo) GetActiveShift(executorID uuid.UUID) (*Shift, error) {
 	return r.FindActiveByExecutor(executorID)
 }
 
+func (r *shiftRepo) GetShiftByID(shiftID uuid.UUID) (*Shift, error) {
+	row := r.db.QueryRow(
+		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
+		 FROM shifts WHERE id = $1`,
+		shiftID,
+	)
+	s, err := scanShiftRow(row)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 func (r *shiftRepo) GetActiveShifts() ([]*Shift, error) {
 	rows, err := r.db.Query(
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
@@ -145,6 +167,32 @@ func (r *shiftRepo) Penalize(shiftID uuid.UUID, fine float64) error {
 		ShiftStatusPenalized, fine, shiftID,
 	)
 	return err
+}
+
+// EarlyEnd terminates a shift before its planned end time and records the fine.
+func (r *shiftRepo) EarlyEnd(shiftID uuid.UUID, fine float64) error {
+	_, err := r.db.Exec(
+		`UPDATE shifts SET status = $1, actual_end_at = now(), fine_amount = fine_amount + $2 WHERE id = $3`,
+		ShiftStatusPenalized, fine, shiftID,
+	)
+	return err
+}
+
+// GetLastShiftByExecutor returns the most recent shift for an executor,
+// regardless of status.
+func (r *shiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error) {
+	row := r.db.QueryRow(
+		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
+		 FROM shifts WHERE executor_id = $1
+		 ORDER BY started_at DESC
+		 LIMIT 1`,
+		executorID,
+	)
+	s, err := scanShiftRow(row)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 func (r *shiftRepo) SaveGPSLog(log *GPSLog) error {
