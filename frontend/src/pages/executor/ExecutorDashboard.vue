@@ -457,6 +457,7 @@
 import { defineComponent, ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Geolocation } from '@capacitor/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 
@@ -480,8 +481,9 @@ export default defineComponent({
     const earlyExitPenalty = ref(50)
 
     // Location Simulator state
-    const latInput = ref(55.7558)
-    const lonInput = ref(37.6173)
+    // Default coordinates: Kursk, Generala Grigorova st., 38 (approx.)
+    const latInput = ref(51.7305)
+    const lonInput = ref(36.1936)
     const sendingLocation = ref(false)
     const telemetryLogs = ref<{time: string, lat: number, lon: number, isInside: boolean}[]>([])
 
@@ -643,21 +645,48 @@ export default defineComponent({
       }
     }
 
-    const getCurrentLocation = () => {
-      if (!navigator.geolocation) {
-        errorMsg.value = 'Geolocation is not supported by your device'
-        return
+    const requestLocationPermission = async () => {
+      try {
+        const permission = await Geolocation.requestPermissions()
+        return permission.location === 'granted' || permission.location === 'prompt'
+      } catch (err) {
+        console.error('Failed to request location permission:', err)
+        return false
       }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          latInput.value = position.coords.latitude
-          lonInput.value = position.coords.longitude
-          successMsg.value = `Location updated: ${latInput.value.toFixed(5)}, ${lonInput.value.toFixed(5)}`
-        },
-        (err) => {
-          errorMsg.value = `Failed to get location: ${err.message}`
+    }
+
+    const getCurrentLocation = async () => {
+      try {
+        const permission = await Geolocation.requestPermissions()
+        if (permission.location !== 'granted') {
+          errorMsg.value = 'Location permission is required for this feature'
+          return
         }
-      )
+
+        const position = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+        })
+        latInput.value = position.coords.latitude
+        lonInput.value = position.coords.longitude
+        successMsg.value = `Location updated: ${latInput.value.toFixed(5)}, ${lonInput.value.toFixed(5)}`
+      } catch (err: any) {
+        // Fallback to the browser API if the Capacitor plugin is unavailable.
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              latInput.value = position.coords.latitude
+              lonInput.value = position.coords.longitude
+              successMsg.value = `Location updated: ${latInput.value.toFixed(5)}, ${lonInput.value.toFixed(5)}`
+            },
+            (browserErr) => {
+              errorMsg.value = `Failed to get location: ${browserErr.message}`
+            }
+          )
+        } else {
+          errorMsg.value = err.message || 'Failed to get location'
+        }
+      }
     }
 
     const findNearbyOrders = async () => {
@@ -826,6 +855,13 @@ export default defineComponent({
       fetchActiveShift()
       fetchAssignedOrders()
       fetchAvailableOrders()
+
+      // Request location permission on the executor dashboard so the app can
+      // update GPS coordinates and search for nearby orders.
+      requestLocationPermission().catch((err) => {
+        console.error('Location permission request failed:', err)
+      })
+
       intervalId = setInterval(() => {
         fetchProfile()
         fetchActiveShift()

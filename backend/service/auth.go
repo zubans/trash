@@ -87,15 +87,20 @@ func (s *AuthService) RegisterWithCoordinates(phone, password, address, role str
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
-	if address == "" {
-		return nil, errors.New("address is required")
-	}
 	if !validRegistrationRole(role) {
 		return nil, errors.New("invalid role: must be CUSTOMER or EXECUTOR")
 	}
-	normalizedAddress, err := normalizeAddress(address)
-	if err != nil {
-		return nil, err
+	if role == "CUSTOMER" && address == "" {
+		return nil, errors.New("address is required")
+	}
+
+	var normalizedAddress string
+	if address != "" {
+		var err error
+		normalizedAddress, err = normalizeAddress(address)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	existing, err := s.repo.FindByPhone(phone)

@@ -143,7 +143,7 @@ func (m *mockShiftRepo) SaveGPSLog(log *repository.GPSLog) error {
 
 func TestShiftService_StartShift(t *testing.T) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, nil, nil, nil, nil)
+	srv := NewShiftService(repo, nil, nil, nil, nil, nil)
 
 	executorID := uuid.New()
 
@@ -240,7 +240,7 @@ func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 			RadiusMeters:    &radius,
 		},
 	}
-	srv := NewShiftService(repo, geoRepo, &mockShiftTransactionRepo{}, nil, nil)
+	srv := NewShiftService(repo, geoRepo, &mockShiftTransactionRepo{}, nil, nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(executorID, 1)
@@ -271,7 +271,7 @@ func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 func TestShiftService_EarlyEnd(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
-	srv := NewShiftService(repo, nil, txRepo, nil, nil)
+	srv := NewShiftService(repo, nil, txRepo, nil, nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(executorID, 3)
@@ -291,6 +291,56 @@ func TestShiftService_EarlyEnd(t *testing.T) {
 	}
 	if ended.FineAmount != 50.0 {
 		t.Errorf("expected fine amount 50.0, got %f", ended.FineAmount)
+	}
+	if shift.Status != repository.ShiftStatusPenalized {
+		t.Errorf("expected original shift status PENALIZED, got %s", shift.Status)
+	}
+}
+
+func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
+	repo := &mockShiftRepo{}
+	txRepo := &mockShiftTransactionRepo{}
+	orderRepo := &mockOrderRepo{}
+	srv := NewShiftService(repo, nil, txRepo, nil, orderRepo, nil)
+
+	executorID := uuid.New()
+	customerID := uuid.New()
+	orderID := uuid.New()
+
+	shift, err := srv.StartShift(executorID, 3)
+	if err != nil {
+		t.Fatalf("unexpected error starting shift: %v", err)
+	}
+
+	orderRepo.orders = append(orderRepo.orders, &repository.Order{
+		ID:         orderID,
+		CustomerID: customerID,
+		ExecutorID: &executorID,
+		Status:     repository.OrderStatusAssigned,
+		HoldAmount: 300.0,
+	})
+
+	ended, err := srv.EarlyEnd(executorID)
+	if err != nil {
+		t.Fatalf("unexpected error ending shift early with order: %v", err)
+	}
+
+	// Double penalty (50 * 2) + order cost (300) = 400
+	expectedFine := 400.0
+	if ended.FineAmount != expectedFine {
+		t.Errorf("expected fine amount %f, got %f", expectedFine, ended.FineAmount)
+	}
+	if ended.Status != repository.ShiftStatusPenalized {
+		t.Errorf("expected status PENALIZED, got %s", ended.Status)
+	}
+
+	// Assigned order should be canceled.
+	updatedOrder, err := orderRepo.GetOrderByID(orderID)
+	if err != nil {
+		t.Fatalf("unexpected error fetching order: %v", err)
+	}
+	if updatedOrder.Status != repository.OrderStatusCanceled {
+		t.Errorf("expected order status CANCELED, got %s", updatedOrder.Status)
 	}
 	if shift.Status != repository.ShiftStatusPenalized {
 		t.Errorf("expected original shift status PENALIZED, got %s", shift.Status)

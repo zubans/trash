@@ -78,7 +78,7 @@ func (m *mockOrderRepo) AssignOrder(orderID uuid.UUID, executorID uuid.UUID) err
 func (m *mockOrderRepo) GetExecutorAssignedOrders(executorID uuid.UUID) ([]*repository.Order, error) {
 	var assigned []*repository.Order
 	for _, o := range m.orders {
-		if o.ExecutorID != nil && *o.ExecutorID == executorID {
+		if o.ExecutorID != nil && *o.ExecutorID == executorID && o.Status == repository.OrderStatusAssigned {
 			assigned = append(assigned, o)
 		}
 	}

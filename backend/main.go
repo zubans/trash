@@ -61,7 +61,7 @@ func main() {
 	authService := service.NewAuthService(userRepo, geocoder)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, geocoder)
-	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, db)
+	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)

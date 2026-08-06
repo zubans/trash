@@ -18,12 +18,13 @@ type ShiftService struct {
 	geozoneRepo     repository.GeozoneRepository
 	transactionRepo repository.TransactionRepository
 	settingsRepo    repository.SettingsRepository
+	orderRepo       repository.OrderRepository
 	db              *sql.DB
 }
 
 // NewShiftService creates a ShiftService.
-func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, db *sql.DB) *ShiftService {
-	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, db: db}
+func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, db *sql.DB) *ShiftService {
+	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, orderRepo: orderRepo, db: db}
 }
 
 // StartShift begins a new shift for an executor.
@@ -74,31 +75,74 @@ func (s *ShiftService) End(executorID uuid.UUID) error {
 }
 
 // EarlyEnd terminates the active shift before its planned end time and charges
-// a penalty configured in system_settings (default 50).
+// a penalty configured in system_settings (default 50). If the executor has
+// assigned orders at the moment of early termination, each order is canceled,
+// the customer is refunded the held amount, and the executor is charged double
+// the penalty plus the total cost of those orders.
 func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error) {
 	shift, err := s.shiftRepo.GetActiveShift(executorID)
 	if err != nil {
 		return nil, errors.New("no active shift")
 	}
 
-	fine := s.earlyExitPenaltyAmount()
+	basePenalty := s.earlyExitPenaltyAmount()
+
+	var assignedOrders []repository.Order
+	if s.orderRepo != nil {
+		assignedOrders, err = s.orderRepo.FindAssignedByExecutor(executorID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	orderCost := 0.0
+	for _, o := range assignedOrders {
+		orderCost += o.HoldAmount
+	}
+
+	// With assigned orders the fine is doubled and includes the order cost.
+	var totalFine float64
+	if len(assignedOrders) > 0 {
+		totalFine = basePenalty*2 + orderCost
+	} else {
+		totalFine = basePenalty
+	}
 
 	if s.transactionRepo != nil {
 		if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-			if err := s.transactionRepo.UpdateBalance(tx, executorID, -fine); err != nil {
+			// Refund customers and cancel their orders first.
+			for _, o := range assignedOrders {
+				if err := s.transactionRepo.UpdateBalance(tx, o.CustomerID, o.HoldAmount); err != nil {
+					return err
+				}
+				if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+					UserID:  o.CustomerID,
+					OrderID: &o.ID,
+					Type:    string(repository.TransactionTypeRefund),
+					Amount:  o.HoldAmount,
+				}); err != nil {
+					return err
+				}
+				if err := s.orderRepo.Cancel(o.ID); err != nil {
+					return err
+				}
+			}
+
+			// Charge the executor.
+			if err := s.transactionRepo.UpdateBalance(tx, executorID, -totalFine); err != nil {
 				return err
 			}
 			return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
 				UserID: executorID,
 				Type:   string(repository.TransactionTypeFine),
-				Amount: fine,
+				Amount: totalFine,
 			})
 		}); err != nil {
 			return nil, err
 		}
 	}
 
-	if err := s.shiftRepo.EarlyEnd(shift.ID, fine); err != nil {
+	if err := s.shiftRepo.EarlyEnd(shift.ID, totalFine); err != nil {
 		return nil, err
 	}
 
@@ -109,7 +153,7 @@ func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error)
 		now := time.Now()
 		shift.Status = repository.ShiftStatusPenalized
 		shift.ActualEndAt = &now
-		shift.FineAmount += fine
+		shift.FineAmount += totalFine
 		return shift, nil
 	}
 	return updated, nil

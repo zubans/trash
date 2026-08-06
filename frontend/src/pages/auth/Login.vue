@@ -87,7 +87,7 @@
             </div>
           </div>
 
-          <div v-if="mode === 'register'" class="form-group mb-4 address-autocomplete">
+          <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-4 address-autocomplete">
             <label class="form-label">{{ $t('login.pickupAddress') }}</label>
             <div class="input-wrapper">
               <span class="material-icons input-icon">location_on</span>
@@ -115,7 +115,7 @@
             <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
           </div>
 
-          <div v-if="mode === 'register'" class="form-group mb-4">
+          <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-4">
             <label class="form-label">{{ $t('login.flatNumber') }}</label>
             <div class="input-wrapper">
               <span class="material-icons input-icon">apartment</span>
@@ -276,23 +276,27 @@ export default defineComponent({
           }
         } else {
           // Registration
-          let normalizedAddress: string
-          try {
-            normalizedAddress = normalizeAddress(address.value, flatNumber.value)
-          } catch (addrErr: any) {
-            error.value = addrErr.message || t('login.addressFormatError')
-            return
-          }
           const payload: any = {
             phone: phone.value,
             password: password.value,
-            address: normalizedAddress,
             role: role.value,
           }
-          if (selectedCoords.value) {
-            payload.lat = selectedCoords.value.lat
-            payload.lon = selectedCoords.value.lon
+
+          if (role.value === 'CUSTOMER') {
+            let normalizedAddress: string
+            try {
+              normalizedAddress = normalizeAddress(address.value, flatNumber.value)
+            } catch (addrErr: any) {
+              error.value = addrErr.message || t('login.addressFormatError')
+              return
+            }
+            payload.address = normalizedAddress
+            if (selectedCoords.value) {
+              payload.lat = selectedCoords.value.lat
+              payload.lon = selectedCoords.value.lon
+            }
           }
+
           await api.post('/register', payload)
           message.value = t('login.registrationSuccess')
           mode.value = 'login'
