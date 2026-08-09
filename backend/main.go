@@ -55,12 +55,14 @@ func main() {
 	transactionRepo := repository.NewTransactionRepository(db)
 	bidRepo := repository.NewBidRepository(db)
 	chatRepo := repository.NewChatRepository(db)
+	catalogRepo := repository.NewServiceCatalogRepository(db)
+	appReleaseRepo := repository.NewAppReleaseRepository(db)
 
 	// Services
 	geocoder := service.NewGeocoder(db)
 	authService := service.NewAuthService(userRepo, geocoder)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
-	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, geocoder)
+	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
@@ -87,6 +89,8 @@ func main() {
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
 	gh := handler.NewGeoHandler(geocoder)
+	sch := handler.NewServiceCatalogHandler(catalogRepo)
+	arh := handler.NewAppReleaseHandler(appReleaseRepo, "releases", getEnv("RELEASES_BASE_URL", ""))
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -101,6 +105,12 @@ func main() {
 	r.Get("/geo/geocode", gh.Geocode)
 	r.Get("/geo/autocomplete", gh.Autocomplete)
 	r.Get("/settings", ah.GetPublicSettingsHandler)
+	r.Get("/service-categories", sch.ListRootCategories)
+	r.Get("/service-categories/{id}/children", sch.ListChildren)
+	r.Get("/service-categories/{id}/variants", sch.ListCategoryVariants)
+	r.Get("/service-variants", sch.ListVariants)
+	r.Get("/service-variants/{id}", sch.GetVariant)
+	r.Get("/app/version", arh.GetVersionHandler)
 
 	// Authenticated customer routes
 	r.Group(func(r chi.Router) {
@@ -158,7 +168,16 @@ func main() {
 		r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
 		r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
 		r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
+		r.Get("/admin/service-nodes", sch.AdminListNodes)
+		r.Get("/admin/service-nodes/{id}", sch.AdminGetNode)
+		r.Post("/admin/service-nodes", sch.AdminCreateNode)
+		r.Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
+		r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
+		r.Post("/admin/app-releases", arh.UploadReleaseHandler)
 	})
+
+	// Serve release files directly when not behind nginx.
+	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {

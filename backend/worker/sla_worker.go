@@ -40,22 +40,21 @@ func (w *SLAWorker) Start(interval time.Duration) {
 }
 
 type overdueOrder struct {
-	ID          uuid.UUID
-	CustomerID  uuid.UUID
-	VolumeType  string
-	SpeedTariff string
-	HoldAmount  float64
+	ID               uuid.UUID
+	CustomerID       uuid.UUID
+	ServiceVariantID uuid.UUID
+	HoldAmount       float64
 }
 
 // CheckSLAOverdue scans for overdue orders and updates them.
 func (w *SLAWorker) CheckSLAOverdue() error {
 	query := `
-		SELECT id, customer_id, volume_type, speed_tariff, hold_amount 
+		SELECT id, customer_id, service_variant_id, hold_amount 
 		FROM orders 
 		WHERE status = 'ASSIGNED' 
 		  AND is_downgraded = FALSE 
 		  AND deadline_at < now() 
-		  AND speed_tariff IN ('ASAP', 'URGENT')`
+		  AND (is_urgent = TRUE OR is_asap = TRUE)`
 
 	rows, err := w.db.Query(query)
 	if err != nil {
@@ -66,7 +65,7 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 	var list []overdueOrder
 	for rows.Next() {
 		var o overdueOrder
-		err := rows.Scan(&o.ID, &o.CustomerID, &o.VolumeType, &o.SpeedTariff, &o.HoldAmount)
+		err := rows.Scan(&o.ID, &o.CustomerID, &o.ServiceVariantID, &o.HoldAmount)
 		if err != nil {
 			return err
 		}
@@ -92,8 +91,8 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Calculate price for standard (REGULAR) speed
-	basePrice, err := w.orderService.CalculatePrice(o.VolumeType, "REGULAR")
+	// 1. Calculate base (non-urgent) price for the variant.
+	basePrice, err := w.orderService.CalculatePrice(o.ServiceVariantID, false, false, false)
 	if err != nil {
 		return err
 	}
@@ -106,9 +105,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	// 2. Update order columns
 	_, err = tx.Exec(`
 		UPDATE orders 
-		SET speed_tariff = 'REGULAR', 
-		    final_amount = $1, 
-		    is_downgraded = TRUE 
+		SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, is_downgraded = TRUE 
 		WHERE id = $2`, basePrice, o.ID)
 	if err != nil {
 		return err
@@ -139,7 +136,8 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	w.chatService.BroadcastSystemMessage(o.ID, map[string]interface{}{
 		"type":         "system",
 		"action":       "downgrade",
-		"speed_tariff": "REGULAR",
+		"is_urgent":    false,
+		"is_asap":      false,
 		"final_amount": basePrice,
 	})
 

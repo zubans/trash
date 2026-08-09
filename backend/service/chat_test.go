@@ -76,7 +76,8 @@ func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	strangerID := uuid.New()
 
 	// Create order and assign executor
-	order, _ := orderRepo.CreateOrderWithHold(customerID, "STANDARD", "REGULAR", 100.00, "")
+	standardVariantID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	order, _ := orderRepo.CreateOrderWithHold(customerID, standardVariantID, false, false, 100.00, "")
 	_ = orderRepo.AssignOrder(order.ID, executorID)
 
 	// Create chat session

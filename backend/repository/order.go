@@ -20,24 +20,26 @@ const (
 
 // Order represents a customer order.
 type Order struct {
-	ID           uuid.UUID    `json:"id"`
-	CustomerID   uuid.UUID    `json:"customer_id"`
-	ExecutorID   *uuid.UUID   `json:"executor_id,omitempty"`
-	VolumeType   string       `json:"volume_type"`
-	SpeedTariff  string       `json:"speed_tariff"`
-	Status       OrderStatus  `json:"status"`
-	HoldAmount   float64      `json:"hold_amount"`
-	FinalAmount  float64      `json:"final_amount"`
-	IsDowngraded bool         `json:"is_downgraded"`
-	PhotoURL     *string      `json:"photo_url,omitempty"`
-	Address      *string      `json:"address,omitempty"`
-	PickupLat    *float64     `json:"pickup_lat,omitempty"`
-	PickupLon    *float64     `json:"pickup_lon,omitempty"`
-	CreatedAt    time.Time    `json:"created_at"`
-	AssignedAt   *time.Time   `json:"assigned_at,omitempty"`
-	DeadlineAt   *time.Time   `json:"deadline_at,omitempty"`
-	CompletedAt  *time.Time   `json:"completed_at,omitempty"`
-	CanceledAt   *time.Time   `json:"canceled_at,omitempty"`
+	ID               uuid.UUID      `json:"id"`
+	CustomerID       uuid.UUID      `json:"customer_id"`
+	ExecutorID       *uuid.UUID     `json:"executor_id,omitempty"`
+	ServiceVariantID uuid.UUID      `json:"service_variant_id"`
+	ServiceVariant   *ServiceNode   `json:"service_variant,omitempty"`
+	IsUrgent         bool           `json:"is_urgent"`
+	IsAsap           bool           `json:"is_asap"`
+	Status           OrderStatus    `json:"status"`
+	HoldAmount       float64        `json:"hold_amount"`
+	FinalAmount      float64        `json:"final_amount"`
+	IsDowngraded     bool           `json:"is_downgraded"`
+	PhotoURL         *string        `json:"photo_url,omitempty"`
+	Address          *string        `json:"address,omitempty"`
+	PickupLat        *float64       `json:"pickup_lat,omitempty"`
+	PickupLon        *float64       `json:"pickup_lon,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	AssignedAt       *time.Time     `json:"assigned_at,omitempty"`
+	DeadlineAt       *time.Time     `json:"deadline_at,omitempty"`
+	CompletedAt      *time.Time     `json:"completed_at,omitempty"`
+	CanceledAt       *time.Time     `json:"canceled_at,omitempty"`
 }
 
 // OrderRepository defines storage operations for orders.
@@ -51,17 +53,17 @@ type OrderRepository interface {
 	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
 	Assign(orderID, executorID uuid.UUID) error
 	AssignOrder(orderID, executorID uuid.UUID) error
-	Confirm(orderID uuid.UUID, finalAmount float64) error
+	Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
 	Cancel(orderID uuid.UUID) error
 
 	// Legacy/test-compatible methods
-	CreateOrderWithHold(customerID uuid.UUID, volume string, tariff string, holdAmount float64, lastGeo string) (*Order, error)
+	CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*Order, error)
 	ConfirmOrderExecution(orderID uuid.UUID) error
 	CancelOrder(orderID uuid.UUID) error
 	GetExecutorAssignedOrders(executorID uuid.UUID) ([]*Order, error)
 	GetCustomerOrders(customerID uuid.UUID) ([]*Order, error)
-	CreateConstructionOrder(customerID uuid.UUID, photoURL, lastGeo string) (*Order, error)
-	GetAvailableConstructionOrders() ([]*Order, error)
+	CreateConstructionOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, photoURL, lastGeo string) (*Order, error)
+	GetAvailableAuctionOrders() ([]*Order, error)
 }
 
 // orderRepo implements OrderRepository using *sql.DB.
@@ -86,10 +88,16 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	return EarthRadius * c
 }
 
+const orderColumns = `
+    id, customer_id, executor_id, service_variant_id, is_urgent, is_asap, status,
+    hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon,
+    created_at, assigned_at, deadline_at, completed_at, canceled_at
+`
+
 func scanOrderRow(row *sql.Row) (Order, error) {
 	var o Order
 	err := row.Scan(
-		&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
+		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
 		&o.PickupLat, &o.PickupLon, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
@@ -100,7 +108,7 @@ func scanOrderRow(row *sql.Row) (Order, error) {
 func scanOrderRows(rows *sql.Rows) (Order, error) {
 	var o Order
 	err := rows.Scan(
-		&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
+		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
 		&o.PickupLat, &o.PickupLon, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
@@ -110,20 +118,19 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 
 func (r *orderRepo) Create(order *Order) error {
 	_, err := r.db.Exec(
-		`INSERT INTO orders (id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, deadline_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		order.ID, order.CustomerID, order.ExecutorID, order.VolumeType, order.SpeedTariff,
+		`INSERT INTO orders (`+orderColumns+`)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+		order.ID, order.CustomerID, order.ExecutorID, order.ServiceVariantID, order.IsUrgent, order.IsAsap,
 		order.Status, order.HoldAmount, order.FinalAmount, order.IsDowngraded, order.PhotoURL,
 		order.Address, order.PickupLat, order.PickupLon,
-		order.CreatedAt, order.DeadlineAt,
+		order.CreatedAt, order.AssignedAt, order.DeadlineAt, order.CompletedAt, order.CanceledAt,
 	)
 	return err
 }
 
 func (r *orderRepo) FindByID(id uuid.UUID) (*Order, error) {
 	row := r.db.QueryRow(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
-		 FROM orders WHERE id = $1`, id,
+		`SELECT `+orderColumns+` FROM orders WHERE id = $1`, id,
 	)
 	o, err := scanOrderRow(row)
 	if err != nil {
@@ -138,8 +145,7 @@ func (r *orderRepo) GetOrderByID(id uuid.UUID) (*Order, error) {
 
 func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
-		 FROM orders WHERE executor_id = $1 AND status = $2`,
+		`SELECT `+orderColumns+` FROM orders WHERE executor_id = $1 AND status = $2`,
 		executorID, OrderStatusAssigned,
 	)
 	if err != nil {
@@ -160,8 +166,7 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 
 func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
-		 FROM orders WHERE customer_id = $1`,
+		`SELECT `+orderColumns+` FROM orders WHERE customer_id = $1`,
 		customerID,
 	)
 	if err != nil {
@@ -182,8 +187,7 @@ func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 
 func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
-		 FROM orders WHERE status = $1`,
+		`SELECT `+orderColumns+` FROM orders WHERE status = $1`,
 		OrderStatusSearching,
 	)
 	if err != nil {
@@ -211,8 +215,7 @@ func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Ord
 	deltaLon := float64(radiusMeters) / (111000.0 * math.Cos(lat*math.Pi/180.0))
 
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
-		 FROM orders
+		`SELECT `+orderColumns+` FROM orders
 		 WHERE status = $1
 		   AND pickup_lat BETWEEN $2 AND $3
 		   AND pickup_lon BETWEEN $4 AND $5`,
@@ -253,10 +256,14 @@ func (r *orderRepo) AssignOrder(orderID, executorID uuid.UUID) error {
 	return r.Assign(orderID, executorID)
 }
 
-func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64) error {
+func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
 	_, err := r.db.Exec(
-		`UPDATE orders SET status = $1, final_amount = $2, completed_at = now() WHERE id = $3 AND status = $4`,
-		OrderStatusCompleted, finalAmount, orderID, OrderStatusAssigned,
+		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
+		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
+		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
+		    completed_at = now()
+		 WHERE id = $4 AND status = $5`,
+		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusAssigned,
 	)
 	return err
 }
@@ -270,16 +277,17 @@ func (r *orderRepo) Cancel(orderID uuid.UUID) error {
 }
 
 // CreateOrderWithHold creates a standard order and blocks customer balance.
-func (r *orderRepo) CreateOrderWithHold(customerID uuid.UUID, volume string, tariff string, holdAmount float64, lastGeo string) (*Order, error) {
+func (r *orderRepo) CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*Order, error) {
 	order := &Order{
-		ID:          uuid.New(),
-		CustomerID:  customerID,
-		VolumeType:  volume,
-		SpeedTariff: tariff,
-		Status:      OrderStatusSearching,
-		HoldAmount:  holdAmount,
-		FinalAmount: holdAmount,
-		CreatedAt:   time.Now(),
+		ID:               uuid.New(),
+		CustomerID:       customerID,
+		ServiceVariantID: serviceVariantID,
+		IsUrgent:         isUrgent,
+		IsAsap:           isAsap,
+		Status:           OrderStatusSearching,
+		HoldAmount:       holdAmount,
+		FinalAmount:      holdAmount,
+		CreatedAt:        time.Now(),
 	}
 	if err := r.Create(order); err != nil {
 		return nil, err
@@ -289,7 +297,7 @@ func (r *orderRepo) CreateOrderWithHold(customerID uuid.UUID, volume string, tar
 
 // ConfirmOrderExecution marks an order as completed.
 func (r *orderRepo) ConfirmOrderExecution(orderID uuid.UUID) error {
-	return r.Confirm(orderID, 0)
+	return r.Confirm(orderID, 0, false)
 }
 
 // CancelOrder cancels an order.
@@ -324,18 +332,19 @@ func (r *orderRepo) GetCustomerOrders(customerID uuid.UUID) ([]*Order, error) {
 }
 
 // CreateConstructionOrder creates a construction waste auction order.
-func (r *orderRepo) CreateConstructionOrder(customerID uuid.UUID, photoURL, lastGeo string) (*Order, error) {
+func (r *orderRepo) CreateConstructionOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, photoURL, lastGeo string) (*Order, error) {
 	photo := &photoURL
 	order := &Order{
-		ID:          uuid.New(),
-		CustomerID:  customerID,
-		VolumeType:  "CONSTRUCTION",
-		SpeedTariff: "CUSTOM",
-		Status:      OrderStatusSearching,
-		HoldAmount:  0,
-		FinalAmount: 0,
-		PhotoURL:    photo,
-		CreatedAt:   time.Now(),
+		ID:               uuid.New(),
+		CustomerID:       customerID,
+		ServiceVariantID: serviceVariantID,
+		IsUrgent:         false,
+		IsAsap:           false,
+		Status:           OrderStatusSearching,
+		HoldAmount:       0,
+		FinalAmount:      0,
+		PhotoURL:         photo,
+		CreatedAt:        time.Now(),
 	}
 	if err := r.Create(order); err != nil {
 		return nil, err
@@ -343,11 +352,12 @@ func (r *orderRepo) CreateConstructionOrder(customerID uuid.UUID, photoURL, last
 	return order, nil
 }
 
-// GetAvailableConstructionOrders returns open construction orders.
-func (r *orderRepo) GetAvailableConstructionOrders() ([]*Order, error) {
+// GetAvailableAuctionOrders returns open auction orders.
+func (r *orderRepo) GetAvailableAuctionOrders() ([]*Order, error) {
 	rows, err := r.db.Query(
-		`SELECT id, customer_id, executor_id, volume_type, speed_tariff, status, hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon, created_at, assigned_at, deadline_at, completed_at, canceled_at
-		 FROM orders WHERE volume_type = 'CONSTRUCTION' AND status = $1`,
+		`SELECT `+orderColumns+` FROM orders o
+		 JOIN service_nodes sn ON sn.id = o.service_variant_id
+		 WHERE sn.is_auction = TRUE AND o.status = $1`,
 		OrderStatusSearching,
 	)
 	if err != nil {

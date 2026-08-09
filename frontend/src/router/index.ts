@@ -52,6 +52,11 @@ const routes: Array<RouteRecordRaw> = [
         name: 'admin-completed-orders',
         component: () => import('../pages/admin/CompletedOrders.vue'),
       },
+      {
+        path: 'service-catalog',
+        name: 'admin-service-catalog',
+        component: () => import('../pages/admin/ServiceCatalog.vue'),
+      },
     ],
   },
   {

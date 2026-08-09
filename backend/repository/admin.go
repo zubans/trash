@@ -39,11 +39,12 @@ type AdminShift struct {
 	ExecutorPhone string `json:"executor_phone"`
 }
 
-// AdminOrder extends Order with customer/executor phone for admin views.
+// AdminOrder extends Order with customer/executor phone and service variant name for admin views.
 type AdminOrder struct {
 	Order
-	CustomerPhone string `json:"customer_phone"`
-	ExecutorPhone string `json:"executor_phone,omitempty"`
+	CustomerPhone      string `json:"customer_phone"`
+	ExecutorPhone      string `json:"executor_phone,omitempty"`
+	ServiceVariantName string `json:"service_variant_name"`
 }
 
 // AdminRepository defines admin database operations.
@@ -158,7 +159,7 @@ func (r *adminRepo) GetTopUpRequests() ([]*TopUpRequest, error) {
 		}
 		reqs = append(reqs, &req)
 	}
-	return reqs, nil
+	return reqs, rows.Err()
 }
 
 func (r *adminRepo) GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error) {
@@ -325,7 +326,7 @@ func (r *adminRepo) GetTransactions() ([]*Transaction, error) {
 		}
 		txs = append(txs, &tx)
 	}
-	return txs, nil
+	return txs, rows.Err()
 }
 
 func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
@@ -360,13 +361,14 @@ func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
 
 func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
 	query := `
-		SELECT o.id, o.customer_id, o.executor_id, o.volume_type, o.speed_tariff, o.status,
+		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
 		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, eu.phone
+		       cu.phone, eu.phone, COALESCE(sn.name->>'ru', sn.code)
 		FROM orders o
 		JOIN users cu ON o.customer_id = cu.id
 		LEFT JOIN users eu ON o.executor_id = eu.id
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE o.status IN ($1, $2)
 		ORDER BY o.created_at DESC`
 
@@ -380,10 +382,10 @@ func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
 	for rows.Next() {
 		var o AdminOrder
 		err := rows.Scan(
-			&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
+			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
 			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
-			&o.CustomerPhone, &o.ExecutorPhone,
+			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
 		)
 		if err != nil {
 			return nil, err
@@ -395,13 +397,14 @@ func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
 
 func (r *adminRepo) GetCompletedOrders() ([]*AdminOrder, error) {
 	query := `
-		SELECT o.id, o.customer_id, o.executor_id, o.volume_type, o.speed_tariff, o.status,
+		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
 		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, eu.phone
+		       cu.phone, eu.phone, COALESCE(sn.name->>'ru', sn.code)
 		FROM orders o
 		JOIN users cu ON o.customer_id = cu.id
 		LEFT JOIN users eu ON o.executor_id = eu.id
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE o.status = $1
 		ORDER BY o.completed_at DESC, o.created_at DESC`
 
@@ -415,10 +418,10 @@ func (r *adminRepo) GetCompletedOrders() ([]*AdminOrder, error) {
 	for rows.Next() {
 		var o AdminOrder
 		err := rows.Scan(
-			&o.ID, &o.CustomerID, &o.ExecutorID, &o.VolumeType, &o.SpeedTariff, &o.Status,
+			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
 			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
-			&o.CustomerPhone, &o.ExecutorPhone,
+			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
 		)
 		if err != nil {
 			return nil, err

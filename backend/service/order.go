@@ -19,48 +19,35 @@ type OrderService struct {
 	userRepo        repository.UserRepository
 	shiftRepo       repository.ShiftRepository
 	chatRepo        repository.ChatRepository
+	catalogRepo     repository.ServiceCatalogRepository
 	geocoder        *Geocoder
 }
 
 // NewOrderService creates an OrderService.
-func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, geocoder *Geocoder) *OrderService {
-	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, geocoder: geocoder}
+func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, geocoder *Geocoder) *OrderService {
+	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, geocoder: geocoder}
 }
 
 // CreateOrderRequest contains the data needed to create an order.
 type CreateOrderRequest struct {
-	VolumeType  string   `json:"volume_type"`
-	SpeedTariff string   `json:"speed_tariff"`
-	PhotoURL    *string  `json:"photo_url,omitempty"`
-	Address     string   `json:"address"`
-	Lat         *float64 `json:"lat,omitempty"`
-	Lon         *float64 `json:"lon,omitempty"`
+	ServiceVariantID uuid.UUID `json:"service_variant_id"`
+	IsUrgent         bool      `json:"is_urgent"`
+	IsAsap           bool      `json:"is_asap"`
+	PhotoURL         *string   `json:"photo_url,omitempty"`
+	Address          string    `json:"address"`
+	Lat              *float64  `json:"lat,omitempty"`
+	Lon              *float64  `json:"lon,omitempty"`
 }
 
-func basePriceByVolume(volumeType string) float64 {
-	switch volumeType {
-	case "STANDARD":
-		return 100.0
-	case "LARGE":
-		return 200.0
-	case "CONSTRUCTION":
-		return 500.0
-	default:
-		return 100.0
+func (s *OrderService) hydrateServiceVariant(order *repository.Order) {
+	if order == nil {
+		return
 	}
-}
-
-func coefficientByTariff(settings map[string]float64, speedTariff string) float64 {
-	switch speedTariff {
-	case "URGENT":
-		return settings["urgent_tariff_coeff"]
-	case "ASAP":
-		return settings["asap_tariff_coeff"]
-	case "REGULAR", "CUSTOM":
-		return settings["standard_tariff_coeff"]
-	default:
-		return settings["standard_tariff_coeff"]
+	variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID)
+	if err != nil || variant == nil {
+		return
 	}
+	order.ServiceVariant = variant
 }
 
 func (s *OrderService) loadSettings() map[string]float64 {
@@ -85,17 +72,47 @@ func (s *OrderService) loadSettings() map[string]float64 {
 	return settings
 }
 
-// CalculatePrice returns the price for a given volume and speed tariff.
-func (s *OrderService) CalculatePrice(volumeType, speedTariff string) (float64, error) {
+// CalculatePrice returns the price for a given service variant and urgency flags.
+func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAsap, isDowngraded bool) (float64, error) {
+	variant, err := s.catalogRepo.GetNodeByID(serviceVariantID)
+	if err != nil {
+		return 0, err
+	}
+	if variant == nil || !variant.IsVariant() {
+		return 0, errors.New("invalid service variant")
+	}
+	if variant.BasePrice == nil {
+		return 0, errors.New("variant has no base price")
+	}
+
+	price := *variant.BasePrice
+
+	if variant.IsAuction {
+		return 0, nil
+	}
+
+	if isDowngraded {
+		return price, nil
+	}
+
 	settings := s.loadSettings()
-	base := basePriceByVolume(volumeType)
-	coeff := coefficientByTariff(settings, speedTariff)
-	return base * coeff, nil
+	switch {
+	case isAsap:
+		price *= settings["asap_tariff_coeff"]
+	case isUrgent:
+		price *= settings["urgent_tariff_coeff"]
+	}
+
+	return price, nil
 }
 
 // CreateOrder creates a standard order and holds customer balance.
-func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff, address string, lat, lon *float64) (*repository.Order, error) {
-	holdAmount, err := s.CalculatePrice(volumeType, speedTariff)
+func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, lat, lon *float64) (*repository.Order, error) {
+	if isUrgent && isAsap {
+		return nil, errors.New("cannot set both urgent and asap flags")
+	}
+
+	holdAmount, err := s.CalculatePrice(serviceVariantID, isUrgent, isAsap, false)
 	if err != nil {
 		return nil, err
 	}
@@ -110,25 +127,26 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff
 
 	var deadline *time.Time
 	now := time.Now()
-	if speedTariff == "URGENT" {
+	if isUrgent {
 		d := now.Add(1 * time.Hour)
 		deadline = &d
-	} else if speedTariff == "ASAP" {
+	} else if isAsap {
 		d := now.Add(15 * time.Minute)
 		deadline = &d
 	}
 
 	order := &repository.Order{
-		ID:          uuid.New(),
-		CustomerID:  customerID,
-		VolumeType:  volumeType,
-		SpeedTariff: speedTariff,
-		Status:      repository.OrderStatusSearching,
-		HoldAmount:  holdAmount,
-		FinalAmount: holdAmount,
-		Address:     &address,
-		CreatedAt:   now,
-		DeadlineAt:  deadline,
+		ID:               uuid.New(),
+		CustomerID:       customerID,
+		ServiceVariantID: serviceVariantID,
+		IsUrgent:         isUrgent,
+		IsAsap:           isAsap,
+		Status:           repository.OrderStatusSearching,
+		HoldAmount:       holdAmount,
+		FinalAmount:      holdAmount,
+		Address:          &address,
+		CreatedAt:        now,
+		DeadlineAt:       deadline,
 	}
 
 	// Resolve coordinates: prefer provided lat/lon, otherwise geocode the address.
@@ -177,12 +195,13 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, volumeType, speedTariff
 		}
 	}
 
+	s.hydrateServiceVariant(order)
 	return order, nil
 }
 
 // Create creates a new order for a customer (alias compatible with handler).
 func (s *OrderService) Create(customerID uuid.UUID, req CreateOrderRequest) (*repository.Order, error) {
-	return s.CreateOrder(customerID, req.VolumeType, req.SpeedTariff, req.Address, req.Lat, req.Lon)
+	return s.CreateOrder(customerID, req.ServiceVariantID, req.IsUrgent, req.IsAsap, req.Address, req.Lat, req.Lon)
 }
 
 // Accept allows an executor to take an order from the queue.
@@ -211,9 +230,9 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 	}
 
 	finalAmount := order.HoldAmount
-	if order.SpeedTariff == "ASAP" && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
+	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
 		order.IsDowngraded = true
-		finalAmount, _ = s.CalculatePrice(order.VolumeType, "REGULAR")
+		finalAmount, _ = s.CalculatePrice(order.ServiceVariantID, false, false, true)
 	}
 
 	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
@@ -256,7 +275,7 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 			return err
 		}
 
-		return s.orderRepo.Confirm(orderID, finalAmount)
+		return s.orderRepo.Confirm(orderID, finalAmount, order.IsDowngraded)
 	})
 }
 
@@ -318,17 +337,27 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 	if photoURL == "" {
 		return nil, errors.New("photo URL is required")
 	}
+
+	variant, err := s.catalogRepo.GetNodeByCode("trash_construction")
+	if err != nil {
+		return nil, err
+	}
+	if variant == nil {
+		return nil, errors.New("construction variant not found")
+	}
+
 	order := &repository.Order{
-		ID:          uuid.New(),
-		CustomerID:  customerID,
-		VolumeType:  "CONSTRUCTION",
-		SpeedTariff: "CUSTOM",
-		Status:      repository.OrderStatusSearching,
-		HoldAmount:  0,
-		FinalAmount: 0,
-		PhotoURL:    &photoURL,
-		Address:     &address,
-		CreatedAt:   time.Now(),
+		ID:               uuid.New(),
+		CustomerID:       customerID,
+		ServiceVariantID: variant.ID,
+		IsUrgent:         false,
+		IsAsap:           false,
+		Status:           repository.OrderStatusSearching,
+		HoldAmount:       0,
+		FinalAmount:      0,
+		PhotoURL:         &photoURL,
+		Address:          &address,
+		CreatedAt:        time.Now(),
 	}
 
 	if lat != nil && lon != nil {
@@ -360,25 +389,54 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 		}
 	}
 
+	s.hydrateServiceVariant(order)
 	return order, nil
 }
 
 // GetAvailableConstructionOrders returns open construction waste orders.
 func (s *OrderService) GetAvailableConstructionOrders() ([]*repository.Order, error) {
-	return s.orderRepo.GetAvailableConstructionOrders()
+	orders, err := s.orderRepo.GetAvailableAuctionOrders()
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range orders {
+		s.hydrateServiceVariant(o)
+	}
+	return orders, nil
 }
 
 // FindNearbyOrders returns searching standard/large orders near the given coordinates within radiusMeters.
 func (s *OrderService) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
-	return s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
+	orders, err := s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range orders {
+		s.hydrateServiceVariant(o)
+	}
+	return orders, nil
 }
 
 // ListAssigned returns orders assigned to an executor.
-func (s *OrderService) ListAssigned(executorID uuid.UUID) ([]repository.Order, error) {
-	return s.orderRepo.FindAssignedByExecutor(executorID)
+func (s *OrderService) ListAssigned(executorID uuid.UUID) ([]*repository.Order, error) {
+	orders, err := s.orderRepo.GetExecutorAssignedOrders(executorID)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range orders {
+		s.hydrateServiceVariant(o)
+	}
+	return orders, nil
 }
 
 // ListByCustomer returns orders created by a customer.
-func (s *OrderService) ListByCustomer(customerID uuid.UUID) ([]repository.Order, error) {
-	return s.orderRepo.FindByCustomer(customerID)
+func (s *OrderService) ListByCustomer(customerID uuid.UUID) ([]*repository.Order, error) {
+	orders, err := s.orderRepo.GetCustomerOrders(customerID)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range orders {
+		s.hydrateServiceVariant(o)
+	}
+	return orders, nil
 }

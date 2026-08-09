@@ -12,6 +12,8 @@
       </div>
     </div>
 
+    <update-banner class="mb-4" />
+
     <!-- Alert messages -->
     <va-alert v-if="successMsg" color="success" class="mb-4" closeable @dismissed="successMsg = ''">
       {{ successMsg }}
@@ -248,7 +250,7 @@
                 <div class="d-flex justify-content-between align-items-start">
                   <div>
                     <div class="font-bold text-sm">#{{ order.id.slice(0, 8) }}</div>
-                    <div class="text-xs text-secondary">{{ order.volume_type }} / {{ order.speed_tariff }}</div>
+                    <div class="text-xs text-secondary">{{ formatOrderType(order) }}</div>
                     <div class="text-xs text-secondary" v-if="order.address">{{ order.address }}</div>
                   </div>
                   <div class="text-right">
@@ -321,10 +323,10 @@
 
               <div class="row text-sm mt-3">
                 <div class="col-6">
-                  <strong>{{ $t('customer.volume') }}:</strong> {{ order.volume_type }}
+                  <strong>{{ $t('customer.serviceType') }}:</strong> {{ order.service_variant ? localizedName(order.service_variant) : order.service_variant_id }}
                 </div>
-                <div class="col-6">
-                  <strong>{{ $t('customer.tariff') }}:</strong> {{ order.speed_tariff }}
+                <div class="col-6" v-if="order.is_urgent || order.is_asap">
+                  <strong>{{ $t('customer.urgent') }}:</strong> {{ order.is_asap ? $t('customer.asap') : $t('customer.urgent') }}
                 </div>
                 <div class="col-6 mt-1">
                   <strong>{{ $t('executor.payout') }}:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
@@ -454,19 +456,34 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { defineComponent, ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Geolocation } from '@capacitor/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
+import UpdateBanner from '../../components/UpdateBanner.vue'
 import api from '../../services/api'
+import type { ServiceNode } from '../../api/services'
 
 export default defineComponent({
   name: 'ExecutorDashboard',
+  components: { UpdateBanner },
   setup() {
     const router = useRouter()
-    const { t } = useI18n()
+    const { t, locale } = useI18n()
     const authStore = useAuthStore()
+
+    const localizedName = (node?: ServiceNode) =>
+      node?.name[locale.value] || node?.name['ru'] || node?.code || ''
+
+    const formatOrderType = (order: any) => {
+      const variant = order.service_variant
+      if (!variant) return order.service_variant_id
+      const name = localizedName(variant)
+      if (order.is_asap) return `${name} (${t('customer.asap')})`
+      if (order.is_urgent) return `${name} (${t('customer.urgent')})`
+      return name
+    }
 
     const phone = ref('')
     const balance = ref(0)
@@ -771,7 +788,8 @@ export default defineComponent({
           chatLocked.value = true
         } else if (data.type === 'system' && data.action === 'downgrade') {
           // Live SLA tariff downgrade sync
-          order.speed_tariff = data.speed_tariff
+          order.is_urgent = data.is_urgent
+          order.is_asap = data.is_asap
           order.final_amount = data.final_amount
           order.is_downgraded = true
         } else if (data.type === 'error') {
@@ -898,6 +916,8 @@ export default defineComponent({
       getCurrentLocation,
       findNearbyOrders,
       acceptOrder,
+      localizedName,
+      formatOrderType,
       selectedChatOrder,
       chatMessages,
       chatText,

@@ -18,6 +18,8 @@
       </div>
     </div>
 
+    <update-banner />
+
     <!-- Alert messages -->
     <va-alert v-if="successMsg" color="success" class="mb-3" closeable @dismissed="successMsg = ''">
       {{ successMsg }}
@@ -64,7 +66,7 @@
         </template>
 
         <template #cell(type)="{ rowData }">
-          {{ $t(`customer.types.${getTypeKey(rowData.volume_type, rowData.speed_tariff)}`) }}
+          {{ formatOrderType(rowData) }}
         </template>
 
         <template #cell(hold_amount)="{ value }">
@@ -133,14 +135,38 @@
 
         <div class="mb-4">
           <va-select
-            v-model="selectedOrderType"
-            :options="orderTypeOptions"
-            :label="$t('customer.orderType')"
+            v-model="selectedCategoryId"
+            :options="categoryOptions"
+            :label="$t('customer.category')"
             text-by="label"
             value-by="value"
             track-by="value"
             class="mb-2"
           />
+          <va-select
+            v-if="subCategoryOptions.length > 0"
+            v-model="selectedSubCategoryId"
+            :options="subCategoryOptions"
+            :label="$t('customer.subCategory')"
+            text-by="label"
+            value-by="value"
+            track-by="value"
+            class="mb-2"
+          />
+          <va-select
+            v-if="variantOptions.length > 0"
+            v-model="selectedVariantId"
+            :options="variantOptions"
+            :label="$t('customer.serviceVariant')"
+            text-by="label"
+            value-by="value"
+            track-by="value"
+            class="mb-2"
+          />
+          <div v-if="!isAuctionSelected" class="d-flex gap-2 mt-2">
+            <va-checkbox v-model="isUrgent" :label="$t('customer.urgent')" />
+            <va-checkbox v-model="isAsap" :label="$t('customer.asap')" />
+          </div>
           <div class="text-secondary text-sm mt-2">
             {{ $t('customer.price') }}: <strong class="text-primary">{{ currencySymbol }}{{ Number(selectedPrice).toFixed(2) }}</strong>
           </div>
@@ -218,19 +244,21 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { defineComponent, ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import UpdateBanner from '../../components/UpdateBanner.vue'
 import api from '../../services/api'
+import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
 export default defineComponent({
   name: 'CustomerDashboard',
-  components: { LanguageSwitcher },
+  components: { LanguageSwitcher, UpdateBanner },
   setup() {
     const router = useRouter()
-    const { t } = useI18n()
+    const { t, locale } = useI18n()
     const authStore = useAuthStore()
 
     const phone = ref('')
@@ -253,23 +281,45 @@ export default defineComponent({
     const geocoding = ref(false)
     const geocodeError = ref('')
 
-    // Order type options with prices (string values to work reliably with va-select)
-    const orderTypeOptions = [
-      { label: t('customer.types.standardRegular'), value: 'STANDARD_REGULAR', volume_type: 'STANDARD', speed_tariff: 'REGULAR', price: 100 },
-      { label: t('customer.types.standardUrgent'), value: 'STANDARD_URGENT', volume_type: 'STANDARD', speed_tariff: 'URGENT', price: 300 },
-      { label: t('customer.types.standardAsap'), value: 'STANDARD_ASAP', volume_type: 'STANDARD', speed_tariff: 'ASAP', price: 800 },
-      { label: t('customer.types.largeRegular'), value: 'LARGE_REGULAR', volume_type: 'LARGE', speed_tariff: 'REGULAR', price: 200 },
-      { label: t('customer.types.largeUrgent'), value: 'LARGE_URGENT', volume_type: 'LARGE', speed_tariff: 'URGENT', price: 600 },
-      { label: t('customer.types.largeAsap'), value: 'LARGE_ASAP', volume_type: 'LARGE', speed_tariff: 'ASAP', price: 1600 },
-    ]
-    const selectedOrderType = ref(orderTypeOptions[0].value)
+    // Service catalog selection
+    const serviceCategories = ref<ServiceNode[]>([])
+    const subCategories = ref<ServiceNode[]>([])
+    const serviceVariants = ref<ServiceNode[]>([])
+    const selectedCategoryId = ref<string | null>(null)
+    const selectedSubCategoryId = ref<string | null>(null)
+    const selectedVariantId = ref<string | null>(null)
+    const isUrgent = ref(false)
+    const isAsap = ref(false)
 
-    const selectedOrderOption = computed(() =>
-      orderTypeOptions.find((o) => o.value === selectedOrderType.value)
+    const selectedVariant = computed(() =>
+      serviceVariants.value.find((v) => v.id === selectedVariantId.value)
+    )
+
+    const isAuctionSelected = computed(() => selectedVariant.value?.is_auction)
+
+    const localizedName = (node?: ServiceNode) =>
+      node?.name[locale.value] || node?.name['ru'] || node?.code || ''
+
+    const categoryOptions = computed(() =>
+      serviceCategories.value.map((c) => ({ label: localizedName(c), value: c.id }))
+    )
+
+    const subCategoryOptions = computed(() =>
+      subCategories.value.map((c) => ({ label: localizedName(c), value: c.id }))
+    )
+
+    const variantOptions = computed(() =>
+      serviceVariants.value.map((v) => ({ label: localizedName(v), value: v.id }))
     )
 
     const selectedPrice = computed(() => {
-      return selectedOrderOption.value ? selectedOrderOption.value.price : 0
+      const variant = selectedVariant.value
+      if (!variant || variant.base_price === undefined) return 0
+      let price = variant.base_price
+      if (isAuctionSelected.value) return 0
+      if (isAsap.value) price *= 8
+      else if (isUrgent.value) price *= 3
+      return price
     })
 
     const currencySymbol = computed(() => {
@@ -326,7 +376,7 @@ export default defineComponent({
 
     const fetchBidsForSearchingOrders = async () => {
       for (const order of orders.value) {
-        if (order.volume_type === 'CONSTRUCTION' && order.status === 'SEARCHING') {
+        if (order.service_variant?.is_auction && order.status === 'SEARCHING') {
           try {
             const response = await api.get(`/customer/orders/${order.id}/bids`)
             bidsMap.value[order.id] = response.data || []
@@ -386,14 +436,14 @@ export default defineComponent({
       errorMsg.value = ''
       creatingOrder.value = true
       try {
-        const option = selectedOrderOption.value
-        if (!option) {
+        if (!selectedVariantId.value) {
           errorMsg.value = t('customer.errorInvalidOrderType')
           return
         }
         const payload: any = {
-          volume_type: option.volume_type,
-          speed_tariff: option.speed_tariff,
+          service_variant_id: selectedVariantId.value,
+          is_urgent: !isAuctionSelected.value && isUrgent.value,
+          is_asap: !isAuctionSelected.value && isAsap.value,
           address: orderAddress.value,
         }
         if (orderLat.value !== null && orderLon.value !== null) {
@@ -461,16 +511,13 @@ export default defineComponent({
       }
     }
 
-    const getTypeKey = (volumeType: string, speedTariff: string) => {
-      const map: Record<string, string> = {
-        'STANDARD_REGULAR': 'standardRegular',
-        'STANDARD_URGENT': 'standardUrgent',
-        'STANDARD_ASAP': 'standardAsap',
-        'LARGE_REGULAR': 'largeRegular',
-        'LARGE_URGENT': 'largeUrgent',
-        'LARGE_ASAP': 'largeAsap',
-      }
-      return map[`${volumeType}_${speedTariff}`] || 'standardRegular'
+    const formatOrderType = (order: any) => {
+      const variant = order.service_variant
+      if (!variant) return order.service_variant_id
+      const name = localizedName(variant)
+      if (order.is_asap) return `${name} (${t('customer.asap')})`
+      if (order.is_urgent) return `${name} (${t('customer.urgent')})`
+      return name
     }
 
     // Chat operations
@@ -504,7 +551,8 @@ export default defineComponent({
         if (data.type === 'system' && data.action === 'lock') {
           chatLocked.value = true
         } else if (data.type === 'system' && data.action === 'downgrade') {
-          order.speed_tariff = data.speed_tariff
+          order.is_urgent = data.is_urgent
+          order.is_asap = data.is_asap
           order.final_amount = data.final_amount
           order.is_downgraded = true
         } else if (data.type === 'error') {
@@ -565,10 +613,44 @@ export default defineComponent({
       }
     }
 
+    watch(selectedCategoryId, async (id) => {
+      selectedSubCategoryId.value = null
+      selectedVariantId.value = null
+      serviceVariants.value = []
+      if (!id) {
+        subCategories.value = []
+        return
+      }
+      const children = await getServiceCategoryChildren(id)
+      const categories = children.filter((c) => c.node_type === 'CATEGORY')
+      const variants = children.filter((c) => c.node_type === 'VARIANT')
+      if (categories.length > 0) {
+        subCategories.value = categories
+      } else {
+        subCategories.value = []
+        serviceVariants.value = variants
+      }
+    })
+
+    watch(selectedSubCategoryId, async (id) => {
+      selectedVariantId.value = null
+      if (!id) {
+        serviceVariants.value = []
+        return
+      }
+      serviceVariants.value = await getCategoryVariants(id)
+    })
+
+    watch(selectedVariantId, () => {
+      isUrgent.value = false
+      isAsap.value = false
+    })
+
     let intervalId: any = null
 
-    onMounted(() => {
+    onMounted(async () => {
       fetchProfile()
+      serviceCategories.value = await getServiceCategories()
       fetchOrders()
       intervalId = setInterval(() => {
         fetchProfile()
@@ -592,9 +674,21 @@ export default defineComponent({
       orders,
       creatingOrder,
       defaultAddress,
-      orderTypeOptions,
-      selectedOrderType,
+      serviceCategories,
+      subCategories,
+      serviceVariants,
+      selectedCategoryId,
+      selectedSubCategoryId,
+      selectedVariantId,
+      isUrgent,
+      isAsap,
+      selectedVariant,
       selectedPrice,
+      isAuctionSelected,
+      categoryOptions,
+      subCategoryOptions,
+      variantOptions,
+      localizedName,
       bidsMap,
       selectedChatOrder,
       chatMessages,
@@ -621,7 +715,7 @@ export default defineComponent({
       openChat,
       sendChatMessage,
       closeChat,
-      getTypeKey,
+      formatOrderType,
       getStatusColor,
       formatTime,
       handleLogout,

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// AuctionWorker automatically cancels construction orders that remain unmatched for 7 days.
+// AuctionWorker automatically cancels auction orders that remain unmatched for 7 days.
 type AuctionWorker struct {
 	db *sql.DB
 }
@@ -37,14 +37,15 @@ type expiredAuction struct {
 	HoldAmount float64
 }
 
-// CheckExpiredAuctions selects and cancels expired construction orders.
+// CheckExpiredAuctions selects and cancels expired auction orders.
 func (w *AuctionWorker) CheckExpiredAuctions() error {
 	query := `
-		SELECT id, customer_id, hold_amount 
-		FROM orders 
-		WHERE status = 'SEARCHING' 
-		  AND volume_type = 'CONSTRUCTION' 
-		  AND created_at < now() - INTERVAL '7 days'`
+		SELECT o.id, o.customer_id, o.hold_amount 
+		FROM orders o
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
+		WHERE o.status = 'SEARCHING' 
+		  AND sn.is_auction = TRUE 
+		  AND o.created_at < now() - INTERVAL '7 days'`
 
 	rows, err := w.db.Query(query)
 	if err != nil {
@@ -67,7 +68,7 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 		if err != nil {
 			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", a.ID, err)
 		} else {
-			log.Printf("[AuctionWorker] Canceled expired construction auction %s.", a.ID)
+			log.Printf("[AuctionWorker] Canceled expired auction %s.", a.ID)
 		}
 	}
 

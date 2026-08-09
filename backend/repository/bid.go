@@ -36,17 +36,22 @@ func NewBidRepository(db *sql.DB) BidRepository {
 }
 
 func (r *bidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice float64) (*Bid, error) {
-	// 1. Check if the order is CONSTRUCTION and in SEARCHING status
-	var volumeType, status string
-	err := r.db.QueryRow(`SELECT volume_type, status FROM orders WHERE id = $1`, orderID).Scan(&volumeType, &status)
+	// 1. Check if the order is an auction and in SEARCHING status
+	var isAuction bool
+	var status string
+	err := r.db.QueryRow(`
+		SELECT sn.is_auction, o.status
+		FROM orders o
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
+		WHERE o.id = $1`, orderID).Scan(&isAuction, &status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("order not found")
 		}
 		return nil, err
 	}
-	if volumeType != "CONSTRUCTION" {
-		return nil, errors.New("cannot bid on non-construction orders")
+	if !isAuction {
+		return nil, errors.New("cannot bid on non-auction orders")
 	}
 	if status != "SEARCHING" {
 		return nil, errors.New("order is not open for bidding")
@@ -57,7 +62,7 @@ func (r *bidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice float64)
 		INSERT INTO bids (order_id, executor_id, offered_price, status, created_at)
 		VALUES ($1, $2, $3, 'PENDING', now())
 		RETURNING id, order_id, executor_id, offered_price, status, created_at`
-	
+
 	var b Bid
 	err = r.db.QueryRow(query, orderID, executorID, offeredPrice).Scan(
 		&b.ID, &b.OrderID, &b.ExecutorID, &b.OfferedPrice, &b.Status, &b.CreatedAt,
@@ -92,7 +97,7 @@ func (r *bidRepo) GetBidsForOrder(orderID uuid.UUID) ([]*Bid, error) {
 		}
 		bids = append(bids, &b)
 	}
-	return bids, nil
+	return bids, rows.Err()
 }
 
 func (r *bidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
@@ -119,11 +124,13 @@ func (r *bidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
 
 	// 2. Lock and verify order ownership & status
 	var ordCustomerID uuid.UUID
-	var ordStatus, volumeType string
+	var ordStatus string
+	var isAuction bool
 	err = tx.QueryRow(`
-		SELECT customer_id, status, volume_type 
-		FROM orders 
-		WHERE id = $1 FOR UPDATE`, orderID).Scan(&ordCustomerID, &ordStatus, &volumeType)
+		SELECT o.customer_id, o.status, sn.is_auction
+		FROM orders o
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
+		WHERE o.id = $1 FOR UPDATE`, orderID).Scan(&ordCustomerID, &ordStatus, &isAuction)
 	if err != nil {
 		return err
 	}
@@ -132,6 +139,9 @@ func (r *bidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
 	}
 	if ordStatus != "SEARCHING" {
 		return errors.New("order is no longer in searching status")
+	}
+	if !isAuction {
+		return errors.New("order is not an auction")
 	}
 
 	// 3. Lock and check customer balance

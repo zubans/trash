@@ -47,8 +47,9 @@ export default defineComponent({
     const columns = computed(() => [
       { key: 'customer_phone', label: t('admin.customerPhone') },
       { key: 'executor_phone', label: t('admin.executorPhone') },
-      { key: 'volume_type', label: t('admin.volumeType') },
-      { key: 'speed_tariff', label: t('admin.speedTariff') },
+      { key: 'service_variant_name', label: t('admin.serviceType') },
+      { key: 'is_urgent', label: t('admin.urgent') },
+      { key: 'is_asap', label: t('admin.asap') },
       { key: 'status', label: t('admin.status') },
       { key: 'hold_amount', label: t('admin.holdAmount') },
       { key: 'address', label: t('admin.address') },

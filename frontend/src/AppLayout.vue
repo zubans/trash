@@ -65,6 +65,13 @@
             <va-sidebar-item-title>{{ $t('app.completedOrders') }}</va-sidebar-item-title>
           </va-sidebar-item-content>
         </va-sidebar-item>
+
+        <va-sidebar-item :active="currentRouteName === 'admin-service-catalog'" to="/admin/service-catalog">
+          <va-sidebar-item-content>
+            <va-icon name="category" />
+            <va-sidebar-item-title>{{ $t('app.serviceCatalog') }}</va-sidebar-item-title>
+          </va-sidebar-item-content>
+        </va-sidebar-item>
       </va-sidebar>
 
       <main class="app-layout__main">
