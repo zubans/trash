@@ -219,7 +219,7 @@
         <div
           v-for="msg in chatMessages"
           :key="msg.id"
-          :class="['message-bubble mb-2 p-2 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto bg-primary text-white' : 'their-message mr-auto bg-light']"
+          :class="['message-bubble p-2.5 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto' : 'their-message mr-auto']"
         >
           <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">{{ $t('common.executor') }}</div>
           <div class="text-sm message-text">{{ msg.text }}</div>
@@ -363,9 +363,6 @@ export default defineComponent({
     const isNative = Capacitor.isNativePlatform()
     const sendingChat = ref(false)
     const chatError = ref('')
-    let chatPollIntervalId: any = null
-
-    // Modals
     const showCreateOrderModal = ref(false)
     const showTopUpModal = ref(false)
 
@@ -603,14 +600,6 @@ export default defineComponent({
           }
         }
       }
-
-      // Native polling fallback: pull history on a recursive timer so incoming
-      // messages show up even if the WebSocket bridge is broken in the WebView.
-      // Start polling IMMEDIATELY (first poll now, then every 3s) so messages
-      // arrive without waiting for the first timer tick.
-      if (isNative) {
-        scheduleChatPoll(order.id, /* immediate= */ true)
-      }
     }
 
     const sendChatMessage = async (event?: Event) => {
@@ -661,55 +650,13 @@ export default defineComponent({
       }
     }
 
-    // Native-only polling helpers.
-    const pollChatMessages = async (orderID: string) => {
-      if (!selectedChatOrder.value) return
-      try {
-        const response = await api.get(`/chats/${orderID}/messages`, {
-          params: { _t: Date.now() },
-          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-          timeout: 5000,
-        })
-        const incoming = response.data || []
-        const existingIds = new Set(chatMessages.value.map((m: any) => m.id))
-        let added = false
-        for (const m of incoming) {
-          if (!existingIds.has(m.id)) {
-            chatMessages.value.push(m)
-            added = true
-          }
-        }
-        if (added) scrollToBottom()
-      } catch (err) {
-        console.warn('[CustomerDashboard] poll chat messages failed:', err)
-      }
-    }
-
-    const scheduleChatPoll = (orderID: string, immediate = false) => {
-      if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
-      const tick = async () => {
-        await pollChatMessages(orderID)
-        if (selectedChatOrder.value) {
-          chatPollIntervalId = setTimeout(tick, 3000)
-        }
-      }
-      if (immediate) {
-        tick()
-      } else {
-        chatPollIntervalId = setTimeout(tick, 3000)
-      }
-    }
-
     const closeChat = () => {
       selectedChatOrder.value = null
       if (ws.value) {
         ws.value.close()
         ws.value = null
       }
-      if (chatPollIntervalId) {
-        clearTimeout(chatPollIntervalId)
-        chatPollIntervalId = null
-      }
+      wsConnected.value = false
       chatError.value = ''
     }
 
@@ -795,10 +742,6 @@ export default defineComponent({
 
     onUnmounted(() => {
       if (intervalId) clearInterval(intervalId)
-      if (chatPollIntervalId) {
-        clearTimeout(chatPollIntervalId)
-        chatPollIntervalId = null
-      }
       if (ws.value) ws.value.close()
     })
 
@@ -921,20 +864,23 @@ export default defineComponent({
 .message-bubble {
   max-width: 80%;
   clear: both;
+  margin-bottom: 8px; /* ~2mm spacing between messages */
 }
 
 .my-message {
   border-radius: 16px 16px 2px 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  background-color: #e3f2fd !important; /* neutral soft light blue */
+  color: #0d47a1 !important; /* dark blue text for high readability */
+  border: 1px solid #bbdefb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .their-message {
   border-radius: 16px 16px 16px 2px;
-  background-color: #e8f0fe !important;
-  color: #1a1a2e !important;
-  border: 1px solid #c4d8f0;
-  border-left: 3px solid #4a90d9;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  background-color: #f8fafc !important;
+  color: #1e293b !important;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .bg-light {

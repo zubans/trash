@@ -177,36 +177,9 @@ SPA-роуты (`/login`, `/admin/*`, `/customer`, `/executor`) отдаются
 
 Разделение платформ в коде — через `Capacitor.isNativePlatform()` (`isNative`).
 
-### 4.3. Поллинг (fallback приёма)
+### 4.3. Транспорт приёма
 
-Так как WebSocket на Android не доставляет входящие сообщения, включён поллинг истории:
-
-```js
-const scheduleChatPoll = (orderID, immediate = false) => {
-  if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
-  const tick = async () => {
-    await pollChatMessages(orderID)   // GET /api/chats/{id}/messages
-    if (selectedChatOrder.value) {
-      chatPollIntervalId = setTimeout(tick, 3000)  // рекурсия
-    }
-  }
-  if (immediate) {
-    tick()  // первый поллинг немедленно
-  } else {
-    chatPollIntervalId = setTimeout(tick, 3000)
-  }
-}
-```
-
-Особенности:
-- **`immediate = true`** — первый поллинг запускается **немедленно** при открытии чата, без задержки 3с. Это критично: без немедленного поллинга пользователь видит только историю, а новые сообщения появляются только через 3с (или вообще не появлялись, если `openChat` зависал).
-- **Рекурсивный `setTimeout`** (не `setInterval`) — устойчив к throttling'у WebView и не накапливает параллельные запросы.
-- **Cache-busting**: `params: { _t: Date.now() }` + `Cache-Control: no-cache, no-store` — обходит кэширование WebView/CapacitorHttp.
-- **`timeout: 5000`** — гарантированно завершает `await`, даже если нативный мост завис; иначе рекурсия остановилась бы. Timeout стоит как на `fetchChatMessages` (загрузка истории), так и на `pollChatMessages` (периодический поллинг).
-- **Дедупликация по `id`** — сообщение, пришедшее через WS и поллинг, не дублируется.
-- **Гейтинг по `isNative`** — поллинг запускается **только** на нативной платформе (`Capacitor.isNativePlatform()`). В вебе используется чистый WebSocket.
-
-Поллинг запускается в `openChat` (с `immediate=true`) и останавливается в `closeChat` / `onUnmounted`.
+Вся работа чата на всех платформах (включая нативное Android-приложение) переведена исключительно на **WebSocket реального времени** (`ws.onmessage`). HTTP-поллинг полностью удалён из фронтенда для исключения лишних HTTP-запросов и нагрузок.
 
 #### Диагностика: почему входящие не приходили
 
