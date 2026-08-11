@@ -36,6 +36,56 @@ public class UpdatePlugin extends Plugin {
     private long currentDownloadId = -1;
     private BroadcastReceiver downloadReceiver;
     private PluginCall pendingInstallCall;
+    private android.os.Handler progressHandler;
+    private Runnable progressRunnable;
+
+    private void startProgressTracking(DownloadManager dm, long downloadId) {
+        stopProgressTracking();
+        progressHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        progressRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (currentDownloadId == -1) return;
+                DownloadManager.Query query = new DownloadManager.Query();
+                query.setFilterById(downloadId);
+                Cursor cursor = null;
+                try {
+                    cursor = dm.query(query);
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int downloadedIdx = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
+                        int totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
+                        if (downloadedIdx >= 0 && totalIdx >= 0) {
+                            long downloaded = cursor.getLong(downloadedIdx);
+                            long total = cursor.getLong(totalIdx);
+                            int progress = total > 0 ? (int) ((downloaded * 100L) / total) : 0;
+                            
+                            JSObject data = new JSObject();
+                            data.put("progress", progress);
+                            data.put("bytesDownloaded", downloaded);
+                            data.put("totalBytes", total);
+                            notifyListeners("downloadProgress", data);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Error querying download progress", e);
+                } finally {
+                    if (cursor != null) cursor.close();
+                }
+                if (currentDownloadId != -1) {
+                    progressHandler.postDelayed(this, 300);
+                }
+            }
+        };
+        progressHandler.post(progressRunnable);
+    }
+
+    private void stopProgressTracking() {
+        if (progressHandler != null && progressRunnable != null) {
+            progressHandler.removeCallbacks(progressRunnable);
+        }
+        progressHandler = null;
+        progressRunnable = null;
+    }
 
     @PluginMethod
     public void getCurrentVersion(PluginCall call) {
@@ -163,6 +213,7 @@ public class UpdatePlugin extends Plugin {
         try {
             currentDownloadId = dm.enqueue(request);
             Log.d(TAG, "Download enqueued, id=" + currentDownloadId);
+            startProgressTracking(dm, currentDownloadId);
         } catch (Exception e) {
             Log.e(TAG, "Failed to enqueue download", e);
             unregisterDownloadReceiver();
@@ -193,6 +244,7 @@ public class UpdatePlugin extends Plugin {
     }
 
     private void unregisterDownloadReceiver() {
+        stopProgressTracking();
         if (downloadReceiver == null) {
             return;
         }

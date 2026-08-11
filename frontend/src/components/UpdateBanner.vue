@@ -18,9 +18,19 @@
         >
           {{ releaseNotes }}
         </p>
+
+        <!-- Progress indicator when downloading -->
+        <div v-if="installing || isDownloading" class="progress-section my-3">
+          <va-progress-bar :model-value="downloadProgress" color="primary" class="mb-1" />
+          <div class="d-flex justify-content-between text-xs text-secondary">
+            <span>{{ formattedDownloaded }} / {{ formattedTotal }}</span>
+            <span>{{ downloadProgress }}%</span>
+          </div>
+        </div>
+
         <va-button
+          v-else
           color="primary"
-          :loading="installing"
           block
           @click="install"
         >
@@ -41,7 +51,7 @@
         @dismissed="dismissed = true"
       >
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
+          <div class="flex-grow-1">
             <div>
               {{ $t('app.updateAvailable', { version: versionName }) }}
             </div>
@@ -51,11 +61,21 @@
             >
               {{ releaseNotes }}
             </div>
+
+            <!-- Progress bar in banner -->
+            <div v-if="installing || isDownloading" class="progress-section mt-2" style="max-width: 300px;">
+              <va-progress-bar :model-value="downloadProgress" color="primary" class="mb-1" />
+              <div class="d-flex justify-content-between text-xs opacity-75">
+                <span>{{ formattedDownloaded }} / {{ formattedTotal }}</span>
+                <span>{{ downloadProgress }}%</span>
+              </div>
+            </div>
           </div>
+
           <va-button
+            v-if="!installing && !isDownloading"
             color="primary"
             size="small"
-            :loading="installing"
             @click="install"
           >
             {{ $t('app.installUpdate') }}
@@ -78,6 +98,10 @@ export default defineComponent({
       forceUpdate,
       versionName,
       releaseNotes,
+      downloadProgress,
+      bytesDownloaded,
+      totalBytes,
+      isDownloading,
       installUpdate,
     } = useAppUpdate()
 
@@ -86,6 +110,15 @@ export default defineComponent({
 
     const showForceUpdate = computed(() => updateAvailable.value && forceUpdate.value)
     const showBanner = computed(() => updateAvailable.value && !forceUpdate.value && !dismissed.value)
+
+    const formatSize = (bytes: number) => {
+      if (!bytes || bytes <= 0) return '0 MB'
+      const mb = bytes / (1024 * 1024)
+      return `${mb.toFixed(1)} MB`
+    }
+
+    const formattedDownloaded = computed(() => formatSize(bytesDownloaded.value))
+    const formattedTotal = computed(() => formatSize(totalBytes.value))
 
     const install = async () => {
       installing.value = true
@@ -101,7 +134,12 @@ export default defineComponent({
       showBanner,
       versionName,
       releaseNotes,
+      dismissed,
       installing,
+      isDownloading,
+      downloadProgress,
+      formattedDownloaded,
+      formattedTotal,
       install,
     }
   },

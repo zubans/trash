@@ -22,7 +22,11 @@ const versionName = ref<string | null>(null)
 const releaseNotes = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 let activeConsumers = 0
-let intervalId: number | undefined
+const downloadProgress = ref(0)
+const bytesDownloaded = ref(0)
+const totalBytes = ref(0)
+const isDownloading = ref(false)
+let listenerHandle: any = null
 
 function resolveDownloadUrl(url: string): string {
   if (!url) return ''
@@ -32,6 +36,16 @@ function resolveDownloadUrl(url: string): string {
   const base = (import.meta.env.VITE_API_URL as string) || ''
   const separator = base.endsWith('/') || url.startsWith('/') ? '' : '/'
   return `${base}${separator}${url}`
+}
+
+async function setupProgressListener() {
+  if (Capacitor.getPlatform() === 'android' && !listenerHandle) {
+    listenerHandle = await AppUpdate.addListener('downloadProgress', (data) => {
+      downloadProgress.value = data.progress || 0
+      bytesDownloaded.value = data.bytesDownloaded || 0
+      totalBytes.value = data.totalBytes || 0
+    })
+  }
 }
 
 async function checkVersion() {
@@ -66,11 +80,16 @@ function reset() {
   downloadUrl.value = null
   versionName.value = null
   releaseNotes.value = null
+  downloadProgress.value = 0
+  bytesDownloaded.value = 0
+  totalBytes.value = 0
+  isDownloading.value = false
 }
 
 function startChecking() {
   if (activeConsumers === 0) {
     checkVersion()
+    setupProgressListener()
     intervalId = window.setInterval(checkVersion, CHECK_INTERVAL_MS)
   }
   activeConsumers++
@@ -78,9 +97,15 @@ function startChecking() {
 
 function stopChecking() {
   activeConsumers = Math.max(0, activeConsumers - 1)
-  if (activeConsumers === 0 && intervalId !== undefined) {
-    clearInterval(intervalId)
-    intervalId = undefined
+  if (activeConsumers === 0) {
+    if (intervalId !== undefined) {
+      clearInterval(intervalId)
+      intervalId = undefined
+    }
+    if (listenerHandle) {
+      listenerHandle.remove()
+      listenerHandle = null
+    }
   }
 }
 
@@ -97,11 +122,17 @@ export function useAppUpdate() {
     if (!downloadUrl.value) {
       return
     }
+    isDownloading.value = true
+    downloadProgress.value = 0
+    bytesDownloaded.value = 0
+    totalBytes.value = 0
     try {
       await AppUpdate.downloadAndInstall({ url: downloadUrl.value })
     } catch (err: any) {
       errorMsg.value = err.message || 'Failed to install update'
       console.error('[AppUpdate] install failed:', err)
+    } finally {
+      isDownloading.value = false
     }
   }
 
@@ -112,6 +143,10 @@ export function useAppUpdate() {
     versionName,
     releaseNotes,
     errorMsg,
+    downloadProgress,
+    bytesDownloaded,
+    totalBytes,
+    isDownloading,
     checkVersion,
     installUpdate,
   }
