@@ -57,6 +57,15 @@ export function buildChatWebSocketUrl(orderId: string, token: string): string {
   return `${wsBase}/api/chats/${orderId}/ws?token=${encodeURIComponent(token)}`
 }
 
+// Convert a relative file path (e.g. /uploads/chat/...) into a full accessible URL
+export function resolveFileUrl(path?: string): string {
+  if (!path) return ''
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  const base = apiUrl.replace(/\/$/, '')
+  const cleanPath = path.startsWith('/') ? path : '/' + path
+  return `${base}${cleanPath}`
+}
+
 // Helper to retrieve cookie by name
 export function getCookie(name: string): string {
   const value = `; ${document.cookie}`

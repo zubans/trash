@@ -251,19 +251,19 @@
           <!-- Attachment rendering -->
           <div v-if="msg.file_url" class="telegram-attachment mb-2">
             <div v-if="msg.file_type === 'image'" class="attachment-image-wrapper">
-              <a :href="msg.file_url" target="_blank">
-                <img :src="msg.file_url" class="attachment-img rounded-lg shadow-sm" alt="photo" />
+              <a :href="resolveFileUrl(msg.file_url)" target="_blank">
+                <img :src="resolveFileUrl(msg.file_url)" class="attachment-img rounded-lg shadow-sm" alt="photo" />
               </a>
             </div>
             <div v-else class="attachment-doc-wrapper p-2 bg-white-10 rounded d-flex align-items-center">
               <span class="doc-icon mr-2">📄</span>
               <div class="flex-grow-1 overflow-hidden">
-                <a :href="msg.file_url" target="_blank" download class="font-bold text-xs text-white truncate d-block">
+                <a :href="resolveFileUrl(msg.file_url)" target="_blank" download class="font-bold text-xs text-white truncate d-block">
                   {{ msg.file_name || 'document' }}
                 </a>
                 <span class="text-xxs opacity-75" v-if="msg.file_size">{{ formatFileSize(msg.file_size) }}</span>
               </div>
-              <a :href="msg.file_url" target="_blank" download class="btn-download ml-2">⬇</a>
+              <a :href="resolveFileUrl(msg.file_url)" target="_blank" download class="btn-download ml-2">⬇</a>
             </div>
           </div>
 
@@ -365,7 +365,7 @@ import { Capacitor } from '@capacitor/core'
 import { useAuthStore } from '../../stores/auth-store'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import UpdateBanner from '../../components/UpdateBanner.vue'
-import api, { buildChatWebSocketUrl, formatApiError } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError } from '../../services/api'
 import { NativeWebSocket } from '../../plugins/native-websocket'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
@@ -1141,6 +1141,7 @@ export default defineComponent({
       triggerDoc,
       formatFileSize,
       onFileSelected,
+      resolveFileUrl,
     }
   },
 })
