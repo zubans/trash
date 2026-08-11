@@ -493,6 +493,7 @@ import { Capacitor } from '@capacitor/core'
 import L from 'leaflet'
 import { useAuthStore } from '../../stores/auth-store'
 import api, { buildChatWebSocketUrl, formatApiError } from '../../services/api'
+import { NativeWebSocket } from '../../plugins/native-websocket'
 import type { ServiceNode } from '../../api/services'
 
 export default defineComponent({
@@ -928,50 +929,80 @@ export default defineComponent({
         chatError.value = t('executor.errorChatHistory')
       }
 
-      // Open websocket. The URL is resolved from the active API base URL so that
-      // native Android builds use the plain HTTP mobile port (8089) while the
-      // web build continues to use the HTTPS port (8080).
+      // Open websocket (Native OkHttp WebSocket on Android for 100% bypass of WebView restrictions and self-signed TLS support).
       const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
 
-      if (ws.value) {
-        ws.value.close()
-        ws.value = null
-      }
-
-      ws.value = new WebSocket(wsUrl)
-      ws.value.onopen = () => {
-        wsConnected.value = true
-        chatError.value = ''
-      }
-      ws.value.onerror = () => {
-        chatError.value = t('executor.errorChatConnection')
-      }
-      ws.value.onclose = () => {
-        wsConnected.value = false
-      }
-      ws.value.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        if (data.type === 'system' && data.action === 'lock') {
-          chatLocked.value = true
-        } else if (data.type === 'system' && data.action === 'downgrade') {
-          // Live SLA tariff downgrade sync
-          order.is_urgent = data.is_urgent
-          order.is_asap = data.is_asap
-          order.final_amount = data.final_amount
-          order.is_downgraded = true
-        } else if (data.type === 'error') {
-          console.warn(data.message)
-        } else {
-          const exists = chatMessages.value.some((m: any) => m.id === data.id)
-          if (!exists) {
-            chatMessages.value.push(data)
-            scrollToBottom()
+      if (isNative) {
+        try {
+          await NativeWebSocket.disconnect()
+          await NativeWebSocket.addListener('onOpen', () => {
+            wsConnected.value = true
+            chatError.value = ''
+          })
+          await NativeWebSocket.addListener('onMessage', (res) => {
+            if (!res || !res.data) return
+            const data = JSON.parse(res.data)
+            if (data.type === 'system' && data.action === 'lock') {
+              chatLocked.value = true
+            } else if (data.type === 'system' && data.action === 'downgrade') {
+              order.is_urgent = data.is_urgent
+              order.is_asap = data.is_asap
+              order.final_amount = data.final_amount
+              order.is_downgraded = true
+            } else if (data.type === 'error') {
+              console.warn(data.message)
+            } else {
+              const exists = chatMessages.value.some((m: any) => m.id === data.id)
+              if (!exists) {
+                chatMessages.value.push(data)
+                scrollToBottom()
+              }
+            }
+          })
+          await NativeWebSocket.addListener('onError', (err) => {
+            console.warn('[NativeWebSocket] error:', err)
+          })
+          await NativeWebSocket.connect({ url: wsUrl })
+        } catch (nativeErr) {
+          console.warn('[ExecutorDashboard] NativeWebSocket connection error:', nativeErr)
+        }
+      } else {
+        if (ws.value) {
+          ws.value.close()
+          ws.value = null
+        }
+        ws.value = new WebSocket(wsUrl)
+        ws.value.onopen = () => {
+          wsConnected.value = true
+          chatError.value = ''
+        }
+        ws.value.onerror = () => {
+          chatError.value = t('executor.errorChatConnection')
+        }
+        ws.value.onclose = () => {
+          wsConnected.value = false
+        }
+        ws.value.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          if (data.type === 'system' && data.action === 'lock') {
+            chatLocked.value = true
+          } else if (data.type === 'system' && data.action === 'downgrade') {
+            order.is_urgent = data.is_urgent
+            order.is_asap = data.is_asap
+            order.final_amount = data.final_amount
+            order.is_downgraded = true
+          } else if (data.type === 'error') {
+            console.warn(data.message)
+          } else {
+            const exists = chatMessages.value.some((m: any) => m.id === data.id)
+            if (!exists) {
+              chatMessages.value.push(data)
+              scrollToBottom()
+            }
           }
         }
       }
 
-      // Start 2-second background polling loop so incoming messages arrive immediately
-      // even if Android WebView WebSocket connection drops or is throttled.
       scheduleChatPoll(order.id)
     }
 
@@ -985,10 +1016,17 @@ export default defineComponent({
 
       const orderID = selectedChatOrder.value.id
 
-      // Primary path: send over WebSocket. The server broadcasts the saved
-      // message back to all room clients (including this one), so the sender's
-      // own message appears via onmessage with a stable id (deduped).
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      // Primary path: send over NativeWebSocket on native, or Web WebSocket on web
+      if (isNative) {
+        try {
+          await NativeWebSocket.send({ message: JSON.stringify({ text }) })
+          chatText.value = ''
+          chatError.value = ''
+          return
+        } catch (err) {
+          console.warn('[ExecutorDashboard] NativeWebSocket send failed, falling back to REST:', err)
+        }
+      } else if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         try {
           ws.value.send(JSON.stringify({ text }))
           chatText.value = ''
@@ -996,7 +1034,6 @@ export default defineComponent({
           return
         } catch (err) {
           console.warn('[ExecutorDashboard] ws.send failed, falling back to HTTP:', err)
-          // fall through to HTTP fallback below
         }
       }
 
