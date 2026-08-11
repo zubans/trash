@@ -64,7 +64,7 @@ export default defineComponent({
 .server-status {
   position: fixed;
   top: 16px;
-  right: 16px;
+  left: 16px;
   z-index: 9999;
   display: flex;
   align-items: center;

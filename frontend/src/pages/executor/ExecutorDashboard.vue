@@ -345,8 +345,9 @@
               </div>
 
               <div class="d-flex justify-content-end mt-3">
-                <va-button color="info" outline size="small" @click="openChat(order)">
+                <va-button color="info" outline size="small" class="position-relative" @click="openChat(order)">
                   <va-icon name="chat" class="mr-1" /> {{ $t('common.chat') }}
+                  <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
                 </va-button>
               </div>
             </va-card>
@@ -418,6 +419,20 @@
       </div>
     </div>
 
+    <!-- Top Floating Toast Notification for Incoming Messages -->
+    <div
+      v-if="chatToast"
+      class="chat-top-toast shadow-lg p-3 rounded-lg d-flex align-items-center cursor-pointer"
+      @click="openChatByToast"
+    >
+      <div class="toast-chat-icon mr-3">💬</div>
+      <div class="flex-grow-1 overflow-hidden">
+        <div class="font-bold text-xs text-white">{{ chatToast.title }}</div>
+        <div class="text-xs text-white-75 truncate">{{ chatToast.text }}</div>
+      </div>
+      <button type="button" class="toast-close-btn ml-2 text-white" @click.stop="chatToast = null">✕</button>
+    </div>
+
     <!-- Sliding Chat Panel (Telegram Style) -->
     <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
       <div class="chat-header d-flex align-items-center bg-telegram text-white p-2 px-3">
@@ -454,7 +469,11 @@
           <div class="telegram-text">{{ msg.text }}</div>
           <div class="telegram-meta">
             <span class="telegram-time">{{ formatTime(msg.created_at) }}</span>
-            <span class="telegram-ticks" v-if="msg.sender_id === authStore.userID">✓✓</span>
+            <span v-if="msg.sender_id === authStore.userID" class="telegram-ticks-status" :title="getMessageStatusTitle(msg.status)">
+              <span v-if="msg.status === 'read'" class="ticks-read">✓✓</span>
+              <span v-else-if="msg.status === 'delivered'" class="ticks-delivered">✓✓</span>
+              <span v-else class="ticks-sent">✓</span>
+            </span>
           </div>
         </div>
       </div>
@@ -905,6 +924,113 @@ export default defineComponent({
 
     const isNative = Capacitor.isNativePlatform()
 
+    const unreadOrderIDs = ref(new Set<string>())
+    const chatToast = ref<{ id: string; title: string; text: string; order: any } | null>(null)
+
+    const fetchUnreadSummary = async () => {
+      try {
+        const response = await api.get('/chats/unread-summary')
+        const ids = response.data?.unread_order_ids || []
+        unreadOrderIDs.value = new Set(ids)
+      } catch (err) {
+        console.warn('[ExecutorDashboard] failed to fetch unread summary:', err)
+      }
+    }
+
+    const markChatAsRead = async (orderID: string) => {
+      unreadOrderIDs.value.delete(orderID)
+      try {
+        await api.post(`/chats/${orderID}/read`)
+      } catch (err) {
+        console.warn('[ExecutorDashboard] mark read failed:', err)
+      }
+      if (isNative) {
+        try {
+          await NativeWebSocket.send({ message: JSON.stringify({ type: 'read_ack' }) })
+        } catch (e) {}
+      } else if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        try {
+          ws.value.send(JSON.stringify({ type: 'read_ack' }))
+        } catch (e) {}
+      }
+    }
+
+    const sendDeliveryAck = () => {
+      if (isNative) {
+        try {
+          NativeWebSocket.send({ message: JSON.stringify({ type: 'delivery_ack' }) })
+        } catch (e) {}
+      } else if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        try {
+          ws.value.send(JSON.stringify({ type: 'delivery_ack' }))
+        } catch (e) {}
+      }
+    }
+
+    const getMessageStatusTitle = (status?: string) => {
+      if (status === 'read') return t('customer.statusRead')
+      if (status === 'delivered') return t('customer.statusDelivered')
+      return t('customer.statusSent')
+    }
+
+    const handleIncomingChatMessage = (data: any, order: any) => {
+      if (data.type === 'status_update') {
+        const updateIds = new Set(data.message_ids || [])
+        for (const m of chatMessages.value) {
+          if (updateIds.has(m.id)) {
+            m.status = data.status
+          }
+        }
+        return
+      }
+
+      if (data.type === 'system' && data.action === 'lock') {
+        chatLocked.value = true
+        return
+      }
+      if (data.type === 'system' && data.action === 'downgrade') {
+        order.is_urgent = data.is_urgent
+        order.is_asap = data.is_asap
+        order.final_amount = data.final_amount
+        order.is_downgraded = true
+        return
+      }
+      if (data.type === 'error') {
+        console.warn(data.message)
+        return
+      }
+
+      // Standard text message
+      const exists = chatMessages.value.some((m: any) => m.id === data.id)
+      if (!exists) {
+        chatMessages.value.push(data)
+        scrollToBottom()
+      }
+
+      // If message is from recipient (other user)
+      if (data.sender_id !== authStore.userID) {
+        sendDeliveryAck()
+        if (!selectedChatOrder.value || selectedChatOrder.value.id !== order.id) {
+          unreadOrderIDs.value.add(order.id)
+          chatToast.value = {
+            id: order.id,
+            title: t('customer.newMessageTitle'),
+            text: t('customer.newMessageToast', { id: order.id.slice(0, 8), text: data.text }),
+            order,
+          }
+        } else {
+          markChatAsRead(order.id)
+        }
+      }
+    }
+
+    const openChatByToast = () => {
+      if (chatToast.value?.order) {
+        openChat(chatToast.value.order)
+        chatToast.value = null
+      }
+    }
+
     // Chat operations
     const openChat = async (order: any) => {
       selectedChatOrder.value = order
@@ -912,6 +1038,9 @@ export default defineComponent({
       chatLocked.value = false
       wsConnected.value = false
       chatError.value = ''
+
+      // Mark unread dot as read
+      markChatAsRead(order.id)
 
       // Load history (with timeout so the native HTTP bridge can't stall forever).
       try {
@@ -936,26 +1065,13 @@ export default defineComponent({
           await NativeWebSocket.addListener('onOpen', () => {
             wsConnected.value = true
             chatError.value = ''
+            sendDeliveryAck()
+            markChatAsRead(order.id)
           })
           await NativeWebSocket.addListener('onMessage', (res) => {
             if (!res || !res.data) return
             const data = JSON.parse(res.data)
-            if (data.type === 'system' && data.action === 'lock') {
-              chatLocked.value = true
-            } else if (data.type === 'system' && data.action === 'downgrade') {
-              order.is_urgent = data.is_urgent
-              order.is_asap = data.is_asap
-              order.final_amount = data.final_amount
-              order.is_downgraded = true
-            } else if (data.type === 'error') {
-              console.warn(data.message)
-            } else {
-              const exists = chatMessages.value.some((m: any) => m.id === data.id)
-              if (!exists) {
-                chatMessages.value.push(data)
-                scrollToBottom()
-              }
-            }
+            handleIncomingChatMessage(data, order)
           })
           await NativeWebSocket.addListener('onError', (err) => {
             console.warn('[NativeWebSocket] error:', err)
@@ -973,6 +1089,8 @@ export default defineComponent({
         ws.value.onopen = () => {
           wsConnected.value = true
           chatError.value = ''
+          sendDeliveryAck()
+          markChatAsRead(order.id)
         }
         ws.value.onerror = () => {
           chatError.value = t('executor.errorChatConnection')
@@ -982,22 +1100,7 @@ export default defineComponent({
         }
         ws.value.onmessage = (event) => {
           const data = JSON.parse(event.data)
-          if (data.type === 'system' && data.action === 'lock') {
-            chatLocked.value = true
-          } else if (data.type === 'system' && data.action === 'downgrade') {
-            order.is_urgent = data.is_urgent
-            order.is_asap = data.is_asap
-            order.final_amount = data.final_amount
-            order.is_downgraded = true
-          } else if (data.type === 'error') {
-            console.warn(data.message)
-          } else {
-            const exists = chatMessages.value.some((m: any) => m.id === data.id)
-            if (!exists) {
-              chatMessages.value.push(data)
-              scrollToBottom()
-            }
-          }
+          handleIncomingChatMessage(data, order)
         }
       }
 
@@ -1170,6 +1273,7 @@ export default defineComponent({
       await fetchActiveShift()
       fetchAssignedOrders()
       fetchAvailableOrders()
+      await fetchUnreadSummary()
 
       // Request location permission and fetch current coordinates.
       await checkLocationPermission()
@@ -1182,6 +1286,7 @@ export default defineComponent({
         fetchActiveShift()
         fetchAssignedOrders()
         fetchAvailableOrders()
+        fetchUnreadSummary()
       }, 5000)
     })
 
@@ -1251,6 +1356,10 @@ export default defineComponent({
       applyMapCoordinates,
       effectiveLat,
       effectiveLon,
+      unreadOrderIDs,
+      chatToast,
+      openChatByToast,
+      getMessageStatusTitle,
     }
   },
 })
@@ -1458,10 +1567,77 @@ export default defineComponent({
   color: rgba(255, 255, 255, 0.55);
 }
 
-.telegram-ticks {
+.telegram-ticks-status {
   font-size: 11px;
-  color: #5bb3f0;
   font-weight: bold;
+}
+.ticks-sent {
+  color: rgba(255, 255, 255, 0.45);
+}
+.ticks-delivered {
+  color: rgba(255, 255, 255, 0.65);
+}
+.ticks-read {
+  color: #5bb3f0;
+}
+
+/* Yellow unread badge dot */
+.position-relative {
+  position: relative;
+}
+.yellow-unread-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  background-color: #f59e0b;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.8);
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+  70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+/* Floating Top Toast Notification */
+.chat-top-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 420px;
+  background: #2b5278;
+  color: white;
+  z-index: 1050;
+  border: 1px solid #3e6587;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: slide-down 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-chat-icon {
+  font-size: 20px;
+}
+
+.toast-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.toast-close-btn:hover {
+  opacity: 1;
+}
+
+@keyframes slide-down {
+  from { transform: translate(-50%, -100%); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
 }
 
 .telegram-input-row {

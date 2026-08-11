@@ -161,7 +161,39 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 			continue
 		}
 
-		// Parse input message
+		// Check if message is a status acknowledgment (delivery_ack / read_ack)
+		var eventReq struct {
+			Type    string   `json:"type"`
+			Text    string   `json:"text"`
+			MsgIDs  []string `json:"message_ids"`
+		}
+		if err := json.Unmarshal(messageBytes, &eventReq); err == nil && eventReq.Type != "" {
+			if eventReq.Type == "delivery_ack" {
+				updatedIDs, err := s.chatRepo.MarkMessagesAsDelivered(room.ChatID, client.UserID)
+				if err == nil && len(updatedIDs) > 0 {
+					ackBytes, _ := json.Marshal(map[string]interface{}{
+						"type":        "status_update",
+						"message_ids": updatedIDs,
+						"status":      "delivered",
+					})
+					room.Broadcast <- ackBytes
+				}
+				continue
+			} else if eventReq.Type == "read_ack" {
+				updatedIDs, err := s.chatRepo.MarkMessagesAsRead(room.ChatID, client.UserID)
+				if err == nil && len(updatedIDs) > 0 {
+					ackBytes, _ := json.Marshal(map[string]interface{}{
+						"type":        "status_update",
+						"message_ids": updatedIDs,
+						"status":      "read",
+					})
+					room.Broadcast <- ackBytes
+				}
+				continue
+			}
+		}
+
+		// Parse input text message
 		var msgReq struct {
 			Text string `json:"text"`
 		}
@@ -182,6 +214,37 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 			room.Broadcast <- broadcastBytes
 		}
 	}
+}
+
+// MarkMessagesAsRead marks messages as read for an order.
+func (s *ChatService) MarkMessagesAsRead(orderID, userID uuid.UUID) ([]uuid.UUID, error) {
+	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	if err != nil || chat == nil {
+		return nil, errors.New("chat room not found")
+	}
+	updatedIDs, err := s.chatRepo.MarkMessagesAsRead(chat.ID, userID)
+	if err == nil && len(updatedIDs) > 0 {
+		s.mu.RLock()
+		room, exists := s.rooms[orderID]
+		s.mu.RUnlock()
+		if exists {
+			ackBytes, _ := json.Marshal(map[string]interface{}{
+				"type":        "status_update",
+				"message_ids": updatedIDs,
+				"status":      "read",
+			})
+			select {
+			case room.Broadcast <- ackBytes:
+			default:
+			}
+		}
+	}
+	return updatedIDs, err
+}
+
+// GetUnreadOrderIDs returns order IDs with unread messages for a user.
+func (s *ChatService) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
+	return s.chatRepo.GetUnreadOrderIDs(userID)
 }
 
 // GetMessages retrieves all saved messages for an order's chat room (verifying participant access).

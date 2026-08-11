@@ -137,6 +137,8 @@ func main() {
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
+			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)
+			r.Get("/chats/unread-summary", ch.GetUnreadSummaryHandler)
 			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
 			r.Post("/logout", ah.LogoutHandler)
 		})

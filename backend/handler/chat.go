@@ -114,3 +114,51 @@ func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	h.chatService.HandleWS(w, r, orderID, user.ID, user.Role)
 }
+
+// MarkReadHandler marks all messages in a chat as read.
+func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	idStr := chi.URLParam(r, "order_id")
+	orderID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid order ID", http.StatusBadRequest)
+		return
+	}
+
+	updatedIDs, err := h.chatService.MarkMessagesAsRead(orderID, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "ok",
+		"updated_ids": updatedIDs,
+	})
+}
+
+// GetUnreadSummaryHandler returns unread order IDs for the authenticated user.
+func (h *ChatHandler) GetUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderIDs, err := h.chatService.GetUnreadOrderIDs(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"unread_order_ids": orderIDs,
+	})
+}
