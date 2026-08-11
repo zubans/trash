@@ -772,9 +772,7 @@ export default defineComponent({
         }
 
         lastSentAt.value = new Date().toISOString()
-        successMsg.value = t('executor.successLocationSubmitted', {
-          status: isInside ? t('executor.inside') : t('executor.outside'),
-        })
+        // Do not set successMsg for silent background location sync to avoid spamming the UI alert
       } catch (err: any) {
         errorMsg.value = err.response?.data || t('executor.errorLocationSubmitted')
         console.error(err)
