@@ -418,50 +418,65 @@
       </div>
     </div>
 
-    <!-- Sliding Chat Panel -->
+    <!-- Sliding Chat Panel (Telegram Style) -->
     <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
-      <div class="chat-header d-flex justify-content-between align-items-center bg-primary text-white p-3">
-        <div>
-          <h4 class="m-0 text-white font-bold text-sm">{{ $t('customer.orderChatTitle', { id: selectedChatOrder?.id.slice(0, 8) }) }}</h4>
-          <span class="text-xs opacity-75">{{ $t('executor.chatSubtitle') }}</span>
+      <div class="chat-header d-flex align-items-center bg-telegram text-white p-2 px-3">
+        <div class="telegram-avatar mr-3">
+          {{ selectedChatOrder?.id.slice(0, 2).toUpperCase() }}
         </div>
-        <va-button color="warning" size="small" flat @click="closeChat">{{ $t('common.close') }}</va-button>
+        <div class="flex-grow-1 overflow-hidden">
+          <h4 class="m-0 text-white font-bold text-sm truncate">
+            {{ $t('customer.orderChatTitle', { id: selectedChatOrder?.id.slice(0, 8) }) }}
+          </h4>
+          <span class="text-xxs text-online d-flex align-items-center">
+            <span class="online-dot mr-1"></span> {{ $t('executor.chatSubtitle') }}
+          </span>
+        </div>
+        <button type="button" class="btn-close-chat" @click="closeChat">
+          ✕
+        </button>
       </div>
 
-      <div class="chat-messages p-3 flex-grow-1" ref="messagesContainer">
-        <div v-if="chatLocked" class="text-center py-2 mb-3 bg-danger-light text-danger rounded text-xs">
+      <div class="chat-messages telegram-bg p-3 flex-grow-1" ref="messagesContainer">
+        <div v-if="chatLocked" class="text-center py-2 mb-3 bg-danger-light text-danger rounded-lg text-xs font-semibold shadow-sm">
           {{ $t('customer.chatLocked') }}
         </div>
-        <div v-else-if="chatError" class="text-center py-2 mb-3 bg-danger-light text-danger rounded text-xs">
+        <div v-else-if="chatError" class="text-center py-2 mb-3 bg-danger-light text-danger rounded-lg text-xs font-semibold shadow-sm">
           {{ chatError }}
         </div>
 
         <div
           v-for="msg in chatMessages"
           :key="msg.id"
-          :class="['message-bubble p-2.5 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto' : 'their-message mr-auto']"
+          :class="['telegram-bubble', msg.sender_id === authStore.userID ? 'my-telegram-msg ml-auto' : 'their-telegram-msg mr-auto']"
         >
-          <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">{{ $t('common.customer') }}</div>
-          <div class="text-sm message-text">{{ msg.text }}</div>
-          <div class="text-xxs text-right mt-1 opacity-75">{{ formatTime(msg.created_at) }}</div>
+          <div class="telegram-sender" v-if="msg.sender_id !== authStore.userID">{{ $t('common.customer') }}</div>
+          <div class="telegram-text">{{ msg.text }}</div>
+          <div class="telegram-meta">
+            <span class="telegram-time">{{ formatTime(msg.created_at) }}</span>
+            <span class="telegram-ticks" v-if="msg.sender_id === authStore.userID">✓✓</span>
+          </div>
         </div>
       </div>
 
-      <div class="chat-input-area p-3 bg-white border-top">
-        <div class="d-flex">
+      <div class="chat-input-area p-2 bg-white border-top">
+        <div class="d-flex align-items-center telegram-input-row">
           <input
             v-model="chatText"
             :placeholder="$t('customer.typeMessage')"
-            class="flex-grow-1 mr-2 p-2"
-            style="border: 1px solid #cbd5e0; border-radius: 4px;"
+            class="telegram-input flex-grow-1 p-2 px-3"
+            :disabled="chatLocked"
             @keyup.enter="sendChatMessage"
           />
           <button
             type="button"
-            style="padding: 8px 16px; background: #2c82e0; color: white; border: none; border-radius: 4px;"
+            class="telegram-send-btn ml-2"
+            :disabled="chatLocked || !chatText.trim()"
             @click="sendChatMessage"
           >
-            {{ sendingChat ? '...' : $t('customer.send') }}
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
           </button>
         </div>
       </div>
@@ -551,6 +566,7 @@ export default defineComponent({
     const chatError = ref('')
     const sendingChat = ref(false)
     const messagesContainer = ref<any>(null)
+    let chatPollIntervalId: any = null
 
     const successMsg = ref('')
     const errorMsg = ref('')
@@ -900,7 +916,12 @@ export default defineComponent({
 
       // Load history (with timeout so the native HTTP bridge can't stall forever).
       try {
-        chatMessages.value = await fetchChatMessages(order.id)
+        const response = await api.get(`/chats/${order.id}/messages`, {
+          params: { _t: Date.now() },
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+          timeout: 4000,
+        })
+        chatMessages.value = response.data || []
         scrollToBottom()
       } catch (err) {
         console.error('[ExecutorDashboard] failed to load chat history:', err)
@@ -948,6 +969,10 @@ export default defineComponent({
           }
         }
       }
+
+      // Start 2-second background polling loop so incoming messages arrive immediately
+      // even if Android WebView WebSocket connection drops or is throttled.
+      scheduleChatPoll(order.id)
     }
 
     const sendChatMessage = async (event?: Event) => {
@@ -1002,17 +1027,40 @@ export default defineComponent({
       }
     }
 
-    // Fetch chat history with cache-busting so mobile WebViews/CapacitorHttp
-    // never return a stale response. The timeout guarantees the polling promise
-    // always settles (resolves or rejects) even when the native HTTP bridge
-    // stalls, so the recursive setTimeout never gets stuck.
-    const fetchChatMessages = async (orderID: string) => {
-      const response = await api.get(`/chats/${orderID}/messages`, {
-        params: { _t: Date.now() },
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-        timeout: 5000,
-      })
-      return response.data || []
+    // Native polling fallback helper to guarantee messages always arrive
+    // even when WebView WS socket drops or is throttled.
+    const pollChatMessages = async (orderID: string) => {
+      if (!selectedChatOrder.value) return
+      try {
+        const response = await api.get(`/chats/${orderID}/messages`, {
+          params: { _t: Date.now() },
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+          timeout: 4000,
+        })
+        const incoming = response.data || []
+        const existingIds = new Set(chatMessages.value.map((m: any) => m.id))
+        let added = false
+        for (const m of incoming) {
+          if (!existingIds.has(m.id)) {
+            chatMessages.value.push(m)
+            added = true
+          }
+        }
+        if (added) scrollToBottom()
+      } catch (err) {
+        console.warn('[ExecutorDashboard] poll chat messages failed:', err)
+      }
+    }
+
+    const scheduleChatPoll = (orderID: string) => {
+      if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
+      const tick = async () => {
+        await pollChatMessages(orderID)
+        if (selectedChatOrder.value && selectedChatOrder.value.id === orderID) {
+          chatPollIntervalId = setTimeout(tick, 2000)
+        }
+      }
+      chatPollIntervalId = setTimeout(tick, 2000)
     }
 
     const closeChat = () => {
@@ -1020,6 +1068,10 @@ export default defineComponent({
       if (ws.value) {
         ws.value.close()
         ws.value = null
+      }
+      if (chatPollIntervalId) {
+        clearTimeout(chatPollIntervalId)
+        chatPollIntervalId = null
       }
       wsConnected.value = false
       chatError.value = ''
@@ -1251,51 +1303,172 @@ export default defineComponent({
   border-bottom: 1px solid #edf2f7;
 }
 
-/* Chat panel sliding out from the right */
+/* Telegram Chat Design */
 .chat-panel {
   position: fixed;
   top: 0;
   right: 0;
-  width: 400px;
+  width: 420px;
+  max-width: 100vw;
   height: 100%;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
+  background: #0f1826;
   z-index: 1000;
   transform: translateX(100%);
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
   display: flex;
   flex-direction: column;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.25);
 }
 
 .chat-panel.open {
   transform: translateX(0);
 }
 
-.chat-messages {
-  flex-grow: 1;
+.bg-telegram {
+  background: #517da2 !important; /* Telegram signature header blue */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.telegram-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #3e6587;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.btn-close-chat {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.btn-close-chat:hover {
+  color: #ffffff;
+}
+
+.text-online {
+  color: #7ce7ff;
+}
+
+.online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #44e883;
+  display: inline-block;
+}
+
+/* Telegram Wallpaper Background pattern */
+.telegram-bg {
+  background-color: #0e1621 !important;
+  background-image: radial-gradient(#1c2938 1px, transparent 1px);
+  background-size: 16px 16px;
   overflow-y: auto;
 }
 
-.message-bubble {
-  max-width: 80%;
-  clear: both;
-  margin-bottom: 8px; /* ~2mm spacing between messages */
+.telegram-bubble {
+  max-width: 78%;
+  padding: 8px 12px 6px 12px;
+  position: relative;
+  margin-bottom: 6px;
+  font-size: 14.5px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
-.my-message {
-  border-radius: 16px 16px 2px 16px;
-  background-color: #e3f2fd !important; /* neutral soft light blue */
-  color: #0d47a1 !important; /* dark blue text for high readability */
-  border: 1px solid #bbdefb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+.my-telegram-msg {
+  background-color: #2b5278 !important; /* Telegram sender bubble blue */
+  color: #f5f5f5 !important;
+  border-radius: 14px 14px 2px 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-.their-message {
-  border-radius: 16px 16px 16px 2px;
-  background-color: #f8fafc !important;
-  color: #1e293b !important;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+.their-telegram-msg {
+  background-color: #182533 !important; /* Telegram receiver dark bubble */
+  color: #e4ecf2 !important;
+  border-radius: 14px 14px 14px 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.telegram-sender {
+  font-size: 12px;
+  font-weight: 700;
+  color: #6bb4e8;
+  margin-bottom: 2px;
+}
+
+.telegram-text {
+  font-size: 14px;
+}
+
+.telegram-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.telegram-time {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.telegram-ticks {
+  font-size: 11px;
+  color: #5bb3f0;
+  font-weight: bold;
+}
+
+.telegram-input-row {
+  background: #17212b;
+  border-radius: 20px;
+  padding: 4px 6px;
+  border: 1px solid #242f3d;
+}
+
+.telegram-input {
+  background: transparent;
+  border: none;
+  color: #f5f5f5;
+  outline: none;
+  font-size: 14px;
+}
+
+.telegram-input::placeholder {
+  color: #708499;
+}
+
+.telegram-send-btn {
+  background: #5288c1;
+  color: white;
+  border: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.telegram-send-btn:hover {
+  background: #4779ad;
+}
+
+.telegram-send-btn:disabled {
+  background: #242f3d;
+  color: #4e5d6d;
 }
 
 .truncate {
