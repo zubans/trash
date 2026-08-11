@@ -253,23 +253,6 @@
               </va-card>
             </div>
           </div>
-
-          <!-- Local logs list of sent coordinates -->
-          <div v-if="telemetryLogs.length > 0" class="mt-4">
-            <h4 class="va-h6 text-secondary mb-2">{{ $t('executor.recentTelemetrySent') }}</h4>
-            <div class="telemetry-log-list p-2 bg-light rounded text-xs">
-              <div
-                v-for="(log, idx) in telemetryLogs"
-                :key="idx"
-                class="d-flex justify-content-between align-items-center mb-1 py-1 border-bottom"
-              >
-                <span>{{ log.time }}: {{ log.lat.toFixed(4) }}, {{ log.lon.toFixed(4) }}</span>
-                <va-badge :color="log.isInside ? 'success' : 'danger'" size="small">
-                  {{ log.isInside ? 'INSIDE' : 'OUTSIDE' }}
-                </va-badge>
-              </div>
-            </div>
-          </div>
         </va-card>
 
         <!-- Map picker modal -->
