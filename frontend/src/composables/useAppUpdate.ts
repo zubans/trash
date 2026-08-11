@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { AppUpdate } from '../plugins/app-update'
-import api from '../services/api'
+import api, { apiUrl } from '../services/api'
 
 const CHECK_INTERVAL_MS = 60 * 1000
 
@@ -33,7 +33,12 @@ function resolveDownloadUrl(url: string): string {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url
   }
-  const base = (import.meta.env.VITE_API_URL as string) || ''
+  // Use the same API URL that the rest of the app uses (VITE_MOBILE_API_URL
+  // for native builds, VITE_API_URL for web). Previously this only read
+  // VITE_API_URL which on native pointed to the nginx HTTPS port (8443)
+  // instead of the direct backend HTTP port (8089), causing large APK
+  // downloads to proxy through nginx and hang on timeout.
+  const base = apiUrl || ''
   const separator = base.endsWith('/') || url.startsWith('/') ? '' : '/'
   return `${base}${separator}${url}`
 }
