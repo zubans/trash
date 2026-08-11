@@ -889,6 +889,8 @@ export default defineComponent({
       }
     }
 
+    const isNative = Capacitor.isNativePlatform()
+
     // Chat operations
     const openChat = async (order: any) => {
       selectedChatOrder.value = order
@@ -897,7 +899,7 @@ export default defineComponent({
       wsConnected.value = false
       chatError.value = ''
 
-      // Load history
+      // Load history (with timeout so the native HTTP bridge can't stall forever).
       try {
         chatMessages.value = await fetchChatMessages(order.id)
         scrollToBottom()
@@ -948,11 +950,13 @@ export default defineComponent({
         }
       }
 
-      // Classic HTTP polling fallback: refetch history on a recursive timer so
-      // messages arrive even when the WebSocket bridge is not working on mobile
-      // WebViews. setTimeout (vs setInterval) survives WebView timer throttling
-      // and avoids overlapping requests.
-      scheduleChatPoll(order.id)
+      // Native polling fallback: pull history on a recursive timer so incoming
+      // messages show up even if the WebSocket bridge is broken in the WebView.
+      // Start polling IMMEDIATELY (first poll now, then every 3s) so messages
+      // arrive without waiting for the first timer tick.
+      if (isNative) {
+        scheduleChatPoll(order.id, /* immediate= */ true)
+      }
     }
 
     const sendChatMessage = async (event?: Event) => {
@@ -1039,15 +1043,21 @@ export default defineComponent({
       }
     }
 
-    const scheduleChatPoll = (orderID: string) => {
+    const scheduleChatPoll = (orderID: string, immediate = false) => {
       if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
-      chatPollIntervalId = setTimeout(async () => {
+      const tick = async () => {
         await pollChatMessages(orderID)
         // Re-schedule only while the chat panel is still open.
         if (selectedChatOrder.value) {
-          scheduleChatPoll(orderID)
+          chatPollIntervalId = setTimeout(tick, 3000)
         }
-      }, 3000)
+      }
+      if (immediate) {
+        // First poll right away so the user sees new messages without a 3s delay.
+        tick()
+      } else {
+        chatPollIntervalId = setTimeout(tick, 3000)
+      }
     }
 
     const closeChat = () => {
