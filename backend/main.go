@@ -137,6 +137,7 @@ func main() {
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
+			r.Post("/chats/{order_id}/upload", ch.UploadAttachmentHandler)
 			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)
 			r.Get("/chats/unread-summary", ch.GetUnreadSummaryHandler)
 			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
@@ -184,8 +185,9 @@ func main() {
 			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
 		})
 
-		// Serve release files directly when not behind nginx.
+		// Serve release files and user uploads directly when not behind nginx.
 		r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
+		r.Get("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))).ServeHTTP)
 	}
 
 	// Primary mount: /api/* (web via nginx + rebuilt mobile app).

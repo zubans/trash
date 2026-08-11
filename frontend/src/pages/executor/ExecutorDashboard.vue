@@ -466,7 +466,27 @@
           :class="['telegram-bubble', msg.sender_id === authStore.userID ? 'my-telegram-msg ml-auto' : 'their-telegram-msg mr-auto']"
         >
           <div class="telegram-sender" v-if="msg.sender_id !== authStore.userID">{{ $t('common.customer') }}</div>
-          <div class="telegram-text">{{ msg.text }}</div>
+
+          <!-- Attachment rendering -->
+          <div v-if="msg.file_url" class="telegram-attachment mb-2">
+            <div v-if="msg.file_type === 'image'" class="attachment-image-wrapper">
+              <a :href="msg.file_url" target="_blank">
+                <img :src="msg.file_url" class="attachment-img rounded-lg shadow-sm" alt="photo" />
+              </a>
+            </div>
+            <div v-else class="attachment-doc-wrapper p-2 bg-white-10 rounded d-flex align-items-center">
+              <span class="doc-icon mr-2">📄</span>
+              <div class="flex-grow-1 overflow-hidden">
+                <a :href="msg.file_url" target="_blank" download class="font-bold text-xs text-white truncate d-block">
+                  {{ msg.file_name || 'document' }}
+                </a>
+                <span class="text-xxs opacity-75" v-if="msg.file_size">{{ formatFileSize(msg.file_size) }}</span>
+              </div>
+              <a :href="msg.file_url" target="_blank" download class="btn-download ml-2">⬇</a>
+            </div>
+          </div>
+
+          <div v-if="msg.text" class="telegram-text">{{ msg.text }}</div>
           <div class="telegram-meta">
             <span class="telegram-time">{{ formatTime(msg.created_at) }}</span>
             <span v-if="msg.sender_id === authStore.userID" class="telegram-ticks-status" :title="getMessageStatusTitle(msg.status)">
@@ -478,19 +498,71 @@
         </div>
       </div>
 
+      <!-- File Attachment Options Menu / Input area -->
       <div class="chat-input-area p-2 bg-white border-top">
+        <div v-if="uploadingFile" class="text-xs text-primary mb-2 d-flex align-items-center">
+          <span class="spinner-border spinner-border-sm mr-2"></span> {{ $t('customer.uploadingFile') }}
+        </div>
+
+        <!-- Attachment Choice Menu Modal for Mobile -->
+        <div v-if="showAttachMenu" class="attach-menu-dropdown p-2 mb-2 bg-light rounded border d-flex gap-2 justify-content-around">
+          <button type="button" class="btn btn-sm btn-outline-primary text-xs" @click="triggerCamera">
+            📸 {{ $t('customer.takePhoto') }}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-success text-xs" @click="triggerGallery">
+            🖼️ {{ $t('customer.chooseFromGallery') }}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary text-xs" @click="triggerDoc">
+            📄 {{ $t('customer.selectDocument') }}
+          </button>
+        </div>
+
         <div class="d-flex align-items-center telegram-input-row">
+          <!-- Attachment Clip Button -->
+          <button
+            type="button"
+            class="telegram-attach-btn mr-1 text-white"
+            :disabled="chatLocked || uploadingFile"
+            :title="$t('customer.attachFile')"
+            @click="toggleAttachMenu"
+          >
+            📎
+          </button>
+
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="*/*"
+            style="display: none;"
+            @change="onFileSelected"
+          />
+          <input
+            ref="galleryInputRef"
+            type="file"
+            accept="image/*"
+            style="display: none;"
+            @change="onFileSelected"
+          />
+          <input
+            ref="cameraInputRef"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style="display: none;"
+            @change="onFileSelected"
+          />
+
           <input
             v-model="chatText"
             :placeholder="$t('customer.typeMessage')"
             class="telegram-input flex-grow-1 p-2 px-3"
-            :disabled="chatLocked"
+            :disabled="chatLocked || uploadingFile"
             @keyup.enter="sendChatMessage"
           />
           <button
             type="button"
             class="telegram-send-btn ml-2"
-            :disabled="chatLocked || !chatText.trim()"
+            :disabled="chatLocked || uploadingFile || (!chatText.trim() && !uploadingFile)"
             @click="sendChatMessage"
           >
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
@@ -498,6 +570,7 @@
             </svg>
           </button>
         </div>
+        <div v-if="chatError" class="text-danger text-xs mt-2">{{ chatError }}</div>
       </div>
     </div>
   </div>
@@ -923,6 +996,74 @@ export default defineComponent({
     }
 
     const isNative = Capacitor.isNativePlatform()
+
+    const fileInputRef = ref<HTMLInputElement | null>(null)
+    const galleryInputRef = ref<HTMLInputElement | null>(null)
+    const cameraInputRef = ref<HTMLInputElement | null>(null)
+    const showAttachMenu = ref(false)
+    const uploadingFile = ref(false)
+
+    const toggleAttachMenu = () => {
+      showAttachMenu.value = !showAttachMenu.value
+    }
+
+    const triggerCamera = () => {
+      showAttachMenu.value = false
+      if (cameraInputRef.value) cameraInputRef.value.click()
+    }
+
+    const triggerGallery = () => {
+      showAttachMenu.value = false
+      if (galleryInputRef.value) galleryInputRef.value.click()
+    }
+
+    const triggerDoc = () => {
+      showAttachMenu.value = false
+      if (fileInputRef.value) fileInputRef.value.click()
+    }
+
+    const formatFileSize = (bytes?: number) => {
+      if (!bytes) return ''
+      if (bytes < 1024) return bytes + ' B'
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+    }
+
+    const onFileSelected = async (event: Event) => {
+      const target = event.target as HTMLInputElement
+      if (!target.files || target.files.length === 0 || !selectedChatOrder.value) return
+      const file = target.files[0]
+      uploadingFile.value = true
+      chatError.value = ''
+
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        if (chatText.value.trim()) {
+          formData.append('text', chatText.value.trim())
+        }
+
+        const response = await api.post(`/chats/${selectedChatOrder.value.id}/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+
+        const savedMsg = response.data
+        if (savedMsg) {
+          const exists = chatMessages.value.some((m: any) => m.id === savedMsg.id)
+          if (!exists) {
+            chatMessages.value.push(savedMsg)
+            scrollToBottom()
+          }
+        }
+        chatText.value = ''
+      } catch (err: any) {
+        console.error('[ExecutorDashboard] file upload failed:', err)
+        chatError.value = formatApiError(err, t('customer.errorUploadFile'))
+      } finally {
+        uploadingFile.value = false
+        target.value = ''
+      }
+    }
 
     const unreadOrderIDs = ref(new Set<string>())
     const chatToast = ref<{ id: string; title: string; text: string; order: any } | null>(null)
@@ -1360,6 +1501,17 @@ export default defineComponent({
       chatToast,
       openChatByToast,
       getMessageStatusTitle,
+      fileInputRef,
+      galleryInputRef,
+      cameraInputRef,
+      showAttachMenu,
+      uploadingFile,
+      toggleAttachMenu,
+      triggerCamera,
+      triggerGallery,
+      triggerDoc,
+      formatFileSize,
+      onFileSelected,
     }
   },
 })
@@ -1541,6 +1693,38 @@ export default defineComponent({
   color: #e4ecf2 !important;
   border-radius: 14px 14px 14px 2px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.telegram-attach-btn {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 6px;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+.telegram-attach-btn:hover {
+  opacity: 1;
+}
+
+.attachment-img {
+  max-width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-doc-wrapper {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-download {
+  color: #7ce7ff;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 14px;
 }
 
 .telegram-sender {

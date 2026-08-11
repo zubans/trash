@@ -2,9 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -161,4 +166,80 @@ func (h *ChatHandler) GetUnreadSummaryHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"unread_order_ids": orderIDs,
 	})
+}
+
+// UploadAttachmentHandler handles POST /api/chats/{order_id}/upload for file/photo attachments.
+func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	idStr := chi.URLParam(r, "order_id")
+	orderID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid order ID", http.StatusBadRequest)
+		return
+	}
+
+	// Limit upload size to 25MB
+	if err := r.ParseMultipartForm(25 << 20); err != nil {
+		http.Error(w, "file too large (max 25MB)", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	text := strings.TrimSpace(r.FormValue("text"))
+
+	// Create uploads directory if not exists
+	uploadDir := filepath.Join(".", "uploads", "chat")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
+		return
+	}
+
+	ext := filepath.Ext(header.Filename)
+	uniqueFileName := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
+	dstPath := filepath.Join(uploadDir, uniqueFileName)
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		http.Error(w, "failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	fileSize, err := io.Copy(dst, file)
+	if err != nil {
+		http.Error(w, "failed to write file", http.StatusInternalServerError)
+		return
+	}
+
+	// Determine file type category: image vs document
+	mimeType := header.Header.Get("Content-Type")
+	fileType := "document"
+	if strings.HasPrefix(mimeType, "image/") || strings.Contains(strings.ToLower(ext), ".jpg") || strings.Contains(strings.ToLower(ext), ".png") || strings.Contains(strings.ToLower(ext), ".webp") || strings.Contains(strings.ToLower(ext), ".jpeg") {
+		fileType = "image"
+	}
+
+	fileURL := fmt.Sprintf("/uploads/chat/%s", uniqueFileName)
+	fileName := header.Filename
+
+	msg, err := h.chatService.SendMessageWithAttachment(orderID, user.ID, text, fileURL, fileName, fileType, fileSize)
+	if err != nil {
+		log.Printf("[UploadAttachmentHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(msg)
 }

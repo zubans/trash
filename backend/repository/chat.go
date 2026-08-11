@@ -14,13 +14,17 @@ type Chat struct {
 	IsActive bool      `json:"is_active"`
 }
 
-// Message represents an individual text message in a chat room.
+// Message represents an individual text or file message in a chat room.
 type Message struct {
 	ID        uuid.UUID  `json:"id"`
 	ChatID    uuid.UUID  `json:"chat_id"`
 	SenderID  uuid.UUID  `json:"sender_id"`
 	Text      string     `json:"text"`
 	Status    string     `json:"status"` // "sent", "delivered", "read"
+	FileURL   *string    `json:"file_url,omitempty"`
+	FileName  *string    `json:"file_name,omitempty"`
+	FileType  *string    `json:"file_type,omitempty"` // "image", "document"
+	FileSize  *int64     `json:"file_size,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
 }
@@ -30,6 +34,7 @@ type ChatRepository interface {
 	GetChatByOrderID(orderID uuid.UUID) (*Chat, error)
 	CreateChat(orderID uuid.UUID) (*Chat, error)
 	SaveMessage(chatID, senderID uuid.UUID, text string) (*Message, error)
+	SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
 	GetMessages(chatID uuid.UUID) ([]*Message, error)
 	DeactivateChat(chatID uuid.UUID) error
 	MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
@@ -76,8 +81,22 @@ func (r *chatRepo) SaveMessage(chatID, senderID uuid.UUID, text string) (*Messag
 	err := r.db.QueryRow(`
 		INSERT INTO messages (chat_id, sender_id, text, status, created_at)
 		VALUES ($1, $2, $3, 'sent', now())
-		RETURNING id, chat_id, sender_id, text, status, created_at`,
-		chatID, senderID, text).Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.CreatedAt)
+		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
+		chatID, senderID, text).Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (r *chatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error) {
+	var m Message
+	err := r.db.QueryRow(`
+		INSERT INTO messages (chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at)
+		VALUES ($1, $2, $3, 'sent', $4, $5, $6, $7, now())
+		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
+		chatID, senderID, text, fileURL, fileName, fileType, fileSize).Scan(
+		&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +105,7 @@ func (r *chatRepo) SaveMessage(chatID, senderID uuid.UUID, text string) (*Messag
 
 func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	query := `
-		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), created_at, read_at
+		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, created_at, read_at
 		FROM messages
 		WHERE chat_id = $1
 		ORDER BY created_at ASC`
@@ -99,7 +118,7 @@ func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	messages := make([]*Message, 0)
 	for rows.Next() {
 		var m Message
-		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.CreatedAt, &m.ReadAt)
+		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt, &m.ReadAt)
 		if err != nil {
 			return nil, err
 		}

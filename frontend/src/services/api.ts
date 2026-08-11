@@ -86,11 +86,11 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Handle auto logout when session expires
+// Handle auto logout when session expires (401 Unauthorized only)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && [401, 403].includes(error.response.status)) {
+    if (error.response && error.response.status === 401) {
       // Clear authentication cookies and localStorage
       document.cookie = 'token=; Max-Age=0; path=/;'
       document.cookie = 'userID=; Max-Age=0; path=/;'
