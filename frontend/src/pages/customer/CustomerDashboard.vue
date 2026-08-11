@@ -512,6 +512,11 @@ export default defineComponent({
       orderLon.value = null
       geocodeError.value = ''
       showCreateOrderModal.value = true
+      try {
+        serviceCategories.value = await getServiceCategories()
+      } catch (err) {
+        console.error('[CustomerDashboard] failed to load categories:', err)
+      }
       await geocodeAddress()
     }
 
@@ -1056,6 +1061,11 @@ export default defineComponent({
       await fetchProfile()
       await fetchOrders()
       await fetchUnreadSummary()
+      try {
+        serviceCategories.value = await getServiceCategories()
+      } catch (err) {
+        console.error('[CustomerDashboard] failed to load categories:', err)
+      }
       intervalId = setInterval(() => {
         fetchProfile()
         fetchOrders()

@@ -352,5 +352,8 @@
     "ASSIGNED": "Assigned",
     "COMPLETED": "Completed",
     "CANCELED": "Cancelled"
+  },
+  "vuestic": {
+    "noOptions": "No options available"
   }
 }

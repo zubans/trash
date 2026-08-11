@@ -352,5 +352,9 @@
     "ASSIGNED": "Назначен",
     "COMPLETED": "Завершён",
     "CANCELED": "Отменён"
+  },
+  "$t": "vuestic",
+  "vuestic": {
+    "noOptions": "Нет доступных опций"
   }
 }

@@ -10,7 +10,7 @@
       {{ errorMsg }}
     </va-alert>
 
-    <va-card class="p-4" style="max-width: 600px;">
+    <va-card class="p-3 p-md-4 settings-card">
       <va-form @submit.prevent="saveSettings">
         <!-- Standard Tariff Coeff -->
         <va-input
@@ -179,12 +179,17 @@ export default defineComponent({
 
 <style scoped>
 .system-settings {
-  padding: 10px;
+  padding: 4px;
+}
+.settings-card {
+  max-width: 600px;
+  width: 100%;
 }
 .d-flex {
   display: flex;
+  flex-wrap: wrap;
 }
 .gap-3 {
-  gap: 15px;
+  gap: 12px;
 }
 </style>

@@ -146,10 +146,11 @@ export default defineComponent({
 
 <style scoped>
 .topup-requests {
-  padding: 10px;
+  padding: 4px;
 }
 .actions-container {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 </style>

@@ -393,34 +393,29 @@ export default defineComponent({
 
 <style scoped>
 .user-list {
-  padding: 10px;
+  padding: 4px;
 }
 .row {
   display: flex;
   flex-wrap: wrap;
-  gap: 15px;
+  margin-left: -6px;
+  margin-right: -6px;
 }
-.col-md-4 {
-  flex: 0 0 calc(33.333% - 10px);
+.row > [class*="col-"] {
+  padding-left: 6px;
+  padding-right: 6px;
 }
-.col-md-3 {
-  flex: 0 0 calc(25% - 11px);
+.col-md-4, .col-md-3, .col-md-2 {
+  width: 100%;
 }
-.col-md-2 {
-  flex: 0 0 calc(16.666% - 12px);
-}
-.d-flex {
-  display: flex;
-}
-.justify-content-between {
-  justify-content: space-between;
-}
-.align-items-center {
-  align-items: center;
+@media (min-width: 768px) {
+  .col-md-4 { width: 33.333333%; }
+  .col-md-3 { width: 25%; }
+  .col-md-2 { width: 16.666667%; }
 }
 .actions-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
 }
 </style>
