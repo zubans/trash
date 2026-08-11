@@ -1043,8 +1043,8 @@ export default defineComponent({
       if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
       chatPollIntervalId = setTimeout(async () => {
         await pollChatMessages(orderID)
-        // Re-schedule only while the chat panel is still open.
-        if (selectedChatOrder.value) {
+        // Re-schedule only while the chat panel for this order is still open.
+        if (selectedChatOrder.value && selectedChatOrder.value.id === orderID) {
           scheduleChatPoll(orderID)
         }
       }, 3000)
@@ -1325,11 +1325,16 @@ export default defineComponent({
 }
 
 .my-message {
-  border-radius: 12px 12px 0 12px;
+  border-radius: 16px 16px 2px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .their-message {
-  border-radius: 12px 12px 12px 0;
+  border-radius: 16px 16px 16px 2px;
+  background-color: #ffffff !important;
+  color: #1e293b !important;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
 }
 
 .truncate {
