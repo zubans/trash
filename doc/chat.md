@@ -182,21 +182,37 @@ SPA-роуты (`/login`, `/admin/*`, `/customer`, `/executor`) отдаются
 Так как WebSocket на Android не доставляет входящие сообщения, включён поллинг истории:
 
 ```js
-const scheduleChatPoll = (orderID) => {
-  chatPollIntervalId = setTimeout(async () => {
+const scheduleChatPoll = (orderID, immediate = false) => {
+  if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
+  const tick = async () => {
     await pollChatMessages(orderID)   // GET /api/chats/{id}/messages
-    if (selectedChatOrder.value) scheduleChatPoll(orderID)  // рекурсия
-  }, 3000)
+    if (selectedChatOrder.value) {
+      chatPollIntervalId = setTimeout(tick, 3000)  // рекурсия
+    }
+  }
+  if (immediate) {
+    tick()  // первый поллинг немедленно
+  } else {
+    chatPollIntervalId = setTimeout(tick, 3000)
+  }
 }
 ```
 
 Особенности:
+- **`immediate = true`** — первый поллинг запускается **немедленно** при открытии чата, без задержки 3с. Это критично: без немедленного поллинга пользователь видит только историю, а новые сообщения появляются только через 3с (или вообще не появлялись, если `openChat` зависал).
 - **Рекурсивный `setTimeout`** (не `setInterval`) — устойчив к throttling'у WebView и не накапливает параллельные запросы.
 - **Cache-busting**: `params: { _t: Date.now() }` + `Cache-Control: no-cache, no-store` — обходит кэширование WebView/CapacitorHttp.
-- **`timeout: 5000`** — гарантированно завершает `await`, даже если нативный мост завис; иначе рекурсия остановилась бы.
+- **`timeout: 5000`** — гарантированно завершает `await`, даже если нативный мост завис; иначе рекурсия остановилась бы. Timeout стоит как на `fetchChatMessages` (загрузка истории), так и на `pollChatMessages` (периодический поллинг).
 - **Дедупликация по `id`** — сообщение, пришедшее через WS и поллинг, не дублируется.
+- **Гейтинг по `isNative`** — поллинг запускается **только** на нативной платформе (`Capacitor.isNativePlatform()`). В вебе используется чистый WebSocket.
 
-Поллинг запускается в `openChat` и останавливается в `closeChat` / `onUnmounted`.
+Поллинг запускается в `openChat` (с `immediate=true`) и останавливается в `closeChat` / `onUnmounted`.
+
+#### Диагностика: почему входящие не приходили
+
+Ранее существовавшая проблема: `openChat` загружал историю через `api.get` **без `timeout`**. На Android Capacitor с `CapacitorHttp` нативный мост мог «зависнуть» на этом запросе — `await` никогда не завершался, и `scheduleChatPoll` (который вызывался **после** `await`) никогда не стартовал. Решение:
+1. `fetchChatMessages` всегда вызывается с `timeout: 5000`.
+2. Поллинг стартует с `immediate=true` — первый тик происходит немедленно, рекурсия продолжается каждые 3с.
 
 ### 4.4. GUI (нативная ветка)
 
@@ -210,6 +226,33 @@ const scheduleChatPoll = (orderID) => {
 - Нативные HTML-элементы — обход проблемы с `va-button` click в WebView.
 - Индикатор `sendingChat` (кнопка показывает `...` во время REST-запроса).
 - Ошибки отображаются через `formatApiError` (с подробностями при `VITE_DEBUG=true`).
+
+### 4.4.1. Стилизация сообщений
+
+Входящие сообщения (`.their-message`) визуально отделены от исходящих:
+
+```css
+.their-message {
+  background-color: #e8f0fe !important;  /* светло-голубой фон */
+  color: #1a1a2e !important;             /* тёмный текст */
+  border: 1px solid #c4d8f0;
+  border-left: 3px solid #4a90d9;        /* акцентная полоса слева */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border-radius: 16px 16px 16px 2px;
+}
+```
+
+Исходящие (`.my-message`):
+```css
+.my-message {
+  background: var(--va-primary);
+  color: white;
+  border-radius: 16px 16px 2px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+```
+
+Контрастность достаточна для чтения на мобильных экранах при ярком свете.
 
 ### 4.5. URL и конфигурация
 

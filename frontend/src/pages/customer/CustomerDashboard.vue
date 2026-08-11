@@ -555,11 +555,12 @@ export default defineComponent({
       chatLocked.value = false
       chatError.value = ''
 
-      // Load history
+      // Load history (with timeout so the native HTTP bridge can't stall forever).
       try {
         const response = await api.get(`/chats/${order.id}/messages`, isNative ? {
           params: { _t: Date.now() },
           headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+          timeout: 5000,
         } : undefined)
         chatMessages.value = response.data || []
         scrollToBottom()
@@ -605,8 +606,10 @@ export default defineComponent({
 
       // Native polling fallback: pull history on a recursive timer so incoming
       // messages show up even if the WebSocket bridge is broken in the WebView.
+      // Start polling IMMEDIATELY (first poll now, then every 3s) so messages
+      // arrive without waiting for the first timer tick.
       if (isNative) {
-        scheduleChatPoll(order.id)
+        scheduleChatPoll(order.id, /* immediate= */ true)
       }
     }
 
@@ -682,12 +685,19 @@ export default defineComponent({
       }
     }
 
-    const scheduleChatPoll = (orderID: string) => {
+    const scheduleChatPoll = (orderID: string, immediate = false) => {
       if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
-      chatPollIntervalId = setTimeout(async () => {
+      const tick = async () => {
         await pollChatMessages(orderID)
-        if (selectedChatOrder.value) scheduleChatPoll(orderID)
-      }, 3000)
+        if (selectedChatOrder.value) {
+          chatPollIntervalId = setTimeout(tick, 3000)
+        }
+      }
+      if (immediate) {
+        tick()
+      } else {
+        chatPollIntervalId = setTimeout(tick, 3000)
+      }
     }
 
     const closeChat = () => {
@@ -920,10 +930,11 @@ export default defineComponent({
 
 .their-message {
   border-radius: 16px 16px 16px 2px;
-  background-color: #ffffff !important;
-  color: #1e293b !important;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+  background-color: #e8f0fe !important;
+  color: #1a1a2e !important;
+  border: 1px solid #c4d8f0;
+  border-left: 3px solid #4a90d9;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .bg-light {
