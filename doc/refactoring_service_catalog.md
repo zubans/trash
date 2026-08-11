@@ -200,8 +200,11 @@ CREATE TABLE IF NOT EXISTS mobile_app_releases (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX idx_mobile_app_releases_active
-    ON mobile_app_releases(platform, version_name)
+CREATE UNIQUE INDEX idx_mobile_app_releases_code
+    ON mobile_app_releases(platform, version_code);
+
+CREATE INDEX idx_mobile_app_releases_active
+    ON mobile_app_releases(platform, is_active)
     WHERE is_active = TRUE;
 ```
 
@@ -931,7 +934,7 @@ func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.
     }
     defer file.Close()
 
-    // Сохраняем файл в backend/releases/android/
+    // Сохраняем файл в releases/<platform>/
     fileName := fmt.Sprintf("app-release-%s-%d.apk", versionName, versionCode)
     filePath := filepath.Join("releases", platform, fileName)
     fullPath := filepath.Join(h.releasesDir, filePath)
@@ -998,8 +1001,10 @@ location /releases/ {
 > Путь `/app/releases/` в контейнере должен быть смонтирован из хоста или volume. В `docker-compose.yml` добавить:
 > ```yaml
 > volumes:
->   - ./backend/releases:/app/releases:ro
+>   - ./releases:/app/releases
 > ```
+>
+> Для development `RELEASES_DIR` по умолчанию равен `releases` (относительно рабочей директории backend). В Docker `RELEASES_DIR=/app/releases`.
 
 ---
 
@@ -1260,12 +1265,56 @@ const formatOrderType = (order: any) => {
 
 ### 6.9 Автообновление Android-приложения
 
+#### CI/CD: автоматическая регистрация при сборке
+
+Для того чтобы при сборке APK автоматически появлялась запись в БД, добавлена CLI-утилита `backend/cmd/release/main.go` и target `make release-android`.
+
+```bash
+make release-android VERSION=1.0.1
+```
+
+Что делает эта команда:
+1. Вызывает `make build-android` (сборка web + Android APK).
+2. Берёт основную версию из переменной `VERSION` (например, `1.0.1`).
+3. Автоматически вычисляет `versionCode` как `MAX(version_code) + 1` для платформы.
+4. Копирует APK в `releases/android/app-release-<version>-<code>.apk` (в корне проекта).
+5. Подключается к PostgreSQL (через переменные окружения `DB_*`) и создаёт запись в `mobile_app_releases`.
+6. Деактивирует предыдущий активный релиз.
+
+> **Важно:** перед первым запуском `make release-android` должна быть применена миграция `backend/migrations/012_service_catalog.sql` (команда `make migrate`).
+>
+> **Важно:** `make build-android` **не** регистрирует релиз в БД. Она только собирает APK. Для регистрации используйте `make release-android VERSION=X.Y.Z`.
+>
+> **Важно:** `versionName` теперь передаётся явно через `VERSION`. `versionCode` генерируется автоматически, поэтому повторные сборки одной версии не вызовут конфликт уникальности.
+
 #### Архитектура
 
-1. Backend хранит актуальный APK в папке `backend/releases/android/` и метаданные релиза в таблице `mobile_app_releases`.
+1. Backend хранит актуальный APK в папке `releases/android/` (в корне проекта) и метаданные релиза в таблице `mobile_app_releases`.
 2. Приложение раз в минуту запрашивает `GET /app/version?platform=android`.
 3. Если `version_code` на сервере больше текущего `versionCode` приложения, показываем диалог с предложением обновиться.
 4. Пользователь соглашается → скачиваем APK → запускаем системный установщик через `Intent.ACTION_INSTALL_PACKAGE` + `FileProvider`.
+
+#### Поля `force_update` и `release_notes`
+
+| Поле | Тип | Назначение | Использование |
+|------|-----|-----------|---------------|
+| `force_update` | BOOLEAN | Принудительное обновление | Если `true`, приложение показывает модальный диалог без кнопки «Позже/Отмена». Пользователь не может пользоваться приложением, пока не установит обновление. Используется при критических багах, breaking changes в API или исправлениях безопасности. |
+| `release_notes` | TEXT | Описание изменений | Показывается в диалоге обновления, чтобы пользователь понимал, зачем обновляться. Может содержать plain text или markdown. |
+
+Примеры использования при сборке:
+
+```bash
+# Обычное обновление с описанием изменений
+make release-android VERSION=1.0.2 RELEASE_NOTES="Исправлены мелкие баги и улучшена производительность"
+
+# Принудительное обновление
+make release-android VERSION=1.0.2 FORCE_UPDATE=1 RELEASE_NOTES="Критическое исправление безопасности. Обновление обязательно."
+```
+
+В UI:
+- `force_update = false` — показывается dismissible banner с кнопкой «Установить».
+- `force_update = true` — показывается модальный диалог на весь экран, который нельзя закрыть. Только кнопка «Установить».
+- `release_notes` отображается под заголовком диалога/banner.
 
 #### Backend: раздача APK
 
@@ -1472,25 +1521,73 @@ export function useAppUpdate() {
 }
 ```
 
-#### UI-диалог
+#### UI-диалог и версия внизу экрана
 
-В `App.vue` или `MainLayout.vue`:
+Компонент `UpdateBanner` добавляется глобально в `App.vue`, чтобы проверка обновлений работала на всех экранах (login, dashboard и т.д.), а не только внутри дашбордов.
+
+`App.vue`:
 
 ```vue
-<script setup lang="ts">
-import { useAppUpdate } from '@/composables/useAppUpdate'
-
-const { updateInfo, installUpdate } = useAppUpdate()
-</script>
-
 <template>
-  <div v-if="updateInfo" class="update-banner">
-    <p>{{ $t('app.updateAvailable', { version: updateInfo.version_name }) }}</p>
-    <button @click="installUpdate">{{ $t('app.installUpdate') }}</button>
-  </div>
+  <ServerStatusIndicator />
+  <UpdateBanner />
   <router-view />
+  <AppVersionFooter />
 </template>
 ```
+
+Компонент `AppVersionFooter` отображает текущую версию приложения внизу экрана маленьким шрифтом:
+
+```vue
+<div class="app-version-footer">
+  <span>v{{ version }}</span>
+  <span>(build {{ build }})</span>
+</div>
+```
+
+#### Кнопка обновления рядом с индикатором сервера
+
+`ServerStatusIndicator.vue` теперь также проверяет `/app/version` и показывает оранжевую пульсирующую кнопку с иконкой ⬆, если на сервере есть более новая версия. При нажатии запускается установка обновления.
+
+#### Явная регистрация плагина в Android
+
+Если auto-discovery Capacitor не подхватывает `UpdatePlugin`, зарегистрируйте его явно в `MainActivity.java`:
+
+```java
+package com.healthlogin.app;
+
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+import com.healthlogin.app.plugins.UpdatePlugin;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(UpdatePlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}
+```
+
+#### Runtime-разрешение `REQUEST_INSTALL_PACKAGES`
+
+На Android 8.0+ (API 26) разрешения `<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />` недостаточно. Нужно проверять `canRequestPackageInstalls()` и, если разрешение не выдано, открывать настройки приложения через `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES`.
+
+`UpdatePlugin.downloadAndInstall` выполняет эту проверку перед запуском скачивания.
+
+#### Формирование URL для скачивания
+
+Backend может возвращать либо абсолютный `download_url`, либо относительный путь. Для гибкости фронтенд дополняет относительный путь базовым `VITE_API_URL`:
+
+```typescript
+function resolveDownloadUrl(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  const base = import.meta.env.VITE_API_URL || ''
+  return `${base}${base.endsWith('/') || url.startsWith('/') ? '' : '/'}${url}`
+}
+```
+
+> **Рекомендация:** в `docker-compose.yml` оставить `RELEASES_BASE_URL` пустым (по умолчанию), чтобы backend отдавал относительный путь, а frontend формировал URL под конкретное окружение (web, эмулятор, реальное устройство).
 
 #### Локализация
 
@@ -1852,6 +1949,7 @@ ON CONFLICT (key) DO NOTHING;
 
 ### Бэкенд
 - [ ] Создать `backend/migrations/012_service_catalog.sql` (с учётом `is_asap`, батчинга и `mobile_app_releases`).
+- [ ] Создать `backend/migrations/013_update_app_release_indexes.sql` (уникальность по `version_code`).
 - [ ] Создать `backend/repository/service_catalog.go` с интерфейсом и транзакционным `CreateNode`.
 - [ ] Создать `backend/repository/app_release.go` и `backend/handler/app_release.go`.
 - [ ] Реализовать проверку циклов и корректный `rebuild_service_node_paths`.
@@ -1873,17 +1971,22 @@ ON CONFLICT (key) DO NOTHING;
 - [ ] Создать `frontend/src/pages/admin/ServiceNodeForm.vue`.
 - [ ] Обновить локализацию `frontend/src/i18n/locales/*.json`.
 - [ ] Создать `frontend/src/plugins/app-update.ts` и `frontend/src/composables/useAppUpdate.ts`.
+- [ ] Создать `frontend/src/components/AppVersionFooter.vue`.
 - [ ] Добавить `UpdatePlugin.java` в `frontend/android/app/src/main/java/com/healthlogin/app/`.
 - [ ] Обновить `AndroidManifest.xml` (`REQUEST_INSTALL_PACKAGES`, FileProvider).
 - [ ] Обновить `res/xml/file_paths.xml` (`<files-path name="updates" path="updates/" />`).
-- [ ] Добавить UI-баннер обновления в `App.vue`.
+- [ ] Добавить `UpdateBanner` и `AppVersionFooter` в `App.vue`.
+- [ ] Убрать дублирующий `UpdateBanner` из `CustomerDashboard.vue` и `ExecutorDashboard.vue`.
+- [ ] Обновить `ServerStatusIndicator.vue` (кнопка обновления).
+- [ ] Обновить `MainActivity.java` (явная регистрация `UpdatePlugin`).
 - [ ] Выполнить `npm run build && npx cap sync android` и собрать APK.
+- [ ] Выполнить `make release-android` и убедиться, что запись появилась в `mobile_app_releases`.
 - [ ] Провести smoke-тест на Android-устройстве/эмуляторе.
 - [ ] Протестировать сценарий автообновления (загрузка APK, сравнение версий, установка).
 
 ### Инфраструктура и тестирование
 - [ ] Обновить `nginx.conf` (проксирование `/app`, раздача `/releases/`).
-- [ ] Настроить volume `backend/releases` в `docker-compose.yml`.
+- [ ] Настроить volume `./releases:/app/releases` в `docker-compose.yml` и `docker-compose.prod.yml`.
 - [ ] Сделать резервную копию БД перед миграцией.
 - [ ] Провести регрессионное тестирование (заказчик, исполнитель, админ, SLA worker).
 - [ ] Подготовить план отката.

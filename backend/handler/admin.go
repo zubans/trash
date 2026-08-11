@@ -244,6 +244,7 @@ func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(map[string]string{
 		"currency":                 settings["currency"],
 		"shift_early_exit_penalty": settings["shift_early_exit_penalty"],
+		"executor_location_send_interval_seconds": settings["executor_location_send_interval_seconds"],
 	})
 }
 

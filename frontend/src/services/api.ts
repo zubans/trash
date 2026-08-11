@@ -1,9 +1,19 @@
 import axios from 'axios'
+import { Capacitor } from '@capacitor/core'
 
-export const apiUrl = import.meta.env.VITE_API_URL
-if (!apiUrl) {
-  throw new Error('VITE_API_URL is not defined. Please check your .env file.')
+function resolveApiUrl(): string {
+  const isNative = Capacitor.isNativePlatform()
+  if (isNative) {
+    return (import.meta.env.VITE_MOBILE_API_URL as string) || 'http://94.103.9.172:8089'
+  }
+  const url = (import.meta.env.VITE_API_URL as string) || ''
+  if (!url) {
+    throw new Error('VITE_API_URL is not defined. Please check your .env file.')
+  }
+  return url
 }
+
+export const apiUrl = resolveApiUrl()
 
 export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 
@@ -26,6 +36,26 @@ export function formatApiError(err: any, fallbackMessage: string): string {
 const api = axios.create({
   baseURL: apiUrl,
 })
+
+// Prepend the /api prefix to every relative request URL so the backend routes
+// (mounted under /api) and the SPA routes (served by nginx from /) never
+// collide. Absolute URLs (http://...) and already-prefixed paths are skipped.
+api.interceptors.request.use((config) => {
+  const url = config.url || ''
+  if (url && !url.startsWith('/api') && !url.startsWith('http') && !url.startsWith('ws')) {
+    config.url = '/api' + (url.startsWith('/') ? url : '/' + url)
+  }
+  return config
+})
+
+// Build a WebSocket URL for the chat endpoint based on the active API base URL.
+// Native apps use plain ws:// against the mobile HTTP port, while the web uses
+// wss:// against the HTTPS port. The /api prefix matches the backend route
+// mounting so SPA and API paths never collide.
+export function buildChatWebSocketUrl(orderId: string, token: string): string {
+  const wsBase = apiUrl.replace(/^http/, 'ws').replace(/\/$/, '')
+  return `${wsBase}/api/chats/${orderId}/ws?token=${encodeURIComponent(token)}`
+}
 
 // Helper to retrieve cookie by name
 export function getCookie(name: string): string {

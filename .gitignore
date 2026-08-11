@@ -1,2 +1,10 @@
 # Self-signed certificates for local HTTPS development
 /certs/
+
+# Android release signing material
+healthlogin-release.keystore
+healthlogin-release.password
+healthlogin-app.apk
+*.jks
+*.keystore
+*.apk

@@ -45,8 +45,11 @@ CREATE TABLE IF NOT EXISTS mobile_app_releases (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_app_releases_active
-    ON mobile_app_releases(platform, version_name)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_app_releases_code
+    ON mobile_app_releases(platform, version_code);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_app_releases_active
+    ON mobile_app_releases(platform, is_active)
     WHERE is_active = TRUE;
 
 CREATE OR REPLACE FUNCTION rebuild_service_node_paths(p_node_id UUID)

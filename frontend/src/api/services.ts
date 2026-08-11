@@ -13,24 +13,34 @@ export interface ServiceNode {
   sort_order: number
 }
 
+function normalizeArray<T>(data: unknown): T[] {
+  if (Array.isArray(data)) {
+    return data as T[]
+  }
+  if (data && typeof data === 'object' && Array.isArray((data as any).data)) {
+    return (data as any).data as T[]
+  }
+  return []
+}
+
 export async function getServiceCategories(): Promise<ServiceNode[]> {
   const response = await api.get('/service-categories')
-  return response.data
+  return normalizeArray<ServiceNode>(response.data)
 }
 
 export async function getServiceCategoryChildren(categoryId: string): Promise<ServiceNode[]> {
   const response = await api.get(`/service-categories/${categoryId}/children`)
-  return response.data
+  return normalizeArray<ServiceNode>(response.data)
 }
 
 export async function getServiceVariants(): Promise<ServiceNode[]> {
   const response = await api.get('/service-variants')
-  return response.data
+  return normalizeArray<ServiceNode>(response.data)
 }
 
 export async function getCategoryVariants(categoryId: string): Promise<ServiceNode[]> {
   const response = await api.get(`/service-categories/${categoryId}/variants`)
-  return response.data
+  return normalizeArray<ServiceNode>(response.data)
 }
 
 export async function getServiceVariant(variantId: string): Promise<{ variant: ServiceNode; path: ServiceNode[] }> {

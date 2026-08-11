@@ -42,10 +42,9 @@
               </span>
             </div>
           </div>
-
-          <div class="balance-box mt-4 p-3 text-center">
+                                                                                                                                                                                                                                                                                                                                                                                                             <div class="balance-box mt-4 p-3 text-center">
             <span class="balance-label d-block text-secondary text-sm mb-1">{{ $t('executor.yourWalletBalance') }}</span>
-            <span class="balance-amount">${{ Number(balance).toFixed(2) }}</span>
+            <span class="balance-amount">{{ Number(balance).toFixed(2) }} РУБ</span>
           </div>
         </va-card>
 
@@ -165,63 +164,49 @@
             {{ $t('executor.gpsTelemetryDescription') }}
           </p>
 
-          <div class="row g-2 mb-4">
-            <div class="col-6">
-              <va-input
-                v-model.number="latInput"
-                type="number"
-                step="any"
-                :label="$t('executor.latitude')"
-                required
-              />
+          <!-- Current location status -->
+          <div class="bg-light rounded p-3 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="text-secondary text-sm">{{ $t('executor.currentCoordinates') }}</span>
+              <va-badge
+                :color="locationPermission === 'granted' ? 'success' : locationPermission === 'denied' ? 'danger' : 'warning'"
+                size="small"
+              >
+                {{ locationPermission === 'granted' ? 'OK' : locationPermission === 'denied' ? t('executor.locationPermissionDenied') : '...' }}
+              </va-badge>
             </div>
-            <div class="col-6">
-              <va-input
-                v-model.number="lonInput"
-                type="number"
-                step="any"
-                :label="$t('executor.longitude')"
-                required
-              />
+            <div class="font-mono text-sm">
+              <span v-if="currentLat !== null && currentLon !== null">
+                {{ currentLat.toFixed(5) }}, {{ currentLon.toFixed(5) }}
+              </span>
+              <span v-else class="text-secondary">—</span>
+            </div>
+            <div v-if="lastSentAt" class="text-xs text-secondary mt-1">
+              {{ $t('executor.lastSentAt') }}: {{ formatTime(lastSentAt) }}
             </div>
           </div>
 
-          <!-- Quick Presets -->
-          <div class="d-flex mb-4">
-            <va-button 
-              color="info" 
-              outline 
-              size="small" 
-              @click="setCoordinates(51.7916886, 36.1908417)"
-              class="mr-2"
+          <!-- Manual coordinates fallback -->
+          <div v-if="locationPermission === 'denied'" class="mb-4">
+            <va-button
+              color="primary"
+              outline
+              block
+              @click="openMapPicker"
             >
-              {{ $t('executor.insideGeofence') }}
-            </va-button>
-            <va-button 
-              color="warning" 
-              outline 
-              size="small" 
-              @click="setCoordinates(51.8500, 36.2500)"
-            >
-              {{ $t('executor.outsideGeofence') }}
+              <va-icon name="map" class="mr-2" /> {{ $t('executor.showOnMap') }}
             </va-button>
           </div>
-
-          <div class="d-flex mb-4">
-            <va-button 
-              color="primary" 
-              outline 
-              size="small" 
-              @click="getCurrentLocation"
-              class="mr-2"
+          <div class="mb-4">
+            <va-button
+              color="secondary"
+              outline
+              block
+              @click="openMapPicker"
             >
-              <va-icon name="my_location" class="mr-1" /> {{ $t('executor.myLocation') }}
+              <va-icon name="edit_location" class="mr-2" /> {{ $t('executor.specifyCoordinatesManually') }}
             </va-button>
           </div>
-
-          <va-button block :loading="sendingLocation" @click="sendLocation">
-            {{ $t('executor.sendGPSLocation') }}
-          </va-button>
 
           <!-- Nearby Orders -->
           <div class="mt-4 pt-4 border-top">
@@ -273,9 +258,9 @@
           <div v-if="telemetryLogs.length > 0" class="mt-4">
             <h4 class="va-h6 text-secondary mb-2">{{ $t('executor.recentTelemetrySent') }}</h4>
             <div class="telemetry-log-list p-2 bg-light rounded text-xs">
-              <div 
-                v-for="(log, idx) in telemetryLogs" 
-                :key="idx" 
+              <div
+                v-for="(log, idx) in telemetryLogs"
+                :key="idx"
                 class="d-flex justify-content-between align-items-center mb-1 py-1 border-bottom"
               >
                 <span>{{ log.time }}: {{ log.lat.toFixed(4) }}, {{ log.lon.toFixed(4) }}</span>
@@ -286,6 +271,26 @@
             </div>
           </div>
         </va-card>
+
+        <!-- Map picker modal -->
+        <va-modal
+          v-model="mapPickerVisible"
+          :title="$t('executor.specifyCoordinatesManually')"
+          hide-default-actions
+          size="large"
+        >
+          <div id="executor-map" class="executor-map"></div>
+          <template #footer>
+            <div class="d-flex justify-content-end gap-3">
+              <va-button color="secondary" outline @click="mapPickerVisible = false">
+                {{ $t('common.cancel') }}
+              </va-button>
+              <va-button color="primary" @click="applyMapCoordinates">
+                {{ $t('common.save') }}
+              </va-button>
+            </div>
+          </template>
+        </va-modal>
 
         <!-- Assigned Orders -->
         <va-card class="p-4 mb-4 shadow-card">
@@ -427,10 +432,13 @@
         <div v-if="chatLocked" class="text-center py-2 mb-3 bg-danger-light text-danger rounded text-xs">
           {{ $t('customer.chatLocked') }}
         </div>
+        <div v-else-if="chatError" class="text-center py-2 mb-3 bg-danger-light text-danger rounded text-xs">
+          {{ chatError }}
+        </div>
 
-        <div 
-          v-for="msg in chatMessages" 
-          :key="msg.id" 
+        <div
+          v-for="msg in chatMessages"
+          :key="msg.id"
           :class="['message-bubble mb-2 p-2 rounded', msg.sender_id === authStore.userID ? 'my-message ml-auto bg-primary text-white' : 'their-message mr-auto bg-light']"
         >
           <div class="text-xs opacity-75 mb-1" v-if="msg.sender_id !== authStore.userID">{{ $t('common.customer') }}</div>
@@ -440,34 +448,41 @@
       </div>
 
       <div class="chat-input-area p-3 bg-white border-top">
-        <va-form @submit.prevent="sendChatMessage" class="d-flex">
-          <va-input 
-            v-model="chatText" 
-            :placeholder="$t('customer.typeMessage')" 
-            class="flex-grow-1 mr-2" 
-            :disabled="chatLocked"
-            required
+        <div class="d-flex">
+          <input
+            v-model="chatText"
+            :placeholder="$t('customer.typeMessage')"
+            class="flex-grow-1 mr-2 p-2"
+            style="border: 1px solid #cbd5e0; border-radius: 4px;"
+            @keyup.enter="sendChatMessage"
           />
-          <va-button type="submit" color="primary" :disabled="chatLocked">{{ $t('customer.send') }}</va-button>
-        </va-form>
+          <button
+            type="button"
+            style="padding: 8px 16px; background: #2c82e0; color: white; border: none; border-radius: 4px;"
+            @click="sendChatMessage"
+          >
+            {{ sendingChat ? '...' : $t('customer.send') }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { defineComponent, ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Geolocation } from '@capacitor/geolocation'
+import { Capacitor } from '@capacitor/core'
+import L from 'leaflet'
 import { useAuthStore } from '../../stores/auth-store'
-import UpdateBanner from '../../components/UpdateBanner.vue'
-import api from '../../services/api'
+import api, { buildChatWebSocketUrl, formatApiError } from '../../services/api'
 import type { ServiceNode } from '../../api/services'
 
 export default defineComponent({
   name: 'ExecutorDashboard',
-  components: { UpdateBanner },
+  components: {},
   setup() {
     const router = useRouter()
     const { t, locale } = useI18n()
@@ -497,12 +512,23 @@ export default defineComponent({
     const endingShiftEarly = ref(false)
     const earlyExitPenalty = ref(50)
 
-    // Location Simulator state
-    // Default coordinates: Kursk, Generala Grigorova st., 38 (approx.)
-    const latInput = ref(51.7305)
-    const lonInput = ref(36.1936)
+    // Automatic GPS location state
+    const currentLat = ref<number | null>(null)
+    const currentLon = ref<number | null>(null)
+    const locationPermission = ref<'granted' | 'denied' | 'prompt' | null>(null)
     const sendingLocation = ref(false)
+    const lastSentAt = ref<string | null>(null)
     const telemetryLogs = ref<{time: string, lat: number, lon: number, isInside: boolean}[]>([])
+    const locationSendIntervalSeconds = ref(5)
+    let locationIntervalId: any = null
+    let locationWatchId: any = null
+
+    // Map picker state
+    const mapPickerVisible = ref(false)
+    const mapInstance = ref<L.Map | null>(null)
+    const mapMarker = ref<L.Marker | null>(null)
+    const manualLat = ref<number | null>(null)
+    const manualLon = ref<number | null>(null)
 
     // Assigned Orders
     const assignedOrders = ref<any[]>([])
@@ -521,7 +547,11 @@ export default defineComponent({
     const chatText = ref('')
     const chatLocked = ref(false)
     const ws = ref<WebSocket | null>(null)
+    const wsConnected = ref(false)
+    const chatError = ref('')
+    const sendingChat = ref(false)
     const messagesContainer = ref<any>(null)
+    let chatPollIntervalId: any = null
 
     const successMsg = ref('')
     const errorMsg = ref('')
@@ -595,13 +625,33 @@ export default defineComponent({
     const fetchSettings = async () => {
       try {
         const response = await api.get('/settings')
-        if (response.data && response.data.shift_early_exit_penalty) {
-          earlyExitPenalty.value = Number(response.data.shift_early_exit_penalty)
+        if (response.data) {
+          if (response.data.shift_early_exit_penalty) {
+            earlyExitPenalty.value = Number(response.data.shift_early_exit_penalty)
+          }
+          const interval = Number(response.data.executor_location_send_interval_seconds)
+          if (!isNaN(interval) && interval >= 1) {
+            locationSendIntervalSeconds.value = interval
+          }
         }
       } catch (err) {
         console.error('Failed to fetch public settings:', err)
       }
     }
+
+    watch(activeShift, (shift) => {
+      if (shift?.status === 'ACTIVE') {
+        startLocationPolling()
+      } else {
+        stopLocationPolling()
+      }
+    }, { immediate: true })
+
+    watch(locationSendIntervalSeconds, () => {
+      if (activeShift.value?.status === 'ACTIVE') {
+        startLocationPolling()
+      }
+    })
 
     const earlyEndShift = async () => {
       successMsg.value = ''
@@ -623,37 +673,92 @@ export default defineComponent({
       }
     }
 
-    const setCoordinates = (lat: number, lon: number) => {
-      latInput.value = lat
-      lonInput.value = lon
+    const effectiveLat = computed(() => manualLat.value ?? currentLat.value)
+    const effectiveLon = computed(() => manualLon.value ?? currentLon.value)
+
+    const checkLocationPermission = async () => {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const permission = await Geolocation.requestPermissions()
+          locationPermission.value = permission.location as any
+          return permission.location === 'granted'
+        }
+        // Browser: rely on getCurrentPosition success/failure.
+        return true
+      } catch (err) {
+        console.error('Failed to check location permission:', err)
+        locationPermission.value = 'denied'
+        return false
+      }
+    }
+
+    const updateCurrentPosition = async (silent = false) => {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const position = await Geolocation.getCurrentPosition({
+            enableHighAccuracy: true,
+            timeout: 10000,
+          })
+          currentLat.value = position.coords.latitude
+          currentLon.value = position.coords.longitude
+          locationPermission.value = 'granted'
+        } else if (navigator.geolocation) {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+            })
+          })
+          currentLat.value = position.coords.latitude
+          currentLon.value = position.coords.longitude
+          locationPermission.value = 'granted'
+        }
+      } catch (err: any) {
+        if (!silent) {
+          errorMsg.value = err.message || t('executor.errorLocationSubmitted')
+        }
+        if (Capacitor.isNativePlatform()) {
+          locationPermission.value = 'denied'
+        }
+        console.error('Failed to get current position:', err)
+      }
     }
 
     const sendLocation = async () => {
+      const lat = effectiveLat.value
+      const lon = effectiveLon.value
+      if (lat == null || lon == null) {
+        console.warn('[ExecutorDashboard] skip sendLocation: coordinates unavailable')
+        return
+      }
+      if (activeShift.value?.status !== 'ACTIVE') {
+        return
+      }
+
       successMsg.value = ''
       errorMsg.value = ''
       sendingLocation.value = true
       try {
         const response = await api.post('/executor/shifts/location', {
-          latitude: Number(latInput.value),
-          longitude: Number(lonInput.value),
+          latitude: Number(lat),
+          longitude: Number(lon),
         })
-        const isInside = response.data.is_inside
-        
+        const isInside = response.data?.is_inside ?? true
+
         telemetryLogs.value.unshift({
           time: new Date().toLocaleTimeString(),
-          lat: latInput.value,
-          lon: lonInput.value,
-          isInside: isInside,
+          lat,
+          lon,
+          isInside,
         })
-        
         if (telemetryLogs.value.length > 5) {
           telemetryLogs.value.pop()
         }
 
-        successMsg.value = t('executor.successLocationSubmitted', { status: isInside ? t('executor.inside') : t('executor.outside') })
-        
-        await fetchActiveShift()
-        await fetchProfile()
+        lastSentAt.value = new Date().toISOString()
+        successMsg.value = t('executor.successLocationSubmitted', {
+          status: isInside ? t('executor.inside') : t('executor.outside'),
+        })
       } catch (err: any) {
         errorMsg.value = err.response?.data || t('executor.errorLocationSubmitted')
         console.error(err)
@@ -662,59 +767,87 @@ export default defineComponent({
       }
     }
 
-    const requestLocationPermission = async () => {
-      try {
-        const permission = await Geolocation.requestPermissions()
-        return permission.location === 'granted' || permission.location === 'prompt'
-      } catch (err) {
-        console.error('Failed to request location permission:', err)
-        return false
+    const startLocationPolling = async () => {
+      await updateCurrentPosition(true)
+      await sendLocation()
+
+      if (locationIntervalId) {
+        clearInterval(locationIntervalId)
+      }
+      const intervalMs = Math.max(1000, Number(locationSendIntervalSeconds.value) * 1000)
+      locationIntervalId = setInterval(async () => {
+        await updateCurrentPosition(true)
+        await sendLocation()
+      }, intervalMs)
+    }
+
+    const stopLocationPolling = () => {
+      if (locationIntervalId) {
+        clearInterval(locationIntervalId)
+        locationIntervalId = null
+      }
+      if (locationWatchId) {
+        // Capacitor geolocation watch is not used here; interval polling is used instead.
+        locationWatchId = null
       }
     }
 
-    const getCurrentLocation = async () => {
-      try {
-        const permission = await Geolocation.requestPermissions()
-        if (permission.location !== 'granted') {
-          errorMsg.value = 'Location permission is required for this feature'
-          return
-        }
-
-        const position = await Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 10000,
-        })
-        latInput.value = position.coords.latitude
-        lonInput.value = position.coords.longitude
-        successMsg.value = `Location updated: ${latInput.value.toFixed(5)}, ${lonInput.value.toFixed(5)}`
-      } catch (err: any) {
-        // Fallback to the browser API if the Capacitor plugin is unavailable.
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              latInput.value = position.coords.latitude
-              lonInput.value = position.coords.longitude
-              successMsg.value = `Location updated: ${latInput.value.toFixed(5)}, ${lonInput.value.toFixed(5)}`
-            },
-            (browserErr) => {
-              errorMsg.value = `Failed to get location: ${browserErr.message}`
-            }
-          )
+    const openMapPicker = () => {
+      const lat = effectiveLat.value ?? 51.7305
+      const lon = effectiveLon.value ?? 36.1936
+      manualLat.value = lat
+      manualLon.value = lon
+      mapPickerVisible.value = true
+      nextTick(() => {
+        if (!mapInstance.value) {
+          mapInstance.value = L.map('executor-map').setView([lat, lon], 14)
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+          }).addTo(mapInstance.value)
+          mapInstance.value.on('click', (e: L.LeafletMouseEvent) => {
+            manualLat.value = e.latlng.lat
+            manualLon.value = e.latlng.lng
+            updateMapMarker()
+          })
         } else {
-          errorMsg.value = err.message || 'Failed to get location'
+          mapInstance.value.setView([lat, lon], 14)
         }
+        updateMapMarker()
+      })
+    }
+
+    const updateMapMarker = () => {
+      if (!mapInstance.value || manualLat.value == null || manualLon.value == null) return
+      if (mapMarker.value) {
+        mapMarker.value.setLatLng([manualLat.value, manualLon.value])
+      } else {
+        mapMarker.value = L.marker([manualLat.value, manualLon.value]).addTo(mapInstance.value)
+      }
+    }
+
+    const applyMapCoordinates = () => {
+      if (manualLat.value != null && manualLon.value != null) {
+        currentLat.value = null
+        currentLon.value = null
+        mapPickerVisible.value = false
       }
     }
 
     const findNearbyOrders = async () => {
       successMsg.value = ''
       errorMsg.value = ''
+      const lat = effectiveLat.value
+      const lon = effectiveLon.value
+      if (lat == null || lon == null) {
+        errorMsg.value = t('executor.errorLocationSubmitted')
+        return
+      }
       searchingNearby.value = true
       try {
         const response = await api.get('/executor/orders/nearby', {
           params: {
-            lat: latInput.value,
-            lon: lonInput.value,
+            lat,
+            lon,
             radius: 2000,
           },
         })
@@ -761,27 +894,39 @@ export default defineComponent({
       selectedChatOrder.value = order
       chatMessages.value = []
       chatLocked.value = false
+      wsConnected.value = false
+      chatError.value = ''
 
       // Load history
       try {
-        const response = await api.get(`/chats/${order.id}/messages`)
-        chatMessages.value = response.data || []
+        chatMessages.value = await fetchChatMessages(order.id)
         scrollToBottom()
       } catch (err) {
-        console.error(err)
+        console.error('[ExecutorDashboard] failed to load chat history:', err)
+        chatError.value = t('executor.errorChatHistory')
       }
 
-      // Open websocket
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://backend:8080'
-      const wsHost = apiBaseUrl.replace('http://', '').replace('https://', '')
-      const wsUrl = `${protocol}//${wsHost}/chats/${order.id}/ws?token=${encodeURIComponent(authStore.token)}`
+      // Open websocket. The URL is resolved from the active API base URL so that
+      // native Android builds use the plain HTTP mobile port (8089) while the
+      // web build continues to use the HTTPS port (8080).
+      const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
 
       if (ws.value) {
         ws.value.close()
+        ws.value = null
       }
 
       ws.value = new WebSocket(wsUrl)
+      ws.value.onopen = () => {
+        wsConnected.value = true
+        chatError.value = ''
+      }
+      ws.value.onerror = () => {
+        chatError.value = t('executor.errorChatConnection')
+      }
+      ws.value.onclose = () => {
+        wsConnected.value = false
+      }
       ws.value.onmessage = (event) => {
         const data = JSON.parse(event.data)
         if (data.type === 'system' && data.action === 'lock') {
@@ -795,16 +940,114 @@ export default defineComponent({
         } else if (data.type === 'error') {
           console.warn(data.message)
         } else {
-          chatMessages.value.push(data)
-          scrollToBottom()
+          const exists = chatMessages.value.some((m: any) => m.id === data.id)
+          if (!exists) {
+            chatMessages.value.push(data)
+            scrollToBottom()
+          }
         }
+      }
+
+      // Classic HTTP polling fallback: refetch history on a recursive timer so
+      // messages arrive even when the WebSocket bridge is not working on mobile
+      // WebViews. setTimeout (vs setInterval) survives WebView timer throttling
+      // and avoids overlapping requests.
+      scheduleChatPoll(order.id)
+    }
+
+    const sendChatMessage = async (event?: Event) => {
+      if (event) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      const text = chatText.value.trim()
+      if (!text || chatLocked.value || !selectedChatOrder.value) return
+
+      const orderID = selectedChatOrder.value.id
+
+      // Primary path: send over WebSocket. The server broadcasts the saved
+      // message back to all room clients (including this one), so the sender's
+      // own message appears via onmessage with a stable id (deduped).
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        try {
+          ws.value.send(JSON.stringify({ text }))
+          chatText.value = ''
+          chatError.value = ''
+          return
+        } catch (err) {
+          console.warn('[ExecutorDashboard] ws.send failed, falling back to HTTP:', err)
+          // fall through to HTTP fallback below
+        }
+      }
+
+      // Fallback path: REST endpoint (used when WS is not connected yet or
+      // unavailable, e.g. on mobile WebViews where the bridge swallows ws.send).
+      const url = `/chats/${orderID}/messages`
+      sendingChat.value = true
+      chatError.value = ''
+      try {
+        const response = await api.post(url, { text })
+        const savedMsg = response.data
+        if (savedMsg) {
+          const exists = chatMessages.value.some((m: any) => m.id === savedMsg.id)
+          if (!exists) {
+            chatMessages.value.push(savedMsg)
+            scrollToBottom()
+          }
+        }
+        chatText.value = ''
+      } catch (err: any) {
+        if (err.response?.status === 409) {
+          chatLocked.value = true
+        }
+        const fallback = t('executor.errorChatConnection')
+        chatError.value = formatApiError(err, fallback)
+      } finally {
+        sendingChat.value = false
       }
     }
 
-    const sendChatMessage = () => {
-      if (!chatText.value.trim() || !ws.value || chatLocked.value) return
-      ws.value.send(JSON.stringify({ text: chatText.value }))
-      chatText.value = ''
+    // Fetch chat history with cache-busting so mobile WebViews/CapacitorHttp
+    // never return a stale response. The timeout guarantees the polling promise
+    // always settles (resolves or rejects) even when the native HTTP bridge
+    // stalls, so the recursive setTimeout never gets stuck.
+    const fetchChatMessages = async (orderID: string) => {
+      const response = await api.get(`/chats/${orderID}/messages`, {
+        params: { _t: Date.now() },
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+        timeout: 5000,
+      })
+      return response.data || []
+    }
+
+    const pollChatMessages = async (orderID: string) => {
+      if (!selectedChatOrder.value) return
+      try {
+        const incoming = await fetchChatMessages(orderID)
+        const existingIds = new Set(chatMessages.value.map((m: any) => m.id))
+        let added = false
+        for (const m of incoming) {
+          if (!existingIds.has(m.id)) {
+            chatMessages.value.push(m)
+            added = true
+          }
+        }
+        if (added) scrollToBottom()
+      } catch (err) {
+        // Silent: polling errors should not spam the UI
+        console.warn('[ExecutorDashboard] poll chat messages failed:', err)
+      }
+    }
+
+    const scheduleChatPoll = (orderID: string) => {
+      if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
+      chatPollIntervalId = setTimeout(async () => {
+        await pollChatMessages(orderID)
+        // Re-schedule only while the chat panel is still open.
+        if (selectedChatOrder.value) {
+          scheduleChatPoll(orderID)
+        }
+      }, 3000)
     }
 
     const closeChat = () => {
@@ -813,6 +1056,12 @@ export default defineComponent({
         ws.value.close()
         ws.value = null
       }
+      if (chatPollIntervalId) {
+        clearTimeout(chatPollIntervalId)
+        chatPollIntervalId = null
+      }
+      wsConnected.value = false
+      chatError.value = ''
     }
 
     const scrollToBottom = () => {
@@ -867,18 +1116,18 @@ export default defineComponent({
 
     let intervalId: any = null
 
-    onMounted(() => {
+    onMounted(async () => {
       fetchProfile()
-      fetchSettings()
-      fetchActiveShift()
+      await fetchSettings()
+      await fetchActiveShift()
       fetchAssignedOrders()
       fetchAvailableOrders()
 
-      // Request location permission on the executor dashboard so the app can
-      // update GPS coordinates and search for nearby orders.
-      requestLocationPermission().catch((err) => {
-        console.error('Location permission request failed:', err)
-      })
+      // Request location permission and fetch current coordinates.
+      await checkLocationPermission()
+      if (locationPermission.value === 'granted') {
+        await updateCurrentPosition(true)
+      }
 
       intervalId = setInterval(() => {
         fetchProfile()
@@ -890,7 +1139,19 @@ export default defineComponent({
 
     onUnmounted(() => {
       if (intervalId) clearInterval(intervalId)
-      if (ws.value) ws.value.close()
+      if (chatPollIntervalId) {
+        clearTimeout(chatPollIntervalId)
+        chatPollIntervalId = null
+      }
+      stopLocationPolling()
+      if (ws.value) {
+        ws.value.close()
+        ws.value = null
+      }
+      if (mapInstance.value) {
+        mapInstance.value.remove()
+        mapInstance.value = null
+      }
     })
 
     return {
@@ -904,16 +1165,17 @@ export default defineComponent({
       startingShift,
       endingShiftEarly,
       earlyExitPenalty,
-      latInput,
-      lonInput,
+      currentLat,
+      currentLon,
+      locationPermission,
       sendingLocation,
+      lastSentAt,
       telemetryLogs,
       assignedOrders,
       availableOrders,
       bidsInputs,
       nearbyOrders,
       searchingNearby,
-      getCurrentLocation,
       findNearbyOrders,
       acceptOrder,
       localizedName,
@@ -922,12 +1184,14 @@ export default defineComponent({
       chatMessages,
       chatText,
       chatLocked,
+      wsConnected,
+      chatError,
+      sendingChat,
       messagesContainer,
       successMsg,
       errorMsg,
       startShift,
       earlyEndShift,
-      setCoordinates,
       sendLocation,
       submitBid,
       openChat,
@@ -938,6 +1202,11 @@ export default defineComponent({
       formatTime,
       formatDuration,
       handleLogout,
+      mapPickerVisible,
+      openMapPicker,
+      applyMapCoordinates,
+      effectiveLat,
+      effectiveLon,
     }
   },
 })
@@ -1007,6 +1276,14 @@ export default defineComponent({
 
 .bg-danger-light {
   background-color: #fff5f5;
+}
+
+.bg-warning-light {
+  background-color: #fffbeb;
+}
+
+.text-warning {
+  color: #d97706;
 }
 
 .rounded {
@@ -1211,5 +1488,20 @@ export default defineComponent({
 }
 .text-secondary {
   color: #718096;
+}
+
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.executor-map {
+  width: 100%;
+  height: 400px;
+  border-radius: 8px;
+  z-index: 1;
+}
+
+.gap-3 {
+  gap: 12px;
 }
 </style>

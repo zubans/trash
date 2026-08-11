@@ -228,7 +228,8 @@
       </div>
 
       <div class="chat-input-area p-3 bg-white border-top">
-        <va-form @submit.prevent="sendChatMessage" class="d-flex">
+        <!-- Web: original va-form (unchanged) -->
+        <va-form v-if="!isNative" @submit.prevent="sendChatMessage" class="d-flex">
           <va-input
             v-model="chatText"
             :placeholder="$t('customer.typeMessage')"
@@ -238,6 +239,27 @@
           />
           <va-button type="submit" color="primary" :disabled="chatLocked">{{ $t('customer.send') }}</va-button>
         </va-form>
+        <!-- Native (Android/iOS): plain HTML controls + loading state, because
+             va-button click events are swallowed by the Capacitor WebView. -->
+        <div v-else class="d-flex">
+          <input
+            v-model="chatText"
+            :placeholder="$t('customer.typeMessage')"
+            class="flex-grow-1 mr-2 p-2"
+            style="border: 1px solid #cbd5e0; border-radius: 4px;"
+            :disabled="chatLocked"
+            @keyup.enter="sendChatMessage"
+          />
+          <button
+            type="button"
+            style="padding: 8px 16px; background: #2c82e0; color: white; border: none; border-radius: 4px;"
+            :disabled="chatLocked || sendingChat"
+            @click="sendChatMessage"
+          >
+            {{ sendingChat ? '...' : $t('customer.send') }}
+          </button>
+        </div>
+        <div v-if="isNative && chatError" class="text-danger text-xs mt-2">{{ chatError }}</div>
       </div>
     </div>
   </div>
@@ -247,10 +269,11 @@
 import { defineComponent, ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Capacitor } from '@capacitor/core'
 import { useAuthStore } from '../../stores/auth-store'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import UpdateBanner from '../../components/UpdateBanner.vue'
-import api from '../../services/api'
+import api, { buildChatWebSocketUrl, formatApiError } from '../../services/api'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
 export default defineComponent({
@@ -336,6 +359,11 @@ export default defineComponent({
     const chatLocked = ref(false)
     const ws = ref<WebSocket | null>(null)
     const messagesContainer = ref<any>(null)
+    // Native-only fallback state (web uses pure WebSocket).
+    const isNative = Capacitor.isNativePlatform()
+    const sendingChat = ref(false)
+    const chatError = ref('')
+    let chatPollIntervalId: any = null
 
     // Modals
     const showCreateOrderModal = ref(false)
@@ -525,27 +553,35 @@ export default defineComponent({
       selectedChatOrder.value = order
       chatMessages.value = []
       chatLocked.value = false
+      chatError.value = ''
 
       // Load history
       try {
-        const response = await api.get(`/chats/${order.id}/messages`)
+        const response = await api.get(`/chats/${order.id}/messages`, isNative ? {
+          params: { _t: Date.now() },
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+        } : undefined)
         chatMessages.value = response.data || []
         scrollToBottom()
       } catch (err) {
         console.error(err)
+        if (isNative) chatError.value = t('customer.errorChatHistory')
       }
 
-      // Open websocket
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://backend:8080'
-      const wsHost = apiBaseUrl.replace('http://', '').replace('https://', '')
-      const wsUrl = `${protocol}//${wsHost}/chats/${order.id}/ws?token=${encodeURIComponent(authStore.token)}`
+      // Open websocket. The shared URL resolver applies the /api prefix and
+      // picks ws/wss + host based on the active API base URL (mobile HTTP port
+      // 8089 for native, HTTPS for web).
+      const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
 
       if (ws.value) {
         ws.value.close()
       }
 
       ws.value = new WebSocket(wsUrl)
+      if (isNative) {
+        ws.value.onopen = () => { chatError.value = '' }
+        ws.value.onerror = () => { chatError.value = t('customer.errorChatConnection') }
+      }
       ws.value.onmessage = (event) => {
         const data = JSON.parse(event.data)
         if (data.type === 'system' && data.action === 'lock') {
@@ -558,16 +594,100 @@ export default defineComponent({
         } else if (data.type === 'error') {
           console.warn(data.message)
         } else {
-          chatMessages.value.push(data)
-          scrollToBottom()
+          // Dedupe so messages arriving via WS and polling don't double up.
+          const exists = chatMessages.value.some((m: any) => m.id === data.id)
+          if (!exists) {
+            chatMessages.value.push(data)
+            scrollToBottom()
+          }
         }
+      }
+
+      // Native polling fallback: pull history on a recursive timer so incoming
+      // messages show up even if the WebSocket bridge is broken in the WebView.
+      if (isNative) {
+        scheduleChatPoll(order.id)
       }
     }
 
-    const sendChatMessage = () => {
+    const sendChatMessage = async (event?: Event) => {
+      if (event) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
       if (!chatText.value.trim() || !ws.value || chatLocked.value) return
-      ws.value.send(JSON.stringify({ text: chatText.value }))
-      chatText.value = ''
+      const text = chatText.value.trim()
+
+      // Primary path (both web and native): WebSocket.
+      if (ws.value.readyState === WebSocket.OPEN) {
+        try {
+          ws.value.send(JSON.stringify({ text }))
+          chatText.value = ''
+          chatError.value = ''
+          return
+        } catch (err) {
+          if (!isNative) throw err
+          console.warn('[CustomerDashboard] ws.send failed, falling back to HTTP:', err)
+        }
+      }
+
+      // Native-only REST fallback when WS is not connected or send threw.
+      if (!isNative) return
+      const orderID = selectedChatOrder.value?.id
+      if (!orderID) return
+      sendingChat.value = true
+      chatError.value = ''
+      try {
+        const response = await api.post(`/chats/${orderID}/messages`, { text })
+        const savedMsg = response.data
+        if (savedMsg) {
+          const exists = chatMessages.value.some((m: any) => m.id === savedMsg.id)
+          if (!exists) {
+            chatMessages.value.push(savedMsg)
+            scrollToBottom()
+          }
+        }
+        chatText.value = ''
+      } catch (err: any) {
+        if (err.response?.status === 409) {
+          chatLocked.value = true
+        }
+        chatError.value = formatApiError(err, t('customer.errorChatConnection'))
+      } finally {
+        sendingChat.value = false
+      }
+    }
+
+    // Native-only polling helpers.
+    const pollChatMessages = async (orderID: string) => {
+      if (!selectedChatOrder.value) return
+      try {
+        const response = await api.get(`/chats/${orderID}/messages`, {
+          params: { _t: Date.now() },
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+          timeout: 5000,
+        })
+        const incoming = response.data || []
+        const existingIds = new Set(chatMessages.value.map((m: any) => m.id))
+        let added = false
+        for (const m of incoming) {
+          if (!existingIds.has(m.id)) {
+            chatMessages.value.push(m)
+            added = true
+          }
+        }
+        if (added) scrollToBottom()
+      } catch (err) {
+        console.warn('[CustomerDashboard] poll chat messages failed:', err)
+      }
+    }
+
+    const scheduleChatPoll = (orderID: string) => {
+      if (chatPollIntervalId) clearTimeout(chatPollIntervalId)
+      chatPollIntervalId = setTimeout(async () => {
+        await pollChatMessages(orderID)
+        if (selectedChatOrder.value) scheduleChatPoll(orderID)
+      }, 3000)
     }
 
     const closeChat = () => {
@@ -576,6 +696,11 @@ export default defineComponent({
         ws.value.close()
         ws.value = null
       }
+      if (chatPollIntervalId) {
+        clearTimeout(chatPollIntervalId)
+        chatPollIntervalId = null
+      }
+      chatError.value = ''
     }
 
     const scrollToBottom = () => {
@@ -660,6 +785,10 @@ export default defineComponent({
 
     onUnmounted(() => {
       if (intervalId) clearInterval(intervalId)
+      if (chatPollIntervalId) {
+        clearTimeout(chatPollIntervalId)
+        chatPollIntervalId = null
+      }
       if (ws.value) ws.value.close()
     })
 
@@ -694,6 +823,9 @@ export default defineComponent({
       chatMessages,
       chatText,
       chatLocked,
+      isNative,
+      sendingChat,
+      chatError,
       messagesContainer,
       showCreateOrderModal,
       showTopUpModal,
@@ -795,6 +927,10 @@ export default defineComponent({
 
 .bg-danger-light {
   background-color: #fff5f5;
+}
+
+.text-danger {
+  color: #c53030;
 }
 
 .rounded {

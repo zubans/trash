@@ -112,12 +112,15 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.shiftService.RecordLocation(user.ID, req.Latitude, req.Longitude); err != nil {
+	inside, err := h.shiftService.RecordLocationWithResult(user.ID, req.Latitude, req.Longitude)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"is_inside": inside})
 }
 
 // GetActiveShiftHandler handles GET /executor/shifts/active.

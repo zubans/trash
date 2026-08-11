@@ -28,8 +28,11 @@ services:
       TLS_CERT_FILE: /app/certs/localhost-cert.pem
       TLS_KEY_FILE: /app/certs/localhost-key.pem
       MOBILE_HTTP_ADDR: :8081
+      RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
     depends_on:
       - db
+    volumes:
+      - ./releases:/app/releases
     ports:
       - "8080:8080"
       # Plain HTTP port for mobile apps. Maps to MOBILE_HTTP_ADDR (:8081) inside

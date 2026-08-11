@@ -20,26 +20,26 @@ const (
 
 // Order represents a customer order.
 type Order struct {
-	ID               uuid.UUID      `json:"id"`
-	CustomerID       uuid.UUID      `json:"customer_id"`
-	ExecutorID       *uuid.UUID     `json:"executor_id,omitempty"`
-	ServiceVariantID uuid.UUID      `json:"service_variant_id"`
-	ServiceVariant   *ServiceNode   `json:"service_variant,omitempty"`
-	IsUrgent         bool           `json:"is_urgent"`
-	IsAsap           bool           `json:"is_asap"`
-	Status           OrderStatus    `json:"status"`
-	HoldAmount       float64        `json:"hold_amount"`
-	FinalAmount      float64        `json:"final_amount"`
-	IsDowngraded     bool           `json:"is_downgraded"`
-	PhotoURL         *string        `json:"photo_url,omitempty"`
-	Address          *string        `json:"address,omitempty"`
-	PickupLat        *float64       `json:"pickup_lat,omitempty"`
-	PickupLon        *float64       `json:"pickup_lon,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	AssignedAt       *time.Time     `json:"assigned_at,omitempty"`
-	DeadlineAt       *time.Time     `json:"deadline_at,omitempty"`
-	CompletedAt      *time.Time     `json:"completed_at,omitempty"`
-	CanceledAt       *time.Time     `json:"canceled_at,omitempty"`
+	ID               uuid.UUID    `json:"id"`
+	CustomerID       uuid.UUID    `json:"customer_id"`
+	ExecutorID       *uuid.UUID   `json:"executor_id,omitempty"`
+	ServiceVariantID uuid.UUID    `json:"service_variant_id"`
+	ServiceVariant   *ServiceNode `json:"service_variant,omitempty"`
+	IsUrgent         bool         `json:"is_urgent"`
+	IsAsap           bool         `json:"is_asap"`
+	Status           OrderStatus  `json:"status"`
+	HoldAmount       float64      `json:"hold_amount"`
+	FinalAmount      float64      `json:"final_amount"`
+	IsDowngraded     bool         `json:"is_downgraded"`
+	PhotoURL         *string      `json:"photo_url,omitempty"`
+	Address          *string      `json:"address,omitempty"`
+	PickupLat        *float64     `json:"pickup_lat,omitempty"`
+	PickupLon        *float64     `json:"pickup_lon,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	AssignedAt       *time.Time   `json:"assigned_at,omitempty"`
+	DeadlineAt       *time.Time   `json:"deadline_at,omitempty"`
+	CompletedAt      *time.Time   `json:"completed_at,omitempty"`
+	CanceledAt       *time.Time   `json:"canceled_at,omitempty"`
 }
 
 // OrderRepository defines storage operations for orders.
@@ -89,6 +89,12 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 }
 
 const orderColumns = `
+    o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
+    o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
+    o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at
+`
+
+const orderInsertColumns = `
     id, customer_id, executor_id, service_variant_id, is_urgent, is_asap, status,
     hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon,
     created_at, assigned_at, deadline_at, completed_at, canceled_at
@@ -118,7 +124,7 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 
 func (r *orderRepo) Create(order *Order) error {
 	_, err := r.db.Exec(
-		`INSERT INTO orders (`+orderColumns+`)
+		`INSERT INTO orders (`+orderInsertColumns+`)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
 		order.ID, order.CustomerID, order.ExecutorID, order.ServiceVariantID, order.IsUrgent, order.IsAsap,
 		order.Status, order.HoldAmount, order.FinalAmount, order.IsDowngraded, order.PhotoURL,
@@ -130,7 +136,7 @@ func (r *orderRepo) Create(order *Order) error {
 
 func (r *orderRepo) FindByID(id uuid.UUID) (*Order, error) {
 	row := r.db.QueryRow(
-		`SELECT `+orderColumns+` FROM orders WHERE id = $1`, id,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.id = $1`, id,
 	)
 	o, err := scanOrderRow(row)
 	if err != nil {
@@ -145,7 +151,7 @@ func (r *orderRepo) GetOrderByID(id uuid.UUID) (*Order, error) {
 
 func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders WHERE executor_id = $1 AND status = $2`,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status = $2`,
 		executorID, OrderStatusAssigned,
 	)
 	if err != nil {
@@ -153,7 +159,7 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 	}
 	defer rows.Close()
 
-	var orders []Order
+	orders := []Order{}
 	for rows.Next() {
 		o, err := scanOrderRows(rows)
 		if err != nil {
@@ -166,7 +172,7 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 
 func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders WHERE customer_id = $1`,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1`,
 		customerID,
 	)
 	if err != nil {
@@ -174,7 +180,7 @@ func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 	}
 	defer rows.Close()
 
-	var orders []Order
+	orders := []Order{}
 	for rows.Next() {
 		o, err := scanOrderRows(rows)
 		if err != nil {
@@ -187,7 +193,7 @@ func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 
 func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders WHERE status = $1`,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.status = $1`,
 		OrderStatusSearching,
 	)
 	if err != nil {
@@ -195,7 +201,7 @@ func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 	}
 	defer rows.Close()
 
-	var orders []*Order
+	orders := []*Order{}
 	for rows.Next() {
 		o, err := scanOrderRows(rows)
 		if err != nil {
@@ -215,10 +221,10 @@ func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Ord
 	deltaLon := float64(radiusMeters) / (111000.0 * math.Cos(lat*math.Pi/180.0))
 
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders
-		 WHERE status = $1
-		   AND pickup_lat BETWEEN $2 AND $3
-		   AND pickup_lon BETWEEN $4 AND $5`,
+		`SELECT `+orderColumns+` FROM orders o
+		 WHERE o.status = $1
+		   AND o.pickup_lat BETWEEN $2 AND $3
+		   AND o.pickup_lon BETWEEN $4 AND $5`,
 		OrderStatusSearching,
 		lat-deltaLat, lat+deltaLat,
 		lon-deltaLon, lon+deltaLon,
@@ -228,7 +234,7 @@ func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Ord
 	}
 	defer rows.Close()
 
-	var result []*Order
+	result := []*Order{}
 	for rows.Next() {
 		o, err := scanOrderRows(rows)
 		if err != nil {
@@ -365,7 +371,7 @@ func (r *orderRepo) GetAvailableAuctionOrders() ([]*Order, error) {
 	}
 	defer rows.Close()
 
-	var orders []*Order
+	orders := []*Order{}
 	for rows.Next() {
 		o, err := scanOrderRows(rows)
 		if err != nil {

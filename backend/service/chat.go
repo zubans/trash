@@ -205,6 +205,53 @@ func (s *ChatService) GetMessages(orderID, userID uuid.UUID) ([]*repository.Mess
 	return s.chatRepo.GetMessages(chat.ID)
 }
 
+// SendMessage saves a chat message via REST and broadcasts it to active WS clients.
+// This is the classic HTTP fallback used when the WebSocket send path is not
+// available (e.g. on mobile WebViews where the bridge swallows ws.send()).
+func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repository.Message, error) {
+	order, err := s.orderRepo.GetOrderByID(orderID)
+	if err != nil {
+		return nil, err
+	}
+	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
+		return nil, errors.New("forbidden: you are not a participant in this order")
+	}
+
+	if order.Status == "COMPLETED" || order.Status == "CANCELED" {
+		return nil, errors.New("chat is locked (order completed or canceled)")
+	}
+
+	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	if err != nil {
+		return nil, err
+	}
+	if chat == nil || !chat.IsActive {
+		return nil, errors.New("chat is locked (read-only)")
+	}
+
+	savedMsg, err := s.chatRepo.SaveMessage(chat.ID, userID, text)
+	if err != nil {
+		return nil, err
+	}
+
+	// Broadcast to any active WebSocket clients in the room.
+	bytes, err := json.Marshal(savedMsg)
+	if err == nil {
+		s.mu.RLock()
+		room, exists := s.rooms[orderID]
+		s.mu.RUnlock()
+		if exists {
+			select {
+			case room.Broadcast <- bytes:
+			default:
+				// drop if backbuffered; clients will refetch history
+			}
+		}
+	}
+
+	return savedMsg, nil
+}
+
 // HandleWS handles upgrades, authorization, and loops.
 func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, userID uuid.UUID, role string) {
 	order, err := s.orderRepo.GetOrderByID(orderID)

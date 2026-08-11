@@ -251,6 +251,9 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 		"asap_tariff_coeff":      true,
 		"geofence_fine_amount":   true,
 	}
+	positiveIntKeys := map[string]bool{
+		"executor_location_send_interval_seconds": true,
+	}
 	for key, value := range settings {
 		if numericKeys[key] {
 			v, err := strconv.ParseFloat(value, 64)
@@ -259,6 +262,15 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 			}
 			if v < 0 {
 				return errors.New("setting " + key + " value cannot be negative")
+			}
+		}
+		if positiveIntKeys[key] {
+			v, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.New("setting " + key + " must be an integer")
+			}
+			if v < 1 {
+				return errors.New("setting " + key + " must be at least 1 second")
 			}
 		}
 	}

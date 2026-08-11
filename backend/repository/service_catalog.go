@@ -296,7 +296,7 @@ func (r *serviceCatalogRepo) GetRootCategories(activeOnly bool) ([]*ServiceNode,
 	}
 	defer rows.Close()
 
-	var nodes []*ServiceNode
+	nodes := []*ServiceNode{}
 	for rows.Next() {
 		n, err := scanServiceNodeRows(rows)
 		if err != nil {
@@ -320,7 +320,7 @@ func (r *serviceCatalogRepo) GetChildren(parentID uuid.UUID, activeOnly bool) ([
 	}
 	defer rows.Close()
 
-	var nodes []*ServiceNode
+	nodes := []*ServiceNode{}
 	for rows.Next() {
 		n, err := scanServiceNodeRows(rows)
 		if err != nil {
@@ -346,7 +346,7 @@ func (r *serviceCatalogRepo) GetDescendants(ancestorID uuid.UUID, maxDepth *int)
 	}
 	defer rows.Close()
 
-	var nodes []*ServiceNode
+	nodes := []*ServiceNode{}
 	for rows.Next() {
 		n, err := scanServiceNodeRows(rows)
 		if err != nil {
@@ -366,7 +366,7 @@ func (r *serviceCatalogRepo) GetAncestors(descendantID uuid.UUID) ([]*ServiceNod
 	}
 	defer rows.Close()
 
-	var nodes []*ServiceNode
+	nodes := []*ServiceNode{}
 	for rows.Next() {
 		n, err := scanServiceNodeRows(rows)
 		if err != nil {
@@ -386,7 +386,7 @@ func (r *serviceCatalogRepo) GetVariantPath(variantID uuid.UUID) ([]*ServiceNode
 	}
 	defer rows.Close()
 
-	var nodes []*ServiceNode
+	nodes := []*ServiceNode{}
 	for rows.Next() {
 		n, err := scanServiceNodeRows(rows)
 		if err != nil {
@@ -406,7 +406,7 @@ func (r *serviceCatalogRepo) GetActiveVariants() ([]*ServiceNode, error) {
 	}
 	defer rows.Close()
 
-	var nodes []*ServiceNode
+	nodes := []*ServiceNode{}
 	for rows.Next() {
 		n, err := scanServiceNodeRows(rows)
 		if err != nil {

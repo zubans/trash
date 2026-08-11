@@ -24,6 +24,7 @@ type AppRelease struct {
 // AppReleaseRepository defines storage operations for mobile app releases.
 type AppReleaseRepository interface {
 	GetActiveRelease(platform string) (*AppRelease, error)
+	GetNextVersionCode(platform string) (int, error)
 	CreateRelease(release *AppRelease) error
 	DeactivateOldReleases(platform string, excludeID uuid.UUID) error
 }
@@ -57,6 +58,21 @@ func (r *appReleaseRepo) GetActiveRelease(platform string) (*AppRelease, error) 
 		return nil, err
 	}
 	return &release, nil
+}
+
+func (r *appReleaseRepo) GetNextVersionCode(platform string) (int, error) {
+	var maxCode sql.NullInt32
+	err := r.db.QueryRow(
+		`SELECT MAX(version_code) FROM mobile_app_releases WHERE platform = $1`,
+		platform,
+	).Scan(&maxCode)
+	if err != nil {
+		return 0, err
+	}
+	if !maxCode.Valid {
+		return 1, nil
+	}
+	return int(maxCode.Int32) + 1, nil
 }
 
 func (r *appReleaseRepo) CreateRelease(release *AppRelease) error {

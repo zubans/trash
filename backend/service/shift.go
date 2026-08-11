@@ -188,9 +188,16 @@ func (s *ShiftService) settingsFloat(key string, defaultValue float64) float64 {
 // RecordLocation stores a GPS point, checks geofence compliance and penalizes
 // the executor after three consecutive violations.
 func (s *ShiftService) RecordLocation(executorID uuid.UUID, lat, lon float64) error {
+	_, err := s.RecordLocationWithResult(executorID, lat, lon)
+	return err
+}
+
+// RecordLocationWithResult stores a GPS point and returns whether the point is
+// inside the executor geofence.
+func (s *ShiftService) RecordLocationWithResult(executorID uuid.UUID, lat, lon float64) (bool, error) {
 	shift, err := s.shiftRepo.GetActiveShift(executorID)
 	if err != nil {
-		return errors.New("no active shift")
+		return false, errors.New("no active shift")
 	}
 
 	inside := true
@@ -206,24 +213,24 @@ func (s *ShiftService) RecordLocation(executorID uuid.UUID, lat, lon float64) er
 	}
 
 	if err := s.shiftRepo.AddGPSLog(shift.ID, lat, lon, inside); err != nil {
-		return err
+		return inside, err
 	}
 
 	if inside {
-		return nil
+		return inside, nil
 	}
 
 	logs, err := s.shiftRepo.GetLastGPSLogs(shift.ID, 3)
 	if err != nil {
 		log.Printf("[ShiftService] failed to load gps logs for shift %s: %v", shift.ID, err)
-		return nil
+		return inside, nil
 	}
 	if len(logs) < 3 {
-		return nil
+		return inside, nil
 	}
 	for _, v := range logs {
 		if v {
-			return nil
+			return inside, nil
 		}
 	}
 
@@ -246,7 +253,7 @@ func (s *ShiftService) RecordLocation(executorID uuid.UUID, lat, lon float64) er
 	if err := s.shiftRepo.Penalize(shift.ID, fine); err != nil {
 		log.Printf("[ShiftService] failed to penalize shift %s: %v", shift.ID, err)
 	}
-	return nil
+	return inside, nil
 }
 
 // IsWithinGeozone checks whether a point is inside the executor working area.

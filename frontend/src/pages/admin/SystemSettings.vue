@@ -77,6 +77,17 @@
           class="mb-4"
         />
 
+        <!-- Executor location send interval -->
+        <va-input
+          v-model="values.executor_location_send_interval_seconds"
+          type="number"
+          :label="$t('settings.executorLocationInterval')"
+          step="1"
+          min="1"
+          class="mb-4"
+          required
+        />
+
         <!-- Actions -->
         <div class="d-flex gap-3">
           <va-button type="submit" color="primary">{{ $t('settings.save') }}</va-button>
@@ -104,6 +115,7 @@ export default defineComponent({
       asap_tariff_coeff: '8.0',
       geofence_fine_amount: '500',
       currency: 'RUB',
+      executor_location_send_interval_seconds: '5',
     })
 
     const currencyOptions = [

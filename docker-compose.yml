@@ -27,11 +27,11 @@ services:
       TLS_CERT_FILE: /app/certs/localhost-cert.pem
       TLS_KEY_FILE: /app/certs/localhost-key.pem
       MOBILE_HTTP_ADDR: :8081
-      RELEASES_BASE_URL: ${RELEASES_BASE_URL:-https://localhost:8443}
+      RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
     depends_on:
       - db
     volumes:
-      - ./backend/releases:/app/releases
+      - ./releases:/app/releases
     ports:
       - "8088:8080"
       - "8089:8081"

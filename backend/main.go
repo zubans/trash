@@ -90,94 +90,107 @@ func main() {
 	ch := handler.NewChatHandler(chatService)
 	gh := handler.NewGeoHandler(geocoder)
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
-	arh := handler.NewAppReleaseHandler(appReleaseRepo, "releases", getEnv("RELEASES_BASE_URL", ""))
+	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
 	r.Use(chiMiddleware.Recoverer)
 	r.Use(chiMiddleware.Logger)
 
-	// Public routes
-	r.Get("/health", ph.HealthHandler)
-	r.Post("/register", ph.RegisterHandler)
-	r.Post("/login", ph.LoginHandler)
-	r.Get("/login", ph.LoginHandler)
-	r.Get("/geo/geocode", gh.Geocode)
-	r.Get("/geo/autocomplete", gh.Autocomplete)
-	r.Get("/settings", ah.GetPublicSettingsHandler)
-	r.Get("/service-categories", sch.ListRootCategories)
-	r.Get("/service-categories/{id}/children", sch.ListChildren)
-	r.Get("/service-categories/{id}/variants", sch.ListCategoryVariants)
-	r.Get("/service-variants", sch.ListVariants)
-	r.Get("/service-variants/{id}", sch.GetVariant)
-	r.Get("/app/version", arh.GetVersionHandler)
+	// registerAPIRoutes wires every handler onto the given chi.Router. It is
+	// mounted twice below so that BOTH /api/* (used by the web build via nginx
+	// and by the rebuilt mobile app) and the legacy root paths /* (used by
+	// already-installed mobile APKs that talk directly to port 8089) keep
+	// working. The web nginx config only proxies /api/ to the backend, so root
+	// paths are never exposed to browsers.
+	registerAPIRoutes := func(r chi.Router) {
+		r.Get("/health", ph.HealthHandler)
+		r.Post("/register", ph.RegisterHandler)
+		r.Post("/login", ph.LoginHandler)
+		r.Get("/geo/geocode", gh.Geocode)
+		r.Get("/geo/autocomplete", gh.Autocomplete)
+		r.Get("/settings", ah.GetPublicSettingsHandler)
+		r.Get("/service-categories", sch.ListRootCategories)
+		r.Get("/service-categories/{id}/children", sch.ListChildren)
+		r.Get("/service-categories/{id}/variants", sch.ListCategoryVariants)
+		r.Get("/service-variants", sch.ListVariants)
+		r.Get("/service-variants/{id}", sch.GetVariant)
+		r.Get("/app/version", arh.GetVersionHandler)
 
-	// Authenticated customer routes
-	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware.RequireAuth)
-		r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
-		r.Get("/customer/profile", ah.GetProfileHandler)
-		r.Post("/customer/orders", oh.CreateOrderHandler)
-		r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
-		r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
-		r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
-		r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
-		r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)
-		r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
-	})
+		// Authenticated customer routes
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.RequireAuth)
+			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
+			r.Get("/customer/profile", ah.GetProfileHandler)
+			r.Post("/customer/orders", oh.CreateOrderHandler)
+			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
+			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
+			r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
+			r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
+			r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)
+			r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
+		})
 
-	// Authenticated shared routes (customer + executor)
-	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware.RequireAuth)
-		r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
-		r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
-		r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
-		r.Post("/logout", ah.LogoutHandler)
-	})
+		// Authenticated shared routes (customer + executor)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.RequireAuth)
+			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
+			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
+			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
+			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
+			r.Post("/logout", ah.LogoutHandler)
+		})
 
-	// Authenticated executor routes
-	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware.RequireAuth)
-		r.Post("/executor/shifts", sh.StartShiftHandler)
-		r.Post("/executor/shifts/end", sh.EndShiftHandler)
-		r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
-		r.Post("/executor/shifts/location", sh.UploadLocationHandler)
-		r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
-		r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
-		r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
-		r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
-		r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
-		r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
-	})
+		// Authenticated executor routes
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.RequireAuth)
+			r.Post("/executor/shifts", sh.StartShiftHandler)
+			r.Post("/executor/shifts/end", sh.EndShiftHandler)
+			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
+			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
+			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
+			r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
+			r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
+			r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
+			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
+			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
+		})
 
-	// Authenticated admin routes
-	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware.RequireAuth)
-		r.Use(authMiddleware.RequireAdmin)
-		r.Get("/admin/users", ah.GetUsersHandler)
-		r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
-		r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
-		r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
-		r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
-		r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
-		r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
-		r.Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)
-		r.Get("/admin/transactions", ah.GetTransactionsHandler)
-		r.Get("/admin/settings", ah.GetSettingsHandler)
-		r.Post("/admin/settings", ah.UpdateSettingsHandler)
-		r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
-		r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
-		r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
-		r.Get("/admin/service-nodes", sch.AdminListNodes)
-		r.Get("/admin/service-nodes/{id}", sch.AdminGetNode)
-		r.Post("/admin/service-nodes", sch.AdminCreateNode)
-		r.Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
-		r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
-		r.Post("/admin/app-releases", arh.UploadReleaseHandler)
-	})
+		// Authenticated admin routes
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.RequireAuth)
+			r.Use(authMiddleware.RequireAdmin)
+			r.Get("/admin/users", ah.GetUsersHandler)
+			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
+			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
+			r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
+			r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
+			r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
+			r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
+			r.Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)
+			r.Get("/admin/transactions", ah.GetTransactionsHandler)
+			r.Get("/admin/settings", ah.GetSettingsHandler)
+			r.Post("/admin/settings", ah.UpdateSettingsHandler)
+			r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
+			r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
+			r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
+			r.Get("/admin/service-nodes", sch.AdminListNodes)
+			r.Get("/admin/service-nodes/{id}", sch.AdminGetNode)
+			r.Post("/admin/service-nodes", sch.AdminCreateNode)
+			r.Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
+			r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
+			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
+		})
 
-	// Serve release files directly when not behind nginx.
-	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
+		// Serve release files directly when not behind nginx.
+		r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
+	}
+
+	// Primary mount: /api/* (web via nginx + rebuilt mobile app).
+	r.Route("/api", registerAPIRoutes)
+	// Legacy mount: /* (already-installed mobile APKs talking directly to port
+	// 8089). Kept until all clients are rebuilt with the /api interceptor.
+	registerAPIRoutes(r)
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {
