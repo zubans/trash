@@ -24,6 +24,7 @@ type TransactionRepository interface {
 	GetBalance(userID uuid.UUID) (float64, error)
 	UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error
 	CreateTransaction(tx *sql.Tx, t *Transaction) error
+	GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error)
 	RunInTx(fn func(*sql.Tx) error) error
 }
 
@@ -84,4 +85,26 @@ func (r *transactionRepo) CreateTransaction(tx *sql.Tx, t *Transaction) error {
 	}
 	_, err := r.db.Exec(query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
 	return err
+}
+
+func (r *transactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error) {
+	rows, err := r.db.Query(
+		`SELECT id, user_id, order_id, type, amount, admin_id, created_at
+		 FROM transactions WHERE user_id = $1 ORDER BY created_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*Transaction
+	for rows.Next() {
+		var t Transaction
+		if err := rows.Scan(&t.ID, &t.UserID, &t.OrderID, &t.Type, &t.Amount, &t.AdminID, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, &t)
+	}
+	return result, rows.Err()
 }

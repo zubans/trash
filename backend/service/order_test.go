@@ -58,6 +58,17 @@ func (m *mockOrderRepo) CancelOrder(orderID uuid.UUID) error {
 	return errors.New("not found")
 }
 
+func (m *mockOrderRepo) Unassign(orderID uuid.UUID) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			o.Status = "SEARCHING"
+			o.ExecutorID = nil
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
 func (m *mockOrderRepo) GetPendingOrders() ([]*repository.Order, error) {
 	var pending []*repository.Order
 	for _, o := range m.orders {
@@ -370,6 +381,10 @@ func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.Custome
 }
 func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error { return nil }
 
+func (m *mockOrderRepo) FindAllByExecutor(executorID uuid.UUID) ([]repository.Order, error) {
+	return nil, nil
+}
+
 type mockTransactionRepo struct{}
 
 func (m *mockTransactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
@@ -382,6 +397,10 @@ func (m *mockTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta 
 
 func (m *mockTransactionRepo) CreateTransaction(tx *sql.Tx, t *repository.Transaction) error {
 	return nil
+}
+
+func (m *mockTransactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*repository.Transaction, error) {
+	return nil, nil
 }
 
 func (m *mockTransactionRepo) RunInTx(fn func(*sql.Tx) error) error {

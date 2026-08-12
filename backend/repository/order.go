@@ -48,6 +48,7 @@ type OrderRepository interface {
 	FindByID(id uuid.UUID) (*Order, error)
 	GetOrderByID(id uuid.UUID) (*Order, error)
 	FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error)
+	FindAllByExecutor(executorID uuid.UUID) ([]Order, error)
 	FindByCustomer(customerID uuid.UUID) ([]Order, error)
 	GetPendingOrders() ([]*Order, error)
 	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
@@ -55,6 +56,7 @@ type OrderRepository interface {
 	AssignOrder(orderID, executorID uuid.UUID) error
 	Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
 	Cancel(orderID uuid.UUID) error
+	Unassign(orderID uuid.UUID) error
 
 	// Legacy/test-compatible methods
 	CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*Order, error)
@@ -153,6 +155,27 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 	rows, err := r.db.Query(
 		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status = $2`,
 		executorID, OrderStatusAssigned,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := []Order{}
+	for rows.Next() {
+		o, err := scanOrderRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, o)
+	}
+	return orders, rows.Err()
+}
+
+func (r *orderRepo) FindAllByExecutor(executorID uuid.UUID) ([]Order, error) {
+	rows, err := r.db.Query(
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 ORDER BY o.created_at DESC`,
+		executorID,
 	)
 	if err != nil {
 		return nil, err
@@ -278,6 +301,14 @@ func (r *orderRepo) Cancel(orderID uuid.UUID) error {
 	_, err := r.db.Exec(
 		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
 		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned,
+	)
+	return err
+}
+
+func (r *orderRepo) Unassign(orderID uuid.UUID) error {
+	_, err := r.db.Exec(
+		`UPDATE orders SET status = $1, executor_id = NULL, assigned_at = NULL WHERE id = $2 AND status = $3`,
+		OrderStatusSearching, orderID, OrderStatusAssigned,
 	)
 	return err
 }

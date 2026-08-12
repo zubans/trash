@@ -66,7 +66,7 @@ func main() {
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
-	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, db)
+	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
@@ -80,6 +80,16 @@ func main() {
 
 	auctionWorker := worker.NewAuctionWorker(db)
 	auctionWorker.Start(1 * time.Minute)
+
+	shiftWorker := worker.NewShiftWorker(shiftService)
+	shiftWorker.Start(1 * time.Minute)
+
+	// Restore auto-end timers for existing active shifts on boot
+	if activeShifts, err := shiftRepo.GetActiveShifts(); err == nil {
+		for _, s := range activeShifts {
+			shiftService.ScheduleShiftAutoEnd(s)
+		}
+	}
 
 	// Middleware
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, adminService, jwtSecret)
@@ -155,10 +165,12 @@ func main() {
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
 			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
+			r.Get("/executor/history", sh.GetExecutorHistoryHandler)
 			r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
 			r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
 			r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
+			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 		})
 

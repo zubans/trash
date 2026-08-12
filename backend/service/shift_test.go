@@ -143,7 +143,7 @@ func (m *mockShiftRepo) SaveGPSLog(log *repository.GPSLog) error {
 
 func TestShiftService_StartShift(t *testing.T) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, nil, nil, nil, nil, nil)
+	srv := NewShiftService(repo, nil, nil, nil, nil, nil, nil)
 
 	executorID := uuid.New()
 
@@ -226,6 +226,10 @@ func (m *mockShiftTransactionRepo) RunInTx(fn func(*sql.Tx) error) error {
 	return fn(nil)
 }
 
+func (m *mockShiftTransactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*repository.Transaction, error) {
+	return nil, nil
+}
+
 func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 	repo := &mockShiftRepo{}
 	centerLat := 55.7558
@@ -240,7 +244,7 @@ func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 			RadiusMeters:    &radius,
 		},
 	}
-	srv := NewShiftService(repo, geoRepo, &mockShiftTransactionRepo{}, nil, nil, nil)
+	srv := NewShiftService(repo, geoRepo, &mockShiftTransactionRepo{}, nil, nil, nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(executorID, 1)
@@ -271,7 +275,7 @@ func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 func TestShiftService_EarlyEnd(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
-	srv := NewShiftService(repo, nil, txRepo, nil, nil, nil)
+	srv := NewShiftService(repo, nil, txRepo, nil, nil, nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(executorID, 3)
@@ -301,7 +305,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
 	orderRepo := &mockOrderRepo{}
-	srv := NewShiftService(repo, nil, txRepo, nil, orderRepo, nil)
+	srv := NewShiftService(repo, nil, txRepo, nil, orderRepo, nil, nil)
 
 	executorID := uuid.New()
 	customerID := uuid.New()

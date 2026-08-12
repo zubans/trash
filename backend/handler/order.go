@@ -126,6 +126,28 @@ func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// RejectOrder handles POST /executor/orders/{id}/reject.
+func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.orderService.RejectAssignedOrder(orderID, user.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // ListAssignedOrders handles GET /executor/orders/assigned.
 func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
@@ -208,4 +230,5 @@ func parseCoords(r *http.Request) (float64, float64, int, error) {
 func (h *OrderHandler) CreateOrderHandler(w http.ResponseWriter, r *http.Request)     { h.CreateOrder(w, r) }
 func (h *OrderHandler) ConfirmOrderHandler(w http.ResponseWriter, r *http.Request)    { h.ConfirmOrder(w, r) }
 func (h *OrderHandler) CancelOrderHandler(w http.ResponseWriter, r *http.Request)     { h.CancelOrder(w, r) }
+func (h *OrderHandler) RejectOrderHandler(w http.ResponseWriter, r *http.Request)     { h.RejectOrder(w, r) }
 func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r *http.Request) { h.ListAssignedOrders(w, r) }

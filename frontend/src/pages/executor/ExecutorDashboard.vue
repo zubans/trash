@@ -42,9 +42,14 @@
               </span>
             </div>
           </div>
-                                                                                                                                                                                                                                                                                                                                                                                                             <div class="balance-box mt-4 p-3 text-center">
-            <span class="balance-label d-block text-secondary text-sm mb-1">{{ $t('executor.yourWalletBalance') }}</span>
+                                                                                                                                                                                                                                                                                                                                                                                                             <div class="balance-box mt-4 p-3 text-center cursor-pointer hover-shadow transition" @click="openFinancialHistoryModal">
+            <span class="balance-label d-block text-secondary text-sm mb-1 d-flex align-items-center justify-content-center">
+              <va-icon name="account_balance_wallet" class="mr-1 text-primary" size="small" />
+              {{ $t('executor.yourWalletBalance') }}
+              <va-icon name="history" class="ml-1 text-secondary" size="small" />
+            </span>
             <span class="balance-amount">{{ Number(balance).toFixed(2) }} РУБ</span>
+            <span class="text-xxs text-primary d-block mt-1">({{ $t('common.details') }})</span>
           </div>
         </va-card>
 
@@ -103,11 +108,14 @@
             <div class="info-list mb-4">
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.shiftStatus') }}</span>
-                <span>
+                <div class="d-flex align-items-center gap-2">
                   <va-badge :color="getShiftStatusColor(activeShift.status)" class="text-uppercase">
                     {{ activeShift.status }}
                   </va-badge>
-                </span>
+                  <span v-if="shiftCountdown" class="font-mono text-xs font-bold text-danger bg-danger-light px-2 py-1 rounded">
+                    ⏳ {{ shiftCountdown }}
+                  </span>
+                </div>
               </div>
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.duration') }}</span>
@@ -120,6 +128,10 @@
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.plannedEnd') }}</span>
                 <span class="info-val text-xs">{{ formatDate(activeShift.planned_end_at) }}</span>
+              </div>
+              <div class="info-item mb-2">
+                <span class="info-label">{{ $t('executor.timeLeft') }}</span>
+                <span class="font-bold text-danger text-sm">{{ shiftCountdown || '00:00:00' }}</span>
               </div>
               <div v-if="activeShift.actual_end_at" class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.actualEnd') }}</span>
@@ -327,7 +339,10 @@
                 </div>
               </div>
 
-              <div class="d-flex justify-content-end mt-3">
+              <div class="d-flex justify-content-between align-items-center mt-3">
+                <va-button color="danger" outline size="small" @click="refuseOrder(order)">
+                  <va-icon name="block" class="mr-1" /> {{ $t('executor.refuseOrder') }}
+                </va-button>
                 <va-button color="info" outline size="small" class="position-relative" @click="openChat(order)">
                   <va-icon name="chat" class="mr-1" /> {{ $t('common.chat') }}
                   <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
@@ -402,6 +417,82 @@
       </div>
     </div>
 
+    <!-- Financial & Order History Modal -->
+    <va-modal
+      v-model="showFinancialHistoryModal"
+      :title="$t('executor.financialHistoryTitle')"
+      size="large"
+      hide-default-actions
+    >
+      <div class="p-2">
+        <va-tabs v-model="historyTab" grow class="mb-4">
+          <template #tabs>
+            <va-tab name="orders">{{ $t('executor.historyOrdersTab') }}</va-tab>
+            <va-tab name="transactions">{{ $t('executor.historyTxsTab') }}</va-tab>
+          </template>
+        </va-tabs>
+
+        <!-- Tab 1: Orders History -->
+        <div v-if="historyTab === 'orders'">
+          <div v-if="executorHistoryOrders.length === 0" class="text-center py-4 text-secondary">
+            {{ $t('customer.noHistoryOrders') }}
+          </div>
+          <va-data-table
+            v-else
+            :items="executorHistoryOrders"
+            :columns="historyOrderColumns"
+            striped
+            hoverable
+          >
+            <template #cell(id)="{ rowData }">
+              <span class="font-bold text-xs">#{{ rowData.id.slice(0, 8) }}</span>
+            </template>
+            <template #cell(type)="{ rowData }">
+              {{ formatOrderType(rowData) }}
+            </template>
+            <template #cell(amount)="{ rowData }">
+              <strong class="text-success">+{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }} РУБ</strong>
+            </template>
+            <template #cell(status)="{ value }">
+              <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
+            </template>
+          </va-data-table>
+        </div>
+
+        <!-- Tab 2: Financial Transactions -->
+        <div v-else-if="historyTab === 'transactions'">
+          <div v-if="executorTransactions.length === 0" class="text-center py-4 text-secondary">
+            {{ $t('executor.noHistoryTxs') }}
+          </div>
+          <va-data-table
+            v-else
+            :items="executorTransactions"
+            :columns="historyTxColumns"
+            striped
+            hoverable
+          >
+            <template #cell(type)="{ value }">
+              <va-badge :color="getTxTypeColor(value)">{{ formatTxType(value) }}</va-badge>
+            </template>
+            <template #cell(amount)="{ rowData }">
+              <span :class="['font-bold', isPositiveTx(rowData.type) ? 'text-success' : 'text-danger']">
+                {{ isPositiveTx(rowData.type) ? '+' : '-' }}{{ Number(rowData.amount).toFixed(2) }} РУБ
+              </span>
+            </template>
+            <template #cell(created_at)="{ value }">
+              <span class="text-xs text-secondary">{{ formatDateFull(value) }}</span>
+            </template>
+          </va-data-table>
+        </div>
+
+        <div class="d-flex justify-content-end mt-4">
+          <va-button color="secondary" @click="showFinancialHistoryModal = false">
+            {{ $t('common.close') }}
+          </va-button>
+        </div>
+      </div>
+    </va-modal>
+
     <!-- Top Floating Toast Notification for Incoming Messages -->
     <div
       v-if="chatToast"
@@ -416,8 +507,14 @@
       <button type="button" class="toast-close-btn ml-2 text-white" @click.stop="chatToast = null">✕</button>
     </div>
 
-    <!-- Sliding Chat Panel (Telegram Style) -->
-    <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
+    <!-- Sliding Chat Panel (Telegram Style) with Swipe-to-Dismiss -->
+    <div
+      :class="['chat-panel shadow-lg', { open: selectedChatOrder }]"
+      :style="chatPanelStyle"
+      @touchstart="handleTouchStart"
+      @touchmove="handleTouchMove"
+      @touchend="handleTouchEnd"
+    >
       <div class="chat-header d-flex align-items-center bg-telegram text-white p-2 px-3">
         <div class="telegram-avatar mr-3">
           {{ (selectedChatOrder?.id?.slice(0, 2) || '').toUpperCase() }}
@@ -603,6 +700,98 @@ export default defineComponent({
     const endingShiftEarly = ref(false)
     const earlyExitPenalty = ref(50)
 
+    // Live countdown timer state
+    const shiftCountdown = ref('')
+    let countdownIntervalId: any = null
+
+    const updateShiftCountdown = () => {
+      if (!activeShift.value || activeShift.value.status !== 'ACTIVE' || !activeShift.value.planned_end_at) {
+        shiftCountdown.value = ''
+        return
+      }
+      const plannedEnd = new Date(activeShift.value.planned_end_at).getTime()
+      const now = new Date().getTime()
+      const diffMs = plannedEnd - now
+
+      if (diffMs <= 0) {
+        shiftCountdown.value = '00:00:00'
+        fetchActiveShift()
+        return
+      }
+
+      const totalSec = Math.floor(diffMs / 1000)
+      const hours = Math.floor(totalSec / 3600)
+      const minutes = Math.floor((totalSec % 3600) / 60)
+      const seconds = totalSec % 60
+
+      const pad = (n: number) => n.toString().padStart(2, '0')
+      shiftCountdown.value = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+    }
+
+    // Financial History & Order History Modal state
+    const showFinancialHistoryModal = ref(false)
+    const historyTab = ref<'orders' | 'transactions'>('orders')
+    const executorHistoryOrders = ref<any[]>([])
+    const executorTransactions = ref<any[]>([])
+
+    const historyOrderColumns = [
+      { key: 'id', label: 'ID' },
+      { key: 'type', label: t('customer.orderType') },
+      { key: 'amount', label: t('executor.payout') },
+      { key: 'status', label: t('customer.status') },
+    ]
+
+    const historyTxColumns = [
+      { key: 'type', label: t('executor.txType') },
+      { key: 'amount', label: t('executor.txAmount') },
+      { key: 'created_at', label: t('executor.txDate') },
+    ]
+
+    const openFinancialHistoryModal = async () => {
+      showFinancialHistoryModal.value = true
+      try {
+        const response = await api.get('/executor/history')
+        if (response.data) {
+          executorHistoryOrders.value = response.data.orders || []
+          executorTransactions.value = response.data.transactions || []
+        }
+      } catch (err) {
+        console.error('Failed to fetch executor history:', err)
+      }
+    }
+
+    const isPositiveTx = (type: string) => {
+      return type === 'REWARD' || type === 'TOP_UP' || type === 'REFUND' || type === 'PAYMENT'
+    }
+
+    const formatTxType = (type: string) => {
+      switch (type) {
+        case 'REWARD': return t('executor.reward')
+        case 'FINE': return t('executor.fine')
+        case 'TOP_UP': return t('executor.topup')
+        case 'REFUND': return t('executor.refund')
+        case 'HOLD': return t('executor.hold')
+        default: return type
+      }
+    }
+
+    const getTxTypeColor = (type: string) => {
+      switch (type) {
+        case 'REWARD': return 'success'
+        case 'FINE': return 'danger'
+        case 'TOP_UP': return 'primary'
+        case 'REFUND': return 'info'
+        case 'HOLD': return 'warning'
+        default: return 'secondary'
+      }
+    }
+
+    const formatDateFull = (dateStr: string) => {
+      if (!dateStr) return ''
+      const d = new Date(dateStr)
+      return d.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    }
+
     // Automatic GPS location state
     const currentLat = ref<number | null>(null)
     const currentLon = ref<number | null>(null)
@@ -668,6 +857,66 @@ export default defineComponent({
         console.error('Failed to fetch active shift:', err)
       }
     }
+
+    const refuseOrder = async (order: any) => {
+      successMsg.value = ''
+      errorMsg.value = ''
+      const penalty = Number(order.hold_amount || 0) * 0.5
+      const confirmText = t('executor.refuseOrderConfirm', { amount: penalty.toFixed(2) + ' РУБ' })
+      if (!confirm(confirmText)) return
+
+      try {
+        await api.post(`/executor/orders/${order.id}/reject`)
+        successMsg.value = t('executor.successOrderRefused')
+        await fetchProfile()
+        await fetchAssignedOrders()
+      } catch (err: any) {
+        errorMsg.value = formatApiError(err) || t('executor.errorOrderRefused')
+      }
+    }
+
+    // Touch swipe-to-close handlers for sliding chat panel
+    const touchStartX = ref<number | null>(null)
+    const touchCurrentX = ref<number | null>(null)
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        touchStartX.value = e.touches[0].clientX
+        touchCurrentX.value = e.touches[0].clientX
+      }
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (touchStartX.value !== null && e.touches.length === 1) {
+        const currentX = e.touches[0].clientX
+        if (currentX > touchStartX.value) {
+          touchCurrentX.value = currentX
+        }
+      }
+    }
+
+    const handleTouchEnd = () => {
+      if (touchStartX.value !== null && touchCurrentX.value !== null) {
+        const deltaX = touchCurrentX.value - touchStartX.value
+        if (deltaX > 100) {
+          // Swiped right over 100px: close chat
+          closeChat()
+        }
+      }
+      touchStartX.value = null
+      touchCurrentX.value = null
+    }
+
+    const chatPanelStyle = computed(() => {
+      if (touchStartX.value !== null && touchCurrentX.value !== null) {
+        const deltaX = Math.max(0, touchCurrentX.value - touchStartX.value)
+        return {
+          transform: `translateX(${deltaX}px)`,
+          transition: 'none'
+        }
+      }
+      return {}
+    })
 
     const fetchAssignedOrders = async () => {
       try {
@@ -1405,6 +1654,9 @@ export default defineComponent({
         await updateCurrentPosition(true)
       }
 
+      updateShiftCountdown()
+      countdownIntervalId = setInterval(updateShiftCountdown, 1000)
+
       intervalId = setInterval(() => {
         fetchProfile()
         fetchActiveShift()
@@ -1416,6 +1668,7 @@ export default defineComponent({
 
     onUnmounted(() => {
       if (intervalId) clearInterval(intervalId)
+      if (countdownIntervalId) clearInterval(countdownIntervalId)
       stopLocationPolling()
       if (ws.value) {
         ws.value.close()
@@ -1438,6 +1691,18 @@ export default defineComponent({
       startingShift,
       endingShiftEarly,
       earlyExitPenalty,
+      shiftCountdown,
+      showFinancialHistoryModal,
+      historyTab,
+      executorHistoryOrders,
+      executorTransactions,
+      historyOrderColumns,
+      historyTxColumns,
+      openFinancialHistoryModal,
+      isPositiveTx,
+      formatTxType,
+      getTxTypeColor,
+      formatDateFull,
       currentLat,
       currentLon,
       locationPermission,
@@ -1451,6 +1716,11 @@ export default defineComponent({
       searchingNearby,
       findNearbyOrders,
       acceptOrder,
+      refuseOrder,
+      handleTouchStart,
+      handleTouchMove,
+      handleTouchEnd,
+      chatPanelStyle,
       localizedName,
       formatOrderType,
       selectedChatOrder,

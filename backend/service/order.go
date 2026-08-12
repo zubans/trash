@@ -216,6 +216,36 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 	return s.orderRepo.Assign(orderID, executorID)
 }
 
+// RejectAssignedOrder allows an executor to reject an assigned order with a 50% penalty fine.
+func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error {
+	order, err := s.orderRepo.GetOrderByID(orderID)
+	if err != nil {
+		return errors.New("order not found")
+	}
+	if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
+		return errors.New("order is not assigned to this executor")
+	}
+
+	penalty := order.HoldAmount * 0.5
+
+	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+		if penalty > 0 {
+			if err := s.transactionRepo.UpdateBalance(tx, executorID, -penalty); err != nil {
+				return err
+			}
+			if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+				UserID:  executorID,
+				OrderID: &order.ID,
+				Type:    "FINE",
+				Amount:  penalty,
+			}); err != nil {
+				return err
+			}
+		}
+		return s.orderRepo.Unassign(orderID)
+	})
+}
+
 // ConfirmOrder completes an order and processes payments.
 func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 	order, err := s.orderRepo.GetOrderByID(orderID)

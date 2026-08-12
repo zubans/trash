@@ -141,6 +141,24 @@ func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(shift)
 }
 
+// GetExecutorHistoryHandler handles GET /executor/history.
+func (h *ShiftHandler) GetExecutorHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	user := shiftUserFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	history, err := h.shiftService.GetExecutorFinancialHistory(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
+}
+
 // Alias method names expected by main.go.
 func (h *ShiftHandler) StartShiftHandler(w http.ResponseWriter, r *http.Request) { h.StartShift(w, r) }
 func (h *ShiftHandler) EndShiftHandler(w http.ResponseWriter, r *http.Request)   { h.EndShift(w, r) }

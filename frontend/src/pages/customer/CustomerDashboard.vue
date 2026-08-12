@@ -42,27 +42,29 @@
       </va-button>
     </div>
 
-    <!-- Orders table -->
-    <va-card class="shadow-card">
+    <!-- Active Orders table -->
+    <va-card class="shadow-card mb-4">
       <div class="d-flex justify-content-between align-items-center mb-3 p-3 pb-0">
-        <h3 class="va-h6 m-0">{{ $t('customer.yourOrders') }}</h3>
+        <h3 class="va-h6 m-0 text-primary font-bold d-flex align-items-center">
+          <va-icon name="pending_actions" class="mr-2" /> {{ $t('customer.activeOrders') }}
+        </h3>
         <va-button icon="refresh" color="secondary" size="small" flat @click="fetchOrders" />
       </div>
 
-      <div v-if="orders.length === 0" class="text-center py-5">
-        <va-icon name="inbox" size="large" color="secondary" class="mb-3" />
-        <p class="text-secondary">{{ $t('customer.noOrders') }}</p>
+      <div v-if="activeOrders.length === 0" class="text-center py-4">
+        <va-icon name="inbox" size="medium" color="secondary" class="mb-2" />
+        <p class="text-secondary text-sm m-0">{{ $t('customer.noActiveOrders') }}</p>
       </div>
 
       <va-data-table
         v-else
-        :items="orders"
+        :items="activeOrders"
         :columns="orderColumns"
         striped
         hoverable
       >
         <template #cell(id)="{ rowData }">
-          <span class="font-bold text-sm">#{{ rowData.id.slice(0, 8) }}</span>
+          <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
         </template>
 
         <template #cell(type)="{ rowData }">
@@ -79,6 +81,14 @@
 
         <template #cell(actions)="{ rowData }">
           <div class="d-flex gap-1">
+            <va-button
+              color="primary"
+              flat
+              size="small"
+              @click="openOrderDetails(rowData)"
+            >
+              <va-icon name="info" />
+            </va-button>
             <va-button
               v-if="rowData.status === 'ASSIGNED'"
               color="info"
@@ -111,6 +121,130 @@
         </template>
       </va-data-table>
     </va-card>
+
+    <!-- Order History table -->
+    <va-card class="shadow-card mb-4">
+      <div class="d-flex justify-content-between align-items-center mb-3 p-3 pb-0">
+        <h3 class="va-h6 m-0 text-secondary font-bold d-flex align-items-center">
+          <va-icon name="history" class="mr-2" /> {{ $t('customer.orderHistory') }}
+        </h3>
+      </div>
+
+      <div v-if="historyOrders.length === 0" class="text-center py-4">
+        <va-icon name="folder_off" size="medium" color="secondary" class="mb-2" />
+        <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
+      </div>
+
+      <va-data-table
+        v-else
+        :items="historyOrders"
+        :columns="orderColumns"
+        striped
+        hoverable
+      >
+        <template #cell(id)="{ rowData }">
+          <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
+        </template>
+
+        <template #cell(type)="{ rowData }">
+          {{ formatOrderType(rowData) }}
+        </template>
+
+        <template #cell(hold_amount)="{ rowData }">
+          <strong>{{ currencySymbol }}{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }}</strong>
+        </template>
+
+        <template #cell(status)="{ value }">
+          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
+        </template>
+
+        <template #cell(actions)="{ rowData }">
+          <div class="d-flex gap-1">
+            <va-button
+              color="primary"
+              flat
+              size="small"
+              @click="openOrderDetails(rowData)"
+            >
+              <va-icon name="info" />
+            </va-button>
+          </div>
+        </template>
+      </va-data-table>
+    </va-card>
+
+    <!-- Order Details Modal / Card -->
+    <va-modal
+      v-model="showOrderDetailsModal"
+      :title="$t('customer.orderDetails')"
+      hide-default-actions
+    >
+      <div v-if="selectedOrderDetails" class="p-2">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="va-h6 font-bold m-0">#{{ selectedOrderDetails.id }}</h4>
+          <va-badge :color="getStatusColor(selectedOrderDetails.status)">
+            {{ selectedOrderDetails.status }}
+          </va-badge>
+        </div>
+
+        <div class="info-list bg-light p-3 rounded mb-3">
+          <div class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.orderType') }}</span>
+            <span class="font-bold text-sm">{{ formatOrderType(selectedOrderDetails) }}</span>
+          </div>
+          <div class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.created') }}</span>
+            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.created_at) }}</span>
+          </div>
+          <div v-if="selectedOrderDetails.assigned_at" class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.assignedAt') }}</span>
+            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</span>
+          </div>
+          <div v-if="selectedOrderDetails.completed_at" class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.completedAt') }}</span>
+            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.completed_at) }}</span>
+          </div>
+          <div v-if="selectedOrderDetails.canceled_at" class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.canceledAt') }}</span>
+            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.canceled_at) }}</span>
+          </div>
+          <div class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.totalAmount') }}</span>
+            <span class="font-bold text-primary text-base">
+              {{ currencySymbol }}{{ Number(selectedOrderDetails.final_amount || selectedOrderDetails.hold_amount).toFixed(2) }}
+            </span>
+          </div>
+          <div v-if="selectedOrderDetails.address" class="info-item mb-2">
+            <span class="text-secondary text-xs d-block">{{ $t('customer.pickupAddress') }}</span>
+            <span class="text-sm">{{ selectedOrderDetails.address }}</span>
+          </div>
+        </div>
+
+        <!-- Executor details -->
+        <div class="executor-card-box border p-3 rounded mb-3">
+          <h5 class="va-h6 text-primary mb-2 text-xs uppercase tracking-wide font-bold">
+            <va-icon name="person" class="mr-1" /> {{ $t('customer.executorDetails') }}
+          </h5>
+          <div v-if="selectedOrderDetails.executor_id || selectedOrderDetails.executor_phone">
+            <div class="text-sm font-bold" v-if="selectedOrderDetails.executor_phone">
+              📱 {{ selectedOrderDetails.executor_phone }}
+            </div>
+            <div class="text-xs text-secondary mt-1">
+              ID: {{ selectedOrderDetails.executor_id }}
+            </div>
+          </div>
+          <div v-else class="text-xs text-secondary italic">
+            {{ $t('customer.notAssigned') }}
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-end">
+          <va-button color="secondary" @click="showOrderDetailsModal = false">
+            {{ $t('common.close') }}
+          </va-button>
+        </div>
+      </div>
+    </va-modal>
 
     <!-- Create Order Modal -->
     <va-modal
@@ -392,6 +526,26 @@ export default defineComponent({
 
     // Orders state
     const orders = ref<any[]>([])
+    const activeOrders = computed(() =>
+      orders.value.filter((o) => o.status === 'SEARCHING' || o.status === 'ASSIGNED')
+    )
+    const historyOrders = computed(() =>
+      orders.value.filter((o) => o.status === 'COMPLETED' || o.status === 'CANCELED')
+    )
+    const showOrderDetailsModal = ref(false)
+    const selectedOrderDetails = ref<any>(null)
+
+    const openOrderDetails = (order: any) => {
+      selectedOrderDetails.value = order
+      showOrderDetailsModal.value = true
+    }
+
+    const formatDateFull = (dateStr: string) => {
+      if (!dateStr) return ''
+      const d = new Date(dateStr)
+      return d.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    }
+
     const creatingOrder = ref(false)
 
     // Default address for the user
@@ -1092,6 +1246,12 @@ export default defineComponent({
       successMsg,
       errorMsg,
       orders,
+      activeOrders,
+      historyOrders,
+      showOrderDetailsModal,
+      selectedOrderDetails,
+      openOrderDetails,
+      formatDateFull,
       creatingOrder,
       defaultAddress,
       serviceCategories,

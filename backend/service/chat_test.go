@@ -66,6 +66,22 @@ func (m *mockChatRepo) DeactivateChat(chatID uuid.UUID) error {
 	return errors.New("chat not found")
 }
 
+func (m *mockChatRepo) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (m *mockChatRepo) MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (m *mockChatRepo) MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (m *mockChatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	return nil, nil
+}
+
 func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	chatRepo := &mockChatRepo{}
 	orderRepo := &mockOrderRepo{}

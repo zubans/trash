@@ -19,15 +19,16 @@ type ShiftService struct {
 	transactionRepo repository.TransactionRepository
 	settingsRepo    repository.SettingsRepository
 	orderRepo       repository.OrderRepository
+	catalogRepo     repository.ServiceCatalogRepository
 	db              *sql.DB
 }
 
 // NewShiftService creates a ShiftService.
-func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, db *sql.DB) *ShiftService {
-	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, orderRepo: orderRepo, db: db}
+func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *ShiftService {
+	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, orderRepo: orderRepo, catalogRepo: catalogRepo, db: db}
 }
 
-// StartShift begins a new shift for an executor.
+// StartShift begins a new shift for an executor and schedules auto-end timer.
 func (s *ShiftService) StartShift(executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
 	if durationHours != 1 && durationHours != 3 && durationHours != 5 {
 		return nil, errors.New("invalid shift duration")
@@ -41,7 +42,56 @@ func (s *ShiftService) StartShift(executorID uuid.UUID, durationHours int) (*rep
 		return nil, errors.New("active shift already exists")
 	}
 
-	return s.shiftRepo.StartShift(executorID, durationHours)
+	shift, err := s.shiftRepo.StartShift(executorID, durationHours)
+	if err != nil {
+		return nil, err
+	}
+
+	s.ScheduleShiftAutoEnd(shift)
+	return shift, nil
+}
+
+// ScheduleShiftAutoEnd starts a Goroutine timer to automatically complete a shift when planned_end_at is reached.
+func (s *ShiftService) ScheduleShiftAutoEnd(shift *repository.Shift) {
+	if shift == nil || shift.Status != repository.ShiftStatusActive {
+		return
+	}
+	duration := time.Until(shift.PlannedEndAt)
+	if duration <= 0 {
+		_ = s.EndShiftByID(shift.ID)
+		return
+	}
+
+	go func(shiftID uuid.UUID, d time.Duration) {
+		timer := time.NewTimer(d)
+		<-timer.C
+		_ = s.EndShiftByID(shiftID)
+	}(shift.ID, duration)
+}
+
+// EndShiftByID completes an active shift if it hasn't already been finished.
+func (s *ShiftService) EndShiftByID(shiftID uuid.UUID) error {
+	shift, err := s.shiftRepo.GetShiftByID(shiftID)
+	if err != nil || shift.Status != repository.ShiftStatusActive {
+		return nil
+	}
+	log.Printf("[ShiftService] Auto-closing expired shift %s for executor %s (planned_end_at: %v)", shift.ID, shift.ExecutorID, shift.PlannedEndAt)
+	return s.shiftRepo.End(shift.ID)
+}
+
+// AutoEndExpiredShifts scans all active shifts and completes any that have passed their planned_end_at.
+func (s *ShiftService) AutoEndExpiredShifts() error {
+	shifts, err := s.shiftRepo.GetActiveShifts()
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, shift := range shifts {
+		if now.After(shift.PlannedEndAt) {
+			_ = s.EndShiftByID(shift.ID)
+		}
+	}
+	return nil
 }
 
 // Start begins a new shift (alias compatible with handler).
@@ -49,17 +99,28 @@ func (s *ShiftService) Start(executorID uuid.UUID, durationHours int) (*reposito
 	return s.StartShift(executorID, durationHours)
 }
 
-// GetActive returns the active shift for an executor.
+// GetActive returns the active shift for an executor, auto-ending it if expired.
 func (s *ShiftService) GetActive(executorID uuid.UUID) (*repository.Shift, error) {
-	return s.shiftRepo.GetActiveShift(executorID)
+	shift, err := s.shiftRepo.GetActiveShift(executorID)
+	if err == nil && shift != nil {
+		if time.Now().After(shift.PlannedEndAt) {
+			_ = s.EndShiftByID(shift.ID)
+			return nil, errors.New("no active shift")
+		}
+		return shift, nil
+	}
+	return nil, err
 }
 
 // GetCurrent returns the active shift, or the most recent shift if no active
-// shift exists. This is used by the executor dashboard to always display
-// current/last shift status.
+// shift exists. Checks for expiration on active shifts.
 func (s *ShiftService) GetCurrent(executorID uuid.UUID) (*repository.Shift, error) {
 	shift, err := s.shiftRepo.GetActiveShift(executorID)
-	if err == nil {
+	if err == nil && shift != nil {
+		if time.Now().After(shift.PlannedEndAt) {
+			_ = s.EndShiftByID(shift.ID)
+			return s.shiftRepo.GetLastShiftByExecutor(executorID)
+		}
 		return shift, nil
 	}
 	return s.shiftRepo.GetLastShiftByExecutor(executorID)
@@ -273,4 +334,40 @@ func (s *ShiftService) IsWithinGeozone(geozone *repository.Geozone, lat, lon flo
 	default:
 		return false, errors.New("unknown geozone type")
 	}
+}
+// ExecutorHistoryResult contains orders and transaction history for an executor.
+type ExecutorHistoryResult struct {
+	Orders       []repository.Order       `json:"orders"`
+	Transactions []*repository.Transaction `json:"transactions"`
+}
+
+// GetExecutorFinancialHistory retrieves order and transaction logs for an executor.
+func (s *ShiftService) GetExecutorFinancialHistory(executorID uuid.UUID) (*ExecutorHistoryResult, error) {
+	res := &ExecutorHistoryResult{
+		Orders:       []repository.Order{},
+		Transactions: []*repository.Transaction{},
+	}
+
+	if s.orderRepo != nil {
+		orders, err := s.orderRepo.FindAllByExecutor(executorID)
+		if err == nil && orders != nil {
+			for i := range orders {
+				if s.catalogRepo != nil {
+					if variant, err := s.catalogRepo.GetNodeByID(orders[i].ServiceVariantID); err == nil {
+						orders[i].ServiceVariant = variant
+					}
+				}
+			}
+			res.Orders = orders
+		}
+	}
+
+	if s.transactionRepo != nil {
+		txs, err := s.transactionRepo.GetTransactionsByUserID(executorID)
+		if err == nil && txs != nil {
+			res.Transactions = txs
+		}
+	}
+
+	return res, nil
 }
