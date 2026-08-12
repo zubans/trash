@@ -150,6 +150,7 @@ func main() {
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
+			r.Delete("/chats/{order_id}/messages/{message_id}", ch.DeleteMessageHandler)
 			r.Post("/chats/{order_id}/upload", ch.UploadAttachmentHandler)
 			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)
 			r.Get("/chats/unread-summary", ch.GetUnreadSummaryHandler)

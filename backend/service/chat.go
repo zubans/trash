@@ -403,6 +403,32 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 	go s.ReadPump(client, room)
 }
 
+// DeleteMessage deletes a message if owned by sender and broadcasts message_deleted event.
+func (s *ChatService) DeleteMessage(messageID, senderID, orderID uuid.UUID) error {
+	if err := s.chatRepo.DeleteMessage(messageID, senderID); err != nil {
+		return err
+	}
+
+	// Broadcast deletion event to room if active
+	deletePayload, _ := json.Marshal(map[string]interface{}{
+		"type":       "message_deleted",
+		"message_id": messageID,
+		"order_id":   orderID,
+	})
+
+	s.mu.RLock()
+	room, exists := s.rooms[orderID]
+	s.mu.RUnlock()
+	if exists {
+		select {
+		case room.Broadcast <- deletePayload:
+		default:
+		}
+	}
+
+	return nil
+}
+
 // BroadcastSystemMessage sends a custom message payload to all active connections of an order.
 func (s *ChatService) BroadcastSystemMessage(orderID uuid.UUID, msg interface{}) {
 	s.mu.RLock()

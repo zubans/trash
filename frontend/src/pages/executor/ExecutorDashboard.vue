@@ -550,9 +550,12 @@
           <!-- Attachment rendering -->
           <div v-if="msg.file_url" class="telegram-attachment mb-2">
             <div v-if="msg.file_type === 'image'" class="attachment-image-wrapper">
-              <a :href="resolveFileUrl(msg.file_url)" target="_blank">
-                <img :src="resolveFileUrl(msg.file_url)" class="attachment-img rounded-lg shadow-sm" alt="photo" />
-              </a>
+              <img
+                :src="resolveFileUrl(msg.file_url)"
+                class="attachment-img rounded-lg shadow-sm cursor-pointer"
+                alt="photo"
+                @click="openImagePreview(resolveFileUrl(msg.file_url))"
+              />
             </div>
             <div v-else class="attachment-doc-wrapper p-2 bg-white-10 rounded d-flex align-items-center">
               <span class="doc-icon mr-2">📄</span>
@@ -567,13 +570,24 @@
           </div>
 
           <div v-if="msg.text" class="telegram-text">{{ msg.text }}</div>
-          <div class="telegram-meta">
-            <span class="telegram-time">{{ formatTime(msg.created_at) }}</span>
-            <span v-if="msg.sender_id === authStore.userID" class="telegram-ticks-status" :title="getMessageStatusTitle(msg.status)">
-              <span v-if="msg.status === 'read'" class="ticks-read">✓✓</span>
-              <span v-else-if="msg.status === 'delivered'" class="ticks-delivered">✓✓</span>
-              <span v-else class="ticks-sent">✓</span>
-            </span>
+          <div class="telegram-meta d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-1">
+              <span class="telegram-time">{{ formatTime(msg.created_at) }}</span>
+              <span v-if="msg.sender_id === authStore.userID" class="telegram-ticks-status" :title="getMessageStatusTitle(msg.status)">
+                <span v-if="msg.status === 'read'" class="ticks-read">✓✓</span>
+                <span v-else-if="msg.status === 'delivered'" class="ticks-delivered">✓✓</span>
+                <span v-else class="ticks-sent">✓</span>
+              </span>
+            </div>
+            <button
+              v-if="msg.sender_id === authStore.userID"
+              type="button"
+              class="btn-delete-msg border-0 bg-transparent text-danger p-0 ml-2"
+              :title="$t('customer.deleteMessage')"
+              @click.stop="deleteMessage(msg.id)"
+            >
+              🗑️
+            </button>
           </div>
         </div>
       </div>
@@ -653,6 +667,23 @@
         <div v-if="chatError" class="text-danger text-xs mt-2">{{ chatError }}</div>
       </div>
     </div>
+
+    <!-- Image Preview Modal -->
+    <va-modal
+      v-model="showImagePreviewModal"
+      hide-default-actions
+      size="large"
+      class="image-preview-modal"
+    >
+      <div class="text-center p-2 position-relative">
+        <img :src="previewImageUrl" class="img-fluid rounded shadow-lg max-h-80vh" alt="preview" />
+        <div class="mt-3 text-right">
+          <va-button color="secondary" @click="showImagePreviewModal = false">
+            {{ $t('common.close') }}
+          </va-button>
+        </div>
+      </div>
+    </va-modal>
   </div>
 </template>
 
@@ -1351,7 +1382,34 @@ export default defineComponent({
       return t('customer.statusSent')
     }
 
+    // Image preview modal state
+    const showImagePreviewModal = ref(false)
+    const previewImageUrl = ref('')
+
+    const openImagePreview = (url: string) => {
+      if (!url) return
+      previewImageUrl.value = url
+      showImagePreviewModal.value = true
+    }
+
+    const deleteMessage = async (messageID: string) => {
+      if (!selectedChatOrder.value || !messageID) return
+      if (!confirm(t('customer.confirmDeleteMessage'))) return
+      try {
+        await api.delete(`/chats/${selectedChatOrder.value.id}/messages/${messageID}`)
+        chatMessages.value = chatMessages.value.filter((m: any) => m.id !== messageID)
+      } catch (err: any) {
+        console.error('[ExecutorDashboard] failed to delete message:', err)
+        chatError.value = formatApiError(err, 'Failed to delete message')
+      }
+    }
+
     const handleIncomingChatMessage = (data: any, order: any) => {
+      if (data.type === 'message_deleted') {
+        chatMessages.value = chatMessages.value.filter((m: any) => m.id !== data.message_id)
+        return
+      }
+
       if (data.type === 'status_update') {
         const updateIds = new Set(data.message_ids || [])
         for (const m of chatMessages.value) {
@@ -1758,6 +1816,10 @@ export default defineComponent({
       unreadOrderIDs,
       chatToast,
       openChatByToast,
+      showImagePreviewModal,
+      previewImageUrl,
+      openImagePreview,
+      deleteMessage,
       getMessageStatusTitle,
       fileInputRef,
       galleryInputRef,

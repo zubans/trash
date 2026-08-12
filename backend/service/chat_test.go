@@ -82,6 +82,10 @@ func (m *mockChatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, tex
 	return nil, nil
 }
 
+func (m *mockChatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
+	return nil
+}
+
 func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	chatRepo := &mockChatRepo{}
 	orderRepo := &mockOrderRepo{}

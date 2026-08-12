@@ -25,6 +25,7 @@ type Message struct {
 	FileName  *string    `json:"file_name,omitempty"`
 	FileType  *string    `json:"file_type,omitempty"` // "image", "document"
 	FileSize  *int64     `json:"file_size,omitempty"`
+	IsDeleted bool       `json:"is_deleted"`
 	CreatedAt time.Time  `json:"created_at"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
 }
@@ -40,6 +41,7 @@ type ChatRepository interface {
 	MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
 	MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
 	GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error)
+	DeleteMessage(messageID, senderID uuid.UUID) error
 }
 
 type chatRepo struct {
@@ -105,9 +107,9 @@ func (r *chatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, f
 
 func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	query := `
-		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, created_at, read_at
+		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at
 		FROM messages
-		WHERE chat_id = $1
+		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
 		ORDER BY created_at ASC`
 	rows, err := r.db.Query(query, chatID)
 	if err != nil {
@@ -118,7 +120,7 @@ func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	messages := make([]*Message, 0)
 	for rows.Next() {
 		var m Message
-		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt, &m.ReadAt)
+		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.IsDeleted, &m.CreatedAt, &m.ReadAt)
 		if err != nil {
 			return nil, err
 		}
@@ -199,4 +201,19 @@ func (r *chatRepo) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
 		}
 	}
 	return orderIDs, nil
+}
+
+func (r *chatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
+	res, err := r.db.Exec(`UPDATE messages SET is_deleted = TRUE WHERE id = $1 AND sender_id = $2`, messageID, senderID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

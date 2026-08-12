@@ -243,3 +243,33 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(msg)
 }
+
+// DeleteMessageHandler handles DELETE /api/chats/{order_id}/messages/{message_id}.
+func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderIDStr := chi.URLParam(r, "order_id")
+	orderID, err := uuid.Parse(orderIDStr)
+	if err != nil {
+		http.Error(w, "invalid order ID", http.StatusBadRequest)
+		return
+	}
+
+	msgIDStr := chi.URLParam(r, "message_id")
+	messageID, err := uuid.Parse(msgIDStr)
+	if err != nil {
+		http.Error(w, "invalid message ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.chatService.DeleteMessage(messageID, user.ID, orderID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}

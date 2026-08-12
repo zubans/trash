@@ -232,6 +232,8 @@
     "statusSent": "Отправлено",
     "statusDelivered": "Доставлено",
     "statusRead": "Прочитано",
+    "deleteMessage": "Удалить",
+    "confirmDeleteMessage": "Удалить это сообщение?",
     "errorChatHistory": "Не удалось загрузить историю чата.",
     "errorChatConnection": "Ошибка отправки сообщения.",
     "successOrderCreated": "Заказ успешно создан!",
