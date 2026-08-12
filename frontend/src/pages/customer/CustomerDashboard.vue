@@ -384,7 +384,7 @@
           
           <!-- Attachment rendering -->
           <div v-if="msg.file_url" class="telegram-attachment mb-2">
-            <div v-if="msg.file_type === 'image'" class="attachment-image-wrapper">
+            <div v-if="isImageAttachment(msg)" class="attachment-image-wrapper">
               <img
                 :src="resolveFileUrl(msg.file_url)"
                 class="attachment-img rounded-lg shadow-sm cursor-pointer"
@@ -906,6 +906,13 @@ export default defineComponent({
     const triggerDoc = () => {
       showAttachMenu.value = false
       if (fileInputRef.value) fileInputRef.value.click()
+    }
+
+    const isImageAttachment = (msg: any) => {
+      if (!msg || !msg.file_url) return false
+      if (msg.file_type === 'image') return true
+      const url = msg.file_url.toLowerCase()
+      return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif')
     }
 
     const formatFileSize = (bytes?: number) => {
@@ -1434,6 +1441,7 @@ export default defineComponent({
       formatFileSize,
       onFileSelected,
       resolveFileUrl,
+      isImageAttachment,
     }
   },
 })
