@@ -555,7 +555,11 @@
                 class="attachment-img rounded-lg shadow-sm cursor-pointer"
                 alt="photo"
                 @click="openImagePreview(resolveFileUrl(msg.file_url))"
+                @error="(e) => console.error('[DEBUG-IMG-ERROR]', { rawUrl: msg.file_url, resolvedUrl: resolveFileUrl(msg.file_url), isNative: Capacitor.isNativePlatform(), err: e })"
               />
+              <div v-if="isDebug" class="text-xxs text-warning bg-dark p-1 rounded mt-1 overflow-auto max-w-xs style-mono">
+                [DEBUG] URL: {{ resolveFileUrl(msg.file_url) }}
+              </div>
             </div>
             <div v-else class="attachment-doc-wrapper p-2 bg-white-10 rounded d-flex align-items-center">
               <span class="doc-icon mr-2">📄</span>
@@ -697,7 +701,7 @@ import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import L from 'leaflet'
 import { useAuthStore } from '../../stores/auth-store'
-import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError, isDebug } from '../../services/api'
 import { NativeWebSocket } from '../../plugins/native-websocket'
 import { compressImage } from '../../utils/imageCompressor'
 import type { ServiceNode } from '../../api/services'
@@ -1882,6 +1886,7 @@ export default defineComponent({
       formatFileSize,
       onFileSelected,
       resolveFileUrl,
+      isDebug,
     }
   },
 })
