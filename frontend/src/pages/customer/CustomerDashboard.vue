@@ -507,11 +507,12 @@
     <va-modal
       v-model="showImagePreviewModal"
       hide-default-actions
-      size="large"
-      class="image-preview-modal"
+      max-width="500px"
+      fixed-layout
+      class="image-preview-modal-wrapper"
     >
-      <div class="text-center p-2 position-relative">
-        <img :src="previewImageUrl" class="img-fluid rounded shadow-lg max-h-80vh" alt="preview" />
+      <div class="text-center p-3">
+        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" />
         <div class="mt-3 text-right">
           <va-button color="secondary" @click="showImagePreviewModal = false">
             {{ $t('common.close') }}
@@ -1815,5 +1816,20 @@ export default defineComponent({
   .balance-amount {
     font-size: 1.4rem;
   }
+}
+
+.img-preview-content {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  margin: 0 auto;
+}
+</style>
+
+<style>
+/* Global override to ensure image preview modal always sits on top of high z-index side drawers (chat-panel z-index: 1000) */
+.image-preview-modal-wrapper .va-modal__overlay,
+.image-preview-modal-wrapper .va-modal__container {
+  z-index: 10000 !important;
 }
 </style>

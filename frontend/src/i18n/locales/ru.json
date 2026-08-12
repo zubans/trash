@@ -378,7 +378,9 @@
     "chat": "Чат",
     "created": "Создан",
     "customer": "Заказчик",
-    "executor": "Исполнитель"
+    "executor": "Исполнитель",
+    "details": "Подробнее",
+    "hours": "ч."
   },
   "orderStatus": {
     "SEARCHING": "Поиск",

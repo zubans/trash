@@ -345,7 +345,9 @@
     "chat": "Chat",
     "created": "Created",
     "customer": "Customer",
-    "executor": "Executor"
+    "executor": "Executor",
+    "details": "Details",
+    "hours": "hours"
   },
   "orderStatus": {
     "SEARCHING": "Searching",

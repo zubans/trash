@@ -72,8 +72,8 @@ export function resolveFileUrl(path?: string): string {
     return `${base}${cleanPath}`
   }
 
-  // On standard web browsers (HTTPS / 8443 or nginx), attach clean relative path to current origin
-  return `${window.location.origin}${cleanPath}`
+  // On standard web browsers (HTTPS / 8443 or nginx), clean relative path allows origin proxying
+  return cleanPath
 }
 
 // Helper to retrieve cookie by name

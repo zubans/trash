@@ -71,7 +71,7 @@
               </div>
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.duration') }}</span>
-                <span class="info-val">{{ activeShift.duration_hours }} hours</span>
+                <span class="info-val">{{ activeShift.duration_hours }} {{ $t('common.hours') }}</span>
               </div>
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.startedAt') }}</span>
@@ -119,7 +119,7 @@
               </div>
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.duration') }}</span>
-                <span class="info-val">{{ activeShift.duration_hours }} hours</span>
+                <span class="info-val">{{ activeShift.duration_hours }} {{ $t('common.hours') }}</span>
               </div>
               <div class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.startedAt') }}</span>
@@ -142,7 +142,7 @@
                 <span class="info-val text-xs">{{ formatDuration(activeShift.started_at) }}</span>
               </div>
               <div v-if="activeShift.fine_amount > 0" class="info-item mb-2">
-                <span class="info-label">{{ $t('executor.fine') || 'Штраф' }}</span>
+                <span class="info-label">{{ $t('executor.fine') }}</span>
                 <span class="info-val text-xs">{{ currencySymbol }}{{ Number(activeShift.fine_amount).toFixed(2) }}</span>
               </div>
             </div>
@@ -251,7 +251,7 @@
                     <div class="text-xs text-secondary" v-if="order.address">{{ order.address }}</div>
                   </div>
                   <div class="text-right">
-                    <strong class="text-primary">${{ Number(order.hold_amount).toFixed(2) }}</strong>
+                    <strong class="text-primary">{{ currencySymbol }}{{ Number(order.hold_amount).toFixed(2) }}</strong>
                     <va-button
                       color="success"
                       size="small"
@@ -313,7 +313,7 @@
                     <va-badge color="danger">{{ $t('customer.slaDowngraded') }}</va-badge>
                   </span>
                   <div class="text-xs text-secondary mt-1">
-                    Customer: {{ order.customer_phone }}
+                    {{ $t('common.customer') }}: {{ order.customer_phone }}
                   </div>
                 </div>
                 <va-badge color="info">
@@ -329,7 +329,7 @@
                   <strong>{{ $t('customer.urgent') }}:</strong> {{ order.is_asap ? $t('customer.asap') : $t('customer.urgent') }}
                 </div>
                 <div class="col-6 mt-1">
-                  <strong>{{ $t('executor.payout') }}:</strong> ${{ Number(order.hold_amount).toFixed(2) }}
+                  <strong>{{ $t('executor.payout') }}:</strong> {{ currencySymbol }}{{ Number(order.hold_amount).toFixed(2) }}
                 </div>
                 <div class="col-6 mt-1" v-if="order.deadline_at">
                   <strong>{{ $t('executor.deadline') }}:</strong> {{ formatDate(order.deadline_at) }}
@@ -672,11 +672,12 @@
     <va-modal
       v-model="showImagePreviewModal"
       hide-default-actions
-      size="large"
-      class="image-preview-modal"
+      max-width="500px"
+      fixed-layout
+      class="image-preview-modal-wrapper"
     >
-      <div class="text-center p-2 position-relative">
-        <img :src="previewImageUrl" class="img-fluid rounded shadow-lg max-h-80vh" alt="preview" />
+      <div class="text-center p-3">
+        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" />
         <div class="mt-3 text-right">
           <va-button color="secondary" @click="showImagePreviewModal = false">
             {{ $t('common.close') }}
@@ -1691,7 +1692,7 @@ export default defineComponent({
       if (diff < 0) return ''
       const hours = Math.floor(diff / 3600000)
       const minutes = Math.floor((diff % 3600000) / 60000)
-      return `${hours}h ${minutes}m`
+      return `${hours} ч. ${minutes} мин.`
     }
 
     const handleLogout = async () => {
@@ -2368,5 +2369,20 @@ export default defineComponent({
 
 .gap-3 {
   gap: 12px;
+}
+
+.img-preview-content {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  margin: 0 auto;
+}
+</style>
+
+<style>
+/* Global override to ensure image preview modal always sits on top of high z-index side drawers (chat-panel z-index: 1000) */
+.image-preview-modal-wrapper .va-modal__overlay,
+.image-preview-modal-wrapper .va-modal__container {
+  z-index: 10000 !important;
 }
 </style>

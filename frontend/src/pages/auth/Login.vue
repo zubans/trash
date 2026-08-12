@@ -129,7 +129,7 @@
             </div>
           </div>
 
-          <button type="submit" class="submit-btn" :disabled="loading">
+          <button ref="submitBtnRef" type="submit" class="submit-btn" :disabled="loading">
             <span v-if="loading" class="spinner"></span>
             <span v-else>{{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}</span>
           </button>
@@ -140,7 +140,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, watch } from 'vue'
+import { defineComponent, ref, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
@@ -172,6 +172,7 @@ export default defineComponent({
     const authStore = useAuthStore()
     const { t } = useI18n()
     
+    const submitBtnRef = ref<HTMLButtonElement | null>(null)
     const mode = ref<'login' | 'register'>('login')
     const phone = ref('')
     const password = ref('')
@@ -186,6 +187,16 @@ export default defineComponent({
     const loading = ref(false)
     let autocompleteTimeout: any = null
 
+    const focusSubmitButton = () => {
+      nextTick(() => {
+        submitBtnRef.value?.focus()
+      })
+    }
+
+    onMounted(() => {
+      focusSubmitButton()
+    })
+
     watch(mode, () => {
       error.value = ''
       message.value = ''
@@ -194,6 +205,7 @@ export default defineComponent({
       role.value = 'CUSTOMER'
       flatNumber.value = ''
       selectedCoords.value = null
+      focusSubmitButton()
     })
 
     const onAddressInput = () => {
@@ -314,6 +326,7 @@ export default defineComponent({
     }
 
     return {
+      submitBtnRef,
       mode,
       phone,
       password,
