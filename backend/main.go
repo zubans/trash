@@ -200,10 +200,6 @@ func main() {
 			r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
 			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
 		})
-
-		// Serve release files and user uploads directly when not behind nginx.
-		r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
-		r.Get("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))).ServeHTTP)
 	}
 
 	// Primary mount: /api/* (web via nginx + rebuilt mobile app).
@@ -211,6 +207,11 @@ func main() {
 	// Legacy mount: /* (already-installed mobile APKs talking directly to port
 	// 8089). Kept until all clients are rebuilt with the /api interceptor.
 	registerAPIRoutes(r)
+
+	// Serve uploaded files and release APKs
+	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
+	r.Get("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))).ServeHTTP)
+	r.Get("/api/uploads/*", http.StripPrefix("/api/uploads/", http.FileServer(http.Dir("uploads"))).ServeHTTP)
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {

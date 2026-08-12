@@ -48,7 +48,7 @@
               {{ $t('executor.yourWalletBalance') }}
               <va-icon name="history" class="ml-1 text-secondary" size="small" />
             </span>
-            <span class="balance-amount">{{ Number(balance).toFixed(2) }} РУБ</span>
+            <span class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</span>
             <span class="text-xxs text-primary d-block mt-1">({{ $t('common.details') }})</span>
           </div>
         </va-card>
@@ -83,7 +83,7 @@
               </div>
               <div v-if="activeShift.fine_amount > 0" class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.fine') }}</span>
-                <span class="info-val text-xs">${{ Number(activeShift.fine_amount).toFixed(2) }}</span>
+                <span class="info-val text-xs">{{ currencySymbol }}{{ Number(activeShift.fine_amount).toFixed(2) }}</span>
               </div>
             </div>
 
@@ -143,7 +143,7 @@
               </div>
               <div v-if="activeShift.fine_amount > 0" class="info-item mb-2">
                 <span class="info-label">{{ $t('executor.fine') || 'Штраф' }}</span>
-                <span class="info-val text-xs">${{ Number(activeShift.fine_amount).toFixed(2) }}</span>
+                <span class="info-val text-xs">{{ currencySymbol }}{{ Number(activeShift.fine_amount).toFixed(2) }}</span>
               </div>
             </div>
 
@@ -159,7 +159,7 @@
             </va-button>
 
             <va-alert v-if="activeShift.status === 'PENALIZED'" color="danger" class="mb-0">
-              {{ activeShift.actual_end_at ? $t('executor.shiftEndedEarly', { amount: '$' + Number(activeShift.fine_amount).toFixed(2) }) : $t('executor.shiftPenalized') }}
+              {{ activeShift.actual_end_at ? $t('executor.shiftEndedEarly', { amount: currencySymbol + Number(activeShift.fine_amount).toFixed(2) }) : $t('executor.shiftPenalized') }}
             </va-alert>
           </div>
         </va-card>
@@ -451,7 +451,7 @@
               {{ formatOrderType(rowData) }}
             </template>
             <template #cell(amount)="{ rowData }">
-              <strong class="text-success">+{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }} РУБ</strong>
+              <strong class="text-success">+{{ currencySymbol }}{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }}</strong>
             </template>
             <template #cell(status)="{ value }">
               <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
@@ -476,7 +476,7 @@
             </template>
             <template #cell(amount)="{ rowData }">
               <span :class="['font-bold', isPositiveTx(rowData.type) ? 'text-success' : 'text-danger']">
-                {{ isPositiveTx(rowData.type) ? '+' : '-' }}{{ Number(rowData.amount).toFixed(2) }} РУБ
+                {{ isPositiveTx(rowData.type) ? '+' : '-' }}{{ currencySymbol }}{{ Number(rowData.amount).toFixed(2) }}
               </span>
             </template>
             <template #cell(created_at)="{ value }">
@@ -708,6 +708,10 @@ export default defineComponent({
     const { t, locale } = useI18n()
     const authStore = useAuthStore()
 
+    const currencySymbol = computed(() => {
+      return authStore.currency === 'RUB' ? '₽' : '$'
+    })
+
     const localizedName = (node?: ServiceNode) =>
       node?.name[locale.value] || node?.name['ru'] || node?.code || ''
 
@@ -894,7 +898,7 @@ export default defineComponent({
       successMsg.value = ''
       errorMsg.value = ''
       const penalty = Number(order.hold_amount || 0) * 0.5
-      const confirmText = t('executor.refuseOrderConfirm', { amount: penalty.toFixed(2) + ' РУБ' })
+      const confirmText = t('executor.refuseOrderConfirm', { amount: currencySymbol.value + penalty.toFixed(2) })
       if (!confirm(confirmText)) return
 
       try {
@@ -1028,14 +1032,14 @@ export default defineComponent({
     const earlyEndShift = async () => {
       successMsg.value = ''
       errorMsg.value = ''
-      const confirmed = confirm(t('executor.endShiftEarlyConfirm', { amount: 'РУБ' + Number(earlyExitPenalty.value).toFixed(2) }))
+      const confirmed = confirm(t('executor.endShiftEarlyConfirm', { amount: currencySymbol.value + Number(earlyExitPenalty.value).toFixed(2) }))
       if (!confirmed) return
 
       endingShiftEarly.value = true
       try {
         const response = await api.post('/executor/shifts/early-end')
         activeShift.value = response.data
-        successMsg.value = t('executor.shiftEndedEarly', { amount: 'РУБ' + Number(activeShift.value.fine_amount).toFixed(2) })
+        successMsg.value = t('executor.shiftEndedEarly', { amount: currencySymbol.value + Number(activeShift.value.fine_amount).toFixed(2) })
         await fetchProfile()
       } catch (err: any) {
         errorMsg.value = err.response?.data || t('executor.errorShiftStarted')
@@ -1744,6 +1748,7 @@ export default defineComponent({
     })
 
     return {
+      currencySymbol,
       authStore,
       phone,
       balance,
@@ -2030,10 +2035,15 @@ export default defineComponent({
 }
 
 .attachment-img {
-  max-width: 100%;
+  width: 100%;
+  max-width: 260px;
+  min-width: 120px;
+  min-height: 100px;
   max-height: 240px;
   object-fit: cover;
   display: block;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .attachment-doc-wrapper {

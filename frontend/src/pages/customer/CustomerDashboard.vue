@@ -1534,10 +1534,15 @@ export default defineComponent({
 }
 
 .attachment-img {
-  max-width: 100%;
+  width: 100%;
+  max-width: 260px;
+  min-width: 120px;
+  min-height: 100px;
   max-height: 240px;
   object-fit: cover;
   display: block;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .attachment-doc-wrapper {

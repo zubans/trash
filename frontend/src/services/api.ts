@@ -64,13 +64,16 @@ export function buildChatWebSocketUrl(orderId: string, token: string): string {
 export function resolveFileUrl(path?: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://')) return path
-  const isNative = Capacitor.isNativePlatform()
   const cleanPath = path.startsWith('/') ? path : '/' + path
+  const isNative = Capacitor.isNativePlatform()
+
   if (isNative || !window.location.origin || window.location.protocol === 'file:') {
     const base = apiUrl.replace(/\/$/, '')
     return `${base}${cleanPath}`
   }
-  return cleanPath
+
+  // On standard web browsers (HTTPS / 8443 or nginx), attach clean relative path to current origin
+  return `${window.location.origin}${cleanPath}`
 }
 
 // Helper to retrieve cookie by name
