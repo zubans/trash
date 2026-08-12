@@ -7,10 +7,11 @@ const config: CapacitorConfig = {
   androidScheme: 'http',
   server: {
     cleartext: true,
+    allowNavigation: ['94.103.9.172:*'],
   },
   plugins: {
     CapacitorHttp: {
-      enabled: true,
+      enabled: false,
     },
   },
 };

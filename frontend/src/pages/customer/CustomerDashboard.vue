@@ -528,6 +528,7 @@ import { defineComponent, ref, onMounted, onUnmounted, computed, nextTick, watch
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Capacitor } from '@capacitor/core'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import UpdateBanner from '../../components/UpdateBanner.vue'
@@ -846,9 +847,51 @@ export default defineComponent({
       showAttachMenu.value = !showAttachMenu.value
     }
 
-    const triggerCamera = () => {
+    const triggerCamera = async () => {
       showAttachMenu.value = false
-      if (cameraInputRef.value) cameraInputRef.value.click()
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const photo = await Camera.getPhoto({
+            quality: 85,
+            allowEditing: false,
+            resultType: CameraResultType.Uri,
+            source: CameraSource.Camera,
+          })
+
+          if (photo.webPath && selectedChatOrder.value) {
+            uploadingFile.value = true
+            chatError.value = ''
+            const response = await fetch(photo.webPath)
+            const blob = await response.blob()
+            let file = new File([blob], `photo_${Date.now()}.${photo.format || 'jpg'}`, { type: `image/${photo.format || 'jpeg'}` })
+            file = await compressImage(file, 150, 300)
+
+            const formData = new FormData()
+            formData.append('file', file)
+            if (chatText.value.trim()) {
+              formData.append('text', chatText.value.trim())
+            }
+
+            const uploadRes = await api.post(`/chats/${selectedChatOrder.value.id}/upload`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+            if (uploadRes.data) {
+              const exists = chatMessages.value.some((m: any) => m.id === uploadRes.data.id)
+              if (!exists) {
+                chatMessages.value.push(uploadRes.data)
+                scrollToBottom()
+              }
+            }
+            chatText.value = ''
+          }
+        } catch (err: any) {
+          console.error('[CustomerDashboard] Camera capture error/cancel:', err)
+        } finally {
+          uploadingFile.value = false
+        }
+      } else {
+        if (cameraInputRef.value) cameraInputRef.value.click()
+      }
     }
 
     const triggerGallery = () => {
