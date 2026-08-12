@@ -1045,9 +1045,20 @@ export default defineComponent({
       selectedVariantId.value = null
       if (!id) {
         serviceVariants.value = []
+        subCategories.value = []
         return
       }
-      serviceVariants.value = await getCategoryVariants(id)
+      const children = await getServiceCategoryChildren(id)
+      const categories = children.filter((c) => c.node_type === 'CATEGORY')
+      const variants = children.filter((c) => c.node_type === 'VARIANT')
+      if (categories.length > 0) {
+        // Further subcategories exist, update subCategories list
+        subCategories.value = categories
+        serviceVariants.value = []
+      } else {
+        subCategories.value = []
+        serviceVariants.value = variants
+      }
     })
 
     watch(selectedVariantId, () => {
