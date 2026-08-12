@@ -4,14 +4,14 @@ const config: CapacitorConfig = {
   appId: 'com.healthlogin.app',
   appName: 'healthlogin',
   webDir: 'dist',
-  androidScheme: 'http',
+  androidScheme: 'https',
   server: {
     cleartext: true,
-    allowNavigation: ['94.103.9.172:*'],
+    allowNavigation: ['94.103.9.172:*', '*'],
   },
   plugins: {
     CapacitorHttp: {
-      enabled: false,
+      enabled: true,
     },
   },
 };
