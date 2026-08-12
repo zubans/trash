@@ -221,11 +221,11 @@
     <div :class="['chat-panel shadow-lg', { open: selectedChatOrder }]">
       <div class="chat-header d-flex align-items-center bg-telegram text-white p-2 px-3">
         <div class="telegram-avatar mr-3">
-          {{ selectedChatOrder?.id.slice(0, 2).toUpperCase() }}
+          {{ (selectedChatOrder?.id?.slice(0, 2) || '').toUpperCase() }}
         </div>
         <div class="flex-grow-1 overflow-hidden">
           <h4 class="m-0 text-white font-bold text-sm truncate">
-            {{ $t('customer.orderChatTitle', { id: selectedChatOrder?.id.slice(0, 8) }) }}
+            {{ $t('customer.orderChatTitle', { id: selectedChatOrder?.id?.slice(0, 8) || '' }) }}
           </h4>
           <span class="text-xxs text-online d-flex align-items-center">
             <span class="online-dot mr-1"></span> {{ $t('customer.chatSubtitle') }}
@@ -367,7 +367,12 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError } from '../../services/api'
 import { NativeWebSocket } from '../../plugins/native-websocket'
-import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
+import {
+  getServiceCategories,
+  getServiceCategoryChildren,
+  getCategoryVariants,
+  type ServiceNode,
+} from '../../api/services'
 
 export default defineComponent({
   name: 'CustomerDashboard',
@@ -983,7 +988,6 @@ export default defineComponent({
         clearTimeout(chatPollIntervalId)
         chatPollIntervalId = null
       }
-      wsConnected.value = false
       chatError.value = ''
     }
 

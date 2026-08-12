@@ -121,15 +121,23 @@ func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error
 }
 
 // TopUpUserBalance adds funds directly to a user's balance.
+// Only non-admin users may be topped up, and an admin cannot credit themselves.
 func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
 	if amount <= 0 {
 		return errors.New("amount must be greater than zero")
 	}
 
-	// Verify user exists
-	_, err := s.userRepo.FindByID(userID)
+	if userID == adminID {
+		return errors.New("admin cannot top up their own balance")
+	}
+
+	// Verify user exists and is not an admin
+	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
 		return errors.New("user not found")
+	}
+	if user.Role == "ADMIN" {
+		return errors.New("cannot top up an admin balance")
 	}
 
 	return s.adminRepo.TopUpUserBalance(userID, adminID, amount)

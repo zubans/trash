@@ -26,9 +26,9 @@ const (
 
 // AuthMiddleware validates JWTs and injects user information into the request context.
 type AuthMiddleware struct {
-	userRepo    repository.UserRepository
+	userRepo     repository.UserRepository
 	adminService *service.AdminService
-	secret      []byte
+	secret       []byte
 }
 
 // NewAuthMiddleware creates an AuthMiddleware.
@@ -117,6 +117,10 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		user, err := m.userRepo.FindByID(userID)
 		if err != nil {
 			http.Error(w, "User not found", http.StatusUnauthorized)
+			return
+		}
+		if user.Status == "BANNED" {
+			http.Error(w, "Account is banned", http.StatusUnauthorized)
 			return
 		}
 

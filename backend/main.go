@@ -42,7 +42,10 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	jwtSecret := getEnv("JWT_SECRET", "dev-secret-change-me")
+	jwtSecret := getEnv("JWT_SECRET", "")
+	if jwtSecret == "" {
+		log.Fatalf("JWT_SECRET environment variable is required")
+	}
 
 	// Repositories
 	userRepo := repository.New(db)
@@ -60,7 +63,7 @@ func main() {
 
 	// Services
 	geocoder := service.NewGeocoder(db)
-	authService := service.NewAuthService(userRepo, geocoder)
+	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, db)
