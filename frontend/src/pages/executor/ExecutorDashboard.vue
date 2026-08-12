@@ -2428,4 +2428,9 @@ export default defineComponent({
 .image-preview-modal-wrapper .va-modal__container {
   z-index: 10000 !important;
 }
+
+/* Hide Leaflet map attribution footer control */
+.leaflet-control-attribution {
+  display: none !important;
+}
 </style>
