@@ -66,7 +66,7 @@ export function resolveFileUrl(path?: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) return path
   const isNative = Capacitor.isNativePlatform()
   const cleanPath = path.startsWith('/') ? path : '/' + path
-  if (isNative) {
+  if (isNative || !window.location.origin || window.location.protocol === 'file:') {
     const base = apiUrl.replace(/\/$/, '')
     return `${base}${cleanPath}`
   }

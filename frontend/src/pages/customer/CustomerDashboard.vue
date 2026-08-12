@@ -501,6 +501,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError } from '../../services/api'
 import { NativeWebSocket } from '../../plugins/native-websocket'
+import { compressImage } from '../../utils/imageCompressor'
 import {
   getServiceCategories,
   getServiceCategoryChildren,
@@ -838,11 +839,15 @@ export default defineComponent({
     const onFileSelected = async (event: Event) => {
       const target = event.target as HTMLInputElement
       if (!target.files || target.files.length === 0 || !selectedChatOrder.value) return
-      const file = target.files[0]
+      let file = target.files[0]
       uploadingFile.value = true
       chatError.value = ''
 
       try {
+        if (file.type.startsWith('image/')) {
+          file = await compressImage(file, 150, 300)
+        }
+
         const formData = new FormData()
         formData.append('file', file)
         if (chatText.value.trim()) {
