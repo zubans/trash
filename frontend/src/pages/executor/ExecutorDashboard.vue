@@ -554,6 +554,8 @@
                 :src="resolveFileUrl(msg.file_url)"
                 class="attachment-img rounded-lg shadow-sm cursor-pointer"
                 alt="photo"
+                referrerpolicy="no-referrer"
+                crossorigin="anonymous"
                 @click="openImagePreview(resolveFileUrl(msg.file_url))"
                 @error="(e) => console.error('[DEBUG-IMG-ERROR]', { rawUrl: msg.file_url, resolvedUrl: resolveFileUrl(msg.file_url), isNative: Capacitor.isNativePlatform(), err: e })"
               />
@@ -681,7 +683,7 @@
       class="image-preview-modal-wrapper"
     >
       <div class="text-center p-3">
-        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" />
+        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" referrerpolicy="no-referrer" crossorigin="anonymous" />
         <div class="mt-3 text-right">
           <va-button color="secondary" @click="showImagePreviewModal = false">
             {{ $t('common.close') }}
