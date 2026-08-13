@@ -136,15 +136,6 @@
                 >
                   <i class="ph ph-check"></i>
                 </button>
-                <button
-                  v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
-                  type="button"
-                  class="btn-action danger"
-                  title="Отменить"
-                  @click="cancelOrder(order.id)"
-                >
-                  <i class="ph ph-x"></i>
-                </button>
               </div>
             </div>
 
@@ -258,6 +249,7 @@
         :format-order-type="formatOrderType"
         :get-status-color="getStatusColor"
         :format-date-full="formatDateFull"
+        @cancel-order="cancelOrder"
       />
 
       <!-- Create Order Modal -->
@@ -388,6 +380,27 @@ export default defineComponent({
 
     const successMsg = ref('')
     const errorMsg = ref('')
+
+    let successTimer: any = null
+    let errorTimer: any = null
+
+    watch(successMsg, (val) => {
+      if (successTimer) clearTimeout(successTimer)
+      if (val) {
+        successTimer = setTimeout(() => {
+          successMsg.value = ''
+        }, 5000)
+      }
+    })
+
+    watch(errorMsg, (val) => {
+      if (errorTimer) clearTimeout(errorTimer)
+      if (val) {
+        errorTimer = setTimeout(() => {
+          errorMsg.value = ''
+        }, 5000)
+      }
+    })
 
     // Addresses
     const defaultAddress = ref('Москва, ул. Тверская, д. 1')
@@ -904,6 +917,8 @@ export default defineComponent({
         clearInterval(intervalId)
         intervalId = null
       }
+      if (successTimer) clearTimeout(successTimer)
+      if (errorTimer) clearTimeout(errorTimer)
     })
 
     return {

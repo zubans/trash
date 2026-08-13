@@ -80,6 +80,14 @@
 
       <!-- Футер -->
       <div class="modal-footer">
+        <button
+          v-if="selectedOrderDetails && (selectedOrderDetails.status === 'SEARCHING' || selectedOrderDetails.status === 'ASSIGNED')"
+          type="button"
+          class="btn-danger-action"
+          @click="confirmCancelOrder"
+        >
+          <i class="ph ph-trash"></i> Отменить заказ
+        </button>
         <button type="button" class="btn-cancel" @click="show = false">
           {{ $t('common.close') }}
         </button>
@@ -101,12 +109,20 @@ export default defineComponent({
     getStatusColor: { type: Function, required: true },
     formatDateFull: { type: Function, required: true },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'cancel-order'],
   setup(props, { emit }) {
     const show = computed({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
     })
+
+    const confirmCancelOrder = () => {
+      if (!props.selectedOrderDetails) return
+      if (confirm('Вы уверены, что хотите отменить этот заказ?')) {
+        emit('cancel-order', props.selectedOrderDetails.id)
+        show.value = false
+      }
+    }
 
     const getStatusBadgeClass = (status: string) => {
       switch (status) {
@@ -133,6 +149,7 @@ export default defineComponent({
 
     return {
       show,
+      confirmCancelOrder,
       getStatusBadgeClass,
     }
   },
@@ -412,9 +429,32 @@ export default defineComponent({
 /* Footer */
 .modal-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   border-top: 1px solid rgba(0,0,0,0.06);
   padding-top: 24px;
+}
+
+.btn-danger-action {
+  padding: 14px 20px;
+  border-radius: 14px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: var(--transition);
+}
+
+.btn-danger-action:hover {
+  background: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 8px 20px -4px rgba(239, 68, 68, 0.4);
 }
 
 .btn-cancel {
