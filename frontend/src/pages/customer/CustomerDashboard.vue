@@ -8,6 +8,7 @@
       :is-verified="isVerified"
       @logout="handleLogout"
       @open-profile-modal="showProfileModal = true"
+      @open-top-up-modal="showTopUpModal = true"
     />
 
     <update-banner />
@@ -20,102 +21,120 @@
       {{ errorMsg }}
     </va-alert>
 
-    <!-- Top-up button (small, left aligned) & Image Debug Button -->
-    <div class="mb-3 d-flex gap-2">
-      <va-button color="primary" outline size="small" @click="showTopUpModal = true">
-        <va-icon name="payment" class="mr-1" /> {{ $t('customer.requestWalletTopUp') }}
-      </va-button>
-      <va-button v-if="isDebug" color="warning" outline size="small" @click="showDebugImgModal = true">
-        🐞 Тест Картинок (HTTP & HTTPS)
-      </va-button>
+    <!-- Main Action Buttons Row -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <button type="button" class="btn-action-outline w-100" @click="showTopUpModal = true">
+          💳 {{ $t('customer.requestWalletTopUp') }}
+        </button>
+      </div>
+      <div class="col-md-6">
+        <button type="button" class="btn-action-solid-green w-100" @click="openCreateOrderModal">
+          ➕ {{ $t('customer.createOrder') }}
+        </button>
+      </div>
     </div>
 
-    <!-- Create order button (large) -->
-    <div class="mb-4">
-      <va-button color="success" block size="large" @click="openCreateOrderModal">
-        <va-icon name="shopping_cart" class="mr-2" /> {{ $t('customer.createOrder') }}
-      </va-button>
-    </div>
-
-    <!-- Active Orders table -->
-    <va-card class="shadow-card mb-4">
-      <div class="d-flex justify-content-between align-items-center mb-3 p-3 pb-0">
-        <h3 class="va-h6 m-0 text-primary font-bold d-flex align-items-center">
-          <va-icon name="pending_actions" class="mr-2" /> {{ $t('customer.activeOrders') }}
-        </h3>
-        <va-button icon="refresh" color="secondary" size="small" flat @click="fetchOrders" />
+    <!-- Active Orders Table Card -->
+    <div class="card shadow-sm border-0 rounded-2xl mb-4 bg-white overflow-hidden">
+      <div class="d-flex justify-content-between align-items-center p-4 border-bottom">
+        <div class="d-flex align-items-center gap-2">
+          <h3 class="va-h6 m-0 font-bold text-dark">
+            {{ $t('customer.activeOrders') }}
+          </h3>
+          <span class="badge rounded-pill bg-primary-subtle text-primary font-bold px-3 py-1 text-xs">
+            {{ activeOrders.length }}
+          </span>
+        </div>
+        <button type="button" class="btn-refresh" title="Обновить" @click="fetchOrders">
+          ↻
+        </button>
       </div>
 
-      <div v-if="activeOrders.length === 0" class="text-center py-4">
-        <va-icon name="inbox" size="medium" color="secondary" class="mb-2" />
+      <div v-if="activeOrders.length === 0" class="text-center py-5 text-secondary">
+        <va-icon name="inbox" size="large" color="secondary" class="mb-2" />
         <p class="text-secondary text-sm m-0">{{ $t('customer.noActiveOrders') }}</p>
       </div>
 
-      <va-data-table
-        v-else
-        :items="activeOrders"
-        :columns="orderColumns"
-        striped
-        hoverable
-      >
-        <template #cell(id)="{ rowData }">
-          <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
-        </template>
+      <div v-else class="table-responsive p-4 pt-2">
+        <table class="table align-middle table-hover text-sm m-0">
+          <thead>
+            <tr class="text-secondary text-xs uppercase tracking-wider">
+              <th>№ Заказа</th>
+              <th>Тип заказа</th>
+              <th>Цена</th>
+              <th>Статус</th>
+              <th>Исполнитель</th>
+              <th class="text-end">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in activeOrders" :key="order.id">
+              <td class="font-bold text-primary cursor-pointer" @click="openOrderDetails(order)">
+                #{{ order.id.slice(0, 8) }}
+              </td>
+              <td>{{ formatOrderType(order) }}</td>
+              <td class="font-bold text-dark">{{ currencySymbol }}{{ Number(order.hold_amount).toFixed(2) }}</td>
+              <td>
+                <span :class="['status-pill-badge', order.status === 'ASSIGNED' ? 'pill-assigned' : 'pill-searching']">
+                  ● {{ order.status === 'ASSIGNED' ? 'Назначен исполнитель' : 'Поиск исполнителя' }}
+                </span>
+              </td>
+              <td class="text-secondary text-xs">
+                <div v-if="order.executor_phone" class="d-flex align-items-center gap-1 font-medium text-dark">
+                  👤 Исполнитель
+                </div>
+                <div v-if="order.executor_phone" class="text-xxs text-secondary">
+                  📱 {{ order.executor_phone }}
+                </div>
+                <span v-else class="italic text-secondary">Не назначен</span>
+              </td>
+              <td class="text-end">
+                <div class="d-flex align-items-center justify-content-end gap-2">
+                  <button
+                    v-if="order.status === 'ASSIGNED'"
+                    type="button"
+                    class="btn-chat-action position-relative"
+                    @click="openChat(order)"
+                  >
+                    💬 Чат
+                    <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
+                  </button>
 
-        <template #cell(type)="{ rowData }">
-          {{ formatOrderType(rowData) }}
-        </template>
+                  <button
+                    type="button"
+                    class="btn-table-action"
+                    @click="openOrderDetails(order)"
+                  >
+                    👁️ Подробнее
+                  </button>
 
-        <template #cell(hold_amount)="{ value }">
-          <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
-        </template>
+                  <button
+                    v-if="order.status === 'ASSIGNED'"
+                    type="button"
+                    class="btn-icon-success"
+                    title="Подтвердить выполнение"
+                    @click="confirmOrder(order.id)"
+                  >
+                    ✓
+                  </button>
 
-        <template #cell(status)="{ value }">
-          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
-        </template>
-
-        <template #cell(actions)="{ rowData }">
-          <div class="d-flex gap-1">
-            <va-button
-              color="primary"
-              flat
-              size="small"
-              @click="openOrderDetails(rowData)"
-            >
-              <va-icon name="info" />
-            </va-button>
-            <va-button
-              v-if="rowData.status === 'ASSIGNED'"
-              color="info"
-              outline
-              size="small"
-              class="position-relative"
-              @click="openChat(rowData)"
-            >
-              <va-icon name="chat" />
-              <span v-if="unreadOrderIDs.has(rowData.id)" class="yellow-unread-dot"></span>
-            </va-button>
-            <va-button
-              v-if="rowData.status === 'ASSIGNED'"
-              color="success"
-              size="small"
-              @click="confirmOrder(rowData.id)"
-            >
-              <va-icon name="check" />
-            </va-button>
-            <va-button
-              v-if="rowData.status === 'SEARCHING' || rowData.status === 'ASSIGNED'"
-              color="danger"
-              outline
-              size="small"
-              @click="cancelOrder(rowData.id)"
-            >
-              <va-icon name="close" />
-            </va-button>
-          </div>
-        </template>
-      </va-data-table>
-    </va-card>
+                  <button
+                    v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
+                    type="button"
+                    class="btn-icon-danger"
+                    title="Отменить заказ"
+                    @click="cancelOrder(order.id)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- Order History table (Collapsible) -->
     <OrderHistoryCard
@@ -1542,6 +1561,151 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.25);
+}
+
+.btn-action-outline {
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  color: #2563eb;
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.08);
+}
+
+.btn-action-outline:hover {
+  background: #eff6ff;
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+}
+
+.btn-action-solid-green {
+  background: #16a34a;
+  border: 2px solid #16a34a;
+  color: #ffffff;
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+}
+
+.btn-action-solid-green:hover {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+.btn-refresh {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-refresh:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.status-pill-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  display: inline-block;
+}
+
+.pill-assigned {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.pill-searching {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.btn-chat-action {
+  background: #f8fafc;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-chat-action:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.btn-table-action {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.825rem;
+  font-weight: 500;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-table-action:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.btn-icon-success {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: bold;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon-success:hover {
+  background: #bbf7d0;
+}
+
+.btn-icon-danger {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: bold;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon-danger:hover {
+  background: #fca5a5;
 }
 
 .chat-panel.open {

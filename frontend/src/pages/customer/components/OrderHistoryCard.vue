@@ -1,66 +1,118 @@
 <template>
-  <va-card class="shadow-card mb-4">
+  <div class="card shadow-sm border-0 rounded-2xl mb-4 bg-white overflow-hidden">
+    <!-- Header with Toggle Button -->
     <div
-      class="d-flex justify-content-between align-items-center p-3 cursor-pointer user-select-none"
+      class="d-flex justify-content-between align-items-center p-4 cursor-pointer user-select-none border-bottom"
       @click="isHistoryCollapsed = !isHistoryCollapsed"
     >
-      <h3 class="va-h6 m-0 text-secondary font-bold d-flex align-items-center">
-        <va-icon name="history" class="mr-2" /> {{ $t('customer.orderHistory') }}
-        <span class="text-xs text-secondary font-normal ml-2">({{ historyOrders.length }})</span>
-      </h3>
-      <va-button flat size="small" color="secondary">
-        <va-icon :name="isHistoryCollapsed ? 'expand_more' : 'expand_less'" />
-      </va-button>
+      <div class="d-flex align-items-center gap-3">
+        <h3 class="va-h6 m-0 font-bold text-dark">
+          История заказов
+        </h3>
+        <span class="badge rounded-pill bg-primary-subtle text-primary font-bold px-3 py-1 text-xs">
+          {{ historyOrders.length }}
+        </span>
+      </div>
+
+      <button type="button" class="btn-toggle-collapse border-0 bg-transparent text-secondary font-medium text-xs d-flex align-items-center gap-1 cursor-pointer">
+        <span>{{ isHistoryCollapsed ? 'Развернуть' : 'Свернуть' }}</span>
+        <va-icon :name="isHistoryCollapsed ? 'expand_more' : 'expand_less'" size="small" />
+      </button>
     </div>
 
-    <div v-if="!isHistoryCollapsed">
-      <div v-if="historyOrders.length === 0" class="text-center py-4">
-        <va-icon name="folder_off" size="medium" color="secondary" class="mb-2" />
+    <!-- Collapsible Body -->
+    <div v-if="!isHistoryCollapsed" class="p-4 pt-3">
+      <!-- Summary Badges Bar -->
+      <div class="summary-badges-row d-flex gap-3 mb-4 flex-wrap">
+        <div class="summary-pill-card p-3 rounded-xl border d-flex align-items-center gap-3 bg-light-green">
+          <span class="icon-circle bg-success text-white">✓</span>
+          <div>
+            <span class="d-block text-secondary text-xs font-medium">Завершённые</span>
+            <span class="font-bold text-dark text-base">{{ completedCount }}</span>
+          </div>
+        </div>
+
+        <div class="summary-pill-card p-3 rounded-xl border d-flex align-items-center gap-3 bg-light-red">
+          <span class="icon-circle bg-danger text-white">✕</span>
+          <div>
+            <span class="d-block text-secondary text-xs font-medium">Отменённые</span>
+            <span class="font-bold text-dark text-base">{{ canceledCount }}</span>
+          </div>
+        </div>
+
+        <div class="summary-pill-card p-3 rounded-xl border d-flex align-items-center gap-3 bg-light-blue">
+          <span class="icon-circle bg-primary text-white">📋</span>
+          <div>
+            <span class="d-block text-secondary text-xs font-medium">Всего заказов</span>
+            <span class="font-bold text-dark text-base">{{ historyOrders.length }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty State -->
+      <div v-if="historyOrders.length === 0" class="text-center py-5 text-secondary">
+        <va-icon name="folder_off" size="large" color="secondary" class="mb-2" />
         <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
       </div>
 
-      <va-data-table
-        v-else
-        :items="historyOrders"
-        :columns="orderColumns"
-        striped
-        hoverable
-      >
-        <template #cell(id)="{ rowData }">
-          <span class="font-bold text-sm cursor-pointer text-primary" @click="$emit('openOrderDetails', rowData)">#{{ rowData.id.slice(0, 8) }}</span>
-        </template>
+      <!-- Table -->
+      <div v-else class="table-responsive">
+        <table class="table align-middle table-hover text-sm m-0">
+          <thead>
+            <tr class="text-secondary text-xs uppercase tracking-wider">
+              <th>№ Заказа</th>
+              <th>Тип заказа</th>
+              <th>Цена</th>
+              <th>Дата</th>
+              <th>Статус</th>
+              <th>Исполнитель</th>
+              <th class="text-end">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in displayedOrders" :key="order.id">
+              <td class="font-bold text-primary cursor-pointer" @click="$emit('openOrderDetails', order)">
+                #{{ order.id.slice(0, 8) }}
+              </td>
+              <td>{{ formatOrderType(order) }}</td>
+              <td class="font-bold text-dark">{{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}</td>
+              <td class="text-secondary text-xs">{{ formatDate(order.created_at) }}</td>
+              <td>
+                <span :class="['status-dot-badge', order.status === 'COMPLETED' ? 'dot-completed' : 'dot-canceled']">
+                  ● {{ order.status === 'COMPLETED' ? 'Завершён' : 'Отменён' }}
+                </span>
+              </td>
+              <td class="text-secondary text-xs">
+                <span v-if="order.executor_phone">📱 {{ order.executor_phone }}</span>
+                <span v-else-if="order.executor_id">ID: #{{ order.executor_id.slice(0, 8) }}</span>
+                <span v-else class="italic">—</span>
+              </td>
+              <td class="text-end">
+                <button
+                  type="button"
+                  class="btn-table-action"
+                  @click="$emit('openOrderDetails', order)"
+                >
+                  👁️ Подробнее
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-        <template #cell(type)="{ rowData }">
-          {{ formatOrderType(rowData) }}
-        </template>
-
-        <template #cell(hold_amount)="{ rowData }">
-          <strong>{{ currencySymbol }}{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }}</strong>
-        </template>
-
-        <template #cell(status)="{ value }">
-          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
-        </template>
-
-        <template #cell(actions)="{ rowData }">
-          <div class="d-flex gap-1">
-            <va-button
-              color="primary"
-              flat
-              size="small"
-              @click="$emit('openOrderDetails', rowData)"
-            >
-              <va-icon name="info" />
-            </va-button>
-          </div>
-        </template>
-      </va-data-table>
+        <!-- Show More Button -->
+        <div v-if="historyOrders.length > visibleLimit" class="text-center mt-3">
+          <button type="button" class="btn-show-more" @click="visibleLimit += 5">
+            Показать ещё ∨
+          </button>
+        </div>
+      </div>
     </div>
-  </va-card>
+  </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref } from 'vue'
+import { defineComponent, ref, computed } from 'vue'
 
 export default defineComponent({
   name: 'OrderHistoryCard',
@@ -72,16 +124,128 @@ export default defineComponent({
     getStatusColor: { type: Function, required: true },
   },
   emits: ['openOrderDetails'],
-  setup() {
+  setup(props) {
     const isHistoryCollapsed = ref(true)
-    return { isHistoryCollapsed }
+    const visibleLimit = ref(5)
+
+    const completedCount = computed(() =>
+      props.historyOrders.filter((o) => o.status === 'COMPLETED').length
+    )
+
+    const canceledCount = computed(() =>
+      props.historyOrders.filter((o) => o.status === 'CANCELED').length
+    )
+
+    const displayedOrders = computed(() =>
+      props.historyOrders.slice(0, visibleLimit.value)
+    )
+
+    const formatDate = (dateStr?: string) => {
+      if (!dateStr) return ''
+      const d = new Date(dateStr)
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+    }
+
+    return {
+      isHistoryCollapsed,
+      visibleLimit,
+      completedCount,
+      canceledCount,
+      displayedOrders,
+      formatDate,
+    }
   },
 })
 </script>
 
 <style scoped>
-.shadow-card {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-  border-radius: 12px !important;
+.bg-primary-subtle {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.summary-pill-card {
+  min-width: 150px;
+  flex: 1;
+  border-radius: 12px;
+}
+
+.bg-light-green {
+  background: #f0fdf4;
+  border-color: #dcfce7 !important;
+}
+
+.bg-light-red {
+  background: #fef2f2;
+  border-color: #fee2e2 !important;
+}
+
+.bg-light-blue {
+  background: #f8fafc;
+  border-color: #e2e8f0 !important;
+}
+
+.icon-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.table th {
+  border-bottom: 1px solid #f1f5f9;
+  font-weight: 600;
+  padding: 12px;
+}
+
+.table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.status-dot-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.dot-completed {
+  color: #16a34a;
+}
+
+.dot-canceled {
+  color: #dc2626;
+}
+
+.btn-table-action {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-table-action:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.btn-show-more {
+  background: transparent;
+  border: none;
+  color: #2563eb;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-show-more:hover {
+  text-decoration: underline;
 }
 </style>

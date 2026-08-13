@@ -1,41 +1,63 @@
 <template>
-  <div class="dashboard-header mb-4">
-    <div class="d-flex justify-content-between align-items-center">
-      <!-- Clickable User Profile Box -->
-      <div
-        class="profile-clickable-box p-2 px-3 rounded-lg border transition-all cursor-pointer user-select-none"
-        @click="$emit('openProfileModal')"
-      >
-        <div class="d-flex align-items-center gap-2">
-          <h1 class="va-h5 m-0 font-bold text-primary phone-title">{{ phone }}</h1>
-          <span
-            v-if="isVerified"
-            class="blue-verified-badge"
-            title="Пользователь верифицирован"
-          >
-            ✓
-          </span>
-        </div>
-
-        <div class="d-flex align-items-center gap-2 mt-1">
-          <span class="text-secondary text-xs">{{ $t('customer.title') }}</span>
-          <span v-if="isVerified" class="badge bg-success text-white text-xxs font-bold px-2 py-0-5 rounded-pill">
-            Верифицирован
-          </span>
-          <span class="text-xs text-primary font-bold hover-underline d-flex align-items-center gap-1">
-            <va-icon name="edit_location" size="small" /> (Управление адресами)
-          </span>
-        </div>
+  <div class="dashboard-header-container mb-4">
+    <!-- Top Bar: Title & Right Controls -->
+    <div class="top-nav-bar d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h1 class="page-title m-0">Личный кабинет</h1>
+        <p class="page-subtitle m-0">Добро пожаловать в ваш кабинет</p>
       </div>
 
-      <!-- Right Header Actions -->
-      <div class="text-right">
-        <LanguageSwitcher class="mb-2" />
-        <div class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</div>
-        <div class="text-secondary text-xs">{{ $t('customer.balance') }}</div>
-        <va-button color="danger" outline size="small" class="mt-2" @click="$emit('logout')">
-          <va-icon name="logout" class="mr-1" /> {{ $t('app.logout') }}
-        </va-button>
+      <div class="d-flex align-items-center gap-3">
+        <LanguageSwitcher />
+        <button type="button" class="btn-logout" @click="$emit('logout')">
+          <va-icon name="logout" size="small" class="mr-1" /> Выйти
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Header Card -->
+    <div class="header-card p-4 rounded-2xl bg-white shadow-sm border">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <!-- Left: Profile Info -->
+        <div class="d-flex align-items-center gap-3">
+          <!-- Avatar Icon Circle -->
+          <div class="avatar-circle" @click="$emit('openProfileModal')">
+            <va-icon name="person" size="large" color="primary" />
+          </div>
+
+          <!-- Phone & Badges -->
+          <div>
+            <div class="d-flex align-items-center gap-2">
+              <h2 class="user-phone font-bold m-0 cursor-pointer" @click="$emit('openProfileModal')">
+                {{ phone }}
+              </h2>
+            </div>
+            
+            <div class="d-flex align-items-center gap-2 mt-1">
+              <span v-if="isVerified" class="verified-status-tag d-inline-flex align-items-center gap-1">
+                <span class="check-dot">✓</span> Верифицирован
+              </span>
+            </div>
+
+            <div class="mt-1">
+              <button type="button" class="btn-address-link text-primary font-medium border-0 bg-transparent p-0 cursor-pointer" @click="$emit('openProfileModal')">
+                📍 Управление адресами
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Balance & Top-Up Action -->
+        <div class="d-flex align-items-center gap-4">
+          <div class="balance-block text-right">
+            <span class="balance-label text-secondary text-xs d-block mb-1">Баланс</span>
+            <span class="balance-value font-bold text-dark">{{ currencySymbol }} {{ Number(balance).toFixed(2) }}</span>
+          </div>
+
+          <button type="button" class="btn-topup-header" @click="$emit('openTopUpModal')">
+            💳 Пополнить кошелёк
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -54,70 +76,122 @@ export default defineComponent({
     currencySymbol: { type: String, default: '₽' },
     isVerified: { type: Boolean, default: true },
   },
-  emits: ['logout', 'openProfileModal'],
+  emits: ['logout', 'openProfileModal', 'openTopUpModal'],
 })
 </script>
 
 <style scoped>
-.dashboard-header {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.profile-clickable-box {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-}
-
-.profile-clickable-box:hover {
-  background: #edf2f7;
-  border-color: #cbd5e0;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-}
-
-.phone-title {
-  font-size: 1.4rem;
-  letter-spacing: 0.5px;
-}
-
-.balance-amount {
-  font-size: 1.8rem;
+.page-title {
+  font-size: 1.6rem;
   font-weight: 800;
-  color: #2b6cb0;
-  line-height: 1.2;
+  color: #0f172a;
 }
 
-.blue-verified-badge {
-  width: 20px;
-  height: 20px;
-  background-color: #1da1f2;
-  color: #ffffff;
+.page-subtitle {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.btn-logout {
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-logout:hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #cbd5e0;
+}
+
+.header-card {
+  border-radius: 16px;
+  border: 1px solid #f1f5f9;
+  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+}
+
+.avatar-circle {
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  font-size: 12px;
-  font-weight: 900;
+  background: #eff6ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.avatar-circle:hover {
+  transform: scale(1.04);
+}
+
+.user-phone {
+  font-size: 1.35rem;
+  color: #0f172a;
+  letter-spacing: 0.3px;
+}
+
+.verified-status-tag {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #16a34a;
+}
+
+.check-dot {
+  width: 16px;
+  height: 16px;
+  background: #22c55e;
+  color: white;
+  border-radius: 50%;
+  font-size: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 5px rgba(29, 161, 242, 0.45);
+  font-weight: 900;
 }
 
-.hover-underline:hover {
+.btn-address-link {
+  font-size: 0.85rem;
+  transition: color 0.15s ease;
+}
+
+.btn-address-link:hover {
+  color: #1d4ed8 !important;
   text-decoration: underline;
 }
 
-.py-0-5 {
-  padding-top: 2px;
-  padding-bottom: 2px;
+.balance-label {
+  font-size: 0.8rem;
+  color: #64748b;
 }
 
-@media (max-width: 576px) {
-  .balance-amount {
-    font-size: 1.4rem;
-  }
-  .phone-title {
-    font-size: 1.2rem;
-  }
+.balance-value {
+  font-size: 1.5rem;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.btn-topup-header {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-topup-header:hover {
+  background: #1d4ed8;
 }
 </style>
