@@ -1,6 +1,5 @@
 <template>
   <div v-if="show" class="modal-overlay" @click.self="show = false">
-    <!-- Modal Card -->
     <div class="modal-card">
       <!-- Header -->
       <div class="modal-header">
@@ -10,87 +9,86 @@
         </button>
       </div>
 
-      <!-- Address Info Box -->
+      <!-- Address Box -->
       <div class="info-box">
-        <div class="info-label">
-          <i class="ph-fill ph-map-pin"></i> {{ $t('customer.pickupAddress') }}
-        </div>
-        <div class="info-address">{{ orderAddress || 'Адрес не указан' }}</div>
-        <div class="info-note">{{ $t('customer.addressChangeHint') }}</div>
-        <div v-if="orderLat !== null && orderLon !== null" class="info-note text-xs mt-1">
-          {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
-        </div>
-        <div v-if="geocodeError" class="text-danger text-xs mt-1">
-          {{ geocodeError }}
+        <div class="info-icon"><i class="ph-fill ph-map-pin"></i></div>
+        <div class="info-text">
+          <div class="info-address">{{ orderAddress || 'Адрес не указан' }}</div>
+          <div v-if="orderLat !== null && orderLon !== null" class="info-coords">
+            {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
+          </div>
+          <div v-if="geocodeError" class="text-danger text-xs mt-1">
+            {{ geocodeError }}
+          </div>
         </div>
       </div>
 
       <form @submit.prevent="$emit('submitOrder')">
-        <!-- Category Dropdown -->
+        <!-- ШАГ 1: КАТЕГОРИЯ (Показываем с помощью segmented control) -->
         <div class="form-group">
-          <label class="form-label">{{ $t('customer.category') }}</label>
-          <div class="custom-select">
-            <div class="select-trigger" @click="isCategoryOpen = !isCategoryOpen">
-              <span>{{ selectedCategoryLabel || 'Выберите категорию' }}</span>
-              <i :class="['ph-bold ph-caret-down', { 'is-open': isCategoryOpen }]"></i>
-            </div>
-            <div v-if="isCategoryOpen" class="select-dropdown">
-              <div
-                v-for="opt in categoryOptions"
-                :key="opt.value"
-                :class="['select-option', { selected: categoryIdProxy === opt.value }]"
-                @click="selectCategory(opt.value)"
-              >
-                <i class="ph-bold ph-check"></i> {{ opt.label }}
-              </div>
-            </div>
+          <label class="form-label">1. Выберите категорию</label>
+          <div class="segmented-control">
+            <label v-for="cat in categoryOptions" :key="cat.value" class="segment">
+              <input
+                type="radio"
+                name="category"
+                :value="cat.value"
+                :checked="categoryIdProxy === cat.value"
+                @change="categoryIdProxy = cat.value"
+              />
+              <span>{{ cat.label }}</span>
+            </label>
           </div>
         </div>
 
-        <!-- SubCategory Dropdown (if available) -->
-        <div v-if="subCategoryOptions && subCategoryOptions.length > 0" class="form-group">
-          <label class="form-label">{{ $t('customer.subCategory') }}</label>
-          <div class="custom-select">
-            <div class="select-trigger" @click="isSubCategoryOpen = !isSubCategoryOpen">
-              <span>{{ selectedSubCategoryLabel || 'Выберите подкатегорию' }}</span>
-              <i :class="['ph-bold ph-caret-down', { 'is-open': isSubCategoryOpen }]"></i>
-            </div>
-            <div v-if="isSubCategoryOpen" class="select-dropdown">
-              <div
-                v-for="opt in subCategoryOptions"
-                :key="opt.value"
-                :class="['select-option', { selected: subCategoryIdProxy === opt.value }]"
-                @click="selectSubCategory(opt.value)"
-              >
-                <i class="ph-bold ph-check"></i> {{ opt.label }}
-              </div>
-            </div>
+        <!-- ШАГ 2: ПОДКАТЕГОРИЯ (Появляется плавно, если есть подкатегории) -->
+        <div
+          v-if="subCategoryOptions && subCategoryOptions.length > 0"
+          class="form-group step-block visible"
+        >
+          <label class="form-label">2. Уточните детали</label>
+          <div class="pills-group">
+            <label v-for="sub in subCategoryOptions" :key="sub.value" class="pill">
+              <input
+                type="radio"
+                name="subcategory"
+                :value="sub.value"
+                :checked="subCategoryIdProxy === sub.value"
+                @change="subCategoryIdProxy = sub.value"
+              />
+              <span>{{ sub.label }}</span>
+            </label>
           </div>
         </div>
 
-        <!-- Service Variant Dropdown (if available) -->
-        <div v-if="variantOptions && variantOptions.length > 0" class="form-group">
-          <label class="form-label">{{ $t('customer.serviceVariant') }}</label>
-          <div class="custom-select">
-            <div class="select-trigger" @click="isVariantOpen = !isVariantOpen">
-              <span>{{ selectedVariantLabel || 'Выберите вариант услуги' }}</span>
-              <i :class="['ph-bold ph-caret-down', { 'is-open': isVariantOpen }]"></i>
-            </div>
-            <div v-if="isVariantOpen" class="select-dropdown">
-              <div
-                v-for="opt in variantOptions"
-                :key="opt.value"
-                :class="['select-option', { selected: variantIdProxy === opt.value }]"
-                @click="selectVariant(opt.value)"
-              >
-                <i class="ph-bold ph-check"></i> {{ opt.label }}
-              </div>
-            </div>
+        <!-- ШАГ 3: ВИД УСЛУГИ (Появляется плавно, если есть варианты) -->
+        <div
+          v-if="variantOptions && variantOptions.length > 0"
+          class="form-group step-block visible"
+        >
+          <label class="form-label">3. Вид услуги</label>
+          <div class="radio-cards">
+            <label
+              v-for="variant in variantOptions"
+              :key="variant.value"
+              class="radio-card"
+            >
+              <input
+                type="radio"
+                name="service_variant"
+                :value="variant.value"
+                :checked="variantIdProxy === variant.value"
+                @change="variantIdProxy = variant.value"
+              />
+              <div class="rc-circle"></div>
+              <div class="rc-content">{{ variant.label }}</div>
+            </label>
           </div>
         </div>
 
-        <!-- Urgency Checkbox Pills -->
-        <div v-if="!isAuctionSelected" class="form-group mt-4">
+        <!-- Дополнительные параметры: Срочность / ASAP -->
+        <div v-if="selectedVariantId && !isAuctionSelected" class="form-group step-block visible mt-3">
+          <label class="form-label">Скорость исполнения</label>
           <div class="checkbox-group">
             <label class="custom-checkbox">
               <input
@@ -116,21 +114,27 @@
           </div>
         </div>
 
-        <!-- Total Price Row -->
+        <!-- Итоговая цена -->
         <div class="price-row">
-          <div class="price-label">{{ $t('customer.price') }}:</div>
-          <div class="price-value">{{ Number(selectedPrice).toFixed(2) }} {{ currencySymbol }}</div>
+          <div class="price-label">Предварительная цена:</div>
+          <div class="price-value" :style="{ color: selectedVariantId ? 'var(--accent-main)' : 'var(--text-title)' }">
+            {{ selectedVariantId ? `${Number(selectedPrice).toFixed(2)} ${currencySymbol}` : '-- ₽' }}
+          </div>
         </div>
 
-        <!-- Footer Buttons -->
+        <!-- Футер -->
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" @click="show = false">
-            {{ $t('common.cancel') }}
+            Отмена
           </button>
-          <button type="submit" class="btn btn-submit" :disabled="creatingOrder || !selectedVariantId">
+          <button
+            type="submit"
+            :class="['btn btn-submit', { active: !!selectedVariantId && !creatingOrder }]"
+            :disabled="creatingOrder || !selectedVariantId"
+          >
             <span v-if="creatingOrder" class="spinner-sm"></span>
             <template v-else>
-              <i class="ph-bold ph-plus"></i> {{ $t('customer.createOrder') }}
+              <i class="ph-bold ph-plus"></i> Создать заказ
             </template>
           </button>
         </div>
@@ -140,7 +144,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, ref, onMounted } from 'vue'
+import { defineComponent, computed, onMounted } from 'vue'
 
 export default defineComponent({
   name: 'CreateOrderModal',
@@ -173,10 +177,6 @@ export default defineComponent({
     'submitOrder',
   ],
   setup(props, { emit }) {
-    const isCategoryOpen = ref(false)
-    const isSubCategoryOpen = ref(false)
-    const isVariantOpen = ref(false)
-
     const show = computed({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
@@ -197,36 +197,6 @@ export default defineComponent({
       set: (val) => emit('update:selectedVariantId', val),
     })
 
-    const selectedCategoryLabel = computed(() => {
-      const found = props.categoryOptions.find((opt) => opt.value === categoryIdProxy.value)
-      return found ? found.label : ''
-    })
-
-    const selectedSubCategoryLabel = computed(() => {
-      const found = props.subCategoryOptions.find((opt) => opt.value === subCategoryIdProxy.value)
-      return found ? found.label : ''
-    })
-
-    const selectedVariantLabel = computed(() => {
-      const found = props.variantOptions.find((opt) => opt.value === variantIdProxy.value)
-      return found ? found.label : ''
-    })
-
-    const selectCategory = (val: string) => {
-      categoryIdProxy.value = val
-      isCategoryOpen.value = false
-    }
-
-    const selectSubCategory = (val: string) => {
-      subCategoryIdProxy.value = val
-      isSubCategoryOpen.value = false
-    }
-
-    const selectVariant = (val: string) => {
-      variantIdProxy.value = val
-      isVariantOpen.value = false
-    }
-
     const loadPhosphorIcons = () => {
       if (!document.getElementById('phosphor-icons-script')) {
         const script = document.createElement('script')
@@ -245,15 +215,6 @@ export default defineComponent({
       categoryIdProxy,
       subCategoryIdProxy,
       variantIdProxy,
-      isCategoryOpen,
-      isSubCategoryOpen,
-      isVariantOpen,
-      selectedCategoryLabel,
-      selectedSubCategoryLabel,
-      selectedVariantLabel,
-      selectCategory,
-      selectSubCategory,
-      selectVariant,
     }
   },
 })
@@ -262,12 +223,10 @@ export default defineComponent({
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
-/* --- Modal Overlay --- */
 .modal-overlay {
   --bg-base: #f8f9fa;
-  --surface-card: rgba(255, 255, 255, 0.92);
-  --surface-input: rgba(255, 255, 255, 0.7);
-  --surface-dropdown: rgba(255, 255, 255, 0.95);
+  --surface-card: rgba(255, 255, 255, 0.85);
+  --surface-input: rgba(255, 255, 255, 0.6);
   
   --text-title: #0f172a;
   --text-body: #334155;
@@ -283,9 +242,6 @@ export default defineComponent({
   --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
                   0 1px 3px rgba(15, 23, 42, 0.05),
                   inset 0 1px 0 rgba(255,255,255,1);
-
-  --shadow-dropdown: 0 12px 32px -8px rgba(15, 23, 42, 0.15),
-                     0 0 0 1px rgba(0,0,0,0.02);
   
   --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -299,17 +255,10 @@ export default defineComponent({
   justify-content: center;
   padding: 20px;
   z-index: 1050;
-  animation: fadeIn 0.3s ease-out;
   font-family: 'Outfit', sans-serif;
   color: var(--text-body);
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* --- Modal Card --- */
 .modal-card {
   background: var(--surface-card);
   backdrop-filter: blur(24px);
@@ -331,7 +280,6 @@ export default defineComponent({
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* --- Header --- */
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -368,54 +316,51 @@ export default defineComponent({
   transform: rotate(90deg);
 }
 
-/* --- Info Box (Address) --- */
+/* Info Box */
 .info-box {
   background: rgba(99, 102, 241, 0.04);
   border: 1px solid rgba(99, 102, 241, 0.1);
   border-radius: var(--rad-md);
-  padding: 20px;
+  padding: 16px;
   margin-bottom: 24px;
-  position: relative;
-  overflow: hidden;
-}
-
-.info-box::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 0; bottom: 0; width: 4px;
-  background: var(--accent-main);
-}
-
-.info-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent-main);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 16px;
+}
+
+.info-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--accent-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.info-text {
+  flex: 1;
 }
 
 .info-address {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-title);
-  margin-bottom: 8px;
-  line-height: 1.4;
+  line-height: 1.3;
 }
 
-.info-note {
-  font-size: 13px;
-  color: var(--text-muted);
-  line-height: 1.4;
-  margin-bottom: 4px;
+.info-coords {
+  font-size: 12px;
+  color: #a1a1aa;
+  font-family: monospace;
+  margin-top: 2px;
 }
 
-/* --- Form Groups --- */
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .form-label {
@@ -429,89 +374,172 @@ export default defineComponent({
   padding-left: 4px;
 }
 
-/* Custom Dropdown Styling */
-.custom-select {
+/* Step Block Animation */
+.step-block {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.step-block.visible {
+  opacity: 1;
+  transform: translateY(0);
+  animation: popIn 0.3s forwards;
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Segmented Control (Шаг 1) */
+.segmented-control {
+  display: flex;
+  background: rgba(15, 23, 42, 0.04);
+  padding: 4px;
+  border-radius: 16px;
+  gap: 4px;
+}
+
+.segment {
+  flex: 1;
   position: relative;
-  width: 100%;
-}
-
-.select-trigger {
-  width: 100%;
-  padding: 16px 20px;
-  border-radius: 16px;
-  background: #ffffff;
-  border: 1.5px solid var(--accent-main);
-  font-size: 15px;
-  color: var(--text-title);
-  font-weight: 600;
   cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
-  transition: var(--transition);
 }
 
-.select-trigger i {
-  color: var(--accent-main);
-  transition: transform 0.3s;
-}
-
-.select-trigger i.is-open {
-  transform: rotate(180deg);
-}
-
-.select-dropdown {
+.segment input {
   position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: 100%;
-  background: var(--surface-dropdown);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 1);
-  border-radius: 16px;
-  box-shadow: var(--shadow-dropdown);
-  padding: 8px;
-  z-index: 100;
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.select-option {
-  padding: 12px 16px;
-  border-radius: 10px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-body);
-  cursor: pointer;
-  transition: var(--transition);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.select-option:hover {
-  background: rgba(99, 102, 241, 0.08);
-  color: var(--text-title);
-}
-
-.select-option.selected {
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--accent-main);
-  font-weight: 600;
-}
-
-.select-option i {
-  font-size: 18px;
   opacity: 0;
 }
 
-.select-option.selected i {
-  opacity: 1;
+.segment span {
+  display: block;
+  text-align: center;
+  padding: 12px 8px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: var(--transition);
 }
 
-/* Checkboxes (Pill Style) */
+.segment input:checked + span {
+  background: #ffffff;
+  color: var(--accent-main);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+/* Pills Group (Шаг 2) */
+.pills-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  position: relative;
+  cursor: pointer;
+}
+
+.pill input {
+  position: absolute;
+  opacity: 0;
+}
+
+.pill span {
+  display: inline-block;
+  padding: 10px 18px;
+  border-radius: 99px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255,255,255,0.8);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-body);
+  transition: var(--transition);
+}
+
+.pill input:checked + span {
+  background: #e0e7ff;
+  border-color: var(--accent-main);
+  color: var(--accent-main);
+  font-weight: 600;
+}
+
+.pill:hover span {
+  background: #ffffff;
+}
+
+/* Radio Cards (Шаг 3) */
+.radio-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-card {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255,255,255,0.8);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: var(--transition);
+  position: relative;
+}
+
+.radio-card input {
+  position: absolute;
+  opacity: 0;
+}
+
+.rc-circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  margin-right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.rc-circle::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-main);
+  transform: scale(0);
+  transition: var(--transition);
+}
+
+.radio-card:hover {
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+}
+
+.radio-card input:checked ~ .rc-circle {
+  border-color: var(--accent-main);
+}
+
+.radio-card input:checked ~ .rc-circle::after {
+  transform: scale(1);
+}
+
+.radio-card input:checked {
+  background: rgba(99, 102, 241, 0.03);
+}
+
+.rc-content {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-title);
+}
+
+/* Checkboxes (Speed) */
 .checkbox-group {
   display: flex;
   gap: 12px;
@@ -528,9 +556,6 @@ export default defineComponent({
 .custom-checkbox input {
   position: absolute;
   opacity: 0;
-  cursor: pointer;
-  height: 0;
-  width: 0;
 }
 
 .checkbox-pill {
@@ -568,7 +593,7 @@ export default defineComponent({
   transform: translateY(-1px);
 }
 
-/* --- Price Row --- */
+/* Price Row */
 .price-row {
   display: flex;
   justify-content: space-between;
@@ -590,9 +615,10 @@ export default defineComponent({
   font-weight: 700;
   color: var(--text-title);
   letter-spacing: -0.5px;
+  transition: color 0.3s;
 }
 
-/* --- Footer --- */
+/* Footer Buttons */
 .modal-footer {
   display: flex;
   gap: 12px;
@@ -628,16 +654,18 @@ export default defineComponent({
   background: linear-gradient(135deg, #6366f1, #4f46e5);
   color: white;
   box-shadow: 0 10px 24px -6px var(--accent-glow);
+  opacity: 0.5;
+  pointer-events: none;
 }
 
-.btn-submit:hover {
+.btn-submit.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.btn-submit.active:hover {
   transform: translateY(-2px);
   box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
-}
-
-.btn-submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .spinner-sm {
@@ -653,7 +681,6 @@ export default defineComponent({
   to { transform: rotate(360deg); }
 }
 
-/* Responsive */
 @media (max-width: 480px) {
   .modal-card {
     padding: 24px;
