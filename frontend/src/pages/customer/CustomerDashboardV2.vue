@@ -286,7 +286,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed, onMounted } from 'vue'
+import { defineComponent, ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
@@ -612,9 +612,22 @@ export default defineComponent({
       isAsap.value = false
     })
 
+    let intervalId: any = null
+
     onMounted(async () => {
       loadPhosphorIcons()
       await Promise.all([fetchProfile(), fetchOrders()])
+      intervalId = setInterval(() => {
+        fetchProfile()
+        fetchOrders()
+      }, 5000)
+    })
+
+    onUnmounted(() => {
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = null
+      }
     })
 
     return {
