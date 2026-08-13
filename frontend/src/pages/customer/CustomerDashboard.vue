@@ -1,22 +1,12 @@
 <template>
   <div class="customer-dashboard">
     <!-- Header: phone + balance -->
-    <div class="dashboard-header mb-4">
-      <div class="d-flex justify-content-between align-items-center">
-        <div>
-          <h1 class="va-h5 m-0">{{ phone }}</h1>
-          <span class="text-secondary text-sm">{{ $t('customer.title') }}</span>
-        </div>
-        <div class="text-right">
-          <LanguageSwitcher class="mb-2" />
-          <div class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</div>
-          <div class="text-secondary text-xs">{{ $t('customer.balance') }}</div>
-          <va-button color="danger" outline size="small" class="mt-2" @click="handleLogout">
-            <va-icon name="logout" class="mr-1" /> {{ $t('app.logout') }}
-          </va-button>
-        </div>
-      </div>
-    </div>
+    <CustomerHeader
+      :phone="phone"
+      :balance="balance"
+      :currency-symbol="currencySymbol"
+      @logout="handleLogout"
+    />
 
     <update-banner />
 
@@ -126,205 +116,46 @@
     </va-card>
 
     <!-- Order History table (Collapsible) -->
-    <va-card class="shadow-card mb-4">
-      <div
-        class="d-flex justify-content-between align-items-center p-3 cursor-pointer user-select-none"
-        @click="isHistoryCollapsed = !isHistoryCollapsed"
-      >
-        <h3 class="va-h6 m-0 text-secondary font-bold d-flex align-items-center">
-          <va-icon name="history" class="mr-2" /> {{ $t('customer.orderHistory') }}
-          <span class="text-xs text-secondary font-normal ml-2">({{ historyOrders.length }})</span>
-        </h3>
-        <va-button flat size="small" color="secondary">
-          <va-icon :name="isHistoryCollapsed ? 'expand_more' : 'expand_less'" />
-        </va-button>
-      </div>
+    <OrderHistoryCard
+      :history-orders="historyOrders"
+      :order-columns="orderColumns"
+      :currency-symbol="currencySymbol"
+      :format-order-type="formatOrderType"
+      :get-status-color="getStatusColor"
+      @open-order-details="openOrderDetails"
+    />
 
-      <div v-if="!isHistoryCollapsed">
-        <div v-if="historyOrders.length === 0" class="text-center py-4">
-          <va-icon name="folder_off" size="medium" color="secondary" class="mb-2" />
-          <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
-        </div>
-
-        <va-data-table
-          v-else
-          :items="historyOrders"
-          :columns="orderColumns"
-          striped
-          hoverable
-        >
-          <template #cell(id)="{ rowData }">
-            <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
-          </template>
-
-        <template #cell(type)="{ rowData }">
-          {{ formatOrderType(rowData) }}
-        </template>
-
-        <template #cell(hold_amount)="{ rowData }">
-          <strong>{{ currencySymbol }}{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }}</strong>
-        </template>
-
-        <template #cell(status)="{ value }">
-          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
-        </template>
-
-        <template #cell(actions)="{ rowData }">
-          <div class="d-flex gap-1">
-            <va-button
-              color="primary"
-              flat
-              size="small"
-              @click="openOrderDetails(rowData)"
-            >
-              <va-icon name="info" />
-            </va-button>
-          </div>
-        </template>
-      </va-data-table>
-      </div>
-    </va-card>
-
-    <!-- Order Details Modal / Card -->
-    <va-modal
+    <!-- Order Details Modal -->
+    <OrderDetailsModal
       v-model="showOrderDetailsModal"
-      :title="$t('customer.orderDetails')"
-      hide-default-actions
-    >
-      <div v-if="selectedOrderDetails" class="p-2">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h4 class="va-h6 font-bold m-0">#{{ selectedOrderDetails.id }}</h4>
-          <va-badge :color="getStatusColor(selectedOrderDetails.status)">
-            {{ selectedOrderDetails.status }}
-          </va-badge>
-        </div>
-
-        <div class="info-list bg-light p-3 rounded mb-3">
-          <div class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.orderType') }}</span>
-            <span class="font-bold text-sm">{{ formatOrderType(selectedOrderDetails) }}</span>
-          </div>
-          <div class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.created') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.created_at) }}</span>
-          </div>
-          <div v-if="selectedOrderDetails.assigned_at" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.assignedAt') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</span>
-          </div>
-          <div v-if="selectedOrderDetails.completed_at" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.completedAt') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.completed_at) }}</span>
-          </div>
-          <div v-if="selectedOrderDetails.canceled_at" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.canceledAt') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.canceled_at) }}</span>
-          </div>
-          <div class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.totalAmount') }}</span>
-            <span class="font-bold text-primary text-base">
-              {{ currencySymbol }}{{ Number(selectedOrderDetails.final_amount || selectedOrderDetails.hold_amount).toFixed(2) }}
-            </span>
-          </div>
-          <div v-if="selectedOrderDetails.address" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.pickupAddress') }}</span>
-            <span class="text-sm">{{ selectedOrderDetails.address }}</span>
-          </div>
-        </div>
-
-        <!-- Executor details -->
-        <div class="executor-card-box border p-3 rounded mb-3">
-          <h5 class="va-h6 text-primary mb-2 text-xs uppercase tracking-wide font-bold">
-            <va-icon name="person" class="mr-1" /> {{ $t('customer.executorDetails') }}
-          </h5>
-          <div v-if="selectedOrderDetails.executor_id || selectedOrderDetails.executor_phone">
-            <div class="text-sm font-bold" v-if="selectedOrderDetails.executor_phone">
-              📱 {{ selectedOrderDetails.executor_phone }}
-            </div>
-            <div class="text-xs text-secondary mt-1">
-              ID: {{ selectedOrderDetails.executor_id }}
-            </div>
-          </div>
-          <div v-else class="text-xs text-secondary italic">
-            {{ $t('customer.notAssigned') }}
-          </div>
-        </div>
-
-        <div class="d-flex justify-content-end">
-          <va-button color="secondary" @click="showOrderDetailsModal = false">
-            {{ $t('common.close') }}
-          </va-button>
-        </div>
-      </div>
-    </va-modal>
+      :selected-order-details="selectedOrderDetails"
+      :currency-symbol="currencySymbol"
+      :format-order-type="formatOrderType"
+      :get-status-color="getStatusColor"
+      :format-date-full="formatDateFull"
+    />
 
     <!-- Create Order Modal -->
-    <va-modal
+    <CreateOrderModal
       v-model="showCreateOrderModal"
-      :title="$t('customer.createNewOrder')"
-      hide-default-actions
-    >
-      <div class="p-2">
-        <div class="mb-4">
-          <div class="text-secondary text-sm mb-2">
-            {{ $t('customer.pickupAddress') }}
-          </div>
-          <div class="font-medium mb-2">{{ orderAddress }}</div>
-          <div class="text-secondary text-xs">
-            {{ $t('customer.addressChangeHint') }}
-          </div>
-          <div v-if="orderLat !== null && orderLon !== null" class="text-secondary text-xs mt-2">
-            {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
-          </div>
-          <div v-if="geocodeError" class="text-danger text-xs mt-2">
-            {{ geocodeError }}
-          </div>
-        </div>
-
-        <div class="mb-4">
-          <va-select
-            v-model="selectedCategoryId"
-            :options="categoryOptions"
-            :label="$t('customer.category')"
-            text-by="label"
-            value-by="value"
-            track-by="value"
-            class="mb-2"
-          />
-          <va-select
-            v-if="subCategoryOptions.length > 0"
-            v-model="selectedSubCategoryId"
-            :options="subCategoryOptions"
-            :label="$t('customer.subCategory')"
-            text-by="label"
-            value-by="value"
-            track-by="value"
-            class="mb-2"
-          />
-          <va-select
-            v-if="variantOptions.length > 0"
-            v-model="selectedVariantId"
-            :options="variantOptions"
-            :label="$t('customer.serviceVariant')"
-            text-by="label"
-            value-by="value"
-            track-by="value"
-            class="mb-2"
-          />
-          <div v-if="!isAuctionSelected" class="d-flex gap-2 mt-2">
-            <va-checkbox v-model="isUrgent" :label="$t('customer.urgent')" />
-            <va-checkbox v-model="isAsap" :label="$t('customer.asap')" />
-          </div>
-          <div class="text-secondary text-sm mt-2">
-            {{ $t('customer.price') }}: <strong class="text-primary">{{ currencySymbol }}{{ Number(selectedPrice).toFixed(2) }}</strong>
-          </div>
-        </div>
-
-        <va-button color="success" block :loading="creatingOrder" @click="submitOrder">
-          {{ $t('customer.createOrder') }}
-        </va-button>
-      </div>
-    </va-modal>
+      v-model:selected-category-id="selectedCategoryId"
+      v-model:selected-sub-category-id="selectedSubCategoryId"
+      v-model:selected-variant-id="selectedVariantId"
+      v-model:is-urgent="isUrgent"
+      v-model:is-asap="isAsap"
+      :order-address="orderAddress"
+      :order-lat="orderLat"
+      :order-lon="orderLon"
+      :geocode-error="geocodeError"
+      :category-options="categoryOptions"
+      :sub-category-options="subCategoryOptions"
+      :variant-options="variantOptions"
+      :is-auction-selected="isAuctionSelected"
+      :selected-price="selectedPrice"
+      :currency-symbol="currencySymbol"
+      :creating-order="creatingOrder"
+      @submit-order="submitOrder"
+    />
 
     <!-- Top-up Modal -->
     <va-modal
@@ -638,9 +469,21 @@ import {
   type ServiceNode,
 } from '../../api/services'
 
+import CustomerHeader from './components/CustomerHeader.vue'
+import OrderHistoryCard from './components/OrderHistoryCard.vue'
+import OrderDetailsModal from './components/OrderDetailsModal.vue'
+import CreateOrderModal from './components/CreateOrderModal.vue'
+
 export default defineComponent({
   name: 'CustomerDashboard',
-  components: { LanguageSwitcher, UpdateBanner },
+  components: {
+    LanguageSwitcher,
+    UpdateBanner,
+    CustomerHeader,
+    OrderHistoryCard,
+    OrderDetailsModal,
+    CreateOrderModal,
+  },
   setup() {
     const router = useRouter()
     const { t, locale } = useI18n()

@@ -25,33 +25,14 @@
     <div class="row g-4">
       <!-- Left Column: Profile & Shift Controls -->
       <div class="col-md-5">
-        <!-- Profile Card -->
-        <va-card class="p-4 mb-4 shadow-card">
-          <h3 class="va-h5 mb-4 text-primary d-flex align-items-center">
-            <va-icon name="account_circle" class="mr-2" /> {{ $t('executor.accountDetails') }}
-          </h3>
-          <div class="info-list">
-            <div class="info-item mb-3">
-              <span class="info-label">{{ $t('customer.phone') }}</span>
-              <span class="info-val">{{ phone }}</span>
-            </div>
-            <div class="info-item mb-3">
-              <span class="info-label">{{ $t('customer.status') }}</span>
-              <span class="info-val">
-                <va-badge color="success">{{ status }}</va-badge>
-              </span>
-            </div>
-          </div>
-                                                                                                                                                                                                                                                                                                                                                                                                             <div class="balance-box mt-4 p-3 text-center cursor-pointer hover-shadow transition" @click="openFinancialHistoryModal">
-            <span class="balance-label d-block text-secondary text-sm mb-1 d-flex align-items-center justify-content-center">
-              <va-icon name="account_balance_wallet" class="mr-1 text-primary" size="small" />
-              {{ $t('executor.yourWalletBalance') }}
-              <va-icon name="history" class="ml-1 text-secondary" size="small" />
-            </span>
-            <span class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</span>
-            <span class="text-xxs text-primary d-block mt-1">({{ $t('common.details') }})</span>
-          </div>
-        </va-card>
+        <!-- Profile Card Component -->
+        <ExecutorProfileCard
+          :phone="phone"
+          :status="status"
+          :balance="balance"
+          :currency-symbol="currencySymbol"
+          @open-financial-history-modal="openFinancialHistoryModal"
+        />
 
         <!-- Shift Controls Card -->
         <va-card class="p-4 mb-4 shadow-card">
@@ -706,9 +687,11 @@ import { NativeWebSocket } from '../../plugins/native-websocket'
 import { compressImage } from '../../utils/imageCompressor'
 import type { ServiceNode } from '../../api/services'
 
+import ExecutorProfileCard from './components/ExecutorProfileCard.vue'
+
 export default defineComponent({
   name: 'ExecutorDashboard',
-  components: {},
+  components: { ExecutorProfileCard },
   setup() {
     const router = useRouter()
     const { t, locale } = useI18n()
