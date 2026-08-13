@@ -56,6 +56,28 @@
           </div>
         </div>
 
+        <!-- Блок отзыва (если уже проставлен) -->
+        <div v-if="existingReview" class="review-display-box">
+          <div class="review-display-header">
+            <div class="review-stars">
+              <i
+                v-for="star in 5"
+                :key="star"
+                :class="[star <= existingReview.rating ? 'ph-fill ph-star active' : 'ph ph-star']"
+              ></i>
+            </div>
+            <span class="review-date">{{ formatDateFull(existingReview.created_at) }}</span>
+          </div>
+          <div v-if="existingReview.tags && existingReview.tags.length > 0" class="review-tags-row">
+            <span v-for="tag in existingReview.tags" :key="tag" class="review-tag-badge">
+              {{ tag }}
+            </span>
+          </div>
+          <div v-if="existingReview.comment" class="review-comment-text">
+            «{{ existingReview.comment }}»
+          </div>
+        </div>
+
         <!-- Блок исполнителя -->
         <div class="executor-box">
           <div class="executor-icon">
@@ -91,10 +113,12 @@
         <button
           v-if="selectedOrderDetails && selectedOrderDetails.status === 'COMPLETED'"
           type="button"
-          class="btn-review-action"
-          @click="$emit('open-review-modal', selectedOrderDetails)"
+          :class="['btn-review-action', { disabled: hasReviewed }]"
+          :disabled="hasReviewed"
+          @click="!hasReviewed && $emit('open-review-modal', selectedOrderDetails)"
         >
-          <i class="ph-fill ph-star"></i> Оценить выполнение
+          <i class="ph-fill ph-star"></i>
+          {{ hasReviewed ? 'Оценка выставлена' : 'Оценить выполнение' }}
         </button>
         <button type="button" class="btn-cancel" @click="show = false">
           {{ $t('common.close') }}
@@ -105,7 +129,8 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, onMounted } from 'vue'
+import { defineComponent, ref, computed, watch, onMounted } from 'vue'
+import { checkMyOrderReview, type OrderReview } from '../../../api/review'
 
 export default defineComponent({
   name: 'OrderDetailsModal',
@@ -123,6 +148,37 @@ export default defineComponent({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
     })
+
+    const hasReviewed = ref(false)
+    const existingReview = ref<OrderReview | null>(null)
+
+    const fetchOrderReview = async (orderId: string) => {
+      hasReviewed.value = false
+      existingReview.value = null
+      if (!orderId) return
+      try {
+        const res = await checkMyOrderReview(orderId)
+        if (res && res.has_reviewed && res.review) {
+          hasReviewed.value = true
+          existingReview.value = res.review
+        }
+      } catch (err) {
+        console.warn('Failed to check review for order:', orderId, err)
+      }
+    }
+
+    watch(
+      () => props.selectedOrderDetails,
+      (order) => {
+        if (order && order.status === 'COMPLETED') {
+          fetchOrderReview(order.id)
+        } else {
+          hasReviewed.value = false
+          existingReview.value = null
+        }
+      },
+      { immediate: true }
+    )
 
     const confirmCancelOrder = () => {
       if (!props.selectedOrderDetails) return
@@ -157,6 +213,8 @@ export default defineComponent({
 
     return {
       show,
+      hasReviewed,
+      existingReview,
       confirmCancelOrder,
       getStatusBadgeClass,
     }
@@ -480,10 +538,74 @@ export default defineComponent({
   transition: var(--transition);
 }
 
-.btn-review-action:hover {
+.btn-review-action:hover:not(.disabled) {
   background: #6366f1;
   color: #ffffff;
   box-shadow: 0 8px 20px -4px rgba(99, 102, 241, 0.4);
+}
+
+.btn-review-action.disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+/* Review Display Box */
+.review-display-box {
+  background: linear-gradient(135deg, rgba(238, 242, 255, 0.6), rgba(243, 244, 246, 0.8));
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 20px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.review-display-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.review-stars {
+  display: flex;
+  gap: 4px;
+  color: #cbd5e1;
+  font-size: 16px;
+}
+
+.review-stars .ph-star.active {
+  color: #f59e0b;
+}
+
+.review-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.review-tag-badge {
+  background: #ffffff;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 99px;
+}
+
+.review-comment-text {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--text-title);
+  line-height: 1.4;
 }
 
 .btn-cancel {
