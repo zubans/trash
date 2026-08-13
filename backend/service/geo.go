@@ -49,3 +49,7 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return EarthRadius * c
 }
+
+func HaversineDistanceKM(lat1, lon1, lat2, lon2 float64) float64 {
+	return haversineDistance(lat1, lon1, lat2, lon2) / 1000.0
+}

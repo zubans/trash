@@ -179,15 +179,14 @@
             </div>
           </div>
 
-          <!-- Manual coordinates fallback -->
-          <div v-if="locationPermission === 'denied'" class="mb-4">
+          <!-- Interactive Map Button -->
+          <div class="mb-4">
             <va-button
               color="primary"
-              outline
               block
-              @click="openMapPicker"
+              @click="showExecutorMapModal = true"
             >
-              <va-icon name="map" class="mr-2" /> {{ $t('executor.showOnMap') }}
+              <va-icon name="map" class="mr-2" /> Карта заказов (Зона 50км / 2км)
             </va-button>
           </div>
           <div class="mb-4">
@@ -474,6 +473,16 @@
       </div>
     </va-modal>
 
+    <!-- Executor Interactive Map Modal -->
+    <ExecutorMapModal
+      v-model="showExecutorMapModal"
+      :current-lat="currentLat || 55.7558"
+      :current-lon="currentLon || 37.6173"
+      :currency-symbol="currencySymbol"
+      @order-accepted="onMapOrderAccepted"
+      @location-changed="onMapLocationChanged"
+    />
+
     <!-- Top Floating Toast Notification for Incoming Messages -->
     <div
       v-if="chatToast"
@@ -688,10 +697,11 @@ import { compressImage } from '../../utils/imageCompressor'
 import type { ServiceNode } from '../../api/services'
 
 import ExecutorProfileCard from './components/ExecutorProfileCard.vue'
+import ExecutorMapModal from './components/ExecutorMapModal.vue'
 
 export default defineComponent({
   name: 'ExecutorDashboard',
-  components: { ExecutorProfileCard },
+  components: { ExecutorProfileCard, ExecutorMapModal },
   setup() {
     const router = useRouter()
     const { t, locale } = useI18n()
@@ -715,7 +725,20 @@ export default defineComponent({
 
     const phone = ref('')
     const balance = ref(0)
-    const status = ref('ACTIVE')
+    // Executor Map Modal state
+    const showExecutorMapModal = ref(false)
+
+    const onMapOrderAccepted = (orderId: string) => {
+      successMsg.value = 'Заказ успешно взят в работу!'
+      fetchAssignedOrders()
+      fetchProfile()
+    }
+
+    const onMapLocationChanged = (pos: { lat: number; lon: number }) => {
+      currentLat.value = pos.lat
+      currentLon.value = pos.lon
+      successMsg.value = 'Район работы успешно обновлен'
+    }
 
     // Shift state
     const activeShift = ref<any>(null)
@@ -1859,6 +1882,9 @@ export default defineComponent({
       endingShiftEarly,
       earlyExitPenalty,
       shiftCountdown,
+      showExecutorMapModal,
+      onMapOrderAccepted,
+      onMapLocationChanged,
       showFinancialHistoryModal,
       historyTab,
       executorHistoryOrders,

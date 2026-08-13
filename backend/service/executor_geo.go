@@ -1,0 +1,164 @@
+package service
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"healthlogin/backend/repository"
+)
+
+type ExecutorGeoService struct {
+	geoRepo   repository.ExecutorGeoRepository
+	orderRepo repository.OrderRepository
+	// In-memory cache & mutex lock for fast cooldown checks
+	cooldownMap sync.Map
+}
+
+func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo repository.OrderRepository) *ExecutorGeoService {
+	return &ExecutorGeoService{
+		geoRepo:   geoRepo,
+		orderRepo: orderRepo,
+	}
+}
+
+type SetLocationRequest struct {
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	IsManual bool    `json:"is_manual"`
+}
+
+type SetLocationResponse struct {
+	Success                 bool     `json:"success"`
+	Message                 string   `json:"message,omitempty"`
+	CooldownRemainingSeconds int      `json:"cooldown_remaining_seconds,omitempty"`
+	Lat                     float64  `json:"lat"`
+	Lon                     float64  `json:"lon"`
+}
+
+func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRequest) (*SetLocationResponse, error) {
+	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
+		return nil, fmt.Errorf("invalid coordinates")
+	}
+
+	oldLat, oldLon, lastManual, err := s.geoRepo.GetExecutorLocation(executorID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+
+	// Check manual shift distance
+	var shiftDist float64
+	if oldLat != nil && oldLon != nil {
+		shiftDist = HaversineDistanceKM(*oldLat, *oldLon, req.Lat, req.Lon)
+	}
+
+	if req.IsManual && shiftDist > 2.0 {
+		// District change (>2km) requires 10 min cooldown
+		var lastManualTime time.Time
+		if val, ok := s.cooldownMap.Load(executorID); ok {
+			lastManualTime = val.(time.Time)
+		} else if lastManual != nil {
+			lastManualTime = *lastManual
+		}
+
+		if !lastManualTime.IsZero() {
+			elapsed := now.Sub(lastManualTime)
+			if elapsed < 10*time.Minute {
+				remaining := int((10*time.Minute - elapsed).Seconds())
+				return &SetLocationResponse{
+					Success:                 false,
+					Message:                 fmt.Sprintf("Ручная смена района возможна не чаще 1 раза в 10 минут. Осталось: %d сек", remaining),
+					CooldownRemainingSeconds: remaining,
+					Lat:                     req.Lat,
+					Lon:                     req.Lon,
+				}, nil
+			}
+		}
+	}
+
+	// Async Goroutine: Deep Geo-Validation for Speed Spoofing Check
+	if oldLat != nil && oldLon != nil && shiftDist > 2.0 {
+		go func(exID uuid.UUID, oLat, oLon, nLat, nLon float64, tNow time.Time) {
+			var lastTime time.Time
+			if lastManual != nil {
+				lastTime = *lastManual
+			} else {
+				lastTime = tNow.Add(-1 * time.Minute)
+			}
+			hours := tNow.Sub(lastTime).Hours()
+			if hours > 0 {
+				speed := shiftDist / hours
+				if speed > 150.0 {
+					// GPS Spoofing detected! Log GeoAlert for Admin
+					_ = s.geoRepo.CreateGeoAlert(&repository.GeoAlert{
+						ExecutorID:         exID,
+						OldLat:             &oLat,
+						OldLon:             &oLon,
+						NewLat:             nLat,
+						NewLon:             nLon,
+						CalculatedSpeedKMH: speed,
+						Status:             "PENDING",
+					})
+				}
+			}
+		}(executorID, *oldLat, *oldLon, req.Lat, req.Lon, now)
+	}
+
+	if err := s.geoRepo.UpdateExecutorLocation(executorID, req.Lat, req.Lon, req.IsManual); err != nil {
+		return nil, err
+	}
+
+	if req.IsManual && shiftDist > 2.0 {
+		s.cooldownMap.Store(executorID, now)
+	}
+
+	return &SetLocationResponse{
+		Success: true,
+		Message: "Координаты успешно обновлены",
+		Lat:     req.Lat,
+		Lon:     req.Lon,
+	}, nil
+}
+
+func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
+	// Find pending orders within 50km
+	const overviewRadiusKM = 50.0
+	const acceptRadiusKM = 2.0
+
+	// Use existing orderRepo to get searching orders
+	pendingOrders, err := s.orderRepo.GetPendingOrders()
+	if err != nil {
+		return nil, err
+	}
+
+	var mapOrders []repository.MapOrder
+
+	for _, o := range pendingOrders {
+		oLat := 55.7558
+		oLon := 37.6173
+		if o.PickupLat != nil {
+			oLat = *o.PickupLat
+		}
+		if o.PickupLon != nil {
+			oLon = *o.PickupLon
+		}
+
+		dist := HaversineDistanceKM(lat, lon, oLat, oLon)
+		if dist <= overviewRadiusKM {
+			mapOrders = append(mapOrders, repository.MapOrder{
+				Order:      *o,
+				CanAccept:  dist <= acceptRadiusKM,
+				DistanceKM: dist,
+			})
+		}
+	}
+
+	return mapOrders, nil
+}
+
+func (s *ExecutorGeoService) GetGeoAlerts(status string, limit, offset int) ([]repository.GeoAlert, error) {
+	return s.geoRepo.GetGeoAlerts(status, limit, offset)
+}

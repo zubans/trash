@@ -61,6 +61,7 @@ func main() {
 	catalogRepo := repository.NewServiceCatalogRepository(db)
 	appReleaseRepo := repository.NewAppReleaseRepository(db)
 	reviewRepo := repository.NewReviewRepository(db)
+	executorGeoRepo := repository.NewExecutorGeoRepository(db)
 
 	// Services
 	geocoder := service.NewGeocoder(db)
@@ -72,6 +73,7 @@ func main() {
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(5 * time.Second)
@@ -107,6 +109,7 @@ func main() {
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
+	egh := handler.NewExecutorGeoHandler(executorGeoService)
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -172,6 +175,8 @@ func main() {
 			r.Post("/executor/shifts/end", sh.EndShiftHandler)
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
+			r.Post("/executor/set-location", egh.SetLocation)
+			r.Get("/executor/map-orders", egh.GetMapOrders)
 			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
 			r.Get("/executor/history", sh.GetExecutorHistoryHandler)
 			r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
@@ -185,6 +190,7 @@ func main() {
 		// Authenticated admin routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
+			r.Get("/admin/geo-alerts", egh.GetGeoAlerts)
 			r.Use(authMiddleware.RequireAdmin)
 			r.Get("/admin/users", ah.GetUsersHandler)
 			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
