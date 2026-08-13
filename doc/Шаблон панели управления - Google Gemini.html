@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет заказчика</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #111827;
+            --text-muted: #6b7280;
+            --primary-blue: #3b82f6;
+            --primary-green: #4ade80;
+            --btn-green: #5c9b42;
+            --btn-green-hover: #4e8636;
+            --border-color: #e5e7eb;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.5;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 24px;
+            position: relative;
+        }
+
+        /* Profile Top Card */
+        .header-card {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 30px;
+        }
+
+        .profile-section {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex: 1;
+        }
+
+        .avatar {
+            width: 80px;
+            height: 80px;
+            background-color: #e5e7eb;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #9ca3af;
+        }
+
+        .profile-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .phone-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .phone-number {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .badge-verified {
+            background-color: #dcfce7;
+            color: #166534;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid #bbf7d0;
+        }
+
+        .role-text {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .address-link {
+            color: #4b5563;
+            text-decoration: none;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        
+        .address-link i {
+            color: var(--primary-blue);
+        }
+
+        .address-link:hover {
+            text-decoration: underline;
+        }
+
+        .divider {
+            width: 1px;
+            height: 80px;
+            background-color: var(--border-color);
+            margin: 0 40px;
+        }
+
+        .finance-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .lang-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #4b5563;
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 6px;
+            width: fit-content;
+            background: #fff;
+            cursor: pointer;
+        }
+
+        .balance-amount {
+            font-size: 28px;
+            font-weight: 700;
+            color: #2563eb;
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+        }
+
+        .balance-label {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .btn-topup {
+            background-color: #788394;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            transition: background-color 0.2s;
+        }
+
+        .btn-topup:hover {
+            background-color: #5c6574;
+        }
+
+        .top-actions {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-icon-text {
+            background-color: #e5e7eb;
+            color: #4b5563;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 500;
+        }
+        
+        .btn-icon-text:hover {
+            background-color: #d1d5db;
+        }
+
+        /* Main Create Order Button */
+        .btn-create-order {
+            background-color: var(--btn-green);
+            color: white;
+            border: none;
+            padding: 16px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            transition: background-color 0.2s;
+        }
+
+        .btn-create-order:hover {
+            background-color: var(--btn-green-hover);
+        }
+
+        /* Tables Card */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1e3a8a;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-refresh {
+            background: #f3f4f6;
+            border: none;
+            color: #6b7280;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-refresh:hover {
+            background: #e5e7eb;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            font-weight: 600;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 16px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .id-link {
+            color: var(--primary-blue);
+            font-weight: 500;
+            text-decoration: none;
+        }
+
+        .price {
+            font-weight: 600;
+        }
+
+        .status {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .actions-group {
+            display: flex;
+            gap: 6px;
+        }
+
+        .action-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: white;
+            transition: opacity 0.2s;
+        }
+        
+        .action-btn:hover {
+            opacity: 0.8;
+        }
+
+        /* Muted button styles from the mockup */
+        .action-info { background-color: #cbd5e1; }
+        .action-chat { background-color: #cbd5e1; }
+        .action-check { background-color: #d1d5db; color: #4ade80;}
+        .action-close { background-color: #d1d5db; color: #f87171;}
+
+        .action-check:hover { background-color: #4ade80; color: white;}
+        .action-close:hover { background-color: #f87171; color: white;}
+        .action-info:hover { background-color: #3b82f6; color: white;}
+        .action-chat:hover { background-color: #0ea5e9; color: white;}
+
+
+        /* Faded History */
+        .history-card {
+            opacity: 0.85;
+        }
+        .history-card .card-title {
+            color: var(--text-main);
+        }
+        .history-card table {
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Profile Card -->
+    <div class="card header-card">
+        <div class="top-actions">
+            <button class="btn-icon-text"><i class="fa-solid fa-user-plus"></i></button>
+            <button class="btn-icon-text"><i class="fa-solid fa-arrow-right-from-bracket"></i> Выйти</button>
+        </div>
+
+        <div class="profile-section">
+            <div class="avatar">
+                <i class="fa-solid fa-user"></i>
+            </div>
+            <div class="profile-info">
+                <div class="phone-row">
+                    <span class="phone-number">79207050707</span>
+                    <span class="badge-verified">Верифицирован</span>
+                </div>
+                <span class="role-text">Личный кабинет заказчика</span>
+                <a href="#" class="address-link">
+                    <i class="fa-solid fa-location-dot"></i> Управление адресами
+                </a>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="finance-section">
+            <div class="lang-selector">
+                <img src="https://flagcdn.com/w20/ru.png" alt="RU" width="16"> Русский <i class="fa-solid fa-chevron-down" style="font-size: 10px; margin-left:4px;"></i>
+            </div>
+            <div>
+                <div class="balance-amount">₽ 1980.00</div>
+                <div class="balance-label">Баланс</div>
+            </div>
+            <button class="btn-topup">
+                <i class="fa-regular fa-credit-card"></i> Запросить пополнение кошелька
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Action -->
+    <button class="btn-create-order">
+        <i class="fa-solid fa-cart-plus"></i> Создать заказ
+    </button>
+
+    <!-- Active Orders -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">
+                <i class="fa-solid fa-clipboard-list"></i> Активные заказы
+            </div>
+            <button class="btn-refresh"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>ТИП ЗАКАЗА</th>
+                    <th>ЦЕНА</th>
+                    <th>СТАТУС</th>
+                    <th>УПРАВЛЕНИЕ</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><a href="#" class="id-link">#6f234b41</a></td>
+                    <td>Большой обычный</td>
+                    <td class="price">200.00 ₽</td>
+                    <td class="status">НАЗНАЧЕН</td>
+                    <td>
+                        <div class="actions-group">
+                            <button class="action-btn action-info"><i class="fa-solid fa-info"></i></button>
+                            <button class="action-btn action-chat"><i class="fa-solid fa-comment-dots"></i></button>
+                            <button class="action-btn action-check"><i class="fa-solid fa-check"></i></button>
+                            <button class="action-btn action-close"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Order History -->
+    <div class="card history-card">
+        <div class="card-header" style="margin-bottom: 10px;">
+            <div class="card-title">
+                <i class="fa-solid fa-clock-rotate-left"></i> История заказов (16) <i class="fa-solid fa-chevron-up" style="font-size: 12px; margin-left: 8px;"></i>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>ТИП ЗАКАЗА</th>
+                    <th>ЦЕНА</th>
+                    <th>СТАТУС</th>
+                    <th>УПРАВЛЕНИЕ</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="id-link" style="color: #9ca3af;">#6f234b41</span></td>
+                    <td>Большой обычный</td>
+                    <td class="price" style="color: #6b7280;">200.00 ₽</td>
+                    <td class="status" style="color: #9ca3af;">НАЗНАЧЕН</td>
+                    <td>
+                        <div class="actions-group">
+                            <button class="action-btn action-info"><i class="fa-solid fa-info"></i></button>
+                            <button class="action-btn action-chat"><i class="fa-solid fa-comment-dots"></i></button>
+                            <button class="action-btn action-check"><i class="fa-solid fa-check"></i></button>
+                            <button class="action-btn action-close"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+</body>
+</html>

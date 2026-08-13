@@ -66,6 +66,12 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {
+    path: '/customer-v2',
+    name: 'customer-dashboard-v2',
+    component: () => import('../pages/customer/CustomerDashboardV2.vue'),
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
     path: '/executor',
     name: 'executor-dashboard',
     component: () => import('../pages/executor/ExecutorDashboard.vue'),
