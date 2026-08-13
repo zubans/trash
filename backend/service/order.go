@@ -277,8 +277,8 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 	if err != nil {
 		return errors.New("order not found")
 	}
-	if order.Status != repository.OrderStatusAssigned && order.Status != repository.OrderStatusExecuted {
-		return errors.New("order is not assigned or executed")
+	if order.Status != repository.OrderStatusExecuted {
+		return errors.New("order must be marked as executed by the executor before confirmation")
 	}
 	if order.ExecutorID == nil {
 		return errors.New("order has no executor")

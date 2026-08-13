@@ -128,10 +128,10 @@
                   <i class="ph-fill ph-chat-circle-dots"></i>
                 </button>
                 <button
-                  v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
+                  v-if="order.status === 'EXECUTED'"
                   type="button"
-                  class="btn-action"
-                  title="Подтвердить приемку"
+                  class="btn-action confirm-btn"
+                  title="Подтвердить выполнение и закрыть заказ"
                   @click="confirmOrder(order.id)"
                 >
                   <i class="ph ph-check"></i>
@@ -450,7 +450,7 @@ export default defineComponent({
     const geocodeError = ref('')
 
     const activeOrders = computed(() => {
-      return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED'].includes(o.status))
+      return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED', 'EXECUTED'].includes(o.status))
     })
 
     const historyOrders = computed(() => {
@@ -1929,6 +1929,8 @@ export default defineComponent({
 .btn-action.danger:hover { background: #fee2e2; color: #ef4444; }
 
 .btn-action.chat-btn { background: #e0e7ff; color: var(--accent-main); }
+.btn-action.confirm-btn { background: #dcfce7; color: #15803d; }
+.btn-action.confirm-btn:hover { background: #bbf7d0; color: #166534; }
 .order-row.chat-open .btn-action.chat-btn { background: var(--accent-main); color: white; box-shadow: 0 4px 12px var(--accent-glow);}
 
 .inline-chat {

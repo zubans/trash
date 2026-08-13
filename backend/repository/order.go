@@ -301,8 +301,8 @@ func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
 		    completed_at = now()
-		 WHERE id = $4 AND status IN ($5, $6)`,
-		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusAssigned, OrderStatusExecuted,
+		 WHERE id = $4 AND status = $5`,
+		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted,
 	)
 	return err
 }
