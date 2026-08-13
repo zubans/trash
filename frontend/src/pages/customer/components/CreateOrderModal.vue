@@ -31,11 +31,11 @@
           <label class="form-label">{{ $t('customer.category') }}</label>
           <div class="select-wrapper">
             <select
-              :value="selectedCategoryId"
+              :value="selectedCategoryId || ''"
               class="form-select"
               @change="$emit('update:selectedCategoryId', ($event.target as HTMLSelectElement).value)"
             >
-              <option value="" disabled selected>Выберите категорию</option>
+              <option value="" disabled>Выберите категорию</option>
               <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -45,15 +45,15 @@
         </div>
 
         <!-- SubCategory Selector (if available) -->
-        <div v-if="subCategoryOptions.length > 0" class="form-group">
+        <div v-if="subCategoryOptions && subCategoryOptions.length > 0" class="form-group">
           <label class="form-label">{{ $t('customer.subCategory') }}</label>
           <div class="select-wrapper">
             <select
-              :value="selectedSubCategoryId"
+              :value="selectedSubCategoryId || ''"
               class="form-select"
               @change="$emit('update:selectedSubCategoryId', ($event.target as HTMLSelectElement).value)"
             >
-              <option value="" disabled selected>Выберите подкатегорию</option>
+              <option value="" disabled>Выберите подкатегорию</option>
               <option v-for="opt in subCategoryOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -63,15 +63,15 @@
         </div>
 
         <!-- Service Variant Selector (if available) -->
-        <div v-if="variantOptions.length > 0" class="form-group">
+        <div v-if="variantOptions && variantOptions.length > 0" class="form-group">
           <label class="form-label">{{ $t('customer.serviceVariant') }}</label>
           <div class="select-wrapper">
             <select
-              :value="selectedVariantId"
+              :value="selectedVariantId || ''"
               class="form-select"
               @change="$emit('update:selectedVariantId', ($event.target as HTMLSelectElement).value)"
             >
-              <option value="" disabled selected>Выберите вариант</option>
+              <option value="" disabled>Выберите вариант услуги</option>
               <option v-for="opt in variantOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>

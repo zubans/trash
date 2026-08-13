@@ -459,6 +459,13 @@ export default defineComponent({
       orderLat.value = null
       orderLon.value = null
       geocodeError.value = ''
+      selectedCategoryId.value = null
+      selectedSubCategoryId.value = null
+      selectedVariantId.value = null
+      subCategories.value = []
+      serviceVariants.value = []
+      isUrgent.value = false
+      isAsap.value = false
       showCreateOrderModal.value = true
       try {
         serviceCategories.value = await getServiceCategories()
