@@ -1,99 +1,137 @@
 <template>
-  <va-modal
-    v-model="show"
-    hide-default-actions
-    max-width="500px"
-  >
-    <template #header>
-      <div class="d-flex justify-content-between align-items-center w-100 p-3 pb-0">
-        <h3 class="va-h5 m-0 font-bold">{{ $t('customer.createNewOrder') }}</h3>
-        <button type="button" class="btn-close-modal border-0 bg-transparent text-secondary cursor-pointer" @click="show = false">
-          ✕
+  <div v-if="show" class="modal-overlay" @click.self="show = false">
+    <!-- Modal Card -->
+    <div class="modal-card">
+      <!-- Header -->
+      <div class="modal-header">
+        <div class="modal-title">{{ $t('customer.createNewOrder') }}</div>
+        <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
+          <i class="ph ph-x"></i>
         </button>
       </div>
-    </template>
 
-    <div class="p-2">
-      <div class="mb-4">
-        <div class="text-secondary text-sm mb-2">
-          {{ $t('customer.pickupAddress') }}
+      <!-- Address Info Box -->
+      <div class="info-box">
+        <div class="info-label">
+          <i class="ph-fill ph-map-pin"></i> {{ $t('customer.pickupAddress') }}
         </div>
-        <div class="font-medium mb-2">{{ orderAddress }}</div>
-        <div class="text-secondary text-xs">
-          {{ $t('customer.addressChangeHint') }}
-        </div>
-        <div v-if="orderLat !== null && orderLon !== null" class="text-secondary text-xs mt-2">
+        <div class="info-address">{{ orderAddress || 'Адрес не указан' }}</div>
+        <div class="info-note">{{ $t('customer.addressChangeHint') }}</div>
+        <div v-if="orderLat !== null && orderLon !== null" class="info-note text-xs mt-1">
           {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
         </div>
-        <div v-if="geocodeError" class="text-danger text-xs mt-2">
+        <div v-if="geocodeError" class="text-danger text-xs mt-1">
           {{ geocodeError }}
         </div>
       </div>
 
-      <div class="mb-4">
-        <va-select
-          :model-value="selectedCategoryId"
-          @update:model-value="$emit('update:selectedCategoryId', $event)"
-          :options="categoryOptions"
-          :label="$t('customer.category')"
-          text-by="label"
-          value-by="value"
-          track-by="value"
-          class="mb-2"
-        />
-        <va-select
-          v-if="subCategoryOptions.length > 0"
-          :model-value="selectedSubCategoryId"
-          @update:model-value="$emit('update:selectedSubCategoryId', $event)"
-          :options="subCategoryOptions"
-          :label="$t('customer.subCategory')"
-          text-by="label"
-          value-by="value"
-          track-by="value"
-          class="mb-2"
-        />
-        <va-select
-          v-if="variantOptions.length > 0"
-          :model-value="selectedVariantId"
-          @update:model-value="$emit('update:selectedVariantId', $event)"
-          :options="variantOptions"
-          :label="$t('customer.serviceVariant')"
-          text-by="label"
-          value-by="value"
-          track-by="value"
-          class="mb-2"
-        />
-        <div v-if="!isAuctionSelected" class="d-flex gap-2 mt-2">
-          <va-checkbox
-            :model-value="isUrgent"
-            @update:model-value="$emit('update:isUrgent', $event)"
-            :label="$t('customer.urgent')"
-          />
-          <va-checkbox
-            :model-value="isAsap"
-            @update:model-value="$emit('update:isAsap', $event)"
-            :label="$t('customer.asap')"
-          />
+      <form @submit.prevent="$emit('submitOrder')">
+        <!-- Category Selector -->
+        <div class="form-group">
+          <label class="form-label">{{ $t('customer.category') }}</label>
+          <div class="select-wrapper">
+            <select
+              :value="selectedCategoryId"
+              class="form-select"
+              @change="$emit('update:selectedCategoryId', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="" disabled selected>Выберите категорию</option>
+              <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <i class="ph ph-caret-down select-icon"></i>
+          </div>
         </div>
-        <div class="text-secondary text-sm mt-2">
-          {{ $t('customer.price') }}: <strong class="text-primary">{{ currencySymbol }}{{ Number(selectedPrice).toFixed(2) }}</strong>
-        </div>
-      </div>
 
-      <div class="d-flex gap-2">
-        <va-button color="secondary" outline block @click="show = false">
-          {{ $t('common.cancel') }}
-        </va-button>
-        <va-button color="success" block :loading="creatingOrder" @click="$emit('submitOrder')">
-          {{ $t('customer.createOrder') }}
-        </va-button>
-      </div>
+        <!-- SubCategory Selector (if available) -->
+        <div v-if="subCategoryOptions.length > 0" class="form-group">
+          <label class="form-label">{{ $t('customer.subCategory') }}</label>
+          <div class="select-wrapper">
+            <select
+              :value="selectedSubCategoryId"
+              class="form-select"
+              @change="$emit('update:selectedSubCategoryId', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="" disabled selected>Выберите подкатегорию</option>
+              <option v-for="opt in subCategoryOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <i class="ph ph-caret-down select-icon"></i>
+          </div>
+        </div>
+
+        <!-- Service Variant Selector (if available) -->
+        <div v-if="variantOptions.length > 0" class="form-group">
+          <label class="form-label">{{ $t('customer.serviceVariant') }}</label>
+          <div class="select-wrapper">
+            <select
+              :value="selectedVariantId"
+              class="form-select"
+              @change="$emit('update:selectedVariantId', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="" disabled selected>Выберите вариант</option>
+              <option v-for="opt in variantOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <i class="ph ph-caret-down select-icon"></i>
+          </div>
+        </div>
+
+        <!-- Urgency Checkbox Pills -->
+        <div v-if="!isAuctionSelected" class="form-group">
+          <div class="checkbox-group">
+            <label class="custom-checkbox">
+              <input
+                type="checkbox"
+                :checked="isUrgent"
+                @change="$emit('update:isUrgent', ($event.target as HTMLInputElement).checked)"
+              />
+              <div class="checkbox-pill">
+                <i class="ph ph-clock-countdown"></i> {{ $t('customer.urgent') }}
+              </div>
+            </label>
+
+            <label class="custom-checkbox">
+              <input
+                type="checkbox"
+                :checked="isAsap"
+                @change="$emit('update:isAsap', ($event.target as HTMLInputElement).checked)"
+              />
+              <div class="checkbox-pill">
+                <i class="ph ph-lightning"></i> ASAP
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Total Price Row -->
+        <div class="price-row">
+          <div class="price-label">{{ $t('customer.price') }}:</div>
+          <div class="price-value">{{ Number(selectedPrice).toFixed(2) }} {{ currencySymbol }}</div>
+        </div>
+
+        <!-- Footer Buttons -->
+        <div class="modal-footer">
+          <button type="button" class="btn btn-cancel" @click="show = false">
+            {{ $t('common.cancel') }}
+          </button>
+          <button type="submit" class="btn btn-submit" :disabled="creatingOrder">
+            <span v-if="creatingOrder" class="spinner-sm"></span>
+            <template v-else>
+              <i class="ph-bold ph-plus"></i> {{ $t('customer.createOrder') }}
+            </template>
+          </button>
+        </div>
+      </form>
     </div>
-  </va-modal>
+  </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, computed } from 'vue'
+import { defineComponent, computed, onMounted } from 'vue'
 
 export default defineComponent({
   name: 'CreateOrderModal',
@@ -131,18 +169,378 @@ export default defineComponent({
       set: (val) => emit('update:modelValue', val),
     })
 
+    const loadPhosphorIcons = () => {
+      if (!document.getElementById('phosphor-icons-script')) {
+        const script = document.createElement('script')
+        script.id = 'phosphor-icons-script'
+        script.src = 'https://unpkg.com/@phosphor-icons/web'
+        document.head.appendChild(script)
+      }
+    }
+
+    onMounted(() => {
+      loadPhosphorIcons()
+    })
+
     return { show }
   },
 })
 </script>
 
 <style scoped>
-.btn-close-modal {
-  font-size: 18px;
-  opacity: 0.7;
-  transition: opacity 0.15s;
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+/* --- Modal Overlay --- */
+.modal-overlay {
+  --bg-base: #f8f9fa;
+  --surface-card: rgba(255, 255, 255, 0.92);
+  --surface-input: rgba(255, 255, 255, 0.7);
+  
+  --text-title: #0f172a;
+  --text-body: #334155;
+  --text-muted: #8b98a5;
+  
+  --accent-main: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.4);
+  
+  --rad-sm: 12px;
+  --rad-md: 20px;
+  --rad-lg: 32px;
+  
+  --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
+                  0 1px 3px rgba(15, 23, 42, 0.05),
+                  inset 0 1px 0 rgba(255,255,255,1);
+  
+  --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1050;
+  animation: fadeIn 0.3s ease-out;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-body);
 }
-.btn-close-modal:hover {
-  opacity: 1;
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --- Modal Card --- */
+.modal-card {
+  background: var(--surface-card);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--rad-lg);
+  width: 100%;
+  max-width: 480px;
+  box-shadow: var(--shadow-float);
+  padding: 32px;
+  position: relative;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* --- Header --- */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.modal-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-title);
+  letter-spacing: -0.5px;
+}
+
+.btn-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-close:hover {
+  background: #ffffff;
+  color: #ef4444;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  transform: rotate(90deg);
+}
+
+/* --- Info Box (Address) --- */
+.info-box {
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.1);
+  border-radius: var(--rad-md);
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.info-box::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--accent-main);
+}
+
+.info-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-main);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-address {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-title);
+  margin-bottom: 6px;
+}
+
+.info-note {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* --- Form Groups --- */
+.form-group {
+  margin-bottom: 24px;
+}
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  padding-left: 4px;
+}
+
+.select-wrapper {
+  position: relative;
+}
+
+.form-select {
+  width: 100%;
+  appearance: none;
+  padding: 16px 48px 16px 20px;
+  border-radius: 16px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--text-title);
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: var(--accent-main);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+}
+
+.select-icon {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Checkboxes (Pill Style) */
+.checkbox-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.custom-checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.custom-checkbox input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.checkbox-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 99px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255,255,255,0.8);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-body);
+  transition: var(--transition);
+}
+
+.checkbox-pill i {
+  font-size: 18px;
+  color: var(--text-muted);
+  transition: var(--transition);
+}
+
+.custom-checkbox input:checked ~ .checkbox-pill {
+  background: #e0e7ff;
+  border-color: var(--accent-main);
+  color: var(--accent-main);
+}
+
+.custom-checkbox input:checked ~ .checkbox-pill i {
+  color: var(--accent-main);
+}
+
+.custom-checkbox:hover .checkbox-pill {
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+/* --- Price Row --- */
+.price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 32px;
+  margin-bottom: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+
+.price-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.price-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-title);
+  letter-spacing: -0.5px;
+}
+
+/* --- Footer --- */
+.modal-footer {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  padding: 16px;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-cancel {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--text-body);
+}
+
+.btn-cancel:hover {
+  background: rgba(15, 23, 42, 0.1);
+  color: var(--text-title);
+}
+
+.btn-submit {
+  flex: 2;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  box-shadow: 0 10px 24px -6px var(--accent-glow);
+}
+
+.btn-submit:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
+}
+
+.btn-submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.spinner-sm {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255,255,255,0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .modal-card {
+    padding: 24px;
+    border-radius: 28px;
+  }
+  .modal-footer {
+    flex-direction: column-reverse;
+  }
+  .btn {
+    width: 100%;
+  }
 }
 </style>

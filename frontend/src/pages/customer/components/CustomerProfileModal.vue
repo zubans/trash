@@ -1,146 +1,112 @@
 <template>
-  <va-modal
-    v-model="show"
-    hide-default-actions
-    max-width="560px"
-    class="profile-modal-dialog"
-  >
-    <div class="profile-modal-content p-3">
-      <!-- Modal Header -->
-      <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
-        <div class="d-flex align-items-center gap-2">
-          <span class="profile-avatar-icon">👤</span>
-          <h3 class="va-h5 m-0 font-bold text-dark">Профиль заказчика</h3>
-          <span
-            v-if="isVerified"
-            class="blue-verified-badge"
-            title="Пользователь верифицирован"
-          >
-            ✓
-          </span>
+  <div v-if="show" class="modal-overlay" @click.self="show = false">
+    <div class="modal-card">
+      <!-- Header -->
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="ph-fill ph-user-circle"></i>
+          Профиль заказчика
         </div>
-        <button
-          type="button"
-          class="btn-close-modal"
-          @click="show = false"
-          aria-label="Close"
-        >
-          ✕
+        <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
+          <i class="ph ph-x"></i>
         </button>
       </div>
 
-      <!-- Verification Status Card -->
-      <div
-        class="verification-card p-3 rounded-lg mb-4 d-flex align-items-center justify-content-between"
-        :class="isVerified ? 'verified-bg' : 'unverified-bg'"
-      >
-        <div class="d-flex align-items-center gap-3">
-          <span class="status-shield-icon">{{ isVerified ? '🛡️' : '📑' }}</span>
-          <div>
-            <div class="font-bold text-sm text-dark">
+      <!-- Verification Status Box -->
+      <div class="verification-box">
+        <i class="ph-fill ph-shield-check v-icon"></i>
+        <div class="v-content">
+          <div class="v-header">
+            <div class="v-title">
               {{ isVerified ? 'Пользователь верифицирован' : 'Статус верификации' }}
             </div>
-            <div class="text-xs text-secondary mt-0-5">
-              {{ isVerified ? 'Ваш паспорт проверен администратором системы' : 'Для верификации передайте данные администратору' }}
+            <div class="v-badge">
+              {{ isVerified ? 'Подтвержден' : 'Не верифицирован' }}
             </div>
           </div>
+          <div class="v-desc">
+            {{ isVerified ? 'Ваш паспорт проверен администратором системы' : 'Для верификации передайте данные администратору' }}
+          </div>
         </div>
-        <span
-          class="status-pill-badge font-bold text-xs px-3 py-1 rounded-pill"
-          :class="isVerified ? 'bg-success text-white' : 'bg-secondary text-white'"
-        >
-          {{ isVerified ? 'Подтвержден' : 'Не верифицирован' }}
-        </span>
       </div>
 
-      <!-- Saved Addresses Section (Max 2 addresses) -->
-      <div class="addresses-section mb-4">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <h4 class="va-h6 font-bold m-0 text-dark d-flex align-items-center gap-2">
-            <span>📍 Сохраненные адреса</span>
-            <span class="badge bg-primary-subtle text-primary font-bold text-xs">
-              {{ customerAddresses.length }}/2
-            </span>
-          </h4>
-          <span class="text-xs text-secondary">Выберите активный для заказов</span>
+      <!-- Address Management -->
+      <div class="section-header">
+        <div class="section-title">
+          <i class="ph-fill ph-map-pin" style="color: #ef4444;"></i>
+          Сохраненные адреса <span class="counter-badge">{{ customerAddresses.length }}/2</span>
         </div>
+        <div class="section-subtitle">Выберите активный для заказов</div>
+      </div>
 
-        <div v-if="customerAddresses.length === 0" class="empty-address-box p-3 text-center rounded border border-dashed mb-3 text-secondary text-xs">
+      <!-- Address List -->
+      <div class="address-list">
+        <div v-if="customerAddresses.length === 0" class="empty-address-box">
           Нет сохраненных адресов. Добавьте адрес ниже.
         </div>
 
-        <div
+        <label
           v-for="(addr, idx) in customerAddresses"
           :key="idx"
-          class="address-item-card p-3 mb-2 rounded-lg border d-flex align-items-center justify-content-between transition-all"
-          :class="addr.address === defaultAddress ? 'active-address-card' : 'inactive-address-card'"
+          class="address-card"
         >
-          <div class="d-flex align-items-center gap-3 overflow-hidden mr-2">
-            <input
-              type="radio"
-              :id="'addr-' + idx"
-              name="active_address"
-              :checked="addr.address === defaultAddress"
-              @change="$emit('setActiveAddress', addr.address)"
-              class="active-radio-input cursor-pointer"
-            />
-            <label :for="'addr-' + idx" class="m-0 cursor-pointer overflow-hidden">
-              <div class="font-bold text-sm text-dark truncate">{{ addr.address }}</div>
-              <span v-if="addr.address === defaultAddress" class="badge bg-success text-white text-xxs font-bold mt-1 d-inline-block">
-                ✓ Активный для заказов
-              </span>
-            </label>
+          <input
+            type="radio"
+            name="active_address"
+            :checked="addr.address === defaultAddress"
+            @change="$emit('setActiveAddress', addr.address)"
+          />
+          <div class="custom-radio"></div>
+          <div class="address-details">
+            <div class="address-text">{{ addr.address }}</div>
+            <div class="active-label"><i class="ph-bold ph-check"></i> Активный для заказов</div>
           </div>
           <button
             type="button"
-            class="btn-delete-addr border-0 bg-transparent text-danger p-1 rounded hover-bg-danger-light cursor-pointer"
+            class="btn-trash"
             title="Удалить адрес"
-            @click="$emit('removeAddress', idx)"
+            @click.prevent="$emit('removeAddress', idx)"
           >
-            🗑️
+            <i class="ph ph-trash"></i>
           </button>
-        </div>
-
-        <!-- Add new address form if < 2 -->
-        <div v-if="customerAddresses.length < 2" class="add-address-form mt-3 p-3 bg-light rounded-lg border">
-          <label class="text-xs font-bold text-secondary mb-1 d-block">Добавить новый адрес</label>
-          <div class="d-flex gap-2">
-            <input
-              type="text"
-              :value="newAddressInput"
-              @input="$emit('update:newAddressInput', ($event.target as HTMLInputElement).value)"
-              placeholder="г. Москва, ул. Ленина, д. 10"
-              class="form-control form-control-sm text-sm"
-              @keyup.enter="$emit('addNewAddress')"
-            />
-            <va-button
-              color="primary"
-              size="small"
-              :disabled="!newAddressInput.trim()"
-              @click="$emit('addNewAddress')"
-            >
-              ➕ Добавить
-            </va-button>
-          </div>
-        </div>
-        <div v-else class="limit-warning-banner p-2 px-3 rounded mt-2 bg-warning-light text-warning-dark text-xs d-flex align-items-center gap-2">
-          <span>ℹ️</span>
-          <span>Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
-        </div>
+        </label>
       </div>
 
-      <!-- Action Footer -->
-      <div class="d-flex justify-content-end pt-3 border-top">
-        <va-button color="secondary" size="medium" @click="show = false">
+      <!-- Add New Address Form -->
+      <div v-if="customerAddresses.length < 2" class="add-address-form">
+        <input
+          type="text"
+          :value="newAddressInput"
+          @input="$emit('update:newAddressInput', ($event.target as HTMLInputElement).value)"
+          placeholder="Введите новый адрес..."
+          class="add-input"
+          @keyup.enter="$emit('addNewAddress')"
+        />
+        <button
+          type="button"
+          class="btn-add"
+          :disabled="!newAddressInput.trim()"
+          @click="$emit('addNewAddress')"
+        >
+          <i class="ph-bold ph-plus"></i> Добавить
+        </button>
+      </div>
+      <div v-else class="limit-warning-banner">
+        <span>ℹ️ Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer">
+        <button type="button" class="btn-cancel" @click="show = false">
           Закрыть
-        </va-button>
+        </button>
       </div>
     </div>
-  </va-modal>
+  </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, computed } from 'vue'
+import { defineComponent, computed, onMounted } from 'vue'
 
 export default defineComponent({
   name: 'CustomerProfileModal',
@@ -164,121 +130,440 @@ export default defineComponent({
       set: (val) => emit('update:modelValue', val),
     })
 
+    const loadPhosphorIcons = () => {
+      if (!document.getElementById('phosphor-icons-script')) {
+        const script = document.createElement('script')
+        script.id = 'phosphor-icons-script'
+        script.src = 'https://unpkg.com/@phosphor-icons/web'
+        document.head.appendChild(script)
+      }
+    }
+
+    onMounted(() => {
+      loadPhosphorIcons()
+    })
+
     return { show }
   },
 })
 </script>
 
 <style scoped>
-.profile-modal-content {
-  color: #1a202c;
-}
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
-.profile-avatar-icon {
-  font-size: 22px;
-}
+/* --- Modal Overlay --- */
+.modal-overlay {
+  --bg-base: #f8f9fa;
+  --surface-card: rgba(255, 255, 255, 0.92);
+  --surface-input: rgba(255, 255, 255, 0.7);
+  
+  --text-title: #0f172a;
+  --text-body: #334155;
+  --text-muted: #8b98a5;
+  
+  --accent-main: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.4);
+  
+  --success-main: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.08);
+  
+  --rad-sm: 12px;
+  --rad-md: 16px;
+  --rad-lg: 32px;
+  
+  --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
+                  0 1px 3px rgba(15, 23, 42, 0.05),
+                  inset 0 1px 0 rgba(255,255,255,1);
+  
+  --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 
-.blue-verified-badge {
-  width: 20px;
-  height: 20px;
-  background-color: #1da1f2;
-  color: #ffffff;
-  border-radius: 50%;
-  font-size: 12px;
-  font-weight: 900;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 5px rgba(29, 161, 242, 0.45);
-}
-
-.btn-close-modal {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: #f1f5f9;
-  border-radius: 50%;
-  font-size: 16px;
-  color: #64748b;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  padding: 20px;
+  z-index: 1050;
+  animation: fadeIn 0.3s ease-out;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-body);
 }
 
-.btn-close-modal:hover {
-  background: #e2e8f0;
-  color: #0f172a;
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* --- Modal Card --- */
+.modal-card {
+  background: var(--surface-card);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--rad-lg);
+  width: 100%;
+  max-width: 560px;
+  box-shadow: var(--shadow-float);
+  padding: 32px;
+  position: relative;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
-.verification-card {
-  border: 1px solid transparent;
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-.verified-bg {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+/* --- Modal Header --- */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
 }
 
-.unverified-bg {
-  background: #f8fafc;
-  border-color: #e2e8f0;
-}
-
-.status-shield-icon {
+.modal-title {
   font-size: 24px;
+  font-weight: 700;
+  color: var(--text-title);
+  letter-spacing: -0.5px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.active-address-card {
-  background: #eff6ff;
-  border-color: #3b82f6 !important;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.12);
+.modal-title i {
+  color: var(--accent-main);
+  font-size: 28px;
 }
 
-.inactive-address-card {
+.btn-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-close:hover {
   background: #ffffff;
-  border-color: #e2e8f0;
+  color: #ef4444;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  transform: rotate(90deg);
 }
 
-.inactive-address-card:hover {
-  background: #f8fafc;
-  border-color: #cbd5e0;
+/* --- Verification Box --- */
+.verification-box {
+  background: var(--success-bg);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: var(--rad-md);
+  padding: 16px 20px;
+  margin-bottom: 32px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  position: relative;
+  overflow: hidden;
 }
 
-.active-radio-input {
-  width: 18px;
-  height: 18px;
-  accent-color: #2563eb;
+.verification-box::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--success-main);
 }
 
-.bg-primary-subtle {
-  background: #dbeafe;
-  color: #1e40af;
+.v-icon {
+  font-size: 24px;
+  color: var(--success-main);
+  margin-top: 2px;
 }
 
-.bg-warning-light {
-  background: #fffbeb;
-  border: 1px solid #fef3c7;
+.v-content { flex: 1; }
+
+.v-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
 }
 
-.text-warning-dark {
-  color: #92400e;
+.v-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-title);
 }
 
-.hover-bg-danger-light:hover {
+.v-badge {
+  background: #ecfdf5;
+  color: #059669;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.v-desc {
+  font-size: 14px;
+  color: var(--text-body);
+}
+
+/* --- Address Section --- */
+.section-header {
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-title);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.counter-badge {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--accent-main);
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.section-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.address-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.empty-address-box {
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--rad-md);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.address-card {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255,255,255,0.8);
+  border-radius: var(--rad-md);
+  cursor: pointer;
+  transition: var(--transition);
+  position: relative;
+}
+
+.address-card:hover {
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+}
+
+.address-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+}
+
+.custom-radio {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  margin-right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+.custom-radio::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-main);
+  transform: scale(0);
+  transition: var(--transition);
+}
+
+.address-card:has(input:checked) {
+  background: rgba(99, 102, 241, 0.03);
+  border-color: var(--accent-main);
+}
+
+.address-card input:checked + .custom-radio {
+  border-color: var(--accent-main);
+}
+
+.address-card input:checked + .custom-radio::after {
+  transform: scale(1);
+}
+
+.address-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.address-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-title);
+  line-height: 1.3;
+}
+
+.active-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-main);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.address-card input:checked ~ .address-details .active-label {
+  opacity: 1;
+}
+
+.btn-trash {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  margin-left: 12px;
+}
+
+.btn-trash:hover {
   background: #fee2e2;
+  color: #ef4444;
 }
 
-.form-control {
-  border: 1px solid #cbd5e0;
-  border-radius: 6px;
-  padding: 6px 10px;
+/* --- Add Address Form --- */
+.add-address-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.add-input {
+  flex: 1;
+  padding: 14px 16px;
+  border-radius: var(--rad-sm);
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--text-title);
+  transition: var(--transition);
+}
+
+.add-input:focus {
   outline: none;
+  border-color: var(--accent-main);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
 }
 
-.form-control:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+.btn-add {
+  background: var(--accent-main);
+  color: white;
+  border: none;
+  padding: 0 20px;
+  border-radius: var(--rad-sm);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: var(--transition);
+}
+
+.btn-add:hover {
+  background: #4f46e5;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-add:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.limit-warning-banner {
+  font-size: 13px;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 10px 14px;
+  border-radius: var(--rad-sm);
+  margin-bottom: 24px;
+}
+
+/* --- Footer --- */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 24px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+
+.btn-cancel {
+  padding: 14px 28px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--text-body);
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-cancel:hover {
+  background: rgba(15, 23, 42, 0.1);
+  color: var(--text-title);
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .modal-card { padding: 24px; border-radius: 28px; }
+  .v-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .add-address-form { flex-direction: column; }
+  .btn-add { padding: 14px; justify-content: center; }
+  .modal-footer { justify-content: stretch; }
+  .btn-cancel { width: 100%; }
 }
 </style>

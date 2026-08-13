@@ -1,141 +1,156 @@
 <template>
   <div class="login-wrapper">
-    <div class="background-decorations">
-      <div class="shape shape-1"></div>
-      <div class="shape shape-2"></div>
-    </div>
-    
-    <va-card class="auth-card">
-      <!-- Tabs header -->
-      <div class="tabs-header">
-        <button 
-          :class="['tab-btn', { active: mode === 'login' }]"
-          @click="mode = 'login'"
-        >
-          {{ $t('login.signIn') }}
-        </button>
-        <button 
-          :class="['tab-btn', { active: mode === 'register' }]"
-          @click="mode = 'register'"
-        >
-          {{ $t('login.register') }}
-        </button>
-      </div>
+    <!-- Floating Orbs Background -->
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
 
-      <div class="card-content p-4">
-        <div class="d-flex justify-content-end mb-2">
+    <!-- Auth Card -->
+    <div class="auth-card">
+      <!-- Header with Tab Control & Language Switcher -->
+      <div class="card-header">
+        <div class="tabs-container">
+          <div
+            :class="['tab', { active: mode === 'login' }]"
+            @click="mode = 'login'"
+          >
+            {{ $t('login.signIn') }}
+          </div>
+          <div
+            :class="['tab', { active: mode === 'register' }]"
+            @click="mode = 'register'"
+          >
+            {{ $t('login.register') }}
+          </div>
+        </div>
+
+        <div class="lang-btn-wrapper">
           <LanguageSwitcher />
         </div>
-        <!-- Title -->
-        <h2 class="auth-title text-center mb-4">
-          {{ mode === 'login' ? $t('login.welcomeBack') : $t('login.createAccount') }}
-        </h2>
-
-        <!-- Alert messages -->
-        <transition name="fade">
-          <div v-if="error" class="custom-alert error-alert mb-4">
-            <span class="material-icons alert-icon">error_outline</span>
-            <span class="alert-text" style="white-space: pre-wrap;">{{ error }}</span>
-          </div>
-        </transition>
-
-        <transition name="fade">
-          <div v-if="message" class="custom-alert success-alert mb-4">
-            <span class="material-icons alert-icon">check_circle_outline</span>
-            <span class="alert-text">{{ message }}</span>
-          </div>
-        </transition>
-
-        <!-- Forms -->
-        <va-form @submit.prevent="handleSubmit">
-          <div class="form-group mb-3">
-            <label class="form-label">{{ $t('login.phone') }}</label>
-            <div class="input-wrapper">
-              <span class="material-icons input-icon">phone</span>
-              <input 
-                v-model="phone" 
-                type="tel" 
-                placeholder="79999999999" 
-                class="custom-input" 
-                required 
-              />
-            </div>
-          </div>
-
-          <div class="form-group mb-4">
-            <label class="form-label">{{ $t('login.password') }}</label>
-            <div class="input-wrapper">
-              <span class="material-icons input-icon">lock</span>
-              <input 
-                v-model="password" 
-                type="password" 
-                placeholder="••••••••" 
-                class="custom-input" 
-                required 
-              />
-            </div>
-          </div>
-
-          <div v-if="mode === 'register'" class="form-group mb-4">
-            <label class="form-label">{{ $t('login.role') }}</label>
-            <div class="input-wrapper">
-              <span class="material-icons input-icon">person_outline</span>
-              <select v-model="role" class="custom-input custom-select" required>
-                <option value="CUSTOMER">{{ $t('roles.customer') }}</option>
-                <option value="EXECUTOR">{{ $t('roles.executor') }}</option>
-              </select>
-            </div>
-          </div>
-
-          <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-4 address-autocomplete">
-            <label class="form-label">{{ $t('login.pickupAddress') }}</label>
-            <div class="input-wrapper">
-              <span class="material-icons input-icon">location_on</span>
-              <input 
-                v-model="address" 
-                type="text" 
-                :placeholder="$t('login.pickupAddressPlaceholder')" 
-                class="custom-input" 
-                required 
-                autocomplete="off"
-                @input="onAddressInput"
-              />
-              <span v-if="autocompleteLoading" class="input-spinner" />
-            </div>
-            <div v-if="addressSuggestions.length > 0" class="suggestions-dropdown">
-              <div
-                v-for="(suggestion, index) in addressSuggestions"
-                :key="index"
-                class="suggestion-item"
-                @click="selectAddress(suggestion)"
-              >
-                {{ suggestion.display }}
-              </div>
-            </div>
-            <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
-          </div>
-
-          <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-4">
-            <label class="form-label">{{ $t('login.flatNumber') }}</label>
-            <div class="input-wrapper">
-              <span class="material-icons input-icon">apartment</span>
-              <input 
-                v-model="flatNumber" 
-                type="text" 
-                :placeholder="$t('login.flatNumberPlaceholder')" 
-                class="custom-input" 
-                autocomplete="off"
-              />
-            </div>
-          </div>
-
-          <button ref="submitBtnRef" type="submit" class="submit-btn" :disabled="loading">
-            <span v-if="loading" class="spinner"></span>
-            <span v-else>{{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}</span>
-          </button>
-        </va-form>
       </div>
-    </va-card>
+
+      <!-- Title -->
+      <h1>
+        {{ mode === 'login' ? $t('login.welcomeBack') : $t('login.createAccount') }}
+      </h1>
+
+      <!-- Alerts -->
+      <transition name="fade">
+        <div v-if="error" class="custom-alert error-alert mb-4">
+          <i class="ph ph-warning-circle alert-icon"></i>
+          <span class="alert-text" style="white-space: pre-wrap;">{{ error }}</span>
+        </div>
+      </transition>
+
+      <transition name="fade">
+        <div v-if="message" class="custom-alert success-alert mb-4">
+          <i class="ph ph-check-circle alert-icon"></i>
+          <span class="alert-text">{{ message }}</span>
+        </div>
+      </transition>
+
+      <!-- Form -->
+      <form @submit.prevent="handleSubmit">
+        <!-- Phone Input -->
+        <div class="form-group mb-3">
+          <label class="form-label">{{ $t('login.phone') }}</label>
+          <div class="input-wrapper">
+            <input
+              v-model="phone"
+              type="tel"
+              placeholder="+7 (999) 999-99-99"
+              class="form-input"
+              required
+            />
+            <i class="ph ph-phone input-icon"></i>
+          </div>
+        </div>
+
+        <!-- Password Input -->
+        <div class="form-group mb-3">
+          <label class="form-label">{{ $t('login.password') }}</label>
+          <div class="input-wrapper">
+            <input
+              v-model="password"
+              type="password"
+              placeholder="••••••••"
+              class="form-input"
+              required
+            />
+            <i class="ph ph-lock-key input-icon"></i>
+          </div>
+        </div>
+
+        <!-- Registration Role Select -->
+        <div v-if="mode === 'register'" class="form-group mb-3">
+          <label class="form-label">{{ $t('login.role') }}</label>
+          <div class="input-wrapper">
+            <select v-model="role" class="form-input custom-select" required>
+              <option value="CUSTOMER">{{ $t('roles.customer') }}</option>
+              <option value="EXECUTOR">{{ $t('roles.executor') }}</option>
+            </select>
+            <i class="ph ph-user input-icon"></i>
+          </div>
+        </div>
+
+        <!-- Address Autocomplete for Customer Registration -->
+        <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-3 address-autocomplete">
+          <label class="form-label">{{ $t('login.pickupAddress') }}</label>
+          <div class="input-wrapper">
+            <input
+              v-model="address"
+              type="text"
+              :placeholder="$t('login.pickupAddressPlaceholder')"
+              class="form-input"
+              required
+              autocomplete="off"
+              @input="onAddressInput"
+            />
+            <i class="ph ph-map-pin input-icon"></i>
+            <span v-if="autocompleteLoading" class="input-spinner" />
+          </div>
+          <div v-if="addressSuggestions.length > 0" class="suggestions-dropdown">
+            <div
+              v-for="(suggestion, index) in addressSuggestions"
+              :key="index"
+              class="suggestion-item"
+              @click="selectAddress(suggestion)"
+            >
+              {{ suggestion.display }}
+            </div>
+          </div>
+          <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
+        </div>
+
+        <!-- Flat Number for Customer Registration -->
+        <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-3">
+          <label class="form-label">{{ $t('login.flatNumber') }}</label>
+          <div class="input-wrapper">
+            <input
+              v-model="flatNumber"
+              type="text"
+              :placeholder="$t('login.flatNumberPlaceholder')"
+              class="form-input"
+              autocomplete="off"
+            />
+            <i class="ph ph-buildings input-icon"></i>
+          </div>
+        </div>
+
+        <!-- Forgot Password Link (for login mode) -->
+        <a v-if="mode === 'login'" href="#" class="forgot-link" @click.prevent="error = 'Обратитесь к администратору для сброса пароля'">
+          Забыли пароль?
+        </a>
+
+        <!-- Submit Button -->
+        <button ref="submitBtnRef" type="submit" class="submit-btn" :disabled="loading">
+          <span v-if="loading" class="spinner"></span>
+          <template v-else>
+            {{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}
+            <i class="ph-bold ph-arrow-right"></i>
+          </template>
+        </button>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -147,7 +162,6 @@ import { useAuthStore } from '../../stores/auth-store'
 import api, { formatApiError } from '../../services/api'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 
-// Helper to decode JWT token
 function parseJwt(token: string) {
   try {
     const base64Url = token.split('.')[1]
@@ -171,7 +185,7 @@ export default defineComponent({
     const router = useRouter()
     const authStore = useAuthStore()
     const { t } = useI18n()
-    
+
     const submitBtnRef = ref<HTMLButtonElement | null>(null)
     const mode = ref<'login' | 'register'>('login')
     const phone = ref('')
@@ -187,6 +201,15 @@ export default defineComponent({
     const loading = ref(false)
     let autocompleteTimeout: any = null
 
+    const loadPhosphorIcons = () => {
+      if (!document.getElementById('phosphor-icons-script')) {
+        const script = document.createElement('script')
+        script.id = 'phosphor-icons-script'
+        script.src = 'https://unpkg.com/@phosphor-icons/web'
+        document.head.appendChild(script)
+      }
+    }
+
     const focusSubmitButton = () => {
       nextTick(() => {
         submitBtnRef.value?.focus()
@@ -194,6 +217,7 @@ export default defineComponent({
     }
 
     onMounted(() => {
+      loadPhosphorIcons()
       focusSubmitButton()
     })
 
@@ -261,7 +285,6 @@ export default defineComponent({
 
       try {
         if (mode.value === 'login') {
-          // Authentication
           const response = await api.post('/login', {
             phone: phone.value,
             password: password.value,
@@ -276,7 +299,6 @@ export default defineComponent({
 
           authStore.login(token, claims.role, claims.phone, claims.sub)
 
-          // Role-based redirection
           if (claims.role === 'ADMIN') {
             router.push('/admin')
           } else if (claims.role === 'CUSTOMER') {
@@ -287,7 +309,6 @@ export default defineComponent({
             error.value = t('login.roleNotSupported')
           }
         } else {
-          // Registration
           const payload: any = {
             phone: phone.value,
             password: password.value,
@@ -347,132 +368,179 @@ export default defineComponent({
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
 .login-wrapper {
-  position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  --bg-base: #f8f9fa;
+  --surface-card: rgba(255, 255, 255, 0.7);
+  --surface-input: rgba(255, 255, 255, 0.6);
+  
+  --text-title: #0f172a;
+  --text-body: #334155;
+  --text-muted: #8b98a5;
+  
+  --accent-main: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.4);
+  
+  --rad-sm: 12px;
+  --rad-md: 20px;
+  --rad-lg: 32px;
+  
+  --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
+                  0 1px 3px rgba(15, 23, 42, 0.05),
+                  inset 0 1px 0 rgba(255,255,255,1);
+  
+  --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+
+  font-family: 'Outfit', sans-serif;
+  background-color: var(--bg-base);
+  background-image: 
+      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(236, 72, 153, 0.08) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.12) 0px, transparent 50%);
+  background-attachment: fixed;
+  color: var(--text-body);
+  line-height: 1.5;
   min-height: 100vh;
-  background: radial-gradient(circle at 10% 20%, rgb(17, 26, 41) 0%, rgb(8, 11, 20) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  position: relative;
   overflow: hidden;
 }
 
-/* Background animated shapes */
-.background-decorations {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1;
+/* Background floating animated orbs */
+@keyframes orbDrift1 {
+  0%, 100% { transform: translate(0, 0) scale(1) rotate(0deg); }
+  50% { transform: translate(40px, -40px) scale(1.1) rotate(20deg); }
+}
+@keyframes orbDrift2 {
+  0%, 100% { transform: translate(0, 0) scale(1) rotate(0deg); }
+  50% { transform: translate(-40px, 40px) scale(1.2) rotate(-20deg); }
 }
 
-.shape {
+.bg-orb {
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
+  z-index: 0;
+}
+.orb-1 {
+  top: 20%; left: 30%; width: 300px; height: 300px;
+  background: rgba(99, 102, 241, 0.3);
+  animation: orbDrift1 14s ease-in-out infinite;
+}
+.orb-2 {
+  bottom: 20%; right: 30%; width: 350px; height: 350px;
+  background: rgba(236, 72, 153, 0.2);
+  animation: orbDrift2 18s ease-in-out infinite;
 }
 
-.shape-1 {
-  width: 300px;
-  height: 300px;
-  background: rgba(49, 130, 206, 0.15);
-  top: 15%;
-  left: 10%;
-  animation: move-1 20s infinite alternate;
-}
-
-.shape-2 {
-  width: 400px;
-  height: 400px;
-  background: rgba(107, 70, 193, 0.12);
-  bottom: 10%;
-  right: 15%;
-  animation: move-2 25s infinite alternate;
-}
-
-@keyframes move-1 {
-  from { transform: translate(0, 0); }
-  to { transform: translate(50px, 80px); }
-}
-
-@keyframes move-2 {
-  from { transform: translate(0, 0); }
-  to { transform: translate(-80px, -40px); }
-}
-
-/* Glassmorphic login card */
+/* Auth Card */
 .auth-card {
-  position: relative;
   width: 100%;
-  max-width: 420px;
-  background: rgba(255, 255, 255, 0.08) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px !important;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  z-index: 5;
-  overflow: hidden;
+  max-width: 440px;
+  background: var(--surface-card);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: var(--rad-lg);
+  padding: 40px;
+  box-shadow: var(--shadow-float);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  position: relative;
+  z-index: 1;
 }
 
-.tabs-header {
+/* Card Header */
+.card-header {
   display: flex;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
 }
 
-.tab-btn {
+.tabs-container {
+  display: flex;
+  background: rgba(15, 23, 42, 0.04);
+  padding: 4px;
+  border-radius: 99px;
   flex: 1;
-  background: none;
-  border: none;
-  padding: 15px 0;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 1rem;
-  font-weight: bold;
+  margin-right: 16px;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px 16px;
+  border-radius: 99px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.3s;
+  transition: var(--transition);
 }
 
-.tab-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.02);
+.tab.active {
+  background: #ffffff;
+  color: var(--text-title);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
-.tab-btn.active {
-  color: #3182ce;
-  border-bottom: 2px solid #3182ce;
-  background: rgba(49, 130, 206, 0.05);
+.lang-btn-wrapper {
+  display: flex;
+  align-items: center;
 }
 
-.card-content {
-  padding: 32px 36px;
-}
-
-.mb-3 {
-  margin-bottom: 20px;
-}
-
-.mb-4 {
-  margin-bottom: 28px;
-}
-
-.auth-title {
-  color: #ffffff;
-  font-size: 1.8rem;
+/* Title */
+h1 {
+  font-size: 32px;
   font-weight: 700;
+  color: var(--text-title);
   letter-spacing: -0.5px;
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+/* Custom Alerts */
+.custom-alert {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.error-alert {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+.success-alert {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+.alert-icon {
+  font-size: 20px;
+}
+
+/* Form Controls */
+.form-group {
+  margin-bottom: 20px;
 }
 
 .form-label {
   display: block;
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.7);
-  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  padding-left: 4px;
 }
 
-/* Premium input controls */
 .input-wrapper {
   position: relative;
   display: flex;
@@ -481,73 +549,111 @@ export default defineComponent({
 
 .input-icon {
   position: absolute;
-  left: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  left: 16px;
   font-size: 20px;
+  color: var(--text-muted);
+  transition: var(--transition);
+  pointer-events: none;
 }
 
-.custom-input {
+.form-input {
   width: 100%;
-  padding: 12px 12px 12px 42px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 1rem;
-  transition: all 0.3s;
-  outline: none;
-}
-
-.custom-input:focus {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #3182ce;
-  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.25);
-}
-
-.custom-input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  padding: 16px 16px 16px 48px;
+  border-radius: 16px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--text-title);
+  font-weight: 500;
+  transition: var(--transition);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
 }
 
 .custom-select {
   appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 36px;
   cursor: pointer;
 }
 
-.custom-select option {
-  background: #1e2332;
-  color: #fff;
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent-main);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1), inset 0 2px 4px rgba(0,0,0,0.01);
 }
 
-/* Premium gradient button */
-.submit-btn {
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.form-input:focus ~ .input-icon,
+.form-input:not(:placeholder-shown) ~ .input-icon {
+  color: var(--accent-main);
+}
+
+.form-input::placeholder {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.suggestions-dropdown {
+  background: #ffffff;
+  border: 1px solid var(--rad-sm);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  margin-top: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  position: absolute;
   width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #3182ce 0%, #553c9a 100%);
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 1rem;
-  font-weight: bold;
+  z-index: 20;
+}
+
+.suggestion-item {
+  padding: 10px 14px;
+  font-size: 14px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(49, 130, 206, 0.3);
+  transition: background 0.15s ease;
 }
 
-.submit-btn:hover:not(:disabled) {
+.suggestion-item:hover {
+  background: #f1f5f9;
+}
+
+.forgot-link {
+  display: block;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-main);
+  text-decoration: none;
+  margin-top: 12px;
+  margin-bottom: 28px;
+  transition: var(--transition);
+}
+
+.forgot-link:hover {
+  color: #4f46e5;
+  text-decoration: underline;
+}
+
+.submit-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  border: none;
+  padding: 18px;
+  border-radius: 16px;
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -6px var(--accent-glow);
+  transition: var(--transition);
+}
+
+.submit-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(49, 130, 206, 0.4);
-}
-
-.submit-btn:active:not(:disabled) {
-  transform: translateY(1px);
+  box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
 }
 
 .submit-btn:disabled {
@@ -555,51 +661,12 @@ export default defineComponent({
   cursor: not-allowed;
 }
 
-/* Custom Alert Boxes */
-.custom-alert {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-}
-
-.error-alert {
-  background: rgba(229, 62, 62, 0.15);
-  border: 1px solid rgba(229, 62, 62, 0.3);
-  color: #feb2b2;
-}
-
-.success-alert {
-  background: rgba(56, 161, 105, 0.15);
-  border: 1px solid rgba(56, 161, 105, 0.3);
-  color: #c6f6d5;
-}
-
-.alert-icon {
-  margin-right: 10px;
-  font-size: 20px;
-}
-
-.alert-text {
-  flex: 1;
-}
-
-/* Transition Animations */
-.fade-enter-active, .fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
-}
-
-/* Spinner */
 .spinner {
-  width: 20px;
-  height: 20px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: #ffffff;
   border-radius: 50%;
-  border-top-color: #fff;
   animation: spin 0.8s linear infinite;
 }
 
@@ -607,51 +674,14 @@ export default defineComponent({
   to { transform: rotate(360deg); }
 }
 
-/* Address autocomplete */
-.address-autocomplete {
-  position: relative;
-}
-
-.input-spinner {
-  position: absolute;
-  right: 12px;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: #fff;
-  animation: spin 0.8s linear infinite;
-}
-
-.suggestions-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  max-height: 200px;
-  overflow-y: auto;
-  background: rgba(30, 35, 50, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  margin-top: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-
-.suggestion-item {
-  padding: 10px 14px;
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 0.9rem;
-  cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.suggestion-item:last-child {
-  border-bottom: none;
-}
-
-.suggestion-item:hover {
-  background: rgba(49, 130, 206, 0.2);
-  color: #fff;
+/* Responsive */
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 32px 24px;
+    border-radius: 28px;
+  }
+  h1 {
+    font-size: 28px;
+  }
 }
 </style>

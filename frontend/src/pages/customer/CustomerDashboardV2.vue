@@ -207,27 +207,44 @@
       />
 
       <!-- Top-up Modal -->
-      <va-modal
-        v-model="showTopUpModal"
-        :title="$t('customer.requestWalletTopUp')"
-        hide-default-actions
-      >
-        <div class="p-2">
-          <va-form @submit.prevent="submitTopUp">
-            <va-input
-              v-model.number="topUpAmount"
-              type="number"
-              :label="$t('customer.amountWithCurrency')"
-              class="mb-4"
-              min="1"
-              required
-            />
-            <va-button type="submit" block :loading="submitting">
-              {{ $t('customer.submitRequest') }}
-            </va-button>
-          </va-form>
+      <div v-if="showTopUpModal" class="topup-modal-overlay" @click.self="showTopUpModal = false">
+        <div class="topup-modal-card">
+          <div class="topup-modal-header">
+            <div class="topup-modal-title">Запрос на пополнение</div>
+            <button type="button" class="btn-close-topup" aria-label="Закрыть" @click="showTopUpModal = false">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <form @submit.prevent="submitTopUp">
+            <div class="form-group mb-4">
+              <label class="form-label">Сумма</label>
+              <div class="input-wrapper">
+                <input
+                  v-model.number="topUpAmount"
+                  type="number"
+                  class="form-input"
+                  min="1"
+                  required
+                />
+                <i class="ph ph-currency-rub input-icon"></i>
+              </div>
+              <div class="quick-amounts">
+                <button type="button" class="amount-pill" @click="topUpAmount = (Number(topUpAmount) || 0) + 500">+ 500 ₽</button>
+                <button type="button" class="amount-pill" @click="topUpAmount = (Number(topUpAmount) || 0) + 1000">+ 1 000 ₽</button>
+                <button type="button" class="amount-pill" @click="topUpAmount = (Number(topUpAmount) || 0) + 5000">+ 5 000 ₽</button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn-submit-topup" :disabled="submitting">
+              <span v-if="submitting" class="spinner-sm"></span>
+              <template v-else>
+                Отправить запрос <i class="ph-bold ph-paper-plane-tilt"></i>
+              </template>
+            </button>
+          </form>
         </div>
-      </va-modal>
+      </div>
 
       <!-- Customer Profile Modal -->
       <CustomerProfileModal
@@ -1099,5 +1116,122 @@ export default defineComponent({
     height: 36px;
     font-size: 16px;
   }
+}
+
+/* Top-up Modal Styles */
+.topup-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1050;
+  animation: fadeIn 0.3s ease-out;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-body);
+}
+
+.topup-modal-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--rad-lg);
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow-float);
+  padding: 32px;
+  position: relative;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.topup-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.topup-modal-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-title);
+  letter-spacing: -0.5px;
+}
+
+.btn-close-topup {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-close-topup:hover {
+  background: #ffffff;
+  color: #ef4444;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  transform: rotate(90deg);
+}
+
+.quick-amounts {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.amount-pill {
+  padding: 8px 16px;
+  border-radius: 99px;
+  background: var(--surface-input);
+  border: 1px solid rgba(255,255,255,0.8);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.amount-pill:hover {
+  background: #e0e7ff;
+  color: var(--accent-main);
+  border-color: var(--accent-main);
+  transform: translateY(-1px);
+}
+
+.btn-submit-topup {
+  width: 100%;
+  padding: 18px;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  box-shadow: 0 10px 24px -6px var(--accent-glow);
+  margin-top: 32px;
+}
+
+.btn-submit-topup:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
 }
 </style>
