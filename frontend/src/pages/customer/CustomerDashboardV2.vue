@@ -660,8 +660,12 @@ export default defineComponent({
     }
 
     const triggerImageSelect = () => {
-      if (chatFileInputRef.value) {
-        chatFileInputRef.value.click()
+      const el: any = chatFileInputRef.value
+      if (!el) return
+      if (Array.isArray(el)) {
+        if (el[0]) el[0].click()
+      } else if (typeof el.click === 'function') {
+        el.click()
       }
     }
 

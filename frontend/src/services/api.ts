@@ -65,15 +65,8 @@ export function resolveFileUrl(path?: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://')) return path
   const cleanPath = path.startsWith('/') ? path : '/' + path
-  const isNative = Capacitor.isNativePlatform()
-
-  if (isNative || !window.location.origin || window.location.protocol === 'file:') {
-    const base = apiUrl.replace(/\/$/, '')
-    return `${base}${cleanPath}`
-  }
-
-  // On standard web browsers (HTTPS / 8443 or nginx), clean relative path allows origin proxying
-  return cleanPath
+  const base = apiUrl.replace(/\/$/, '')
+  return `${base}${cleanPath}`
 }
 
 // Helper to retrieve cookie by name
