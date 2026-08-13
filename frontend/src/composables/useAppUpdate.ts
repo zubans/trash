@@ -22,6 +22,7 @@ const versionName = ref<string | null>(null)
 const releaseNotes = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 let activeConsumers = 0
+let intervalId: number | undefined = undefined
 const downloadProgress = ref(0)
 const bytesDownloaded = ref(0)
 const totalBytes = ref(0)
