@@ -551,13 +551,10 @@
           <div v-if="msg.file_url" class="telegram-attachment mb-2">
             <div v-if="isImageAttachment(msg)" class="attachment-image-wrapper">
               <img
-                src="https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg"
+                :src="resolveFileUrl(msg.file_url)"
                 class="attachment-img rounded-lg shadow-sm cursor-pointer"
                 alt="photo"
-                referrerpolicy="no-referrer"
-                crossorigin="anonymous"
-                @click="openImagePreview('https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg')"
-                @error="(e) => console.error('[DEBUG-IMG-ERROR]', { err: e })"
+                @click="openImagePreview(resolveFileUrl(msg.file_url))"
               />
               <div v-if="isDebug" class="text-xxs text-warning bg-dark p-1 rounded mt-1 overflow-auto max-w-xs style-mono">
                 [DEBUG] URL: {{ resolveFileUrl(msg.file_url) }}

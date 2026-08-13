@@ -60,8 +60,7 @@ export function buildChatWebSocketUrl(orderId: string, token: string): string {
 // Convert a relative file path (e.g. /uploads/chat/...) into a full accessible URL.
 // On web apps, relative paths (/uploads/...) are returned as-is so nginx
 // serves them over the active origin (HTTPS / port 8443 or 443).
-// On Android native apps, images are served via Nginx HTTPS (https://94.103.9.172:8443)
-// so Android WebView allows loading without HTTP cleartext/mixed content blocks.
+// On Android native apps, files are served from HTTP port 8089 backend server.
 export function resolveFileUrl(path?: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://')) return path
@@ -69,8 +68,8 @@ export function resolveFileUrl(path?: string): string {
   const isNative = Capacitor.isNativePlatform()
 
   if (isNative || !window.location.origin || window.location.protocol === 'file:') {
-    const mediaBase = (import.meta.env.VITE_MOBILE_MEDIA_URL as string) || 'https://94.103.9.172:8443'
-    return `${mediaBase}${cleanPath}`
+    const base = apiUrl.replace(/\/$/, '')
+    return `${base}${cleanPath}`
   }
 
   // On standard web browsers (HTTPS / 8443 or nginx), clean relative path allows origin proxying
