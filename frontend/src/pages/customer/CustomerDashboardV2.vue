@@ -826,7 +826,6 @@ export default defineComponent({
       cancelOrder,
       submitTopUp,
       openOrderDetails,
-      openChat,
       setActiveAddress,
       addNewAddress,
       removeAddress,
