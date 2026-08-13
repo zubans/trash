@@ -186,7 +186,7 @@
               block
               @click="showExecutorMapModal = true"
             >
-              <va-icon name="map" class="mr-2" /> Карта заказов (Зона 50км / 2км)
+              <va-icon name="map" class="mr-2" /> Карта заказов (Зона 10км / 2км)
             </va-button>
           </div>
           <div class="mb-4">

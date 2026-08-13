@@ -73,7 +73,7 @@ func main() {
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
-	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo, geocoder)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(5 * time.Second)

@@ -12,14 +12,16 @@ import (
 type ExecutorGeoService struct {
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
+	geocoder  *Geocoder
 	// In-memory cache & mutex lock for fast cooldown checks
 	cooldownMap sync.Map
 }
 
-func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo repository.OrderRepository) *ExecutorGeoService {
+func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo repository.OrderRepository, geocoder *Geocoder) *ExecutorGeoService {
 	return &ExecutorGeoService{
 		geoRepo:   geoRepo,
 		orderRepo: orderRepo,
+		geocoder:  geocoder,
 	}
 }
 
@@ -124,8 +126,8 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 }
 
 func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
-	// Find pending orders within 50km
-	const overviewRadiusKM = 50.0
+	// Find pending orders within 10km
+	const overviewRadiusKM = 10.0
 	const acceptRadiusKM = 2.0
 
 	// Use existing orderRepo to get searching orders
@@ -137,13 +139,20 @@ func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID, lat, lon float64
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
-		oLat := 55.7558
-		oLon := 37.6173
-		if o.PickupLat != nil {
+		var oLat, oLon float64
+		if o.PickupLat != nil && o.PickupLon != nil {
 			oLat = *o.PickupLat
-		}
-		if o.PickupLon != nil {
 			oLon = *o.PickupLon
+		} else if s.geocoder != nil && o.Address != nil && *o.Address != "" {
+			geo, err := s.geocoder.Geocode(*o.Address)
+			if err == nil {
+				oLat = geo.Lat
+				oLon = geo.Lon
+			} else {
+				continue
+			}
+		} else {
+			continue
 		}
 
 		dist := HaversineDistanceKM(lat, lon, oLat, oLon)

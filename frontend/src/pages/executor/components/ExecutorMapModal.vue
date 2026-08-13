@@ -3,7 +3,7 @@
     <div class="map-modal-card">
       <div class="map-modal-header">
         <div>
-          <h3 class="map-modal-title">Карта заказов (Зона 50 км)</h3>
+          <h3 class="map-modal-title">Карта заказов (Зона 10 км)</h3>
           <p class="map-modal-subtitle">Зеленый круг (2 км) — зона мгновенного взятия заказа</p>
         </div>
         <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
@@ -110,9 +110,9 @@ export default defineComponent({
           attribution: '© OpenStreetMap',
         }).addTo(map)
 
-        // 50km Outer Circle
+        // 10km Outer Circle
         zone50kmCircle = L.circle([props.currentLat, props.currentLon], {
-          radius: 50000,
+          radius: 10000,
           color: '#6366f1',
           weight: 1,
           dashArray: '6, 6',
