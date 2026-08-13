@@ -105,48 +105,79 @@
           <div
             v-for="order in activeOrders"
             :key="order.id"
-            class="order-pill cursor-pointer"
-            @click="openOrderDetails(order)"
+            :class="['order-row', { 'chat-open': openChatOrderId === order.id }]"
           >
-            <div :class="['op-icon', order.is_urgent ? 'orange' : 'purple']">
-              <i :class="['ph', order.is_urgent ? 'ph-rocket-launch' : 'ph-package']"></i>
+            <!-- Summary Row -->
+            <div class="order-summary cursor-pointer" @click="openOrderDetails(order)">
+              <div :class="['o-icon', order.is_urgent ? 'orange' : 'purple']">
+                <i :class="['ph-fill', order.is_urgent ? 'ph-rocket-launch' : 'ph-package']"></i>
+              </div>
+              <div class="o-info">
+                <div class="o-title">{{ formatOrderType(order) }}</div>
+                <div class="o-id">#{{ order.id.slice(0, 8) }}</div>
+              </div>
+              <div class="o-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+              <div class="o-actions" @click.stop>
+                <button
+                  v-if="order.status === 'ASSIGNED'"
+                  type="button"
+                  :class="['btn-action chat-btn', { active: openChatOrderId === order.id }]"
+                  title="Чат"
+                  @click="toggleChat(order)"
+                >
+                  <i :class="['ph-fill', openChatOrderId === order.id ? 'ph-chat-circle-dots' : 'ph-chat-circle-dots']"></i>
+                </button>
+                <button
+                  v-if="order.status === 'ASSIGNED'"
+                  type="button"
+                  class="btn-action"
+                  title="Принять"
+                  @click="confirmOrder(order.id)"
+                >
+                  <i class="ph ph-check"></i>
+                </button>
+                <button
+                  v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
+                  type="button"
+                  class="btn-action danger"
+                  title="Отменить"
+                  @click="cancelOrder(order.id)"
+                >
+                  <i class="ph ph-x"></i>
+                </button>
+              </div>
             </div>
-            <div class="op-info">
-              <div class="op-title">{{ formatOrderType(order) }}</div>
-              <div class="op-id">#{{ order.id.slice(0, 8) }}</div>
-            </div>
-            <div class="op-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-            <div class="op-status">
-              {{ order.status === 'ASSIGNED' ? 'Назначен' : 'Поиск' }}
-            </div>
-            <div class="op-actions" @click.stop>
-              <button
-                v-if="order.status === 'ASSIGNED'"
-                type="button"
-                class="btn-elegant primary"
-                title="Чат"
-                @click="openChat(order)"
-              >
-                <i class="ph ph-chat-centered-text"></i>
-              </button>
-              <button
-                v-if="order.status === 'ASSIGNED'"
-                type="button"
-                class="btn-elegant"
-                title="Принять"
-                @click="confirmOrder(order.id)"
-              >
-                <i class="ph ph-check"></i>
-              </button>
-              <button
-                v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
-                type="button"
-                class="btn-elegant danger"
-                title="Отменить"
-                @click="cancelOrder(order.id)"
-              >
-                <i class="ph ph-x"></i>
-              </button>
+
+            <!-- Inline Accordion Chat Area -->
+            <div v-if="openChatOrderId === order.id" class="inline-chat">
+              <div ref="chatContainerRef" class="chat-msgs">
+                <div v-if="chatMessages.length === 0" class="text-center text-muted text-sm py-3">
+                  Сообщений пока нет. Напишите первым!
+                </div>
+                <div
+                  v-for="msg in chatMessages"
+                  :key="msg.id"
+                  :class="['msg', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
+                >
+                  <div class="bubble">
+                    {{ msg.text }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="chat-input-area">
+                <form class="input-group" @submit.prevent="sendChatMessage">
+                  <input
+                    v-model="chatInputText"
+                    type="text"
+                    class="inline-input"
+                    placeholder="Написать сообщение исполнителю..."
+                  />
+                  <button type="submit" class="btn-inline-send" :disabled="!chatInputText.trim()">
+                    <i class="ph-bold ph-paper-plane-tilt"></i>
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
@@ -279,7 +310,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
@@ -287,7 +318,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
-import api from '../../services/api'
+import api, { buildChatWebSocketUrl } from '../../services/api'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
 export default defineComponent({
@@ -536,8 +567,122 @@ export default defineComponent({
       showOrderDetailsModal.value = true
     }
 
-    const openChat = (order: any) => {
-      console.log('Open chat for order', order)
+    // Chat State & Logic
+    const openChatOrderId = ref<string | null>(null)
+    const chatMessages = ref<any[]>([])
+    const chatInputText = ref('')
+    const chatContainerRef = ref<any>(null)
+    const ws = ref<WebSocket | null>(null)
+    let chatPollTimer: any = null
+
+    const currentUserId = computed(() => authStore.userID)
+
+    const scrollToChatBottom = () => {
+      nextTick(() => {
+        if (chatContainerRef.value) {
+          if (Array.isArray(chatContainerRef.value)) {
+            if (chatContainerRef.value[0]) {
+              chatContainerRef.value[0].scrollTop = chatContainerRef.value[0].scrollHeight
+            }
+          } else {
+            chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
+          }
+        }
+      })
+    }
+
+    const closeInlineChat = () => {
+      openChatOrderId.value = null
+      chatMessages.value = []
+      chatInputText.value = ''
+      if (ws.value) {
+        ws.value.close()
+        ws.value = null
+      }
+      if (chatPollTimer) {
+        clearInterval(chatPollTimer)
+        chatPollTimer = null
+      }
+    }
+
+    const toggleChat = async (order: any) => {
+      if (openChatOrderId.value === order.id) {
+        closeInlineChat()
+        return
+      }
+
+      closeInlineChat()
+      openChatOrderId.value = order.id
+
+      // Fetch message history
+      try {
+        const response = await api.get(`/chats/${order.id}/messages`)
+        chatMessages.value = response.data || []
+        scrollToChatBottom()
+      } catch (err) {
+        console.error('Failed to load chat messages:', err)
+      }
+
+      // Setup WebSocket connection
+      try {
+        const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
+        ws.value = new WebSocket(wsUrl)
+        ws.value.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (data && data.text) {
+              const exists = chatMessages.value.some((m) => m.id === data.id)
+              if (!exists) {
+                chatMessages.value.push(data)
+                scrollToChatBottom()
+              }
+            }
+          } catch (e) {
+            console.error('WS message parse error:', e)
+          }
+        }
+      } catch (e) {
+        console.warn('WS connect failed:', e)
+      }
+
+      // Polling fallback
+      chatPollTimer = setInterval(async () => {
+        if (!openChatOrderId.value) return
+        try {
+          const res = await api.get(`/chats/${order.id}/messages`)
+          const incoming = res.data || []
+          const existingIds = new Set(chatMessages.value.map((m: any) => m.id))
+          let added = false
+          for (const m of incoming) {
+            if (!existingIds.has(m.id)) {
+              chatMessages.value.push(m)
+              added = true
+            }
+          }
+          if (added) scrollToChatBottom()
+        } catch (e) {}
+      }, 3000)
+    }
+
+    const sendChatMessage = async () => {
+      if (!chatInputText.value.trim() || !openChatOrderId.value) return
+      const text = chatInputText.value.trim()
+      chatInputText.value = ''
+
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({ text }))
+        return
+      }
+
+      try {
+        const res = await api.post(`/chats/${openChatOrderId.value}/messages`, { text })
+        if (res.data) {
+          chatMessages.value.push(res.data)
+          scrollToChatBottom()
+        }
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Ошибка отправки сообщения'
+      }
     }
 
     const setActiveAddress = (addr: string) => {
@@ -665,6 +810,14 @@ export default defineComponent({
       variantOptions,
       isAuctionSelected,
       selectedPrice,
+
+      openChatOrderId,
+      chatMessages,
+      chatInputText,
+      chatContainerRef,
+      currentUserId,
+      toggleChat,
+      sendChatMessage,
 
       fetchOrders,
       openCreateOrderModal,
@@ -1541,5 +1694,113 @@ export default defineComponent({
     from { transform: translateY(-100%); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+}
+
+/* --- Inline Accordion Chat Styles --- */
+.order-row {
+  background: var(--surface-card);
+  backdrop-filter: blur(24px);
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.8);
+  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.05);
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+.order-row:hover {
+  box-shadow: 0 15px 40px -10px rgba(0,0,0,0.08);
+  transform: translateY(-2px);
+}
+
+.order-row.chat-open {
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateY(0);
+}
+
+.order-summary {
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.o-icon {
+  width: 48px; height: 48px; border-radius: 16px;
+  background: #e0e7ff; color: #4f46e5;
+  display: flex; align-items: center; justify-content: center; font-size: 24px;
+}
+
+.o-info { flex: 1; }
+.o-title { font-size: 16px; font-weight: 700; color: var(--text-title); }
+.o-id { font-size: 13px; color: var(--text-muted); font-family: monospace; }
+.o-price { font-size: 18px; font-weight: 700; color: var(--text-title); margin-right: 20px;}
+
+.o-actions { display: flex; gap: 8px; }
+
+.btn-action {
+  width: 40px; height: 40px; border-radius: 12px; border: none;
+  background: #f1f5f9; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; cursor: pointer; transition: var(--transition);
+}
+.btn-action:hover { background: #e2e8f0; color: var(--text-title); }
+.btn-action.danger:hover { background: #fee2e2; color: #ef4444; }
+
+.btn-action.chat-btn { background: #e0e7ff; color: var(--accent-main); }
+.order-row.chat-open .btn-action.chat-btn { background: var(--accent-main); color: white; box-shadow: 0 4px 12px var(--accent-glow);}
+
+.inline-chat {
+  background: rgba(15, 23, 42, 0.02);
+  border-top: 1px solid rgba(0,0,0,0.04);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-msgs {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.msg { display: flex; flex-direction: column; max-width: 80%; }
+.msg.incoming { align-self: flex-start; }
+.msg.outgoing { align-self: flex-end; }
+
+.bubble { padding: 10px 14px; font-size: 14px; border-radius: 16px; line-height: 1.4;}
+.msg.incoming .bubble { background: white; border: 1px solid rgba(0,0,0,0.05); color: var(--text-title); border-bottom-left-radius: 4px; }
+.msg.outgoing .bubble { background: var(--accent-main); color: white; border-bottom-right-radius: 4px; }
+
+.chat-input-area {
+  padding: 16px 24px 24px 24px;
+}
+
+.input-group {
+  display: flex; align-items: center; gap: 12px;
+  background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 99px;
+  padding: 6px 6px 6px 20px; transition: var(--transition);
+}
+.input-group:focus-within { border-color: var(--accent-main); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); }
+
+.inline-input {
+  flex: 1; border: none; outline: none; background: transparent;
+  font-family: inherit; font-size: 14px; color: var(--text-title);
+}
+.inline-input::placeholder { color: #94a3b8; }
+
+.btn-inline-send {
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: var(--accent-main); color: white; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: var(--transition); flex-shrink: 0;
+}
+.btn-inline-send:hover { background: #4f46e5; }
+.btn-inline-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 600px) {
+  .order-summary { flex-wrap: wrap; }
+  .o-price { width: 100%; margin-top: 8px; }
+  .o-actions { width: 100%; justify-content: flex-end; }
 }
 </style>
