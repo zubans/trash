@@ -190,8 +190,8 @@ func main() {
 		// Authenticated admin routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
-			r.Get("/admin/geo-alerts", egh.GetGeoAlerts)
 			r.Use(authMiddleware.RequireAdmin)
+			r.Get("/admin/geo-alerts", egh.GetGeoAlerts)
 			r.Get("/admin/users", ah.GetUsersHandler)
 			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
 			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
