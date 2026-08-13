@@ -155,9 +155,17 @@
             </div>
 
             <!-- Встроенный чат гармошка -->
-            <div v-if="selectedChatOrder && selectedChatOrder.id === order.id" class="inline-chat-accordion">
-              <div ref="chatContainerRef" class="chat-messages-scroll">
-                <div v-if="chatMessages.length === 0" class="chat-empty">
+            <div v-if="selectedChatOrder && selectedChatOrder.id === order.id" class="inline-chat">
+              <input
+                ref="chatFileInputRef"
+                type="file"
+                accept="image/*"
+                style="display: none;"
+                @change="onChatFileSelected"
+              />
+
+              <div ref="chatContainerRef" class="chat-msgs">
+                <div v-if="chatMessages.length === 0" class="text-center text-muted text-sm py-3">
                   Сообщений пока нет. Напишите заказчику!
                 </div>
                 <div
@@ -166,45 +174,44 @@
                   :class="['msg', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
                   <div class="bubble">
-                    <template v-if="isImageAttachment(msg)">
-                      <div class="chat-img-wrapper" @click="openImagePreview(getImageSrc(msg))">
-                        <img :src="getImageSrc(msg)" class="chat-img" alt="Attachment" @error="onChatImgError" />
-                      </div>
-                      <div v-if="msg.content" class="mt-1">{{ msg.content }}</div>
-                    </template>
-                    <template v-else>
-                      {{ msg.content }}
-                    </template>
+                    <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                      <img
+                        :src="getImageSrc(msg)"
+                        alt="Фото"
+                        class="chat-img"
+                        @error="onChatImgError(msg)"
+                        @click="openImagePreview(getImageSrc(msg))"
+                      />
+                    </div>
+                    <span v-if="msg.text || msg.content">{{ msg.text || msg.content }}</span>
                   </div>
                 </div>
               </div>
 
               <div class="chat-input-area">
-                <div class="input-group">
-                  <button type="button" class="btn-attach" title="Прикрепить фото" @click="triggerImageSelect">
-                    <i class="ph-bold ph-image"></i>
+                <form class="input-group" @submit.prevent="sendChatMessage">
+                  <button
+                    type="button"
+                    class="btn-attach"
+                    title="Прикрепить фото"
+                    :disabled="uploadingChatFile"
+                    @click="triggerImageSelect"
+                  >
+                    <i v-if="uploadingChatFile" class="ph ph-spinner spinner"></i>
+                    <i v-else class="ph-bold ph-image"></i>
                   </button>
-                  <input
-                    ref="chatFileInputRef"
-                    type="file"
-                    accept="image/*"
-                    style="display: none;"
-                    @change="onChatFileSelected"
-                  />
 
                   <input
                     v-model="chatInputText"
                     type="text"
                     placeholder="Напишите сообщение..."
                     class="inline-input"
-                    @keyup.enter="sendChatMessage"
                   />
 
-                  <button type="button" class="btn-inline-send" :disabled="uploadingChatFile" @click="sendChatMessage">
-                    <i v-if="!uploadingChatFile" class="ph-bold ph-paper-plane-right"></i>
-                    <i v-else class="ph-bold ph-spinner spinner"></i>
+                  <button type="submit" class="btn-inline-send" :disabled="!chatInputText.trim() && !uploadingChatFile">
+                    <i class="ph-bold ph-paper-plane-tilt"></i>
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -401,7 +408,7 @@ export default defineComponent({
     const showImagePreviewModal = ref(false)
     const previewImageUrl = ref('')
 
-    const currentUserId = computed(() => authStore.user?.id || '')
+    const currentUserId = computed(() => authStore.userID)
 
     const fetchProfile = async () => {
       if (authStore.user) {
@@ -1401,20 +1408,20 @@ export default defineComponent({
 }
 
 /* --- Inline Chat Accordion --- */
-.inline-chat-accordion {
-  border-top: 1px solid #f1f5f9;
-  background: #f8fafc;
+.inline-chat {
+  background: rgba(15, 23, 42, 0.02);
+  border-top: 1px solid rgba(0,0,0,0.04);
   display: flex;
   flex-direction: column;
 }
 
-.chat-messages-scroll {
-  max-height: 280px;
-  overflow-y: auto;
-  padding: 16px 24px;
+.chat-msgs {
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .chat-empty {
@@ -1454,40 +1461,29 @@ export default defineComponent({
 }
 
 .chat-input-area {
-  padding: 12px 24px 20px 24px;
+  padding: 16px 24px 24px 24px;
 }
 
 .input-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: #ffffff;
-  border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 99px;
-  padding: 6px 6px 6px 16px;
+  display: flex; align-items: center; gap: 12px;
+  background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 99px;
+  padding: 6px 6px 6px 20px; transition: var(--transition);
 }
+.input-group:focus-within { border-color: var(--accent-main); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); }
 
 .inline-input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: inherit;
-  font-size: 14px;
+  flex: 1; border: none; outline: none; background: transparent;
+  font-family: inherit; font-size: 14px; color: var(--text-title);
 }
+.inline-input::placeholder { color: #94a3b8; }
 
 .btn-inline-send {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
-  background: var(--accent-main);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: var(--accent-main); color: white; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: var(--transition); flex-shrink: 0;
 }
+.btn-inline-send:hover { background: #4f46e5; }
+.btn-inline-send:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-attach {
   background: transparent;
