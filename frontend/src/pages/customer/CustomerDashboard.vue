@@ -28,10 +28,13 @@
       {{ errorMsg }}
     </va-alert>
 
-    <!-- Top-up button (small, left aligned) -->
-    <div class="mb-3">
+    <!-- Top-up button (small, left aligned) & Image Debug Button -->
+    <div class="mb-3 d-flex gap-2">
       <va-button color="primary" outline size="small" @click="showTopUpModal = true">
         <va-icon name="payment" class="mr-1" /> {{ $t('customer.requestWalletTopUp') }}
+      </va-button>
+      <va-button color="warning" outline size="small" @click="showDebugImgModal = true">
+        🐞 Тест Картинок (HTTP & HTTPS)
       </va-button>
     </div>
 
@@ -526,6 +529,54 @@
         </div>
       </div>
     </va-modal>
+
+    <!-- Debug Images Modal (HTTP & HTTPS test) -->
+    <va-modal
+      v-model="showDebugImgModal"
+      title="🐞 Тестирование Загрузки Картинок (Android)"
+      hide-default-actions
+      max-width="600px"
+    >
+      <div class="p-3">
+        <h5 class="va-h6 mb-2 text-primary">1. Вариант HTTP (порт 8089)</h5>
+        <div class="text-xs text-secondary mb-2 break-all">
+          URL: <code>http://94.103.9.172:8089/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg</code>
+        </div>
+        <div class="border p-2 rounded text-center mb-4 bg-dark">
+          <img
+            src="http://94.103.9.172:8089/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg"
+            style="max-width: 100%; max-height: 200px; object-fit: contain;"
+            alt="HTTP Test"
+            @error="httpImgError = true"
+            @load="httpImgError = false"
+          />
+          <div v-if="httpImgError" class="text-danger text-xs mt-1">❌ Ошибка загрузки HTTP ссылки</div>
+          <div v-else class="text-success text-xs mt-1">✅ HTTP Изображение успешно загружено!</div>
+        </div>
+
+        <h5 class="va-h6 mb-2 text-primary">2. Вариант HTTPS (порт 8443)</h5>
+        <div class="text-xs text-secondary mb-2 break-all">
+          URL: <code>https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg</code>
+        </div>
+        <div class="border p-2 rounded text-center mb-4 bg-dark">
+          <img
+            src="https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg"
+            style="max-width: 100%; max-height: 200px; object-fit: contain;"
+            alt="HTTPS Test"
+            @error="httpsImgError = true"
+            @load="httpsImgError = false"
+          />
+          <div v-if="httpsImgError" class="text-danger text-xs mt-1">❌ Ошибка загрузки HTTPS ссылки</div>
+          <div v-else class="text-success text-xs mt-1">✅ HTTPS Изображение успешно загружено!</div>
+        </div>
+
+        <div class="text-right">
+          <va-button color="secondary" @click="showDebugImgModal = false">
+            Закрыть
+          </va-button>
+        </div>
+      </div>
+    </va-modal>
   </div>
 </template>
 
@@ -558,6 +609,10 @@ export default defineComponent({
 
     const phone = ref('')
     const balance = ref(0)
+
+    const showDebugImgModal = ref(false)
+    const httpImgError = ref(false)
+    const httpsImgError = ref(false)
 
     const topUpAmount = ref(100)
     const submitting = ref(false)
@@ -1401,6 +1456,9 @@ export default defineComponent({
       messagesContainer,
       showCreateOrderModal,
       showTopUpModal,
+      showDebugImgModal,
+      httpImgError,
+      httpsImgError,
       showImagePreviewModal,
       previewImageUrl,
       openImagePreview,
