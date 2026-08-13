@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,17 +45,22 @@ func (r *executorGeoRepository) UpdateExecutorLocation(executorID uuid.UUID, lat
 	now := time.Now()
 	if isManual {
 		query := `
-			UPDATE executor_profiles
-			SET current_lat = $1, current_lon = $2, last_manual_location_change_at = $3
-			WHERE user_id = $4
+			INSERT INTO executor_profiles (user_id, current_lat, current_lon, last_manual_location_change_at)
+			VALUES ($4, $1, $2, $3)
+			ON CONFLICT (user_id) DO UPDATE
+			SET current_lat = EXCLUDED.current_lat,
+			    current_lon = EXCLUDED.current_lon,
+			    last_manual_location_change_at = EXCLUDED.last_manual_location_change_at
 		`
 		_, err := r.db.Exec(query, lat, lon, now, executorID)
 		return err
 	}
 	query := `
-		UPDATE executor_profiles
-		SET current_lat = $1, current_lon = $2
-		WHERE user_id = $3
+		INSERT INTO executor_profiles (user_id, current_lat, current_lon)
+		VALUES ($3, $1, $2)
+		ON CONFLICT (user_id) DO UPDATE
+		SET current_lat = EXCLUDED.current_lat,
+		    current_lon = EXCLUDED.current_lon
 	`
 	_, err := r.db.Exec(query, lat, lon, executorID)
 	return err
@@ -66,6 +72,9 @@ func (r *executorGeoRepository) GetExecutorLocation(executorID uuid.UUID) (lat *
 	query := `SELECT current_lat, current_lon, last_manual_location_change_at FROM executor_profiles WHERE user_id = $1`
 	err = r.db.QueryRow(query, executorID).Scan(&cLat, &cLon, &lm)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, nil, nil
+		}
 		return nil, nil, nil, err
 	}
 	if cLat.Valid {
