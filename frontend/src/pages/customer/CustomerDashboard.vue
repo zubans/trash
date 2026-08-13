@@ -533,41 +533,73 @@
     <!-- Debug Images Modal (HTTP & HTTPS test) -->
     <va-modal
       v-model="showDebugImgModal"
-      title="🐞 Тестирование Загрузки Картинок (Android)"
+      title="🐞 Расширенная Диагностика Загрузки (Android)"
       hide-default-actions
-      max-width="600px"
+      max-width="650px"
     >
       <div class="p-3">
-        <h5 class="va-h6 mb-2 text-primary">1. Вариант HTTP (порт 8089)</h5>
+        <div class="mb-3 text-center">
+          <va-button color="primary" size="small" :loading="testingFetch" @click="runFetchDiagnostics">
+            🔄 Запустить тест сетевых ответов (fetch / blob / base64)
+          </va-button>
+        </div>
+
+        <h5 class="va-h6 mb-1 text-primary">1. HTTP (порт 8089)</h5>
         <div class="text-xs text-secondary mb-2 break-all">
           URL: <code>http://94.103.9.172:8089/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg</code>
         </div>
-        <div class="border p-2 rounded text-center mb-4 bg-dark">
+        <div class="border p-2 rounded text-center mb-2 bg-dark">
           <img
+            v-if="!httpBlobUrl"
             src="http://94.103.9.172:8089/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg"
-            style="max-width: 100%; max-height: 200px; object-fit: contain;"
+            style="max-width: 100%; max-height: 140px; object-fit: contain;"
             alt="HTTP Test"
             @error="httpImgError = true"
             @load="httpImgError = false"
           />
-          <div v-if="httpImgError" class="text-danger text-xs mt-1">❌ Ошибка загрузки HTTP ссылки</div>
-          <div v-else class="text-success text-xs mt-1">✅ HTTP Изображение успешно загружено!</div>
+          <img
+            v-else
+            :src="httpBlobUrl"
+            style="max-width: 100%; max-height: 140px; object-fit: contain;"
+            alt="HTTP Blob Test"
+          />
+          <div v-if="httpImgError && !httpBlobUrl" class="text-danger text-xs mt-1">❌ Ошибка тега &lt;img&gt; (Cleartext/CORS блог)</div>
+          <div v-else-if="!httpBlobUrl" class="text-success text-xs mt-1">✅ Тег &lt;img&gt; успешно отобразил!</div>
+        </div>
+        <div v-if="httpFetchResult" class="p-2 mb-3 bg-secondary rounded text-xs style-mono text-white overflow-auto max-h-32">
+          <strong>Fetch результат HTTP:</strong><br/>
+          Status: {{ httpFetchResult.status }} {{ httpFetchResult.statusText }}<br/>
+          OK: {{ httpFetchResult.ok }} | Size: {{ httpFetchResult.size }} bytes<br/>
+          Err: {{ httpFetchResult.error || 'нет' }}
         </div>
 
-        <h5 class="va-h6 mb-2 text-primary">2. Вариант HTTPS (порт 8443)</h5>
+        <h5 class="va-h6 mb-1 text-primary">2. HTTPS (порт 8443 - SSL)</h5>
         <div class="text-xs text-secondary mb-2 break-all">
           URL: <code>https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg</code>
         </div>
-        <div class="border p-2 rounded text-center mb-4 bg-dark">
+        <div class="border p-2 rounded text-center mb-2 bg-dark">
           <img
+            v-if="!httpsBlobUrl"
             src="https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg"
-            style="max-width: 100%; max-height: 200px; object-fit: contain;"
+            style="max-width: 100%; max-height: 140px; object-fit: contain;"
             alt="HTTPS Test"
             @error="httpsImgError = true"
             @load="httpsImgError = false"
           />
-          <div v-if="httpsImgError" class="text-danger text-xs mt-1">❌ Ошибка загрузки HTTPS ссылки</div>
-          <div v-else class="text-success text-xs mt-1">✅ HTTPS Изображение успешно загружено!</div>
+          <img
+            v-else
+            :src="httpsBlobUrl"
+            style="max-width: 100%; max-height: 140px; object-fit: contain;"
+            alt="HTTPS Blob Test"
+          />
+          <div v-if="httpsImgError && !httpsBlobUrl" class="text-danger text-xs mt-1">❌ Ошибка тега &lt;img&gt; (SSL Cert / Self-signed блог)</div>
+          <div v-else-if="!httpsBlobUrl" class="text-success text-xs mt-1">✅ Тег &lt;img&gt; успешно отобразил!</div>
+        </div>
+        <div v-if="httpsFetchResult" class="p-2 mb-3 bg-secondary rounded text-xs style-mono text-white overflow-auto max-h-32">
+          <strong>Fetch результат HTTPS:</strong><br/>
+          Status: {{ httpsFetchResult.status }} {{ httpsFetchResult.statusText }}<br/>
+          OK: {{ httpsFetchResult.ok }} | Size: {{ httpsFetchResult.size }} bytes<br/>
+          Err: {{ httpsFetchResult.error || 'нет' }}
         </div>
 
         <div class="text-right">
@@ -613,6 +645,45 @@ export default defineComponent({
     const showDebugImgModal = ref(false)
     const httpImgError = ref(false)
     const httpsImgError = ref(false)
+    const testingFetch = ref(false)
+    const httpBlobUrl = ref('')
+    const httpsBlobUrl = ref('')
+    const httpFetchResult = ref<any>(null)
+    const httpsFetchResult = ref<any>(null)
+
+    const runFetchDiagnostics = async () => {
+      testingFetch.value = true
+      httpFetchResult.value = null
+      httpsFetchResult.value = null
+      httpBlobUrl.value = ''
+      httpsBlobUrl.value = ''
+
+      // 1. Test HTTP
+      try {
+        const res = await fetch('http://94.103.9.172:8089/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg')
+        const blob = await res.blob()
+        httpFetchResult.value = { status: res.status, statusText: res.statusText, ok: res.ok, size: blob.size }
+        if (res.ok && blob.size > 0) {
+          httpBlobUrl.value = URL.createObjectURL(blob)
+        }
+      } catch (err: any) {
+        httpFetchResult.value = { status: 0, statusText: 'Failed', ok: false, size: 0, error: String(err) }
+      }
+
+      // 2. Test HTTPS
+      try {
+        const res = await fetch('https://94.103.9.172:8443/uploads/chat/029c51c0-3bc9-4569-b49c-6247839105d0_1786616908.jpg')
+        const blob = await res.blob()
+        httpsFetchResult.value = { status: res.status, statusText: res.statusText, ok: res.ok, size: blob.size }
+        if (res.ok && blob.size > 0) {
+          httpsBlobUrl.value = URL.createObjectURL(blob)
+        }
+      } catch (err: any) {
+        httpsFetchResult.value = { status: 0, statusText: 'Failed', ok: false, size: 0, error: String(err) }
+      } finally {
+        testingFetch.value = false
+      }
+    }
 
     const topUpAmount = ref(100)
     const submitting = ref(false)
@@ -1459,6 +1530,12 @@ export default defineComponent({
       showDebugImgModal,
       httpImgError,
       httpsImgError,
+      testingFetch,
+      httpBlobUrl,
+      httpsBlobUrl,
+      httpFetchResult,
+      httpsFetchResult,
+      runFetchDiagnostics,
       showImagePreviewModal,
       previewImageUrl,
       openImagePreview,
