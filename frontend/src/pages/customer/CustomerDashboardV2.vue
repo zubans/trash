@@ -150,6 +150,15 @@
 
             <!-- Inline Accordion Chat Area -->
             <div v-if="openChatOrderId === order.id" class="inline-chat">
+              <!-- Hidden File Input for Image Attachments -->
+              <input
+                ref="chatFileInputRef"
+                type="file"
+                accept="image/*"
+                style="display: none"
+                @change="onChatFileSelected"
+              />
+
               <div ref="chatContainerRef" class="chat-msgs">
                 <div v-if="chatMessages.length === 0" class="text-center text-muted text-sm py-3">
                   Сообщений пока нет. Напишите первым!
@@ -160,20 +169,40 @@
                   :class="['msg', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
                   <div class="bubble">
-                    {{ msg.text }}
+                    <!-- Image Attachment -->
+                    <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                      <img
+                        :src="getImageSrc(msg.file_url)"
+                        alt="Фото"
+                        class="chat-img"
+                        @error="onChatImgError(msg.file_url)"
+                        @click="openImagePreview(getImageSrc(msg.file_url))"
+                      />
+                    </div>
+                    <span v-if="msg.text">{{ msg.text }}</span>
                   </div>
                 </div>
               </div>
 
               <div class="chat-input-area">
                 <form class="input-group" @submit.prevent="sendChatMessage">
+                  <button
+                    type="button"
+                    class="btn-attach"
+                    title="Прикрепить фото"
+                    :disabled="uploadingChatFile"
+                    @click="triggerImageSelect"
+                  >
+                    <i v-if="uploadingChatFile" class="ph ph-spinner spinner"></i>
+                    <i v-else class="ph-bold ph-image"></i>
+                  </button>
                   <input
                     v-model="chatInputText"
                     type="text"
                     class="inline-input"
                     placeholder="Написать сообщение исполнителю..."
                   />
-                  <button type="submit" class="btn-inline-send" :disabled="!chatInputText.trim()">
+                  <button type="submit" class="btn-inline-send" :disabled="!chatInputText.trim() && !uploadingChatFile">
                     <i class="ph-bold ph-paper-plane-tilt"></i>
                   </button>
                 </form>
@@ -305,6 +334,16 @@
         @add-new-address="addNewAddress"
         @remove-address="removeAddress"
       />
+
+      <!-- Image Preview Modal -->
+      <div v-if="showImagePreviewModal" class="img-preview-overlay" @click.self="showImagePreviewModal = false">
+        <div class="img-preview-card">
+          <button type="button" class="btn-close-preview" aria-label="Закрыть" @click="showImagePreviewModal = false">
+            <i class="ph ph-x"></i>
+          </button>
+          <img :src="previewImageUrl" alt="Предпросмотр" class="img-preview-full" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -318,7 +357,8 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
-import api, { buildChatWebSocketUrl } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
+import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
 export default defineComponent({
@@ -572,10 +612,97 @@ export default defineComponent({
     const chatMessages = ref<any[]>([])
     const chatInputText = ref('')
     const chatContainerRef = ref<any>(null)
+    const chatFileInputRef = ref<HTMLInputElement | null>(null)
+    const uploadingChatFile = ref(false)
+    const blobImageCache = ref<Record<string, string>>({})
+    const showImagePreviewModal = ref(false)
+    const previewImageUrl = ref('')
     const ws = ref<WebSocket | null>(null)
     let chatPollTimer: any = null
 
     const currentUserId = computed(() => authStore.userID)
+
+    const isImageAttachment = (msg: any) => {
+      if (!msg || !msg.file_url) return false
+      if (msg.file_type === 'image') return true
+      const url = msg.file_url.toLowerCase()
+      return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif')
+    }
+
+    const getImageSrc = (path?: string) => {
+      if (!path) return ''
+      if (blobImageCache.value[path]) {
+        return blobImageCache.value[path]
+      }
+      return resolveFileUrl(path)
+    }
+
+    const onChatImgError = async (path?: string) => {
+      if (!path || blobImageCache.value[path]) return
+      const fullUrl = resolveFileUrl(path)
+      try {
+        const res = await fetch(fullUrl)
+        if (res.ok) {
+          const blob = await res.blob()
+          if (blob.size > 0) {
+            blobImageCache.value[path] = URL.createObjectURL(blob)
+          }
+        }
+      } catch (err) {
+        console.warn('[CustomerDashboard] fetch blob fallback failed for:', fullUrl, err)
+      }
+    }
+
+    const openImagePreview = (url: string) => {
+      if (!url) return
+      previewImageUrl.value = url
+      showImagePreviewModal.value = true
+    }
+
+    const triggerImageSelect = () => {
+      if (chatFileInputRef.value) {
+        chatFileInputRef.value.click()
+      }
+    }
+
+    const onChatFileSelected = async (event: Event) => {
+      const target = event.target as HTMLInputElement
+      if (!target.files || target.files.length === 0 || !openChatOrderId.value) return
+      let file = target.files[0]
+      uploadingChatFile.value = true
+
+      try {
+        if (file.type.startsWith('image/')) {
+          file = await compressImage(file, 150, 300)
+        }
+
+        const formData = new FormData()
+        formData.append('file', file)
+        if (chatInputText.value.trim()) {
+          formData.append('text', chatInputText.value.trim())
+        }
+
+        const response = await api.post(`/chats/${openChatOrderId.value}/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+
+        const savedMsg = response.data
+        if (savedMsg) {
+          const exists = chatMessages.value.some((m: any) => m.id === savedMsg.id)
+          if (!exists) {
+            chatMessages.value.push(savedMsg)
+            scrollToChatBottom()
+          }
+        }
+        chatInputText.value = ''
+      } catch (err: any) {
+        console.error('[CustomerDashboard] chat file upload failed:', err)
+        errorMsg.value = 'Ошибка загрузки изображения'
+      } finally {
+        uploadingChatFile.value = false
+        target.value = ''
+      }
+    }
 
     const scrollToChatBottom = () => {
       nextTick(() => {
@@ -815,7 +942,17 @@ export default defineComponent({
       chatMessages,
       chatInputText,
       chatContainerRef,
+      chatFileInputRef,
+      uploadingChatFile,
+      showImagePreviewModal,
+      previewImageUrl,
       currentUserId,
+      isImageAttachment,
+      getImageSrc,
+      onChatImgError,
+      openImagePreview,
+      triggerImageSelect,
+      onChatFileSelected,
       toggleChat,
       sendChatMessage,
 
@@ -1796,6 +1933,105 @@ export default defineComponent({
 }
 .btn-inline-send:hover { background: #4f46e5; }
 .btn-inline-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-attach {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: var(--transition);
+}
+
+.btn-attach:hover {
+  color: var(--accent-main);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.chat-img-wrapper {
+  max-width: 220px;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.chat-img {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  display: block;
+  border-radius: 12px;
+  transition: transform 0.2s ease;
+}
+
+.chat-img:hover {
+  transform: scale(1.02);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Image Preview Modal */
+.img-preview-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10000;
+}
+
+.img-preview-card {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.img-preview-full {
+  max-width: 100%;
+  max-height: 85vh;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  object-fit: contain;
+}
+
+.btn-close-preview {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(15, 23, 42, 0.6);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  z-index: 10001;
+}
+
+.btn-close-preview:hover {
+  background: #ef4444;
+  color: white;
+  transform: scale(1.1);
+}
 
 @media (max-width: 600px) {
   .order-summary { flex-wrap: wrap; }
