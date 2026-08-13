@@ -404,15 +404,24 @@ export default defineComponent({
     const currentUserId = computed(() => authStore.user?.id || '')
 
     const fetchProfile = async () => {
+      if (authStore.user) {
+        phone.value = authStore.user.phone || authStore.phone || ''
+        balance.value = authStore.user.balance || authStore.balance || 0
+        status.value = authStore.user.status || authStore.status || 'ACTIVE'
+      }
       try {
         const res = await api.get('/auth/me')
         if (res.data) {
-          phone.value = res.data.phone || ''
-          balance.value = res.data.balance || 0
-          status.value = res.data.status || 'ACTIVE'
+          phone.value = res.data.phone || phone.value
+          balance.value = res.data.balance ?? balance.value
+          status.value = res.data.status || status.value
         }
       } catch (err) {
-        console.error(err)
+        // Fallback to authStore
+        if (authStore.user) {
+          phone.value = authStore.user.phone || ''
+          balance.value = authStore.user.balance || 0
+        }
       }
     }
 
@@ -524,13 +533,7 @@ export default defineComponent({
     }
 
     const openMapPicker = () => {
-      const latStr = prompt('Введите широту (Lat):', String(currentLat.value))
-      const lonStr = prompt('Введите долготу (Lon):', String(currentLon.value))
-      if (latStr && lonStr) {
-        currentLat.value = parseFloat(latStr)
-        currentLon.value = parseFloat(lonStr)
-        fetchAvailableOrders()
-      }
+      showExecutorMapModal.value = true
     }
 
     const onMapOrderAccepted = () => {

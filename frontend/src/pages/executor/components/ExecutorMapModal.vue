@@ -147,6 +147,15 @@ export default defineComponent({
           await handleManualLocationChange(position.lat, position.lng)
         })
 
+        // Move marker directly when clicking anywhere on the map
+        map.on('click', async (event: L.LeafletMouseEvent) => {
+          const { lat, lng } = event.latlng
+          if (userMarker) {
+            userMarker.setLatLng([lat, lng])
+          }
+          await handleManualLocationChange(lat, lng)
+        })
+
         markersLayer = L.layerGroup().addTo(map)
         fetchMapOrders()
       })
