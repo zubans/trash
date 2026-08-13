@@ -1161,7 +1161,16 @@ export default defineComponent({
       manualLat.value = lat
       manualLon.value = lon
       mapPickerVisible.value = true
+
       nextTick(() => {
+        // Fix Leaflet missing marker icon in bundled webview assets
+        delete (L.Icon.Default.prototype as any)._getIconUrl
+        L.Icon.Default.mergeOptions({
+          iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+          shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        })
+
         if (!mapInstance.value) {
           mapInstance.value = L.map('executor-map').setView([lat, lon], 14)
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1175,6 +1184,13 @@ export default defineComponent({
         } else {
           mapInstance.value.setView([lat, lon], 14)
         }
+
+        setTimeout(() => {
+          if (mapInstance.value) {
+            mapInstance.value.invalidateSize()
+          }
+        }, 150)
+
         updateMapMarker()
       })
     }

@@ -1,9 +1,18 @@
 <template>
   <va-modal
     v-model="show"
-    :title="$t('customer.createNewOrder')"
     hide-default-actions
+    max-width="500px"
   >
+    <template #header>
+      <div class="d-flex justify-content-between align-items-center w-100 p-3 pb-0">
+        <h3 class="va-h5 m-0 font-bold">{{ $t('customer.createNewOrder') }}</h3>
+        <button type="button" class="btn-close-modal border-0 bg-transparent text-secondary cursor-pointer" @click="show = false">
+          ✕
+        </button>
+      </div>
+    </template>
+
     <div class="p-2">
       <div class="mb-4">
         <div class="text-secondary text-sm mb-2">
@@ -71,9 +80,14 @@
         </div>
       </div>
 
-      <va-button color="success" block :loading="creatingOrder" @click="$emit('submitOrder')">
-        {{ $t('customer.createOrder') }}
-      </va-button>
+      <div class="d-flex gap-2">
+        <va-button color="secondary" outline block @click="show = false">
+          {{ $t('common.cancel') }}
+        </va-button>
+        <va-button color="success" block :loading="creatingOrder" @click="$emit('submitOrder')">
+          {{ $t('customer.createOrder') }}
+        </va-button>
+      </div>
     </div>
   </va-modal>
 </template>
@@ -121,3 +135,14 @@ export default defineComponent({
   },
 })
 </script>
+
+<style scoped>
+.btn-close-modal {
+  font-size: 18px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.btn-close-modal:hover {
+  opacity: 1;
+}
+</style>

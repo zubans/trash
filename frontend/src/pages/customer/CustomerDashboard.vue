@@ -5,7 +5,9 @@
       :phone="phone"
       :balance="balance"
       :currency-symbol="currencySymbol"
+      :is-verified="isVerified"
       @logout="handleLogout"
+      @open-profile-modal="showProfileModal = true"
     />
 
     <update-banner />
@@ -179,6 +181,18 @@
         </va-form>
       </div>
     </va-modal>
+
+    <!-- Customer Profile Modal -->
+    <CustomerProfileModal
+      v-model="showProfileModal"
+      v-model:new-address-input="newAddressInput"
+      :is-verified="isVerified"
+      :customer-addresses="customerAddresses"
+      :default-address="defaultAddress"
+      @set-active-address="setActiveAddress"
+      @add-new-address="addNewAddress"
+      @remove-address="removeAddress"
+    />
 
     <!-- Top Floating Toast Notification for Incoming Messages -->
     <div
@@ -473,6 +487,7 @@ import CustomerHeader from './components/CustomerHeader.vue'
 import OrderHistoryCard from './components/OrderHistoryCard.vue'
 import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
+import CustomerProfileModal from './components/CustomerProfileModal.vue'
 
 export default defineComponent({
   name: 'CustomerDashboard',
@@ -483,6 +498,7 @@ export default defineComponent({
     OrderHistoryCard,
     OrderDetailsModal,
     CreateOrderModal,
+    CustomerProfileModal,
   },
   setup() {
     const router = useRouter()
