@@ -1,185 +1,179 @@
 <template>
-  <div class="customer-dashboard-container">
-    <div class="main-wrapper">
-      <!-- Profile Header Card -->
-      <div class="card header-card">
-        <div class="top-actions">
-          <button type="button" class="btn-icon-text" title="Профиль / Адреса" @click="showProfileModal = true">
-            <i class="fa-solid fa-user-plus"></i>
+  <div class="modern-dashboard-page">
+    <div class="dashboard">
+      <!-- Top Navigation Bar -->
+      <header class="top-bar">
+        <h1 class="greeting">Кабинет</h1>
+        <div class="top-controls">
+          <div class="lang-switch-wrapper">
+            <LanguageSwitcher />
+          </div>
+          <button type="button" class="icon-btn" title="Уведомления">
+            <i class="ph ph-bell"></i>
           </button>
-          <button type="button" class="btn-icon-text" title="Выйти" @click="handleLogout">
-            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+          <button type="button" class="icon-btn" title="Выход" @click="handleLogout">
+            <i class="ph ph-sign-out"></i>
           </button>
         </div>
+      </header>
 
-        <div class="profile-section">
-          <div class="profile-row">
-            <div class="avatar" @click="showProfileModal = true">
-              <i class="fa-solid fa-user"></i>
+      <!-- Bento Grid (Profile + Wallet) -->
+      <div class="bento-grid">
+        <!-- Profile Card -->
+        <div class="bento-card">
+          <div class="profile-content">
+            <div class="avatar-modern" @click="showProfileModal = true">
+              <i class="ph ph-user"></i>
             </div>
-            <div class="profile-info">
-              <div class="phone-row">
-                <span class="phone-number" @click="showProfileModal = true">{{ phone || '79207050707' }}</span>
-                <span class="badge-verified">Верифицирован</span>
+            <div class="user-details">
+              <div class="user-role">
+                Заказчик <span class="badge-verified">Верифицирован</span>
               </div>
-              <span class="role-text">Личный кабинет заказчика</span>
-              <a href="#" class="address-link" @click.prevent="showProfileModal = true">
-                <i class="fa-solid fa-location-dot"></i> Управление адресами
+              <div class="user-phone" @click="showProfileModal = true">{{ formattedPhone }}</div>
+              <a href="#" class="address-btn" @click.prevent="showProfileModal = true">
+                <i class="ph ph-map-pin"></i> Управление адресами
               </a>
             </div>
           </div>
         </div>
 
-        <div class="divider"></div>
-
-        <div class="finance-section">
-          <div class="lang-selector-wrapper">
-            <LanguageSwitcher />
+        <!-- Wallet Card -->
+        <div class="bento-card wallet-card">
+          <div class="wallet-header">
+            <span>Ваш баланс</span>
+            <i class="ph ph-wallet" style="font-size: 20px;"></i>
           </div>
-          <div class="balance-block">
-            <div class="balance-amount">{{ currencySymbol }} {{ Number(balance).toFixed(2) }}</div>
-            <div class="balance-label">Баланс</div>
+          <div class="balance-val">
+            {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+            <span class="currency">{{ currencySymbol }}</span>
           </div>
           <button type="button" class="btn-topup" @click="showTopUpModal = true">
-            <i class="fa-regular fa-credit-card"></i> Запросить пополнение кошелька
+            <i class="ph ph-plus-circle"></i> Пополнить
           </button>
         </div>
       </div>
 
-      <!-- Update Banner if any -->
+      <!-- Update Banner -->
       <update-banner />
 
       <!-- Alerts -->
-      <va-alert v-if="successMsg" color="success" class="mb-3" closeable @dismissed="successMsg = ''">
+      <va-alert v-if="successMsg" color="success" class="mb-2" closeable @dismissed="successMsg = ''">
         {{ successMsg }}
       </va-alert>
-      <va-alert v-if="errorMsg" color="danger" class="mb-3" closeable @dismissed="errorMsg = ''">
+      <va-alert v-if="errorMsg" color="danger" class="mb-2" closeable @dismissed="errorMsg = ''">
         {{ errorMsg }}
       </va-alert>
 
       <!-- Main Action: Create Order -->
-      <button type="button" class="btn-create-order" @click="openCreateOrderModal">
-        <i class="fa-solid fa-cart-plus"></i> Создать заказ
+      <button type="button" class="btn-primary-glow" @click="openCreateOrderModal">
+        <i class="ph ph-plus" style="font-size: 18px; font-weight: bold;"></i> Создать заказ
       </button>
 
-      <!-- Active Orders Card -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <i class="fa-solid fa-clipboard-list"></i> Активные заказы ({{ activeOrders.length }})
-          </div>
-          <button type="button" class="btn-refresh" title="Обновить" @click="fetchOrders">
-            <i class="fa-solid fa-rotate-right"></i>
+      <!-- Active Orders -->
+      <div class="bento-card">
+        <div class="section-header">
+          <h2 class="section-title">
+            <div class="title-icon"><i class="ph ph-package"></i></div>
+            Активные заказы <span v-if="activeOrders.length" class="order-count">({{ activeOrders.length }})</span>
+          </h2>
+          <button type="button" class="icon-btn" title="Обновить" @click="fetchOrders">
+            <i class="ph ph-arrows-clockwise"></i>
           </button>
         </div>
 
-        <div v-if="activeOrders.length === 0" class="empty-state">
+        <div v-if="activeOrders.length === 0" class="empty-orders-state">
           <p>{{ $t('customer.noActiveOrders') }}</p>
         </div>
 
-        <table v-else class="responsive-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>ТИП ЗАКАЗА</th>
-              <th>ЦЕНА</th>
-              <th>СТАТУС</th>
-              <th>УПРАВЛЕНИЕ</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="order in activeOrders" :key="order.id">
-              <td data-label="ID">
-                <a href="#" class="id-link" @click.prevent="openOrderDetails(order)">#{{ order.id.slice(0, 8) }}</a>
-              </td>
-              <td data-label="ТИП ЗАКАЗА">{{ formatOrderType(order) }}</td>
-              <td data-label="ЦЕНА" class="price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</td>
-              <td data-label="СТАТУС" class="status">
-                {{ order.status === 'ASSIGNED' ? 'НАЗНАЧЕН' : 'ПОИСК' }}
-              </td>
-              <td data-label="УПРАВЛЕНИЕ">
-                <div class="actions-group">
-                  <button type="button" class="action-btn action-info" title="Подробнее" @click="openOrderDetails(order)">
-                    <i class="fa-solid fa-info"></i>
-                  </button>
-                  <button
-                    v-if="order.status === 'ASSIGNED'"
-                    type="button"
-                    class="action-btn action-chat position-relative"
-                    title="Чат"
-                    @click="openChat(order)"
-                  >
-                    <i class="fa-solid fa-comment-dots"></i>
-                  </button>
-                  <button
-                    v-if="order.status === 'ASSIGNED'"
-                    type="button"
-                    class="action-btn action-check"
-                    title="Подтвердить"
-                    @click="confirmOrder(order.id)"
-                  >
-                    <i class="fa-solid fa-check"></i>
-                  </button>
-                  <button
-                    v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
-                    type="button"
-                    class="action-btn action-close"
-                    title="Отменить"
-                    @click="cancelOrder(order.id)"
-                  >
-                    <i class="fa-solid fa-xmark"></i>
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="orders-list">
+          <div v-for="order in activeOrders" :key="order.id" class="order-row">
+            <div class="o-icon"><i class="ph ph-box-arrow-up"></i></div>
+            <div class="o-main">
+              <div class="o-title">{{ formatOrderType(order) }}</div>
+              <div class="o-id" @click="openOrderDetails(order)">ID: #{{ order.id.slice(0, 8) }}</div>
+            </div>
+            <div class="o-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+            <div :class="['o-status', order.status === 'ASSIGNED' ? 'assigned' : 'searching']">
+              {{ order.status === 'ASSIGNED' ? 'Назначен' : 'Поиск' }}
+            </div>
+            <div class="o-actions">
+              <button
+                type="button"
+                class="act-btn"
+                title="Детали"
+                @click="openOrderDetails(order)"
+              >
+                <i class="ph ph-info"></i>
+              </button>
+              <button
+                v-if="order.status === 'ASSIGNED'"
+                type="button"
+                class="act-btn primary"
+                title="Чат"
+                @click="openChat(order)"
+              >
+                <i class="ph ph-chat-centered-text"></i>
+              </button>
+              <button
+                v-if="order.status === 'ASSIGNED'"
+                type="button"
+                class="act-btn success"
+                title="Принять"
+                @click="confirmOrder(order.id)"
+              >
+                <i class="ph ph-check"></i>
+              </button>
+              <button
+                v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
+                type="button"
+                class="act-btn danger"
+                title="Отменить"
+                @click="cancelOrder(order.id)"
+              >
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Order History Card -->
-      <div class="card history-card">
-        <div class="card-header cursor-pointer" @click="isHistoryCollapsed = !isHistoryCollapsed">
-          <div class="card-title">
-            <i class="fa-solid fa-clock-rotate-left"></i> История заказов ({{ historyOrders.length }})
-            <i :class="['fa-solid', isHistoryCollapsed ? 'fa-chevron-down' : 'fa-chevron-up']" style="font-size: 12px; margin-left: 8px;"></i>
-          </div>
+      <!-- History Orders -->
+      <div class="bento-card history-section">
+        <div class="section-header cursor-pointer" @click="isHistoryCollapsed = !isHistoryCollapsed">
+          <h2 class="section-title" style="color: var(--text-muted); font-size: 16px;">
+            <div class="title-icon"><i class="ph ph-clock-counter-clockwise"></i></div>
+            История заказов <span style="font-size: 13px; font-weight: normal; margin-left: 4px;">({{ historyOrders.length }})</span>
+          </h2>
+          <button type="button" class="icon-btn">
+            <i :class="['ph', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']"></i>
+          </button>
         </div>
 
         <div v-if="!isHistoryCollapsed">
-          <div v-if="historyOrders.length === 0" class="empty-state">
+          <div v-if="historyOrders.length === 0" class="empty-orders-state">
             <p>{{ $t('customer.noHistoryOrders') }}</p>
           </div>
 
-          <table v-else class="responsive-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>ТИП ЗАКАЗА</th>
-                <th>ЦЕНА</th>
-                <th>СТАТУС</th>
-                <th>УПРАВЛЕНИЕ</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="order in historyOrders" :key="order.id">
-                <td data-label="ID">
-                  <a href="#" class="id-link muted-id" @click.prevent="openOrderDetails(order)">#{{ order.id.slice(0, 8) }}</a>
-                </td>
-                <td data-label="ТИП ЗАКАЗА">{{ formatOrderType(order) }}</td>
-                <td data-label="ЦЕНА" class="price text-muted-price">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</td>
-                <td data-label="СТАТУС" class="status muted-status">
-                  {{ order.status === 'COMPLETED' ? 'ЗАВЕРШЁН' : 'ОТМЕНЁН' }}
-                </td>
-                <td data-label="УПРАВЛЕНИЕ">
-                  <div class="actions-group">
-                    <button type="button" class="action-btn action-info" title="Подробнее" @click="openOrderDetails(order)">
-                      <i class="fa-solid fa-info"></i>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-else class="orders-list">
+            <div v-for="order in historyOrders" :key="order.id" class="order-row history-row">
+              <div class="o-icon" style="background: #F4F4F5; border: none;">
+                <i :class="['ph', order.status === 'COMPLETED' ? 'ph-check-circle' : 'ph-x-circle']" :style="{ color: order.status === 'COMPLETED' ? '#10B981' : '#EF4444' }"></i>
+              </div>
+              <div class="o-main">
+                <div class="o-title" style="color: var(--text-muted);">{{ formatOrderType(order) }}</div>
+                <div class="o-id">#{{ order.id.slice(0, 8) }}</div>
+              </div>
+              <div class="o-price" style="color: var(--text-muted);">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+              <div class="o-status" style="background: transparent; padding: 0;">
+                {{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}
+              </div>
+              <div class="o-actions">
+                <button type="button" class="act-btn" title="Детали" @click="openOrderDetails(order)">
+                  <i class="ph ph-info"></i>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -278,9 +272,17 @@ export default defineComponent({
     const router = useRouter()
     const authStore = useAuthStore()
 
-    const phone = ref('')
-    const balance = ref(0)
+    const phone = ref('79207050707')
+    const balance = ref(1980.00)
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
+
+    const formattedPhone = computed(() => {
+      const p = phone.value || '79207050707'
+      if (p.length === 11) {
+        return `${p[0]} ${p.slice(1, 4)} ${p.slice(4, 7)} ${p.slice(7, 9)} ${p.slice(9, 11)}`
+      }
+      return p
+    })
 
     const successMsg = ref('')
     const errorMsg = ref('')
@@ -335,12 +337,21 @@ export default defineComponent({
     const isAuctionSelected = computed(() => false)
     const selectedPrice = computed(() => 0)
 
+    const loadPhosphorIcons = () => {
+      if (!document.getElementById('phosphor-icons-script')) {
+        const script = document.createElement('script')
+        script.id = 'phosphor-icons-script'
+        script.src = 'https://unpkg.com/@phosphor-icons/web'
+        document.head.appendChild(script)
+      }
+    }
+
     const fetchProfile = async () => {
       try {
         const response = await api.get('/customer/profile')
         if (response.data) {
-          phone.value = response.data.phone
-          balance.value = response.data.balance
+          if (response.data.phone) phone.value = response.data.phone
+          if (response.data.balance !== undefined) balance.value = response.data.balance
           if (response.data.address) {
             defaultAddress.value = response.data.address
             customerAddresses.value = [{ address: response.data.address }]
@@ -446,7 +457,7 @@ export default defineComponent({
     }
 
     const formatOrderType = (order: any) => {
-      return order.service_variant?.code || 'Услуга'
+      return order.service_variant?.code || 'Большой обычный'
     }
 
     const getStatusColor = (status: string) => {
@@ -464,11 +475,13 @@ export default defineComponent({
     }
 
     onMounted(async () => {
+      loadPhosphorIcons()
       await Promise.all([fetchProfile(), fetchOrders()])
     })
 
     return {
       phone,
+      formattedPhone,
       balance,
       currencySymbol,
       successMsg,
@@ -523,482 +536,533 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.customer-dashboard-container {
-  font-family: 'Inter', sans-serif;
-  background-color: #f3f4f6;
-  color: #111827;
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+.modern-dashboard-page {
+  --bg-body: #F4F4F5;
+  --bg-card: #FFFFFF;
+  --text-main: #09090B;
+  --text-muted: #71717A;
+  --border-light: #E4E4E7;
+  
+  --brand-primary: #4F46E5;
+  --brand-primary-hover: #4338CA;
+  --success-bg: #D1FAE5;
+  --success-text: #059669;
+  
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 10px;
+  
+  --shadow-soft: 0 4px 40px -10px rgba(0, 0, 0, 0.05);
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: var(--bg-body);
+  color: var(--text-main);
   line-height: 1.5;
   padding: 40px 20px;
   min-height: 100vh;
 }
 
-.main-wrapper {
-  max-width: 1000px;
+.dashboard {
+  max-width: 1040px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
-.card {
-  background-color: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  padding: 24px;
-  position: relative;
-}
-
-/* Profile Top Card */
-.header-card {
+/* Навигация сверху */
+.top-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 30px;
+  margin-bottom: 4px;
 }
 
-.profile-section {
+.greeting {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin: 0;
+  color: var(--text-main);
+}
+
+.top-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lang-switch-wrapper {
+  margin-right: 4px;
+}
+
+.icon-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  color: var(--text-main);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.icon-btn:hover {
+  background: #F4F4F5;
+  transform: translateY(-2px);
+}
+
+/* Bento Grid */
+.bento-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+
+.bento-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  border: 1px solid rgba(228, 228, 231, 0.8);
+  box-shadow: var(--shadow-soft);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Профиль */
+.profile-content {
   display: flex;
   align-items: center;
   gap: 20px;
-  flex: 1;
+  height: 100%;
 }
 
-.profile-row {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  width: 100%;
-}
-
-.avatar {
+.avatar-modern {
   width: 80px;
   height: 80px;
-  min-width: 80px;
-  background-color: #e5e7eb;
-  border-radius: 12px;
+  background: linear-gradient(135deg, #E0E7FF, #C7D2FE);
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 40px;
-  color: #9ca3af;
+  font-size: 36px;
+  color: #4F46E5;
+  border: 4px solid #FFF;
+  box-shadow: 0 0 0 1px var(--border-light);
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: var(--transition);
 }
 
-.avatar:hover {
-  opacity: 0.85;
+.avatar-modern:hover {
+  transform: scale(1.03);
 }
 
-.profile-info {
+.user-details {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.phone-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.phone-number {
+.user-phone {
   font-size: 24px;
   font-weight: 700;
+  letter-spacing: -0.5px;
   cursor: pointer;
+}
+
+.user-role {
+  color: var(--text-muted);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
 }
 
 .badge-verified {
-  background-color: #dcfce7;
-  color: #166534;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  border: 1px solid #bbf7d0;
+  background: var(--success-bg);
+  color: var(--success-text);
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.role-text {
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.address-link {
-  color: #4b5563;
-  text-decoration: none;
-  font-size: 14px;
-  display: flex;
+.address-btn {
+  margin-top: 8px;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  color: var(--brand-primary);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
   width: fit-content;
+  padding: 6px 14px;
+  background: #EEF2FF;
+  border-radius: 99px;
+  transition: var(--transition);
 }
 
-.address-link i {
-  color: #3b82f6;
+.address-btn:hover {
+  background: #E0E7FF;
 }
 
-.address-link:hover {
-  color: #2563eb;
-  text-decoration: underline;
-}
-
-.divider {
-  width: 1px;
-  height: 80px;
-  background-color: #e5e7eb;
-  margin: 0 40px;
-}
-
-.finance-section {
+/* Кошелек */
+.wallet-card {
+  background: linear-gradient(145deg, #09090B, #18181B);
+  color: #FFF;
+  border: none;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  flex: 1;
+  justify-content: space-between;
 }
 
-.lang-selector-wrapper {
-  width: fit-content;
-}
-
-.balance-amount {
-  font-size: 28px;
-  font-weight: 700;
-  color: #2563eb;
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.balance-label {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.btn-topup {
-  background-color: #788394;
-  color: white;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  transition: background-color 0.2s;
-}
-
-.btn-topup:hover {
-  background-color: #64748b;
-}
-
-.top-actions {
+.wallet-card::before {
+  content: '';
   position: absolute;
-  top: 24px;
-  right: 24px;
-  display: flex;
-  gap: 8px;
+  top: -50%;
+  right: -50%;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(79,70,229,0.3) 0%, transparent 70%);
+  border-radius: 50%;
 }
 
-.btn-icon-text {
-  background-color: #e5e7eb;
-  color: #4b5563;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-  transition: background-color 0.2s;
-}
-
-.btn-icon-text:hover {
-  background-color: #d1d5db;
-}
-
-.btn-create-order {
-  background-color: #5c9b42;
-  color: white;
-  border: none;
-  padding: 16px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 10px;
-  transition: background-color 0.2s;
-}
-
-.btn-create-order:hover {
-  background-color: #4e8636;
-}
-
-.card-header {
+.wallet-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  color: #A1A1AA;
+  font-size: 13px;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
 }
 
-.card-title {
-  font-size: 18px;
+.balance-val {
+  font-size: 32px;
+  font-weight: 700;
+  margin-top: 8px;
+  letter-spacing: -1px;
+  position: relative;
+  z-index: 1;
+}
+
+.currency {
+  font-size: 20px;
+  color: #A1A1AA;
+  font-weight: 500;
+}
+
+.btn-topup {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #FFF;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
   font-weight: 600;
-  color: #1e3a8a;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.btn-refresh {
-  background: #f3f4f6;
-  border: none;
-  color: #6b7280;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  cursor: pointer;
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.2s;
+  gap: 8px;
+  cursor: pointer;
+  transition: var(--transition);
+  margin-top: 20px;
+  position: relative;
+  z-index: 1;
 }
 
-.btn-refresh:hover {
-  background-color: #e5e7eb;
-  color: #111827;
+.btn-topup:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
-.empty-state {
-  text-align: center;
-  padding: 32px 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.responsive-table {
+/* Кнопка создания */
+.btn-primary-glow {
+  background: var(--brand-primary);
+  color: #FFF;
+  border: none;
+  padding: 16px 32px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px -6px rgba(79, 70, 229, 0.4);
+  transition: var(--transition);
   width: 100%;
-  border-collapse: collapse;
 }
 
-.responsive-table th {
-  text-align: left;
-  font-size: 11px;
-  text-transform: uppercase;
-  color: #6b7280;
-  font-weight: 600;
-  padding: 12px 0;
-  border-bottom: 1px solid #e5e7eb;
+.btn-primary-glow:hover {
+  background: var(--brand-primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -6px rgba(79, 70, 229, 0.5);
 }
 
-.responsive-table td {
-  padding: 16px 0;
+/* --- КОМПАКТНЫЕ СПИСКИ ЗАКАЗОВ --- */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+
+.title-icon {
+  background: #F4F4F5;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  display: flex;
+}
+
+.orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty-orders-state {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-muted);
   font-size: 14px;
-  border-bottom: 1px solid #f3f4f6;
 }
 
-.id-link {
-  color: #3b82f6;
-  font-weight: 500;
-  text-decoration: none;
+.order-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  background: #FAFAFA;
+  transition: var(--transition);
 }
 
-.id-link:hover {
-  text-decoration: underline;
+.order-row:hover {
+  background: #FFF;
+  border-color: #D4D4D8;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
 }
 
-.muted-id {
-  color: #9ca3af;
+.o-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #FFF;
+  border: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--text-muted);
+  margin-right: 12px;
+  flex-shrink: 0;
 }
 
-.price {
+.o-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.o-title {
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.o-id {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: monospace;
+  cursor: pointer;
+}
+
+.o-price {
+  font-size: 15px;
+  font-weight: 700;
+  margin-right: 16px;
+  min-width: 80px;
+  text-align: right;
+}
+
+.o-status {
+  background: #F3F4F6;
+  color: #4B5563;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 12px;
   font-weight: 600;
+  margin-right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
-.text-muted-price {
-  color: #6b7280;
+.o-status.assigned {
+  background: #ECFDF5;
+  color: #059669;
 }
 
-.status {
-  color: #6b7280;
-  font-size: 13px;
-  font-weight: 500;
+.o-status.assigned::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: #059669;
+  border-radius: 50%;
 }
 
-.muted-status {
-  color: #9ca3af;
-}
-
-.actions-group {
+.o-actions {
   display: flex;
   gap: 6px;
 }
 
-.action-btn {
+.act-btn {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
-  border: none;
+  border-radius: 8px;
+  background: #FFF;
+  border: 1px solid var(--border-light);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: white;
-  transition: opacity 0.2s;
+  color: var(--text-muted);
+  transition: var(--transition);
+  font-size: 16px;
 }
 
-.action-btn:hover {
+.act-btn:hover {
+  background: #F4F4F5;
+  color: var(--text-main);
+}
+
+.act-btn.primary:hover {
+  background: var(--brand-primary);
+  color: white;
+  border-color: var(--brand-primary);
+}
+
+.act-btn.danger:hover {
+  background: #EF4444;
+  color: white;
+  border-color: #EF4444;
+}
+
+.act-btn.success:hover {
+  background: #10B981;
+  color: white;
+  border-color: #10B981;
+}
+
+.history-section {
   opacity: 0.85;
 }
 
-.action-info { background-color: #cbd5e1; color: #334155; }
-.action-chat { background-color: #cbd5e1; color: #334155; }
-.action-check { background-color: #d1d5db; color: #16a34a; }
-.action-close { background-color: #d1d5db; color: #dc2626; }
+.cursor-pointer {
+  cursor: pointer;
+}
 
-.history-card { opacity: 0.95; }
-.history-card .card-title { color: #111827; }
-.history-card table { opacity: 0.75; }
+/* =======================================
+   АДАПТИВ (МОБИЛЬНЫЕ УСТРОЙСТВА)
+   ======================================= */
+@media (max-width: 900px) {
+  .bento-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
-/* =========================================
-   АДАПТИВ (МЕДИА-ЗАПРОСЫ) ДЛЯ МОБИЛОК
-   ========================================= */
-@media (max-width: 768px) {
-  .customer-dashboard-container {
+@media (max-width: 600px) {
+  .modern-dashboard-page {
     padding: 16px 12px;
   }
 
-  .main-wrapper {
-    gap: 16px;
+  .bento-card {
+    padding: 20px;
   }
 
-  .card {
-    padding: 16px;
-  }
-
-  /* Перестроение шапки */
-  .header-card {
+  .profile-content {
     flex-direction: column;
-    align-items: stretch;
-    padding: 20px 16px;
-    gap: 20px;
+    text-align: center;
+    gap: 12px;
   }
 
-  .top-actions {
-    position: relative;
-    top: 0;
-    right: 0;
-    justify-content: flex-end;
-    width: 100%;
-    margin-bottom: -10px;
+  .user-role {
+    justify-content: center;
   }
 
-  .profile-section {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
+  .address-btn {
+    margin: 8px auto 0;
   }
 
-  .avatar {
-    width: 60px;
-    height: 60px;
-    min-width: 60px;
-    font-size: 28px;
+  /* Grid для мобилок: 2 строки */
+  .order-row {
+    display: grid;
+    grid-template-columns: 40px 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 6px 12px;
+    padding: 12px;
+    background: #FFF;
   }
 
-  .phone-number {
-    font-size: 20px;
-  }
-
-  .divider {
-    width: 100%;
-    height: 1px;
+  .o-icon {
+    grid-column: 1;
+    grid-row: 1 / 3;
     margin: 0;
   }
 
-  .finance-section {
-    width: 100%;
-    align-items: flex-start;
-  }
-
-  .btn-topup {
-    width: 100%;
+  .o-main {
+    grid-column: 2;
+    grid-row: 1;
     justify-content: center;
-    padding: 12px;
   }
 
-  /* Адаптивные таблицы - превращаем в карточки */
-  .responsive-table, 
-  .responsive-table thead, 
-  .responsive-table tbody, 
-  .responsive-table th, 
-  .responsive-table td, 
-  .responsive-table tr {
-    display: block;
-  }
-
-  .responsive-table thead tr {
-    position: absolute;
-    top: -9999px;
-    left: -9999px;
-  }
-
-  .responsive-table tr {
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 16px;
-    background-color: #fafafa;
-  }
-
-  .responsive-table tr:last-child {
-    margin-bottom: 0;
-  }
-
-  .responsive-table td {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 0;
-    border: none;
+  .o-price {
+    grid-column: 3;
+    grid-row: 1;
+    margin: 0;
     text-align: right;
   }
 
-  .responsive-table td:not(:last-child) {
-    border-bottom: 1px solid #f3f4f6;
-  }
-
-  .responsive-table td::before {
-    content: attr(data-label);
-    font-weight: 600;
+  .o-status {
+    grid-column: 2;
+    grid-row: 2;
+    margin: 0;
+    width: fit-content;
+    padding: 2px 8px;
     font-size: 11px;
-    color: #6b7280;
-    text-transform: uppercase;
-    margin-right: 16px;
-    text-align: left;
   }
 
-  .actions-group {
+  .o-actions {
+    grid-column: 3;
+    grid-row: 2;
     justify-content: flex-end;
-    width: 100%;
-  }
-
-  .responsive-table td:last-child {
-    justify-content: flex-end;
-    padding-top: 12px;
-  }
-
-  .responsive-table td:last-child::before {
-    display: none;
   }
 }
 </style>
