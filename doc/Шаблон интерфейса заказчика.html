@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Личный кабинет заказчика</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -23,6 +23,7 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
+            -webkit-tap-highlight-color: transparent; /* Убирает синюю подсветку при тапе на Android */
         }
 
         body {
@@ -67,6 +68,7 @@
         .avatar {
             width: 80px;
             height: 80px;
+            min-width: 80px;
             background-color: #e5e7eb;
             border-radius: 12px;
             display: flex;
@@ -86,6 +88,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .phone-number {
@@ -116,14 +119,11 @@
             align-items: center;
             gap: 6px;
             margin-top: 4px;
+            width: fit-content;
         }
         
         .address-link i {
             color: var(--primary-blue);
-        }
-
-        .address-link:hover {
-            text-decoration: underline;
         }
 
         .divider {
@@ -161,6 +161,7 @@
             display: flex;
             align-items: baseline;
             gap: 4px;
+            flex-wrap: wrap;
         }
 
         .balance-label {
@@ -181,10 +182,6 @@
             gap: 8px;
             width: fit-content;
             transition: background-color 0.2s;
-        }
-
-        .btn-topup:hover {
-            background-color: #5c6574;
         }
 
         .top-actions {
@@ -208,12 +205,7 @@
             gap: 6px;
             font-weight: 500;
         }
-        
-        .btn-icon-text:hover {
-            background-color: #d1d5db;
-        }
 
-        /* Main Create Order Button */
         .btn-create-order {
             background-color: var(--btn-green);
             color: white;
@@ -231,11 +223,6 @@
             transition: background-color 0.2s;
         }
 
-        .btn-create-order:hover {
-            background-color: var(--btn-green-hover);
-        }
-
-        /* Tables Card */
         .card-header {
             display: flex;
             justify-content: space-between;
@@ -263,10 +250,6 @@
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-
-        .btn-refresh:hover {
-            background: #e5e7eb;
         }
 
         table {
@@ -311,43 +294,153 @@
         }
 
         .action-btn {
-            width: 28px;
-            height: 28px;
-            border-radius: 4px;
+            width: 32px; /* Увеличил для мобилок (удобнее нажимать) */
+            height: 32px;
+            border-radius: 6px;
             border: none;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             color: white;
-            transition: opacity 0.2s;
-        }
-        
-        .action-btn:hover {
-            opacity: 0.8;
         }
 
-        /* Muted button styles from the mockup */
         .action-info { background-color: #cbd5e1; }
         .action-chat { background-color: #cbd5e1; }
         .action-check { background-color: #d1d5db; color: #4ade80;}
         .action-close { background-color: #d1d5db; color: #f87171;}
 
-        .action-check:hover { background-color: #4ade80; color: white;}
-        .action-close:hover { background-color: #f87171; color: white;}
-        .action-info:hover { background-color: #3b82f6; color: white;}
-        .action-chat:hover { background-color: #0ea5e9; color: white;}
+        .history-card { opacity: 0.85; }
+        .history-card .card-title { color: var(--text-main); }
+        .history-card table { opacity: 0.6; }
 
+        /* =========================================
+           АДАПТИВ (МЕДИА-ЗАПРОСЫ) ДЛЯ МОБИЛОК/VITE
+           ========================================= */
+        @media (max-width: 768px) {
+            body {
+                padding: 16px 12px;
+                background-color: var(--bg-color);
+            }
 
-        /* Faded History */
-        .history-card {
-            opacity: 0.85;
-        }
-        .history-card .card-title {
-            color: var(--text-main);
-        }
-        .history-card table {
-            opacity: 0.6;
+            .container {
+                gap: 16px;
+            }
+
+            .card {
+                padding: 16px;
+            }
+
+            /* Перестроение шапки */
+            .header-card {
+                flex-direction: column;
+                align-items: stretch;
+                padding: 20px 16px;
+                gap: 20px;
+            }
+
+            .top-actions {
+                position: relative;
+                top: 0;
+                right: 0;
+                justify-content: flex-end;
+                width: 100%;
+                margin-bottom: -10px;
+            }
+
+            .profile-section {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 16px;
+            }
+
+            .avatar {
+                width: 60px;
+                height: 60px;
+                min-width: 60px;
+                font-size: 28px;
+            }
+
+            .phone-number {
+                font-size: 20px;
+            }
+
+            .divider {
+                width: 100%;
+                height: 1px;
+                margin: 0;
+            }
+
+            .finance-section {
+                width: 100%;
+                align-items: flex-start;
+            }
+
+            .btn-topup {
+                width: 100%;
+                justify-content: center;
+                padding: 12px;
+            }
+
+            /* Адаптивные таблицы - превращаем в карточки */
+            table, thead, tbody, th, td, tr {
+                display: block;
+            }
+
+            thead tr {
+                position: absolute;
+                top: -9999px;
+                left: -9999px;
+            }
+
+            tr {
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                padding: 12px;
+                margin-bottom: 16px;
+                background-color: #fafafa;
+            }
+
+            tr:last-child {
+                margin-bottom: 0;
+            }
+
+            td {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 0;
+                border: none;
+                text-align: right;
+            }
+            
+            td:not(:last-child) {
+                border-bottom: 1px solid #f3f4f6;
+            }
+
+            td::before {
+                content: attr(data-label);
+                font-weight: 600;
+                font-size: 11px;
+                color: var(--text-muted);
+                text-transform: uppercase;
+                margin-right: 16px;
+                text-align: left;
+            }
+
+            .actions-group {
+                justify-content: flex-end;
+                width: 100%;
+            }
+            
+            /* Фикс для колонки управления, чтобы скрыть лейбл, если он мешает */
+            td:last-child {
+                justify-content: flex-end;
+                padding-top: 12px;
+            }
+            td:last-child::before {
+                display: none;
+            }
         }
     </style>
 </head>
@@ -358,22 +451,24 @@
     <div class="card header-card">
         <div class="top-actions">
             <button class="btn-icon-text"><i class="fa-solid fa-user-plus"></i></button>
-            <button class="btn-icon-text"><i class="fa-solid fa-arrow-right-from-bracket"></i> Выйти</button>
+            <button class="btn-icon-text"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
         </div>
 
         <div class="profile-section">
-            <div class="avatar">
-                <i class="fa-solid fa-user"></i>
-            </div>
-            <div class="profile-info">
-                <div class="phone-row">
-                    <span class="phone-number">79207050707</span>
-                    <span class="badge-verified">Верифицирован</span>
+            <div style="display: flex; gap: 16px; align-items: center; width: 100%;">
+                <div class="avatar">
+                    <i class="fa-solid fa-user"></i>
                 </div>
-                <span class="role-text">Личный кабинет заказчика</span>
-                <a href="#" class="address-link">
-                    <i class="fa-solid fa-location-dot"></i> Управление адресами
-                </a>
+                <div class="profile-info">
+                    <div class="phone-row">
+                        <span class="phone-number">79207050707</span>
+                        <span class="badge-verified">Верифицирован</span>
+                    </div>
+                    <span class="role-text">Личный кабинет заказчика</span>
+                    <a href="#" class="address-link">
+                        <i class="fa-solid fa-location-dot"></i> Управление адресами
+                    </a>
+                </div>
             </div>
         </div>
 
@@ -418,11 +513,11 @@
             </thead>
             <tbody>
                 <tr>
-                    <td><a href="#" class="id-link">#6f234b41</a></td>
-                    <td>Большой обычный</td>
-                    <td class="price">200.00 ₽</td>
-                    <td class="status">НАЗНАЧЕН</td>
-                    <td>
+                    <td data-label="ID"><a href="#" class="id-link">#6f234b41</a></td>
+                    <td data-label="ТИП ЗАКАЗА">Большой обычный</td>
+                    <td data-label="ЦЕНА" class="price">200.00 ₽</td>
+                    <td data-label="СТАТУС" class="status">НАЗНАЧЕН</td>
+                    <td data-label="УПРАВЛЕНИЕ">
                         <div class="actions-group">
                             <button class="action-btn action-info"><i class="fa-solid fa-info"></i></button>
                             <button class="action-btn action-chat"><i class="fa-solid fa-comment-dots"></i></button>
@@ -454,11 +549,11 @@
             </thead>
             <tbody>
                 <tr>
-                    <td><span class="id-link" style="color: #9ca3af;">#6f234b41</span></td>
-                    <td>Большой обычный</td>
-                    <td class="price" style="color: #6b7280;">200.00 ₽</td>
-                    <td class="status" style="color: #9ca3af;">НАЗНАЧЕН</td>
-                    <td>
+                    <td data-label="ID"><span class="id-link" style="color: #9ca3af;">#6f234b41</span></td>
+                    <td data-label="ТИП ЗАКАЗА">Большой обычный</td>
+                    <td data-label="ЦЕНА" class="price" style="color: #6b7280;">200.00 ₽</td>
+                    <td data-label="СТАТУС" class="status" style="color: #9ca3af;">НАЗНАЧЕН</td>
+                    <td data-label="УПРАВЛЕНИЕ">
                         <div class="actions-group">
                             <button class="action-btn action-info"><i class="fa-solid fa-info"></i></button>
                             <button class="action-btn action-chat"><i class="fa-solid fa-comment-dots"></i></button>
