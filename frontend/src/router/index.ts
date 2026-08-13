@@ -67,7 +67,13 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/customer',
     name: 'customer-dashboard',
-    component: () => import('../pages/customer/CustomerDashboard.vue'),
+    component: () => import('../pages/customer/CustomerDashboardV2.vue'),
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
+    path: '/customer-v2',
+    name: 'customer-dashboard-v2',
+    component: () => import('../pages/customer/CustomerDashboardV2.vue'),
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {

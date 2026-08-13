@@ -1,22 +1,15 @@
 <template>
   <div class="customer-dashboard">
     <!-- Header: phone + balance -->
-    <div class="dashboard-header mb-4">
-      <div class="d-flex justify-content-between align-items-center">
-        <div>
-          <h1 class="va-h5 m-0">{{ phone }}</h1>
-          <span class="text-secondary text-sm">{{ $t('customer.title') }}</span>
-        </div>
-        <div class="text-right">
-          <LanguageSwitcher class="mb-2" />
-          <div class="balance-amount">{{ currencySymbol }}{{ Number(balance).toFixed(2) }}</div>
-          <div class="text-secondary text-xs">{{ $t('customer.balance') }}</div>
-          <va-button color="danger" outline size="small" class="mt-2" @click="handleLogout">
-            <va-icon name="logout" class="mr-1" /> {{ $t('app.logout') }}
-          </va-button>
-        </div>
-      </div>
-    </div>
+    <CustomerHeader
+      :phone="phone"
+      :balance="balance"
+      :currency-symbol="currencySymbol"
+      :is-verified="isVerified"
+      @logout="handleLogout"
+      @open-profile-modal="showProfileModal = true"
+      @open-top-up-modal="showTopUpModal = true"
+    />
 
     <update-banner />
 
@@ -28,303 +21,162 @@
       {{ errorMsg }}
     </va-alert>
 
-    <!-- Top-up button (small, left aligned) & Image Debug Button -->
-    <div class="mb-3 d-flex gap-2">
-      <va-button color="primary" outline size="small" @click="showTopUpModal = true">
-        <va-icon name="payment" class="mr-1" /> {{ $t('customer.requestWalletTopUp') }}
-      </va-button>
-      <va-button v-if="isDebug" color="warning" outline size="small" @click="showDebugImgModal = true">
-        🐞 Тест Картинок (HTTP & HTTPS)
-      </va-button>
+    <!-- Main Action Buttons Row -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <button type="button" class="btn-action-outline w-100" @click="showTopUpModal = true">
+          💳 {{ $t('customer.requestWalletTopUp') }}
+        </button>
+      </div>
+      <div class="col-md-6">
+        <button type="button" class="btn-action-solid-green w-100" @click="openCreateOrderModal">
+          ➕ {{ $t('customer.createOrder') }}
+        </button>
+      </div>
     </div>
 
-    <!-- Create order button (large) -->
-    <div class="mb-4">
-      <va-button color="success" block size="large" @click="openCreateOrderModal">
-        <va-icon name="shopping_cart" class="mr-2" /> {{ $t('customer.createOrder') }}
-      </va-button>
-    </div>
-
-    <!-- Active Orders table -->
-    <va-card class="shadow-card mb-4">
-      <div class="d-flex justify-content-between align-items-center mb-3 p-3 pb-0">
-        <h3 class="va-h6 m-0 text-primary font-bold d-flex align-items-center">
-          <va-icon name="pending_actions" class="mr-2" /> {{ $t('customer.activeOrders') }}
-        </h3>
-        <va-button icon="refresh" color="secondary" size="small" flat @click="fetchOrders" />
+    <!-- Active Orders Table Card -->
+    <div class="card shadow-sm border-0 rounded-2xl mb-4 bg-white overflow-hidden">
+      <div class="d-flex justify-content-between align-items-center p-4 border-bottom">
+        <div class="d-flex align-items-center gap-2">
+          <h3 class="va-h6 m-0 font-bold text-dark">
+            {{ $t('customer.activeOrders') }}
+          </h3>
+          <span class="badge rounded-pill bg-primary-subtle text-primary font-bold px-3 py-1 text-xs">
+            {{ activeOrders.length }}
+          </span>
+        </div>
+        <button type="button" class="btn-refresh" title="Обновить" @click="fetchOrders">
+          ↻
+        </button>
       </div>
 
-      <div v-if="activeOrders.length === 0" class="text-center py-4">
-        <va-icon name="inbox" size="medium" color="secondary" class="mb-2" />
+      <div v-if="activeOrders.length === 0" class="text-center py-5 text-secondary">
+        <va-icon name="inbox" size="large" color="secondary" class="mb-2" />
         <p class="text-secondary text-sm m-0">{{ $t('customer.noActiveOrders') }}</p>
       </div>
 
-      <va-data-table
-        v-else
-        :items="activeOrders"
-        :columns="orderColumns"
-        striped
-        hoverable
-      >
-        <template #cell(id)="{ rowData }">
-          <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
-        </template>
+      <div v-else class="table-responsive p-4 pt-2">
+        <table class="table align-middle table-hover text-sm m-0">
+          <thead>
+            <tr class="text-secondary text-xs uppercase tracking-wider">
+              <th>№ Заказа</th>
+              <th>Тип заказа</th>
+              <th>Цена</th>
+              <th>Статус</th>
+              <th>Исполнитель</th>
+              <th class="text-end">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in activeOrders" :key="order.id">
+              <td class="font-bold text-primary cursor-pointer" @click="openOrderDetails(order)">
+                #{{ order.id.slice(0, 8) }}
+              </td>
+              <td>{{ formatOrderType(order) }}</td>
+              <td class="font-bold text-dark">{{ currencySymbol }}{{ Number(order.hold_amount).toFixed(2) }}</td>
+              <td>
+                <span :class="['status-pill-badge', order.status === 'ASSIGNED' ? 'pill-assigned' : 'pill-searching']">
+                  ● {{ order.status === 'ASSIGNED' ? 'Назначен исполнитель' : 'Поиск исполнителя' }}
+                </span>
+              </td>
+              <td class="text-secondary text-xs">
+                <div v-if="order.executor_phone" class="d-flex align-items-center gap-1 font-medium text-dark">
+                  👤 Исполнитель
+                </div>
+                <div v-if="order.executor_phone" class="text-xxs text-secondary">
+                  📱 {{ order.executor_phone }}
+                </div>
+                <span v-else class="italic text-secondary">Не назначен</span>
+              </td>
+              <td class="text-end">
+                <div class="d-flex align-items-center justify-content-end gap-2">
+                  <button
+                    v-if="order.status === 'ASSIGNED'"
+                    type="button"
+                    class="btn-chat-action position-relative"
+                    @click="openChat(order)"
+                  >
+                    💬 Чат
+                    <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
+                  </button>
 
-        <template #cell(type)="{ rowData }">
-          {{ formatOrderType(rowData) }}
-        </template>
+                  <button
+                    type="button"
+                    class="btn-table-action"
+                    @click="openOrderDetails(order)"
+                  >
+                    👁️ Подробнее
+                  </button>
 
-        <template #cell(hold_amount)="{ value }">
-          <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
-        </template>
+                  <button
+                    v-if="order.status === 'ASSIGNED'"
+                    type="button"
+                    class="btn-icon-success"
+                    title="Подтвердить выполнение"
+                    @click="confirmOrder(order.id)"
+                  >
+                    ✓
+                  </button>
 
-        <template #cell(status)="{ value }">
-          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
-        </template>
-
-        <template #cell(actions)="{ rowData }">
-          <div class="d-flex gap-1">
-            <va-button
-              color="primary"
-              flat
-              size="small"
-              @click="openOrderDetails(rowData)"
-            >
-              <va-icon name="info" />
-            </va-button>
-            <va-button
-              v-if="rowData.status === 'ASSIGNED'"
-              color="info"
-              outline
-              size="small"
-              class="position-relative"
-              @click="openChat(rowData)"
-            >
-              <va-icon name="chat" />
-              <span v-if="unreadOrderIDs.has(rowData.id)" class="yellow-unread-dot"></span>
-            </va-button>
-            <va-button
-              v-if="rowData.status === 'ASSIGNED'"
-              color="success"
-              size="small"
-              @click="confirmOrder(rowData.id)"
-            >
-              <va-icon name="check" />
-            </va-button>
-            <va-button
-              v-if="rowData.status === 'SEARCHING' || rowData.status === 'ASSIGNED'"
-              color="danger"
-              outline
-              size="small"
-              @click="cancelOrder(rowData.id)"
-            >
-              <va-icon name="close" />
-            </va-button>
-          </div>
-        </template>
-      </va-data-table>
-    </va-card>
+                  <button
+                    v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
+                    type="button"
+                    class="btn-icon-danger"
+                    title="Отменить заказ"
+                    @click="cancelOrder(order.id)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- Order History table (Collapsible) -->
-    <va-card class="shadow-card mb-4">
-      <div
-        class="d-flex justify-content-between align-items-center p-3 cursor-pointer user-select-none"
-        @click="isHistoryCollapsed = !isHistoryCollapsed"
-      >
-        <h3 class="va-h6 m-0 text-secondary font-bold d-flex align-items-center">
-          <va-icon name="history" class="mr-2" /> {{ $t('customer.orderHistory') }}
-          <span class="text-xs text-secondary font-normal ml-2">({{ historyOrders.length }})</span>
-        </h3>
-        <va-button flat size="small" color="secondary">
-          <va-icon :name="isHistoryCollapsed ? 'expand_more' : 'expand_less'" />
-        </va-button>
-      </div>
+    <OrderHistoryCard
+      :history-orders="historyOrders"
+      :order-columns="orderColumns"
+      :currency-symbol="currencySymbol"
+      :format-order-type="formatOrderType"
+      :get-status-color="getStatusColor"
+      @open-order-details="openOrderDetails"
+    />
 
-      <div v-if="!isHistoryCollapsed">
-        <div v-if="historyOrders.length === 0" class="text-center py-4">
-          <va-icon name="folder_off" size="medium" color="secondary" class="mb-2" />
-          <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
-        </div>
-
-        <va-data-table
-          v-else
-          :items="historyOrders"
-          :columns="orderColumns"
-          striped
-          hoverable
-        >
-          <template #cell(id)="{ rowData }">
-            <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
-          </template>
-
-        <template #cell(type)="{ rowData }">
-          {{ formatOrderType(rowData) }}
-        </template>
-
-        <template #cell(hold_amount)="{ rowData }">
-          <strong>{{ currencySymbol }}{{ Number(rowData.final_amount || rowData.hold_amount).toFixed(2) }}</strong>
-        </template>
-
-        <template #cell(status)="{ value }">
-          <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
-        </template>
-
-        <template #cell(actions)="{ rowData }">
-          <div class="d-flex gap-1">
-            <va-button
-              color="primary"
-              flat
-              size="small"
-              @click="openOrderDetails(rowData)"
-            >
-              <va-icon name="info" />
-            </va-button>
-          </div>
-        </template>
-      </va-data-table>
-      </div>
-    </va-card>
-
-    <!-- Order Details Modal / Card -->
-    <va-modal
+    <!-- Order Details Modal -->
+    <OrderDetailsModal
       v-model="showOrderDetailsModal"
-      :title="$t('customer.orderDetails')"
-      hide-default-actions
-    >
-      <div v-if="selectedOrderDetails" class="p-2">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h4 class="va-h6 font-bold m-0">#{{ selectedOrderDetails.id }}</h4>
-          <va-badge :color="getStatusColor(selectedOrderDetails.status)">
-            {{ selectedOrderDetails.status }}
-          </va-badge>
-        </div>
-
-        <div class="info-list bg-light p-3 rounded mb-3">
-          <div class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.orderType') }}</span>
-            <span class="font-bold text-sm">{{ formatOrderType(selectedOrderDetails) }}</span>
-          </div>
-          <div class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.created') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.created_at) }}</span>
-          </div>
-          <div v-if="selectedOrderDetails.assigned_at" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.assignedAt') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</span>
-          </div>
-          <div v-if="selectedOrderDetails.completed_at" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.completedAt') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.completed_at) }}</span>
-          </div>
-          <div v-if="selectedOrderDetails.canceled_at" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.canceledAt') }}</span>
-            <span class="text-sm">{{ formatDateFull(selectedOrderDetails.canceled_at) }}</span>
-          </div>
-          <div class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.totalAmount') }}</span>
-            <span class="font-bold text-primary text-base">
-              {{ currencySymbol }}{{ Number(selectedOrderDetails.final_amount || selectedOrderDetails.hold_amount).toFixed(2) }}
-            </span>
-          </div>
-          <div v-if="selectedOrderDetails.address" class="info-item mb-2">
-            <span class="text-secondary text-xs d-block">{{ $t('customer.pickupAddress') }}</span>
-            <span class="text-sm">{{ selectedOrderDetails.address }}</span>
-          </div>
-        </div>
-
-        <!-- Executor details -->
-        <div class="executor-card-box border p-3 rounded mb-3">
-          <h5 class="va-h6 text-primary mb-2 text-xs uppercase tracking-wide font-bold">
-            <va-icon name="person" class="mr-1" /> {{ $t('customer.executorDetails') }}
-          </h5>
-          <div v-if="selectedOrderDetails.executor_id || selectedOrderDetails.executor_phone">
-            <div class="text-sm font-bold" v-if="selectedOrderDetails.executor_phone">
-              📱 {{ selectedOrderDetails.executor_phone }}
-            </div>
-            <div class="text-xs text-secondary mt-1">
-              ID: {{ selectedOrderDetails.executor_id }}
-            </div>
-          </div>
-          <div v-else class="text-xs text-secondary italic">
-            {{ $t('customer.notAssigned') }}
-          </div>
-        </div>
-
-        <div class="d-flex justify-content-end">
-          <va-button color="secondary" @click="showOrderDetailsModal = false">
-            {{ $t('common.close') }}
-          </va-button>
-        </div>
-      </div>
-    </va-modal>
+      :selected-order-details="selectedOrderDetails"
+      :currency-symbol="currencySymbol"
+      :format-order-type="formatOrderType"
+      :get-status-color="getStatusColor"
+      :format-date-full="formatDateFull"
+    />
 
     <!-- Create Order Modal -->
-    <va-modal
+    <CreateOrderModal
       v-model="showCreateOrderModal"
-      :title="$t('customer.createNewOrder')"
-      hide-default-actions
-    >
-      <div class="p-2">
-        <div class="mb-4">
-          <div class="text-secondary text-sm mb-2">
-            {{ $t('customer.pickupAddress') }}
-          </div>
-          <div class="font-medium mb-2">{{ orderAddress }}</div>
-          <div class="text-secondary text-xs">
-            {{ $t('customer.addressChangeHint') }}
-          </div>
-          <div v-if="orderLat !== null && orderLon !== null" class="text-secondary text-xs mt-2">
-            {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
-          </div>
-          <div v-if="geocodeError" class="text-danger text-xs mt-2">
-            {{ geocodeError }}
-          </div>
-        </div>
-
-        <div class="mb-4">
-          <va-select
-            v-model="selectedCategoryId"
-            :options="categoryOptions"
-            :label="$t('customer.category')"
-            text-by="label"
-            value-by="value"
-            track-by="value"
-            class="mb-2"
-          />
-          <va-select
-            v-if="subCategoryOptions.length > 0"
-            v-model="selectedSubCategoryId"
-            :options="subCategoryOptions"
-            :label="$t('customer.subCategory')"
-            text-by="label"
-            value-by="value"
-            track-by="value"
-            class="mb-2"
-          />
-          <va-select
-            v-if="variantOptions.length > 0"
-            v-model="selectedVariantId"
-            :options="variantOptions"
-            :label="$t('customer.serviceVariant')"
-            text-by="label"
-            value-by="value"
-            track-by="value"
-            class="mb-2"
-          />
-          <div v-if="!isAuctionSelected" class="d-flex gap-2 mt-2">
-            <va-checkbox v-model="isUrgent" :label="$t('customer.urgent')" />
-            <va-checkbox v-model="isAsap" :label="$t('customer.asap')" />
-          </div>
-          <div class="text-secondary text-sm mt-2">
-            {{ $t('customer.price') }}: <strong class="text-primary">{{ currencySymbol }}{{ Number(selectedPrice).toFixed(2) }}</strong>
-          </div>
-        </div>
-
-        <va-button color="success" block :loading="creatingOrder" @click="submitOrder">
-          {{ $t('customer.createOrder') }}
-        </va-button>
-      </div>
-    </va-modal>
+      v-model:selected-category-id="selectedCategoryId"
+      v-model:selected-sub-category-id="selectedSubCategoryId"
+      v-model:selected-variant-id="selectedVariantId"
+      v-model:is-urgent="isUrgent"
+      v-model:is-asap="isAsap"
+      :order-address="orderAddress"
+      :order-lat="orderLat"
+      :order-lon="orderLon"
+      :geocode-error="geocodeError"
+      :category-options="categoryOptions"
+      :sub-category-options="subCategoryOptions"
+      :variant-options="variantOptions"
+      :is-auction-selected="isAuctionSelected"
+      :selected-price="selectedPrice"
+      :currency-symbol="currencySymbol"
+      :creating-order="creatingOrder"
+      @submit-order="submitOrder"
+    />
 
     <!-- Top-up Modal -->
     <va-modal
@@ -348,6 +200,18 @@
         </va-form>
       </div>
     </va-modal>
+
+    <!-- Customer Profile Modal -->
+    <CustomerProfileModal
+      v-model="showProfileModal"
+      v-model:new-address-input="newAddressInput"
+      :is-verified="isVerified"
+      :customer-addresses="customerAddresses"
+      :default-address="defaultAddress"
+      @set-active-address="setActiveAddress"
+      @add-new-address="addNewAddress"
+      @remove-address="removeAddress"
+    />
 
     <!-- Top Floating Toast Notification for Incoming Messages -->
     <div
@@ -638,9 +502,23 @@ import {
   type ServiceNode,
 } from '../../api/services'
 
+import CustomerHeader from './components/CustomerHeader.vue'
+import OrderHistoryCard from './components/OrderHistoryCard.vue'
+import OrderDetailsModal from './components/OrderDetailsModal.vue'
+import CreateOrderModal from './components/CreateOrderModal.vue'
+import CustomerProfileModal from './components/CustomerProfileModal.vue'
+
 export default defineComponent({
   name: 'CustomerDashboard',
-  components: { LanguageSwitcher, UpdateBanner },
+  components: {
+    LanguageSwitcher,
+    UpdateBanner,
+    CustomerHeader,
+    OrderHistoryCard,
+    OrderDetailsModal,
+    CreateOrderModal,
+    CustomerProfileModal,
+  },
   setup() {
     const router = useRouter()
     const { t, locale } = useI18n()
@@ -1683,6 +1561,151 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.25);
+}
+
+.btn-action-outline {
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  color: #2563eb;
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.08);
+}
+
+.btn-action-outline:hover {
+  background: #eff6ff;
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+}
+
+.btn-action-solid-green {
+  background: #16a34a;
+  border: 2px solid #16a34a;
+  color: #ffffff;
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+}
+
+.btn-action-solid-green:hover {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+.btn-refresh {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-refresh:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.status-pill-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  display: inline-block;
+}
+
+.pill-assigned {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.pill-searching {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.btn-chat-action {
+  background: #f8fafc;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-chat-action:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.btn-table-action {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.825rem;
+  font-weight: 500;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-table-action:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.btn-icon-success {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: bold;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon-success:hover {
+  background: #bbf7d0;
+}
+
+.btn-icon-danger {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: bold;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon-danger:hover {
+  background: #fca5a5;
 }
 
 .chat-panel.open {
