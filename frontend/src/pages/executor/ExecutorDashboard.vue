@@ -681,7 +681,7 @@
       class="image-preview-modal-wrapper"
     >
       <div class="text-center p-3">
-        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" />
+        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" @error="onPreviewModalImgError" />
         <div class="mt-3 text-right">
           <va-button color="secondary" @click="showImagePreviewModal = false">
             {{ $t('common.close') }}
@@ -1476,19 +1476,23 @@ export default defineComponent({
       previewImageUrl.value = url
       showImagePreviewModal.value = true
 
-      // On Android native, ensure previewImageUrl is loaded via blob if HTTP img fails
-      if (Capacitor.isNativePlatform() && !url.startsWith('blob:')) {
-        try {
-          const res = await fetch(url)
-          if (res.ok) {
-            const blob = await res.blob()
-            if (blob.size > 0) {
-              previewImageUrl.value = URL.createObjectURL(blob)
-            }
+      if (!url.startsWith('blob:')) {
+        onPreviewModalImgError()
+      }
+    }
+
+    const onPreviewModalImgError = async () => {
+      if (!previewImageUrl.value || previewImageUrl.value.startsWith('blob:')) return
+      try {
+        const res = await fetch(previewImageUrl.value)
+        if (res.ok) {
+          const blob = await res.blob()
+          if (blob.size > 0) {
+            previewImageUrl.value = URL.createObjectURL(blob)
           }
-        } catch (e) {
-          console.warn('[ExecutorDashboard] preview fetch failed:', e)
         }
+      } catch (e) {
+        console.warn('[ExecutorDashboard] modal preview fetch fallback failed:', e)
       }
     }
 
@@ -1920,6 +1924,7 @@ export default defineComponent({
       showImagePreviewModal,
       previewImageUrl,
       openImagePreview,
+      onPreviewModalImgError,
       getImageSrc,
       onChatImgError,
       deleteMessage,

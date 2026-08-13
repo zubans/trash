@@ -33,7 +33,7 @@
       <va-button color="primary" outline size="small" @click="showTopUpModal = true">
         <va-icon name="payment" class="mr-1" /> {{ $t('customer.requestWalletTopUp') }}
       </va-button>
-      <va-button color="warning" outline size="small" @click="showDebugImgModal = true">
+      <va-button v-if="isDebug" color="warning" outline size="small" @click="showDebugImgModal = true">
         🐞 Тест Картинок (HTTP & HTTPS)
       </va-button>
     </div>
@@ -125,29 +125,37 @@
       </va-data-table>
     </va-card>
 
-    <!-- Order History table -->
+    <!-- Order History table (Collapsible) -->
     <va-card class="shadow-card mb-4">
-      <div class="d-flex justify-content-between align-items-center mb-3 p-3 pb-0">
+      <div
+        class="d-flex justify-content-between align-items-center p-3 cursor-pointer user-select-none"
+        @click="isHistoryCollapsed = !isHistoryCollapsed"
+      >
         <h3 class="va-h6 m-0 text-secondary font-bold d-flex align-items-center">
           <va-icon name="history" class="mr-2" /> {{ $t('customer.orderHistory') }}
+          <span class="text-xs text-secondary font-normal ml-2">({{ historyOrders.length }})</span>
         </h3>
+        <va-button flat size="small" color="secondary">
+          <va-icon :name="isHistoryCollapsed ? 'expand_more' : 'expand_less'" />
+        </va-button>
       </div>
 
-      <div v-if="historyOrders.length === 0" class="text-center py-4">
-        <va-icon name="folder_off" size="medium" color="secondary" class="mb-2" />
-        <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
-      </div>
+      <div v-if="!isHistoryCollapsed">
+        <div v-if="historyOrders.length === 0" class="text-center py-4">
+          <va-icon name="folder_off" size="medium" color="secondary" class="mb-2" />
+          <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
+        </div>
 
-      <va-data-table
-        v-else
-        :items="historyOrders"
-        :columns="orderColumns"
-        striped
-        hoverable
-      >
-        <template #cell(id)="{ rowData }">
-          <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
-        </template>
+        <va-data-table
+          v-else
+          :items="historyOrders"
+          :columns="orderColumns"
+          striped
+          hoverable
+        >
+          <template #cell(id)="{ rowData }">
+            <span class="font-bold text-sm cursor-pointer text-primary" @click="openOrderDetails(rowData)">#{{ rowData.id.slice(0, 8) }}</span>
+          </template>
 
         <template #cell(type)="{ rowData }">
           {{ formatOrderType(rowData) }}
@@ -174,6 +182,7 @@
           </div>
         </template>
       </va-data-table>
+      </div>
     </va-card>
 
     <!-- Order Details Modal / Card -->
@@ -519,7 +528,7 @@
       class="image-preview-modal-wrapper"
     >
       <div class="text-center p-3">
-        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" />
+        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" @error="onPreviewModalImgError" />
         <div class="mt-3 text-right">
           <va-button color="secondary" @click="showImagePreviewModal = false">
             {{ $t('common.close') }}
@@ -696,6 +705,7 @@ export default defineComponent({
     const historyOrders = computed(() =>
       orders.value.filter((o) => o.status === 'COMPLETED' || o.status === 'CANCELED')
     )
+    const isHistoryCollapsed = ref(true)
     const showOrderDetailsModal = ref(false)
     const selectedOrderDetails = ref<any>(null)
 
@@ -1172,19 +1182,23 @@ export default defineComponent({
       previewImageUrl.value = url
       showImagePreviewModal.value = true
 
-      // On Android native, ensure previewImageUrl is loaded via blob if HTTP img fails
-      if (isNative && !url.startsWith('blob:')) {
-        try {
-          const res = await fetch(url)
-          if (res.ok) {
-            const blob = await res.blob()
-            if (blob.size > 0) {
-              previewImageUrl.value = URL.createObjectURL(blob)
-            }
+      if (!url.startsWith('blob:')) {
+        onPreviewModalImgError()
+      }
+    }
+
+    const onPreviewModalImgError = async () => {
+      if (!previewImageUrl.value || previewImageUrl.value.startsWith('blob:')) return
+      try {
+        const res = await fetch(previewImageUrl.value)
+        if (res.ok) {
+          const blob = await res.blob()
+          if (blob.size > 0) {
+            previewImageUrl.value = URL.createObjectURL(blob)
           }
-        } catch (e) {
-          console.warn('[CustomerDashboard] preview fetch failed:', e)
         }
+      } catch (e) {
+        console.warn('[CustomerDashboard] modal preview fetch fallback failed:', e)
       }
     }
 
@@ -1533,6 +1547,7 @@ export default defineComponent({
       orders,
       activeOrders,
       historyOrders,
+      isHistoryCollapsed,
       showOrderDetailsModal,
       selectedOrderDetails,
       openOrderDetails,
@@ -1578,6 +1593,7 @@ export default defineComponent({
       showImagePreviewModal,
       previewImageUrl,
       openImagePreview,
+      onPreviewModalImgError,
       getImageSrc,
       onChatImgError,
       deleteMessage,
