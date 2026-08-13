@@ -575,7 +575,7 @@ export default defineComponent({
       const text = chatInputText.value.trim()
       chatInputText.value = ''
       try {
-        await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { content: text })
+        await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { text })
         fetchChatMessages(selectedChatOrder.value.id)
       } catch (err: any) {
         errorMsg.value = 'Ошибка отправки сообщения'
