@@ -20,7 +20,7 @@
             <i class="ph ph-x"></i>
           </button>
           <div class="op-header">
-            <span class="op-id">#{{ selectedOrder.id.slice(0, 8) }}</span>
+            <span class="op-id">#{{ selectedOrder?.id ? selectedOrder.id.slice(0, 8) : '---' }}</span>
             <span class="op-price">{{ currencySymbol }}{{ Number(selectedOrder.hold_amount).toFixed(2) }}</span>
           </div>
           <div class="op-address">{{ selectedOrder.address || 'Адрес не указан' }}</div>

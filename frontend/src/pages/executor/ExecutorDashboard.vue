@@ -133,7 +133,7 @@
               </div>
               <div class="o-info">
                 <div class="o-title">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">#{{ order.id.slice(0, 8) }} • {{ order.customer_phone }}</div>
+                <div class="o-subtitle">#{{ order?.id ? order.id.slice(0, 8) : '---' }} • {{ order.customer_phone || '' }}</div>
               </div>
               <div class="o-price">
                 {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
@@ -286,7 +286,7 @@
               </div>
               <div class="o-info">
                 <div class="o-title gray">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">#{{ order.id.slice(0, 8) }}</div>
+                <div class="o-subtitle">#{{ order?.id ? order.id.slice(0, 8) : '---' }}</div>
               </div>
               <div class="o-price gray">
                 {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
