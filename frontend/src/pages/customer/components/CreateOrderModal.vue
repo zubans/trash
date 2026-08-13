@@ -26,59 +26,71 @@
       </div>
 
       <form @submit.prevent="$emit('submitOrder')">
-        <!-- Category Selector -->
+        <!-- Category Dropdown -->
         <div class="form-group">
           <label class="form-label">{{ $t('customer.category') }}</label>
-          <div class="select-wrapper">
-            <select
-              v-model="categoryIdProxy"
-              class="form-select"
-            >
-              <option value="" disabled>Выберите категорию</option>
-              <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-            <i class="ph ph-caret-down select-icon"></i>
+          <div class="custom-select">
+            <div class="select-trigger" @click="isCategoryOpen = !isCategoryOpen">
+              <span>{{ selectedCategoryLabel || 'Выберите категорию' }}</span>
+              <i :class="['ph-bold ph-caret-down', { 'is-open': isCategoryOpen }]"></i>
+            </div>
+            <div v-if="isCategoryOpen" class="select-dropdown">
+              <div
+                v-for="opt in categoryOptions"
+                :key="opt.value"
+                :class="['select-option', { selected: categoryIdProxy === opt.value }]"
+                @click="selectCategory(opt.value)"
+              >
+                <i class="ph-bold ph-check"></i> {{ opt.label }}
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- SubCategory Selector (if available) -->
+        <!-- SubCategory Dropdown (if available) -->
         <div v-if="subCategoryOptions && subCategoryOptions.length > 0" class="form-group">
           <label class="form-label">{{ $t('customer.subCategory') }}</label>
-          <div class="select-wrapper">
-            <select
-              v-model="subCategoryIdProxy"
-              class="form-select"
-            >
-              <option value="" disabled>Выберите подкатегорию</option>
-              <option v-for="opt in subCategoryOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-            <i class="ph ph-caret-down select-icon"></i>
+          <div class="custom-select">
+            <div class="select-trigger" @click="isSubCategoryOpen = !isSubCategoryOpen">
+              <span>{{ selectedSubCategoryLabel || 'Выберите подкатегорию' }}</span>
+              <i :class="['ph-bold ph-caret-down', { 'is-open': isSubCategoryOpen }]"></i>
+            </div>
+            <div v-if="isSubCategoryOpen" class="select-dropdown">
+              <div
+                v-for="opt in subCategoryOptions"
+                :key="opt.value"
+                :class="['select-option', { selected: subCategoryIdProxy === opt.value }]"
+                @click="selectSubCategory(opt.value)"
+              >
+                <i class="ph-bold ph-check"></i> {{ opt.label }}
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Service Variant Selector (if available) -->
+        <!-- Service Variant Dropdown (if available) -->
         <div v-if="variantOptions && variantOptions.length > 0" class="form-group">
           <label class="form-label">{{ $t('customer.serviceVariant') }}</label>
-          <div class="select-wrapper">
-            <select
-              v-model="variantIdProxy"
-              class="form-select"
-            >
-              <option value="" disabled>Выберите вариант услуги</option>
-              <option v-for="opt in variantOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-            <i class="ph ph-caret-down select-icon"></i>
+          <div class="custom-select">
+            <div class="select-trigger" @click="isVariantOpen = !isVariantOpen">
+              <span>{{ selectedVariantLabel || 'Выберите вариант услуги' }}</span>
+              <i :class="['ph-bold ph-caret-down', { 'is-open': isVariantOpen }]"></i>
+            </div>
+            <div v-if="isVariantOpen" class="select-dropdown">
+              <div
+                v-for="opt in variantOptions"
+                :key="opt.value"
+                :class="['select-option', { selected: variantIdProxy === opt.value }]"
+                @click="selectVariant(opt.value)"
+              >
+                <i class="ph-bold ph-check"></i> {{ opt.label }}
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Urgency Checkbox Pills -->
-        <div v-if="!isAuctionSelected" class="form-group">
+        <div v-if="!isAuctionSelected" class="form-group mt-4">
           <div class="checkbox-group">
             <label class="custom-checkbox">
               <input
@@ -115,7 +127,7 @@
           <button type="button" class="btn btn-cancel" @click="show = false">
             {{ $t('common.cancel') }}
           </button>
-          <button type="submit" class="btn btn-submit" :disabled="creatingOrder">
+          <button type="submit" class="btn btn-submit" :disabled="creatingOrder || !selectedVariantId">
             <span v-if="creatingOrder" class="spinner-sm"></span>
             <template v-else>
               <i class="ph-bold ph-plus"></i> {{ $t('customer.createOrder') }}
@@ -128,7 +140,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, onMounted } from 'vue'
+import { defineComponent, computed, ref, onMounted } from 'vue'
 
 export default defineComponent({
   name: 'CreateOrderModal',
@@ -161,6 +173,10 @@ export default defineComponent({
     'submitOrder',
   ],
   setup(props, { emit }) {
+    const isCategoryOpen = ref(false)
+    const isSubCategoryOpen = ref(false)
+    const isVariantOpen = ref(false)
+
     const show = computed({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
@@ -181,6 +197,36 @@ export default defineComponent({
       set: (val) => emit('update:selectedVariantId', val),
     })
 
+    const selectedCategoryLabel = computed(() => {
+      const found = props.categoryOptions.find((opt) => opt.value === categoryIdProxy.value)
+      return found ? found.label : ''
+    })
+
+    const selectedSubCategoryLabel = computed(() => {
+      const found = props.subCategoryOptions.find((opt) => opt.value === subCategoryIdProxy.value)
+      return found ? found.label : ''
+    })
+
+    const selectedVariantLabel = computed(() => {
+      const found = props.variantOptions.find((opt) => opt.value === variantIdProxy.value)
+      return found ? found.label : ''
+    })
+
+    const selectCategory = (val: string) => {
+      categoryIdProxy.value = val
+      isCategoryOpen.value = false
+    }
+
+    const selectSubCategory = (val: string) => {
+      subCategoryIdProxy.value = val
+      isSubCategoryOpen.value = false
+    }
+
+    const selectVariant = (val: string) => {
+      variantIdProxy.value = val
+      isVariantOpen.value = false
+    }
+
     const loadPhosphorIcons = () => {
       if (!document.getElementById('phosphor-icons-script')) {
         const script = document.createElement('script')
@@ -199,6 +245,15 @@ export default defineComponent({
       categoryIdProxy,
       subCategoryIdProxy,
       variantIdProxy,
+      isCategoryOpen,
+      isSubCategoryOpen,
+      isVariantOpen,
+      selectedCategoryLabel,
+      selectedSubCategoryLabel,
+      selectedVariantLabel,
+      selectCategory,
+      selectSubCategory,
+      selectVariant,
     }
   },
 })
@@ -212,6 +267,7 @@ export default defineComponent({
   --bg-base: #f8f9fa;
   --surface-card: rgba(255, 255, 255, 0.92);
   --surface-input: rgba(255, 255, 255, 0.7);
+  --surface-dropdown: rgba(255, 255, 255, 0.95);
   
   --text-title: #0f172a;
   --text-body: #334155;
@@ -227,8 +283,11 @@ export default defineComponent({
   --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
                   0 1px 3px rgba(15, 23, 42, 0.05),
                   inset 0 1px 0 rgba(255,255,255,1);
+
+  --shadow-dropdown: 0 12px 32px -8px rgba(15, 23, 42, 0.15),
+                     0 0 0 1px rgba(0,0,0,0.02);
   
-  --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -314,7 +373,7 @@ export default defineComponent({
   background: rgba(99, 102, 241, 0.04);
   border: 1px solid rgba(99, 102, 241, 0.1);
   border-radius: var(--rad-md);
-  padding: 16px 20px;
+  padding: 20px;
   margin-bottom: 24px;
   position: relative;
   overflow: hidden;
@@ -329,11 +388,11 @@ export default defineComponent({
 
 .info-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--accent-main);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -343,18 +402,20 @@ export default defineComponent({
   font-size: 16px;
   font-weight: 600;
   color: var(--text-title);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  line-height: 1.4;
 }
 
 .info-note {
   font-size: 13px;
   color: var(--text-muted);
   line-height: 1.4;
+  margin-bottom: 4px;
 }
 
 /* --- Form Groups --- */
 .form-group {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .form-label {
@@ -368,50 +429,86 @@ export default defineComponent({
   padding-left: 4px;
 }
 
-.select-wrapper {
+/* Custom Dropdown Styling */
+.custom-select {
   position: relative;
+  width: 100%;
 }
 
-.form-select {
+.select-trigger {
   width: 100%;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  padding: 16px 48px 16px 20px;
+  padding: 16px 20px;
   border-radius: 16px;
-  background-color: var(--surface-input);
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
-  font-family: inherit;
+  background: #ffffff;
+  border: 1.5px solid var(--accent-main);
   font-size: 15px;
   color: var(--text-title);
   font-weight: 600;
   cursor: pointer;
-  transition: var(--transition);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
-}
-
-.form-select option {
-  background-color: #ffffff;
-  color: #0f172a;
-  padding: 12px 16px;
-  font-weight: 500;
-}
-
-.form-select:focus {
-  outline: none;
-  border-color: var(--accent-main);
-  background-color: #ffffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+  transition: var(--transition);
 }
 
-.select-icon {
+.select-trigger i {
+  color: var(--accent-main);
+  transition: transform 0.3s;
+}
+
+.select-trigger i.is-open {
+  transform: rotate(180deg);
+}
+
+.select-dropdown {
   position: absolute;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  background: var(--surface-dropdown);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 1);
+  border-radius: 16px;
+  box-shadow: var(--shadow-dropdown);
+  padding: 8px;
+  z-index: 100;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.select-option {
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.select-option:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-title);
+}
+
+.select-option.selected {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--accent-main);
+  font-weight: 600;
+}
+
+.select-option i {
   font-size: 18px;
-  color: var(--text-muted);
-  pointer-events: none;
+  opacity: 0;
+}
+
+.select-option.selected i {
+  opacity: 1;
 }
 
 /* Checkboxes (Pill Style) */
@@ -483,7 +580,7 @@ export default defineComponent({
 }
 
 .price-label {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -539,7 +636,7 @@ export default defineComponent({
 }
 
 .btn-submit:disabled {
-  opacity: 0.7;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
