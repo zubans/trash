@@ -250,6 +250,15 @@
         :get-status-color="getStatusColor"
         :format-date-full="formatDateFull"
         @cancel-order="cancelOrder"
+        @open-review-modal="openReviewModal"
+      />
+
+      <!-- Review Modal -->
+      <ReviewModal
+        v-model="showReviewModal"
+        :order-id="reviewTargetOrderId"
+        role="CUSTOMER"
+        @reviewed="onReviewSubmitted"
       />
 
       <!-- Create Order Modal -->
@@ -349,6 +358,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
+import ReviewModal from './components/ReviewModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -361,6 +371,7 @@ export default defineComponent({
     OrderDetailsModal,
     CreateOrderModal,
     CustomerProfileModal,
+    ReviewModal,
   },
   setup() {
     const router = useRouter()
@@ -613,6 +624,19 @@ export default defineComponent({
       } finally {
         submitting.value = false
       }
+    }
+
+    const showReviewModal = ref(false)
+    const reviewTargetOrderId = ref('')
+
+    const openReviewModal = (order: any) => {
+      reviewTargetOrderId.value = order.id
+      showOrderDetailsModal.value = false
+      showReviewModal.value = true
+    }
+
+    const onReviewSubmitted = () => {
+      successMsg.value = 'Спасибо за отзыв!'
     }
 
     const openOrderDetails = (order: any) => {
@@ -963,6 +987,10 @@ export default defineComponent({
       chatContainerRef,
       chatFileInputRef,
       uploadingChatFile,
+      showReviewModal,
+      reviewTargetOrderId,
+      openReviewModal,
+      onReviewSubmitted,
       showImagePreviewModal,
       previewImageUrl,
       currentUserId,

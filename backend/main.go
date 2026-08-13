@@ -60,6 +60,7 @@ func main() {
 	chatRepo := repository.NewChatRepository(db)
 	catalogRepo := repository.NewServiceCatalogRepository(db)
 	appReleaseRepo := repository.NewAppReleaseRepository(db)
+	reviewRepo := repository.NewReviewRepository(db)
 
 	// Services
 	geocoder := service.NewGeocoder(db)
@@ -70,6 +71,7 @@ func main() {
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
+	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(5 * time.Second)
@@ -104,6 +106,7 @@ func main() {
 	gh := handler.NewGeoHandler(geocoder)
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
+	rh := handler.NewReviewHandler(reviewService)
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -129,6 +132,8 @@ func main() {
 		r.Get("/service-variants", sch.ListVariants)
 		r.Get("/service-variants/{id}", sch.GetVariant)
 		r.Get("/app/version", arh.GetVersionHandler)
+		r.Get("/users/{id}/reviews", rh.GetUserReviews)
+		r.Get("/users/{id}/rating", rh.GetUserRating)
 
 		// Authenticated customer routes
 		r.Group(func(r chi.Router) {
@@ -155,6 +160,8 @@ func main() {
 			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)
 			r.Get("/chats/unread-summary", ch.GetUnreadSummaryHandler)
 			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
+			r.Post("/orders/{id}/reviews", rh.CreateReview)
+			r.Get("/orders/{id}/reviews/mine", rh.GetOrderReview)
 			r.Post("/logout", ah.LogoutHandler)
 		})
 

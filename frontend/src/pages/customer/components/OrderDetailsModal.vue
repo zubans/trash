@@ -88,6 +88,14 @@
         >
           <i class="ph ph-trash"></i> Отменить заказ
         </button>
+        <button
+          v-if="selectedOrderDetails && selectedOrderDetails.status === 'COMPLETED'"
+          type="button"
+          class="btn-review-action"
+          @click="$emit('open-review-modal', selectedOrderDetails)"
+        >
+          <i class="ph-fill ph-star"></i> Оценить выполнение
+        </button>
         <button type="button" class="btn-cancel" @click="show = false">
           {{ $t('common.close') }}
         </button>
@@ -109,7 +117,7 @@ export default defineComponent({
     getStatusColor: { type: Function, required: true },
     formatDateFull: { type: Function, required: true },
   },
-  emits: ['update:modelValue', 'cancel-order'],
+  emits: ['update:modelValue', 'cancel-order', 'open-review-modal'],
   setup(props, { emit }) {
     const show = computed({
       get: () => props.modelValue,
@@ -455,6 +463,27 @@ export default defineComponent({
   background: #ef4444;
   color: #ffffff;
   box-shadow: 0 8px 20px -4px rgba(239, 68, 68, 0.4);
+}
+
+.btn-review-action {
+  padding: 14px 20px;
+  border-radius: 14px;
+  background: #eef2ff;
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: var(--transition);
+}
+
+.btn-review-action:hover {
+  background: #6366f1;
+  color: #ffffff;
+  box-shadow: 0 8px 20px -4px rgba(99, 102, 241, 0.4);
 }
 
 .btn-cancel {
