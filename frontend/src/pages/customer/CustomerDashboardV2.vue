@@ -119,19 +119,19 @@
               <div class="o-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
               <div class="o-actions" @click.stop>
                 <button
-                  v-if="order.status === 'ASSIGNED'"
+                  v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
                   type="button"
                   :class="['btn-action chat-btn', { active: openChatOrderId === order.id }]"
                   title="Чат"
                   @click="toggleChat(order)"
                 >
-                  <i :class="['ph-fill', openChatOrderId === order.id ? 'ph-chat-circle-dots' : 'ph-chat-circle-dots']"></i>
+                  <i class="ph-fill ph-chat-circle-dots"></i>
                 </button>
                 <button
-                  v-if="order.status === 'ASSIGNED'"
+                  v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
                   type="button"
                   class="btn-action"
-                  title="Принять"
+                  title="Подтвердить приемку"
                   @click="confirmOrder(order.id)"
                 >
                   <i class="ph ph-check"></i>
@@ -928,7 +928,6 @@ export default defineComponent({
     let intervalId: any = null
 
     onMounted(async () => {
-      loadPhosphorIcons()
       await Promise.all([fetchProfile(), fetchOrders()])
       intervalId = setInterval(() => {
         fetchProfile()

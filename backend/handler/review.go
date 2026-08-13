@@ -111,8 +111,9 @@ func (h *ReviewHandler) GetUserRating(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role := r.URL.Query().Get("role")
-	if role == "" {
-		role = "EXECUTOR"
+	if role != "CUSTOMER" && role != "EXECUTOR" {
+		http.Error(w, "invalid or missing role parameter (must be CUSTOMER or EXECUTOR)", http.StatusBadRequest)
+		return
 	}
 
 	rating, err := h.reviewService.GetUserRating(userID, role)

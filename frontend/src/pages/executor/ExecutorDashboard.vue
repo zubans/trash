@@ -145,6 +145,15 @@
               </div>
               <div class="o-actions" @click.stop>
                 <button
+                  v-if="order.status === 'ASSIGNED'"
+                  type="button"
+                  class="btn-action-execute"
+                  title="Исполнил"
+                  @click="markOrderAsExecuted(order.id)"
+                >
+                  <i class="ph-bold ph-check-circle"></i> Исполнил
+                </button>
+                <button
                   type="button"
                   :class="['btn-chat-toggle', { active: selectedChatOrder && selectedChatOrder.id === order.id }]"
                   @click="toggleChat(order)"
@@ -526,6 +535,19 @@ export default defineComponent({
       }
     }
 
+    const markOrderAsExecuted = async (orderId: string) => {
+      try {
+        await api.post(`/executor/orders/${orderId}/execute`)
+        successMsg.value = 'Статус заказа изменен на "Исполнил"! Заказчику отправлено уведомление.'
+        await fetchAssignedOrders()
+        if (selectedChatOrder.value && selectedChatOrder.value.id === orderId) {
+          fetchChatMessages(orderId)
+        }
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Ошибка изменения статуса заказа'
+      }
+    }
+
     const updateCurrentPosition = (force = false) => {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -739,6 +761,7 @@ export default defineComponent({
       startShift,
       earlyEndShift,
       acceptOrder,
+      markOrderAsExecuted,
       updateCurrentPosition,
       openMapPicker,
       onMapOrderAccepted,

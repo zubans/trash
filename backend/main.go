@@ -184,6 +184,7 @@ func main() {
 			r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
 			r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
+			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 		})

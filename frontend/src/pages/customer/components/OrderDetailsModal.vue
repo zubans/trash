@@ -192,23 +192,15 @@ export default defineComponent({
       switch (status) {
         case 'SEARCHING': return 'status-searching'
         case 'ASSIGNED': return 'status-assigned'
+        case 'EXECUTED': return 'status-executed'
         case 'COMPLETED': return 'status-completed'
         case 'CANCELED': return 'status-canceled'
         default: return 'status-default'
       }
     }
 
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
-
     onMounted(() => {
-      loadPhosphorIcons()
+      // Phosphor icons are loaded globally in index.html
     })
 
     return {
@@ -375,6 +367,12 @@ export default defineComponent({
   background: rgba(99, 102, 241, 0.1);
   color: #4f46e5;
   border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.status-executed {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0284c7;
+  border: 1px solid rgba(14, 165, 233, 0.2);
 }
 
 .status-completed {

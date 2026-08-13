@@ -171,20 +171,9 @@ func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error)
 
 	if s.transactionRepo != nil {
 		if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-			// Refund customers and cancel their orders first.
+			// Unassign orders so they return to SEARCHING pool for other executors.
 			for _, o := range assignedOrders {
-				if err := s.transactionRepo.UpdateBalance(tx, o.CustomerID, o.HoldAmount); err != nil {
-					return err
-				}
-				if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-					UserID:  o.CustomerID,
-					OrderID: &o.ID,
-					Type:    string(repository.TransactionTypeRefund),
-					Amount:  o.HoldAmount,
-				}); err != nil {
-					return err
-				}
-				if err := s.orderRepo.Cancel(o.ID); err != nil {
+				if err := s.orderRepo.Unassign(o.ID); err != nil {
 					return err
 				}
 			}
