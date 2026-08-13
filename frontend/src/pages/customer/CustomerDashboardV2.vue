@@ -220,6 +220,7 @@
             <div class="form-group mb-4">
               <label class="form-label">Сумма</label>
               <div class="input-wrapper">
+                <!-- Порядок элементов важен для селектора соседства в CSS -->
                 <input
                   v-model.number="topUpAmount"
                   type="number"
@@ -1129,7 +1130,7 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   padding: 20px;
-  z-index: 1050;
+  z-index: 2000;
   animation: fadeIn 0.3s ease-out;
   font-family: 'Outfit', sans-serif;
   color: var(--text-body);
@@ -1183,6 +1184,48 @@ export default defineComponent({
   color: #ef4444;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
   transform: rotate(90deg);
+}
+
+/* Form input & icon inside modal */
+.topup-modal-card .input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.topup-modal-card .input-icon {
+  position: absolute;
+  left: 20px;
+  font-size: 20px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: var(--transition);
+}
+
+.topup-modal-card .form-input {
+  width: 100%;
+  padding: 18px 20px 18px 52px;
+  border-radius: 16px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  font-family: inherit;
+  font-size: 20px;
+  color: var(--text-title);
+  font-weight: 600;
+  transition: var(--transition);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
+}
+
+.topup-modal-card .form-input:focus {
+  outline: none;
+  border-color: var(--accent-main);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+}
+
+.topup-modal-card .form-input:focus + .input-icon {
+  color: var(--accent-main);
 }
 
 .quick-amounts {
