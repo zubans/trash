@@ -52,13 +52,36 @@
       <!-- Update Banner -->
       <update-banner />
 
-      <!-- Alerts -->
-      <va-alert v-if="successMsg" color="success" class="mb-2" closeable @dismissed="successMsg = ''">
-        {{ successMsg }}
-      </va-alert>
-      <va-alert v-if="errorMsg" color="danger" class="mb-2" closeable @dismissed="errorMsg = ''">
-        {{ errorMsg }}
-      </va-alert>
+      <!-- Toast Notifications Container -->
+      <div class="toast-container">
+        <!-- Success Toast -->
+        <div v-if="successMsg" class="toast success">
+          <div class="toast-icon">
+            <i class="ph-bold ph-check"></i>
+          </div>
+          <div class="toast-content">
+            <div class="toast-title">Успешно</div>
+            <div class="toast-message">{{ successMsg }}</div>
+          </div>
+          <button type="button" class="toast-close" @click="successMsg = ''">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <!-- Error Toast -->
+        <div v-if="errorMsg" class="toast error">
+          <div class="toast-icon">
+            <i class="ph-bold ph-warning"></i>
+          </div>
+          <div class="toast-content">
+            <div class="toast-title">Ошибка</div>
+            <div class="toast-message">{{ errorMsg }}</div>
+          </div>
+          <button type="button" class="toast-close" @click="errorMsg = ''">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </div>
 
       <!-- Большая сочная кнопка -->
       <button type="button" class="create-order-btn" @click="openCreateOrderModal">
@@ -325,6 +348,8 @@ export default defineComponent({
 
     // Catalog & Order Create
     const serviceCategories = ref<ServiceNode[]>([])
+    const subCategories = ref<ServiceNode[]>([])
+    const serviceVariants = ref<ServiceNode[]>([])
     const selectedCategoryId = ref<string | null>(null)
     const selectedSubCategoryId = ref<string | null>(null)
     const selectedVariantId = ref<string | null>(null)
@@ -333,6 +358,7 @@ export default defineComponent({
     const orderAddress = ref(defaultAddress.value)
     const orderLat = ref<number | null>(null)
     const orderLon = ref<number | null>(null)
+    const geocoding = ref(false)
     const geocodeError = ref('')
 
     const activeOrders = computed(() => {
@@ -343,14 +369,38 @@ export default defineComponent({
       return orders.value.filter((o) => ['COMPLETED', 'CANCELED'].includes(o.status))
     })
 
-    const categoryOptions = computed(() => {
-      return serviceCategories.value.map((c) => ({ label: c.code, value: c.id }))
-    })
+    const selectedVariant = computed(() =>
+      serviceVariants.value.find((v) => v.id === selectedVariantId.value)
+    )
 
-    const subCategoryOptions = computed(() => [])
-    const variantOptions = computed(() => [])
-    const isAuctionSelected = computed(() => false)
-    const selectedPrice = computed(() => 0)
+    const isAuctionSelected = computed(() => !!selectedVariant.value?.is_auction)
+
+    const localizedName = (node?: ServiceNode) => {
+      if (!node) return ''
+      return node.name['ru'] || node.name['en'] || node.code || ''
+    }
+
+    const categoryOptions = computed(() =>
+      serviceCategories.value.map((c) => ({ label: localizedName(c), value: c.id }))
+    )
+
+    const subCategoryOptions = computed(() =>
+      subCategories.value.map((c) => ({ label: localizedName(c), value: c.id }))
+    )
+
+    const variantOptions = computed(() =>
+      serviceVariants.value.map((v) => ({ label: localizedName(v), value: v.id }))
+    )
+
+    const selectedPrice = computed(() => {
+      const variant = selectedVariant.value
+      if (!variant || variant.base_price === undefined) return 0
+      let price = variant.base_price
+      if (isAuctionSelected.value) return 0
+      if (isAsap.value) price *= 8
+      else if (isUrgent.value) price *= 3
+      return price
+    })
 
     const loadPhosphorIcons = () => {
       if (!document.getElementById('phosphor-icons-script')) {
@@ -369,11 +419,29 @@ export default defineComponent({
           if (response.data.balance !== undefined) balance.value = response.data.balance
           if (response.data.address) {
             defaultAddress.value = response.data.address
+            orderAddress.value = response.data.address
             customerAddresses.value = [{ address: response.data.address }]
           }
         }
       } catch (err) {
         console.error('Failed to load profile:', err)
+      }
+    }
+
+    const geocodeAddress = async () => {
+      geocoding.value = true
+      geocodeError.value = ''
+      orderLat.value = null
+      orderLon.value = null
+      try {
+        const response = await api.get('/geo/geocode', { params: { q: orderAddress.value } })
+        orderLat.value = response.data.lat
+        orderLon.value = response.data.lon
+        orderAddress.value = response.data.address || orderAddress.value
+      } catch (err: any) {
+        geocodeError.value = err.response?.data || 'Не удалось геокодировать адрес'
+      } finally {
+        geocoding.value = false
       }
     }
 
@@ -387,25 +455,41 @@ export default defineComponent({
     }
 
     const openCreateOrderModal = async () => {
+      orderAddress.value = defaultAddress.value
+      orderLat.value = null
+      orderLon.value = null
+      geocodeError.value = ''
       showCreateOrderModal.value = true
       try {
         serviceCategories.value = await getServiceCategories()
       } catch (err) {
         console.error('Failed to load categories:', err)
       }
+      await geocodeAddress()
     }
 
     const submitOrder = async () => {
+      if (!selectedVariantId.value) {
+        errorMsg.value = 'Выберите тип услуги'
+        return
+      }
       creatingOrder.value = true
+      errorMsg.value = ''
       try {
-        await api.post('/customer/orders', {
+        const payload: any = {
           service_variant_id: selectedVariantId.value,
+          is_urgent: !isAuctionSelected.value && isUrgent.value,
+          is_asap: !isAuctionSelected.value && isAsap.value,
           address: orderAddress.value,
-          is_urgent: isUrgent.value,
-          is_asap: isAsap.value,
-        })
+        }
+        if (orderLat.value !== null && orderLon.value !== null) {
+          payload.lat = orderLat.value
+          payload.lon = orderLon.value
+        }
+        await api.post('/customer/orders', payload)
         successMsg.value = 'Заказ успешно создан'
         showCreateOrderModal.value = false
+        await fetchProfile()
         await fetchOrders()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка создания заказа'
@@ -458,12 +542,14 @@ export default defineComponent({
 
     const setActiveAddress = (addr: string) => {
       defaultAddress.value = addr
+      orderAddress.value = addr
     }
 
     const addNewAddress = () => {
       if (!newAddressInput.value.trim()) return
       customerAddresses.value.push({ address: newAddressInput.value.trim() })
       defaultAddress.value = newAddressInput.value.trim()
+      orderAddress.value = newAddressInput.value.trim()
       newAddressInput.value = ''
     }
 
@@ -472,7 +558,9 @@ export default defineComponent({
     }
 
     const formatOrderType = (order: any) => {
-      return order.service_variant?.code || 'Большой обычный'
+      const variant = order.service_variant
+      if (!variant) return 'Большой обычный'
+      return localizedName(variant)
     }
 
     const getStatusColor = (status: string) => {
@@ -488,6 +576,41 @@ export default defineComponent({
       authStore.logout()
       router.push('/login')
     }
+
+    watch(selectedCategoryId, async (id) => {
+      selectedSubCategoryId.value = null
+      selectedVariantId.value = null
+      serviceVariants.value = []
+      if (!id) {
+        subCategories.value = []
+        return
+      }
+      const children = await getServiceCategoryChildren(id)
+      const categories = children.filter((c) => c.node_type === 'CATEGORY')
+      const variants = children.filter((c) => c.node_type === 'VARIANT')
+      if (categories.length > 0) {
+        subCategories.value = categories
+      } else {
+        subCategories.value = []
+        serviceVariants.value = variants
+      }
+    })
+
+    watch(selectedSubCategoryId, async (id) => {
+      selectedVariantId.value = null
+      if (!id) {
+        serviceVariants.value = []
+        return
+      }
+      const children = await getServiceCategoryChildren(id)
+      const variants = children.filter((c) => c.node_type === 'VARIANT')
+      serviceVariants.value = variants
+    })
+
+    watch(selectedVariantId, () => {
+      isUrgent.value = false
+      isAsap.value = false
+    })
 
     onMounted(async () => {
       loadPhosphorIcons()
@@ -1276,5 +1399,134 @@ export default defineComponent({
 .btn-submit-topup:hover {
   transform: translateY(-2px);
   box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
+}
+
+/* Toast Notifications Styles */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  padding: 16px 20px;
+  width: 340px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.1),
+              inset 0 1px 0 rgba(255, 255, 255, 1);
+  position: relative;
+  overflow: hidden;
+  animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.toast.success::before { background: var(--success-main, #10b981); }
+.toast.success .toast-icon { 
+  color: var(--success-main, #10b981); 
+  background: rgba(16, 185, 129, 0.1); 
+}
+
+.toast.error::before { background: #ef4444; }
+.toast.error .toast-icon { 
+  color: #ef4444; 
+  background: rgba(239, 68, 68, 0.1); 
+}
+
+.toast.info::before { background: var(--accent-main, #6366f1); }
+.toast.info .toast-icon { 
+  color: var(--accent-main, #6366f1); 
+  background: rgba(99, 102, 241, 0.1); 
+}
+
+.toast-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.toast-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.toast-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-title);
+  letter-spacing: -0.2px;
+}
+
+.toast-message {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.toast-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px -4px 0 0;
+  border-radius: 8px;
+  transition: var(--transition);
+}
+
+.toast-close:hover {
+  color: var(--text-title);
+  background: rgba(15, 23, 42, 0.05);
+}
+
+@media (max-width: 480px) {
+  .toast-container {
+    top: 16px;
+    right: 16px;
+    left: 16px;
+  }
+  .toast {
+    width: 100%;
+    animation: slideInDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes slideInDown {
+    from { transform: translateY(-100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
 }
 </style>
