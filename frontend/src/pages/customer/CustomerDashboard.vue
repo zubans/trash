@@ -389,13 +389,14 @@
           <div v-if="msg.file_url" class="telegram-attachment mb-2">
             <div v-if="isImageAttachment(msg)" class="attachment-image-wrapper">
               <img
-                :src="resolveFileUrl(msg.file_url)"
+                :src="getImageSrc(msg.file_url)"
                 class="attachment-img rounded-lg shadow-sm cursor-pointer"
                 alt="photo"
-                @click="openImagePreview(resolveFileUrl(msg.file_url))"
+                @click="openImagePreview(getImageSrc(msg.file_url))"
+                @error="onChatImgError(msg.file_url)"
               />
               <div v-if="isDebug" class="text-xxs text-warning bg-dark p-1 rounded mt-1 overflow-auto max-w-xs style-mono">
-                [DEBUG] URL: {{ resolveFileUrl(msg.file_url) }}
+                [DEBUG] URL: {{ getImageSrc(msg.file_url) }}
               </div>
             </div>
             <div v-else class="attachment-doc-wrapper p-2 bg-white-10 rounded d-flex align-items-center">
@@ -1040,6 +1041,32 @@ export default defineComponent({
       return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif')
     }
 
+    const blobImageCache = ref<Record<string, string>>({})
+
+    const getImageSrc = (path?: string) => {
+      if (!path) return ''
+      if (blobImageCache.value[path]) {
+        return blobImageCache.value[path]
+      }
+      return resolveFileUrl(path)
+    }
+
+    const onChatImgError = async (path?: string) => {
+      if (!path || blobImageCache.value[path]) return
+      const fullUrl = resolveFileUrl(path)
+      try {
+        const res = await fetch(fullUrl)
+        if (res.ok) {
+          const blob = await res.blob()
+          if (blob.size > 0) {
+            blobImageCache.value[path] = URL.createObjectURL(blob)
+          }
+        }
+      } catch (err) {
+        console.warn('[CustomerDashboard] fetch blob fallback failed for:', fullUrl, err)
+      }
+    }
+
     const formatFileSize = (bytes?: number) => {
       if (!bytes) return ''
       if (bytes < 1024) return bytes + ' B'
@@ -1536,6 +1563,8 @@ export default defineComponent({
       showImagePreviewModal,
       previewImageUrl,
       openImagePreview,
+      getImageSrc,
+      onChatImgError,
       deleteMessage,
       orderColumns,
       orderAddress,
