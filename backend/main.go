@@ -61,6 +61,7 @@ func main() {
 	catalogRepo := repository.NewServiceCatalogRepository(db)
 	appReleaseRepo := repository.NewAppReleaseRepository(db)
 	reviewRepo := repository.NewReviewRepository(db)
+	executorGeoRepo := repository.NewExecutorGeoRepository(db)
 
 	// Services
 	geocoder := service.NewGeocoder(db)
@@ -72,6 +73,7 @@ func main() {
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo, geocoder)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(5 * time.Second)
@@ -107,6 +109,7 @@ func main() {
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
+	egh := handler.NewExecutorGeoHandler(executorGeoService)
 
 	r := chi.NewRouter()
 	r.Use(corsMiddleware)
@@ -153,6 +156,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
+			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
 			r.Delete("/chats/{order_id}/messages/{message_id}", ch.DeleteMessageHandler)
@@ -172,12 +176,15 @@ func main() {
 			r.Post("/executor/shifts/end", sh.EndShiftHandler)
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
+			r.Post("/executor/set-location", egh.SetLocation)
+			r.Get("/executor/map-orders", egh.GetMapOrders)
 			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
 			r.Get("/executor/history", sh.GetExecutorHistoryHandler)
 			r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
 			r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
 			r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
+			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 		})
@@ -186,6 +193,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(authMiddleware.RequireAdmin)
+			r.Get("/admin/geo-alerts", egh.GetGeoAlerts)
 			r.Get("/admin/users", ah.GetUsersHandler)
 			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
 			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)

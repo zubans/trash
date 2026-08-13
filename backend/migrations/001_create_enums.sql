@@ -14,7 +14,7 @@ CREATE TYPE volume_type AS ENUM ('STANDARD', 'LARGE', 'CONSTRUCTION');
 CREATE TYPE speed_tariff_type AS ENUM ('REGULAR', 'URGENT', 'ASAP', 'CUSTOM');
 
 -- Order status
-CREATE TYPE order_status_type AS ENUM ('SEARCHING', 'ASSIGNED', 'COMPLETED', 'CANCELED');
+CREATE TYPE order_status_type AS ENUM ('SEARCHING', 'ASSIGNED', 'EXECUTED', 'COMPLETED', 'CANCELED');
 
 -- Shift status
 CREATE TYPE shift_status_type AS ENUM ('ACTIVE', 'COMPLETED', 'PENALIZED');

@@ -148,6 +148,28 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ExecuteOrder handles POST /executor/orders/{id}/execute.
+func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.orderService.ExecuteOrder(orderID, user.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // ListAssignedOrders handles GET /executor/orders/assigned.
 func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)

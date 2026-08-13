@@ -14,6 +14,7 @@ type OrderStatus string
 const (
 	OrderStatusSearching OrderStatus = "SEARCHING"
 	OrderStatusAssigned  OrderStatus = "ASSIGNED"
+	OrderStatusExecuted  OrderStatus = "EXECUTED"
 	OrderStatusCompleted OrderStatus = "COMPLETED"
 	OrderStatusCanceled  OrderStatus = "CANCELED"
 )
@@ -54,6 +55,7 @@ type OrderRepository interface {
 	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
 	Assign(orderID, executorID uuid.UUID) error
 	AssignOrder(orderID, executorID uuid.UUID) error
+	Execute(orderID uuid.UUID) error
 	Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
 	Cancel(orderID uuid.UUID) error
 	Unassign(orderID uuid.UUID) error
@@ -285,6 +287,14 @@ func (r *orderRepo) AssignOrder(orderID, executorID uuid.UUID) error {
 	return r.Assign(orderID, executorID)
 }
 
+func (r *orderRepo) Execute(orderID uuid.UUID) error {
+	_, err := r.db.Exec(
+		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
+		OrderStatusExecuted, orderID, OrderStatusAssigned,
+	)
+	return err
+}
+
 func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
 	_, err := r.db.Exec(
 		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
@@ -292,15 +302,15 @@ func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
 		    completed_at = now()
 		 WHERE id = $4 AND status = $5`,
-		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusAssigned,
+		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted,
 	)
 	return err
 }
 
 func (r *orderRepo) Cancel(orderID uuid.UUID) error {
 	_, err := r.db.Exec(
-		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
-		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned,
+		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status = $3`,
+		OrderStatusCanceled, orderID, OrderStatusSearching,
 	)
 	return err
 }

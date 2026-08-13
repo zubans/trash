@@ -119,19 +119,19 @@
               <div class="o-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
               <div class="o-actions" @click.stop>
                 <button
-                  v-if="order.status === 'ASSIGNED'"
+                  v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
                   type="button"
                   :class="['btn-action chat-btn', { active: openChatOrderId === order.id }]"
                   title="Чат"
                   @click="toggleChat(order)"
                 >
-                  <i :class="['ph-fill', openChatOrderId === order.id ? 'ph-chat-circle-dots' : 'ph-chat-circle-dots']"></i>
+                  <i class="ph-fill ph-chat-circle-dots"></i>
                 </button>
                 <button
-                  v-if="order.status === 'ASSIGNED'"
+                  v-if="order.status === 'EXECUTED'"
                   type="button"
-                  class="btn-action"
-                  title="Принять"
+                  class="btn-action confirm-btn"
+                  title="Подтвердить выполнение и закрыть заказ"
                   @click="confirmOrder(order.id)"
                 >
                   <i class="ph ph-check"></i>
@@ -450,7 +450,7 @@ export default defineComponent({
     const geocodeError = ref('')
 
     const activeOrders = computed(() => {
-      return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED'].includes(o.status))
+      return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED', 'EXECUTED'].includes(o.status))
     })
 
     const historyOrders = computed(() => {
@@ -928,7 +928,6 @@ export default defineComponent({
     let intervalId: any = null
 
     onMounted(async () => {
-      loadPhosphorIcons()
       await Promise.all([fetchProfile(), fetchOrders()])
       intervalId = setInterval(() => {
         fetchProfile()
@@ -1930,6 +1929,8 @@ export default defineComponent({
 .btn-action.danger:hover { background: #fee2e2; color: #ef4444; }
 
 .btn-action.chat-btn { background: #e0e7ff; color: var(--accent-main); }
+.btn-action.confirm-btn { background: #dcfce7; color: #15803d; }
+.btn-action.confirm-btn:hover { background: #bbf7d0; color: #166534; }
 .order-row.chat-open .btn-action.chat-btn { background: var(--accent-main); color: white; box-shadow: 0 4px 12px var(--accent-glow);}
 
 .inline-chat {

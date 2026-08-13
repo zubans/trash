@@ -246,14 +246,39 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 	})
 }
 
+// ExecuteOrder marks an order as EXECUTED by the executor and sends a system chat message.
+func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
+	order, err := s.orderRepo.GetOrderByID(orderID)
+	if err != nil {
+		return errors.New("order not found")
+	}
+	if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
+		return errors.New("order is not assigned to this executor")
+	}
+
+	if err := s.orderRepo.Execute(orderID); err != nil {
+		return err
+	}
+
+	// Send system notification message in chat
+	if s.chatRepo != nil {
+		chat, err := s.chatRepo.GetChatByOrderID(orderID)
+		if err == nil && chat != nil {
+			_, _ = s.chatRepo.SaveMessage(chat.ID, executorID, "📦 Исполнитель отметила(ся) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
+		}
+	}
+
+	return nil
+}
+
 // ConfirmOrder completes an order and processes payments.
 func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 	order, err := s.orderRepo.GetOrderByID(orderID)
 	if err != nil {
 		return errors.New("order not found")
 	}
-	if order.Status != repository.OrderStatusAssigned {
-		return errors.New("order is not assigned")
+	if order.Status != repository.OrderStatusExecuted {
+		return errors.New("order must be marked as executed by the executor before confirmation")
 	}
 	if order.ExecutorID == nil {
 		return errors.New("order has no executor")
