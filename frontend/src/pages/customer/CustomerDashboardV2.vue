@@ -1,54 +1,50 @@
 <template>
-  <div class="modern-dashboard-page">
-    <div class="dashboard">
-      <!-- Top Navigation Bar -->
-      <header class="top-bar">
-        <h1 class="greeting">Кабинет</h1>
-        <div class="top-controls">
+  <div class="premium-dashboard-page">
+    <div class="container">
+      <!-- Шапка -->
+      <header class="glass-header">
+        <div class="logo-text">
+          <i class="ph-fill ph-planet" style="color: var(--accent-main);"></i> Кабинет
+        </div>
+        <div class="top-actions">
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
-          <button type="button" class="icon-btn" title="Уведомления">
-            <i class="ph ph-bell"></i>
-          </button>
-          <button type="button" class="icon-btn" title="Выход" @click="handleLogout">
+          <button type="button" class="btn-glass" title="Выход" @click="handleLogout">
             <i class="ph ph-sign-out"></i>
           </button>
         </div>
       </header>
 
-      <!-- Bento Grid (Profile + Wallet) -->
-      <div class="bento-grid">
-        <!-- Profile Card -->
-        <div class="bento-card">
-          <div class="profile-content">
-            <div class="avatar-modern" @click="showProfileModal = true">
+      <!-- Сетка Профиль + Кошелек -->
+      <div class="premium-grid">
+        <!-- Карточка профиля (Светлая, матовое стекло) -->
+        <div class="surface-card">
+          <div class="profile-row">
+            <div class="avatar-glow" @click="showProfileModal = true">
               <i class="ph ph-user"></i>
             </div>
-            <div class="user-details">
-              <div class="user-role">
-                Заказчик <span class="badge-verified">Верифицирован</span>
-              </div>
-              <div class="user-phone" @click="showProfileModal = true">{{ formattedPhone }}</div>
-              <a href="#" class="address-btn" @click.prevent="showProfileModal = true">
-                <i class="ph ph-map-pin"></i> Управление адресами
+            <div class="profile-info">
+              <div class="role-badge">Верифицированный заказчик</div>
+              <h2 @click="showProfileModal = true">{{ formattedPhone }}</h2>
+              <a href="#" class="link-elegant" @click.prevent="showProfileModal = true">
+                <i class="ph ph-map-pin"></i> Мои адреса
               </a>
             </div>
           </div>
         </div>
 
-        <!-- Wallet Card -->
-        <div class="bento-card wallet-card">
-          <div class="wallet-header">
-            <span>Ваш баланс</span>
-            <i class="ph ph-wallet" style="font-size: 20px;"></i>
+        <!-- Кошелек (Темная премиум-карта) -->
+        <div class="wallet-card">
+          <div class="wallet-inner">
+            <div class="w-label">Доступный баланс</div>
+            <div class="w-balance">
+              {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              <span class="w-currency">{{ currencySymbol }}</span>
+            </div>
           </div>
-          <div class="balance-val">
-            {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
-            <span class="currency">{{ currencySymbol }}</span>
-          </div>
-          <button type="button" class="btn-topup" @click="showTopUpModal = true">
-            <i class="ph ph-plus-circle"></i> Пополнить
+          <button type="button" class="btn-topup-blur" @click="showTopUpModal = true">
+            <i class="ph ph-plus-circle"></i> Пополнить счет
           </button>
         </div>
       </div>
@@ -64,19 +60,16 @@
         {{ errorMsg }}
       </va-alert>
 
-      <!-- Main Action: Create Order -->
-      <button type="button" class="btn-primary-glow" @click="openCreateOrderModal">
-        <i class="ph ph-plus" style="font-size: 18px; font-weight: bold;"></i> Создать заказ
+      <!-- Большая сочная кнопка -->
+      <button type="button" class="create-order-btn" @click="openCreateOrderModal">
+        <i class="ph-bold ph-plus"></i> Создать новый заказ
       </button>
 
-      <!-- Active Orders -->
-      <div class="bento-card">
-        <div class="section-header">
-          <h2 class="section-title">
-            <div class="title-icon"><i class="ph ph-package"></i></div>
-            Активные заказы <span v-if="activeOrders.length" class="order-count">({{ activeOrders.length }})</span>
-          </h2>
-          <button type="button" class="icon-btn" title="Обновить" @click="fetchOrders">
+      <!-- Блок заказов -->
+      <div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="section-title m-0">Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span></h2>
+          <button type="button" class="btn-glass" style="width:40px; height:40px; font-size:18px;" title="Обновить" @click="fetchOrders">
             <i class="ph ph-arrows-clockwise"></i>
           </button>
         </div>
@@ -85,21 +78,23 @@
           <p>{{ $t('customer.noActiveOrders') }}</p>
         </div>
 
-        <div v-else class="orders-list">
-          <div v-for="order in activeOrders" :key="order.id" class="order-row">
-            <div class="o-icon"><i class="ph ph-box-arrow-up"></i></div>
-            <div class="o-main">
-              <div class="o-title">{{ formatOrderType(order) }}</div>
-              <div class="o-id" @click="openOrderDetails(order)">ID: #{{ order.id.slice(0, 8) }}</div>
+        <div v-else class="orders-stack">
+          <div v-for="order in activeOrders" :key="order.id" class="order-pill">
+            <div :class="['op-icon', order.is_urgent ? 'orange' : 'purple']">
+              <i :class="['ph', order.is_urgent ? 'ph-rocket-launch' : 'ph-package']"></i>
             </div>
-            <div class="o-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-            <div :class="['o-status', order.status === 'ASSIGNED' ? 'assigned' : 'searching']">
+            <div class="op-info">
+              <div class="op-title">{{ formatOrderType(order) }}</div>
+              <div class="op-id cursor-pointer" @click="openOrderDetails(order)">#{{ order.id.slice(0, 8) }}</div>
+            </div>
+            <div class="op-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+            <div class="op-status">
               {{ order.status === 'ASSIGNED' ? 'Назначен' : 'Поиск' }}
             </div>
-            <div class="o-actions">
+            <div class="op-actions">
               <button
                 type="button"
-                class="act-btn"
+                class="btn-elegant"
                 title="Детали"
                 @click="openOrderDetails(order)"
               >
@@ -108,7 +103,7 @@
               <button
                 v-if="order.status === 'ASSIGNED'"
                 type="button"
-                class="act-btn primary"
+                class="btn-elegant primary"
                 title="Чат"
                 @click="openChat(order)"
               >
@@ -117,7 +112,7 @@
               <button
                 v-if="order.status === 'ASSIGNED'"
                 type="button"
-                class="act-btn success"
+                class="btn-elegant"
                 title="Принять"
                 @click="confirmOrder(order.id)"
               >
@@ -126,7 +121,7 @@
               <button
                 v-if="order.status === 'SEARCHING' || order.status === 'ASSIGNED'"
                 type="button"
-                class="act-btn danger"
+                class="btn-elegant danger"
                 title="Отменить"
                 @click="cancelOrder(order.id)"
               >
@@ -137,41 +132,43 @@
         </div>
       </div>
 
-      <!-- History Orders -->
-      <div class="bento-card history-section">
-        <div class="section-header cursor-pointer" @click="isHistoryCollapsed = !isHistoryCollapsed">
-          <h2 class="section-title" style="color: var(--text-muted); font-size: 16px;">
-            <div class="title-icon"><i class="ph ph-clock-counter-clockwise"></i></div>
-            История заказов <span style="font-size: 13px; font-weight: normal; margin-left: 4px;">({{ historyOrders.length }})</span>
+      <!-- История -->
+      <div style="margin-top: 12px;">
+        <div class="cursor-pointer" @click="isHistoryCollapsed = !isHistoryCollapsed">
+          <h2 class="section-title" style="font-size: 18px;">
+            <i class="ph ph-clock-counter-clockwise"></i> История заказов ({{ historyOrders.length }})
+            <i :class="['ph', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="font-size: 14px; margin-left: 6px;"></i>
           </h2>
-          <button type="button" class="icon-btn">
-            <i :class="['ph', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']"></i>
-          </button>
         </div>
 
-        <div v-if="!isHistoryCollapsed">
+        <div v-if="!isHistoryCollapsed" class="orders-stack mt-3">
           <div v-if="historyOrders.length === 0" class="empty-orders-state">
             <p>{{ $t('customer.noHistoryOrders') }}</p>
           </div>
 
-          <div v-else class="orders-list">
-            <div v-for="order in historyOrders" :key="order.id" class="order-row history-row">
-              <div class="o-icon" style="background: #F4F4F5; border: none;">
-                <i :class="['ph', order.status === 'COMPLETED' ? 'ph-check-circle' : 'ph-x-circle']" :style="{ color: order.status === 'COMPLETED' ? '#10B981' : '#EF4444' }"></i>
-              </div>
-              <div class="o-main">
-                <div class="o-title" style="color: var(--text-muted);">{{ formatOrderType(order) }}</div>
-                <div class="o-id">#{{ order.id.slice(0, 8) }}</div>
-              </div>
-              <div class="o-price" style="color: var(--text-muted);">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-              <div class="o-status" style="background: transparent; padding: 0;">
-                {{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}
-              </div>
-              <div class="o-actions">
-                <button type="button" class="act-btn" title="Детали" @click="openOrderDetails(order)">
-                  <i class="ph ph-info"></i>
-                </button>
-              </div>
+          <div
+            v-for="order in historyOrders"
+            :key="order.id"
+            class="order-pill"
+            style="box-shadow: none; border-color: rgba(0,0,0,0.05); background: transparent;"
+          >
+            <div class="op-icon" style="background: #e2e8f0; width: 40px; height: 40px; border-radius: 12px;">
+              <i :class="['ph', order.status === 'COMPLETED' ? 'ph-check-circle' : 'ph-x-circle']"></i>
+            </div>
+            <div class="op-info">
+              <div class="op-title" style="color: var(--text-muted);">{{ formatOrderType(order) }}</div>
+              <div class="op-id">#{{ order.id.slice(0, 8) }}</div>
+            </div>
+            <div class="op-price" style="color: var(--text-muted); font-size: 16px;">
+              {{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}
+            </div>
+            <div class="op-status" style="background: transparent; color: var(--text-muted);">
+              {{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}
+            </div>
+            <div class="op-actions">
+              <button type="button" class="btn-elegant" title="Детали" @click="openOrderDetails(order)">
+                <i class="ph ph-info"></i>
+              </button>
             </div>
           </div>
         </div>
@@ -536,192 +533,204 @@ export default defineComponent({
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
-.modern-dashboard-page {
-  --bg-body: #F4F4F5;
-  --bg-card: #FFFFFF;
-  --text-main: #09090B;
-  --text-muted: #71717A;
-  --border-light: #E4E4E7;
+.premium-dashboard-page {
+  --bg-base: #f8f9fa;
+  --surface-card: rgba(255, 255, 255, 0.85);
+  --surface-hover: rgba(255, 255, 255, 1);
   
-  --brand-primary: #4F46E5;
-  --brand-primary-hover: #4338CA;
-  --success-bg: #D1FAE5;
-  --success-text: #059669;
+  --text-title: #0f172a;
+  --text-body: #334155;
+  --text-muted: #8b98a5;
   
-  --radius-lg: 24px;
-  --radius-md: 16px;
-  --radius-sm: 10px;
+  --accent-main: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.4);
   
-  --shadow-soft: 0 4px 40px -10px rgba(0, 0, 0, 0.05);
-  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --rad-sm: 12px;
+  --rad-md: 20px;
+  --rad-lg: 32px;
+  
+  --shadow-float: 0 10px 40px -10px rgba(15, 23, 42, 0.08), 
+                  0 1px 3px rgba(15, 23, 42, 0.03),
+                  inset 0 1px 0 rgba(255,255,255,1);
+  
+  --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  background-color: var(--bg-body);
-  color: var(--text-main);
+  font-family: 'Outfit', sans-serif;
+  background-color: var(--bg-base);
+  background-image: 
+      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(236, 72, 153, 0.05) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.08) 0px, transparent 50%);
+  background-attachment: fixed;
+  color: var(--text-body);
   line-height: 1.5;
   padding: 40px 20px;
   min-height: 100vh;
 }
 
-.dashboard {
-  max-width: 1040px;
+.container {
+  max-width: 960px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 28px;
 }
 
-/* Навигация сверху */
-.top-bar {
+/* --- Header: Glassmorphism --- */
+.glass-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 12px;
 }
 
-.greeting {
-  font-size: 24px;
+.logo-text {
+  font-size: 28px;
   font-weight: 700;
-  letter-spacing: -0.5px;
-  margin: 0;
-  color: var(--text-main);
-}
-
-.top-controls {
+  color: var(--text-title);
+  letter-spacing: -1px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
-.lang-switch-wrapper {
-  margin-right: 4px;
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.icon-btn {
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  color: var(--text-main);
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+.btn-glass {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.8);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--rad-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 22px;
+  color: var(--text-title);
   cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
   transition: var(--transition);
 }
 
-.icon-btn:hover {
-  background: #F4F4F5;
+.btn-glass:hover {
+  background: rgba(255, 255, 255, 0.9);
   transform: translateY(-2px);
 }
 
-/* Bento Grid */
-.bento-grid {
+/* --- Grid --- */
+.premium-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 20px;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 24px;
 }
 
-.bento-card {
-  background: var(--bg-card);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  border: 1px solid rgba(228, 228, 231, 0.8);
-  box-shadow: var(--shadow-soft);
-  position: relative;
-  overflow: hidden;
+/* --- Profile Card --- */
+.surface-card {
+  background: var(--surface-card);
+  backdrop-filter: blur(20px);
+  border-radius: var(--rad-lg);
+  padding: 32px;
+  box-shadow: var(--shadow-float);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
-/* Профиль */
-.profile-content {
+.profile-row {
   display: flex;
   align-items: center;
-  gap: 20px;
-  height: 100%;
+  gap: 24px;
 }
 
-.avatar-modern {
-  width: 80px;
-  height: 80px;
-  background: linear-gradient(135deg, #E0E7FF, #C7D2FE);
-  border-radius: 50%;
+.avatar-glow {
+  width: 88px;
+  height: 88px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #f8fafc, #e2e8f0);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 36px;
-  color: #4F46E5;
-  border: 4px solid #FFF;
-  box-shadow: 0 0 0 1px var(--border-light);
+  font-size: 40px;
+  color: #94a3b8;
+  box-shadow: inset 0 2px 4px rgba(255,255,255,0.8), 
+              0 8px 16px rgba(0,0,0,0.05);
+  position: relative;
   cursor: pointer;
   transition: var(--transition);
 }
 
-.avatar-modern:hover {
+.avatar-glow:hover {
   transform: scale(1.03);
 }
 
-.user-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.avatar-glow::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 20px;
+  height: 20px;
+  background: #10b981;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
 }
 
-.user-phone {
-  font-size: 24px;
+.profile-info h2 {
+  font-size: 32px;
   font-weight: 700;
+  color: var(--text-title);
   letter-spacing: -0.5px;
+  margin-bottom: 4px;
+  line-height: 1;
   cursor: pointer;
 }
 
-.user-role {
-  color: var(--text-muted);
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.badge-verified {
-  background: var(--success-bg);
-  color: var(--success-text);
-  padding: 2px 8px;
-  border-radius: 99px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.address-btn {
-  margin-top: 8px;
+.role-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--brand-primary);
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.link-elegant {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 14px;
   font-weight: 600;
-  font-size: 13px;
+  color: var(--accent-main);
   text-decoration: none;
-  width: fit-content;
-  padding: 6px 14px;
-  background: #EEF2FF;
-  border-radius: 99px;
+  padding: 10px 20px;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: var(--rad-sm);
   transition: var(--transition);
 }
 
-.address-btn:hover {
-  background: #E0E7FF;
+.link-elegant:hover {
+  background: rgba(99, 102, 241, 0.15);
 }
 
-/* Кошелек */
+/* --- Premium Wallet Card --- */
 .wallet-card {
-  background: linear-gradient(145deg, #09090B, #18181B);
-  color: #FFF;
-  border: none;
+  background: linear-gradient(120deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%);
+  border-radius: var(--rad-lg);
+  padding: 32px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 20px 40px -10px rgba(30, 27, 75, 0.5);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -730,339 +739,365 @@ export default defineComponent({
 .wallet-card::before {
   content: '';
   position: absolute;
-  top: -50%;
-  right: -50%;
+  top: -20%;
+  left: -10%;
+  width: 150px;
+  height: 150px;
+  background: #6366f1;
+  filter: blur(60px);
+  border-radius: 50%;
+  opacity: 0.5;
+}
+
+.wallet-card::after {
+  content: '';
+  position: absolute;
+  bottom: -20%;
+  right: -10%;
   width: 200px;
   height: 200px;
-  background: radial-gradient(circle, rgba(79,70,229,0.3) 0%, transparent 70%);
+  background: #ec4899;
+  filter: blur(60px);
   border-radius: 50%;
+  opacity: 0.4;
 }
 
-.wallet-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: #A1A1AA;
-  font-size: 13px;
-  font-weight: 500;
+.wallet-inner {
   position: relative;
   z-index: 1;
 }
 
-.balance-val {
-  font-size: 32px;
-  font-weight: 700;
-  margin-top: 8px;
-  letter-spacing: -1px;
-  position: relative;
-  z-index: 1;
-}
-
-.currency {
-  font-size: 20px;
-  color: #A1A1AA;
-  font-weight: 500;
-}
-
-.btn-topup {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.1);
-  color: #FFF;
-  padding: 10px 16px;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
+.w-label {
   font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: var(--transition);
-  margin-top: 20px;
-  position: relative;
-  z-index: 1;
+  color: rgba(255,255,255,0.7);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
-.btn-topup:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-/* Кнопка создания */
-.btn-primary-glow {
-  background: var(--brand-primary);
-  color: #FFF;
-  border: none;
-  padding: 16px 32px;
-  border-radius: var(--radius-md);
-  font-size: 15px;
+.w-balance {
+  font-size: 44px;
   font-weight: 700;
+  letter-spacing: -1.5px;
+  margin-top: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.w-currency {
+  font-size: 24px;
+  color: rgba(255,255,255,0.6);
+  font-weight: 400;
+}
+
+.btn-topup-blur {
+  margin-top: 32px;
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: white;
+  padding: 14px 24px;
+  border-radius: var(--rad-sm);
+  font-size: 15px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   cursor: pointer;
-  box-shadow: 0 8px 24px -6px rgba(79, 70, 229, 0.4);
+  transition: var(--transition);
+  position: relative;
+  z-index: 1;
+}
+
+.btn-topup-blur:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateY(-2px);
+}
+
+/* --- Giant Action Button --- */
+.create-order-btn {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  border: none;
+  padding: 20px;
+  border-radius: var(--rad-md);
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 15px 30px -10px var(--accent-glow);
   transition: var(--transition);
   width: 100%;
 }
 
-.btn-primary-glow:hover {
-  background: var(--brand-primary-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -6px rgba(79, 70, 229, 0.5);
+.create-order-btn:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 20px 40px -10px rgba(99, 102, 241, 0.6);
 }
 
-/* --- КОМПАКТНЫЕ СПИСКИ ЗАКАЗОВ --- */
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
+/* --- Floating Orders List --- */
 .section-title {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
+  color: var(--text-title);
+  margin: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  letter-spacing: -0.5px;
-  margin: 0;
-}
-
-.title-icon {
-  background: #F4F4F5;
-  padding: 6px;
-  border-radius: var(--radius-sm);
-  color: var(--text-main);
-  display: flex;
-}
-
-.orders-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .empty-orders-state {
   text-align: center;
-  padding: 24px 0;
+  padding: 32px 0;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 15px;
 }
 
-.order-row {
+.orders-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.order-pill {
+  background: var(--surface-card);
+  backdrop-filter: blur(20px);
+  border-radius: var(--rad-md);
+  padding: 16px 24px;
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-light);
-  background: #FAFAFA;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.8);
+  border: 1px solid rgba(255,255,255,0.5);
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.order-pill:hover {
+  transform: translateY(-3px);
+  background: var(--surface-hover);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,1);
+}
+
+.order-pill::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent-main);
+  opacity: 0;
   transition: var(--transition);
 }
 
-.order-row:hover {
-  background: #FFF;
-  border-color: #D4D4D8;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+.order-pill:hover::before {
+  opacity: 1;
 }
 
-.o-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: #FFF;
-  border: 1px solid var(--border-light);
+.op-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: #f1f5f9;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  color: var(--text-muted);
-  margin-right: 12px;
+  font-size: 24px;
+  color: #64748b;
+  margin-right: 20px;
   flex-shrink: 0;
 }
 
-.o-main {
+.op-icon.purple {
+  background: #e0e7ff;
+  color: #4f46e5;
+}
+
+.op-icon.orange {
+  background: #ffedd5;
+  color: #ea580c;
+}
+
+.op-info {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
-.o-title {
-  font-weight: 700;
-  font-size: 15px;
-  line-height: 1.2;
-}
-
-.o-id {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-family: monospace;
-  cursor: pointer;
-}
-
-.o-price {
-  font-size: 15px;
-  font-weight: 700;
-  margin-right: 16px;
-  min-width: 80px;
-  text-align: right;
-}
-
-.o-status {
-  background: #F3F4F6;
-  color: #4B5563;
-  padding: 4px 10px;
-  border-radius: 99px;
-  font-size: 12px;
+.op-title {
+  font-size: 17px;
   font-weight: 600;
-  margin-right: 16px;
+  color: var(--text-title);
+  letter-spacing: -0.3px;
+}
+
+.op-id {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.op-price {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-title);
+  margin-right: 32px;
+}
+
+.op-status {
+  padding: 6px 14px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #ecfdf5;
+  color: #059669;
+  margin-right: 32px;
   display: flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
 }
 
-.o-status.assigned {
-  background: #ECFDF5;
-  color: #059669;
-}
-
-.o-status.assigned::before {
+.op-status::before {
   content: '';
   width: 6px;
   height: 6px;
-  background: #059669;
+  background: currentColor;
   border-radius: 50%;
 }
 
-.o-actions {
+.op-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
-.act-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: #FFF;
-  border: 1px solid var(--border-light);
+.btn-elegant {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: #f8fafc;
+  color: #64748b;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 18px;
   cursor: pointer;
-  color: var(--text-muted);
   transition: var(--transition);
-  font-size: 16px;
 }
 
-.act-btn:hover {
-  background: #F4F4F5;
-  color: var(--text-main);
+.btn-elegant:hover {
+  background: #f1f5f9;
+  color: var(--text-title);
+  transform: scale(1.05);
 }
 
-.act-btn.primary:hover {
-  background: var(--brand-primary);
+.btn-elegant.primary:hover {
+  background: var(--accent-main);
   color: white;
-  border-color: var(--brand-primary);
 }
 
-.act-btn.danger:hover {
-  background: #EF4444;
+.btn-elegant.danger:hover {
+  background: #ef4444;
   color: white;
-  border-color: #EF4444;
-}
-
-.act-btn.success:hover {
-  background: #10B981;
-  color: white;
-  border-color: #10B981;
-}
-
-.history-section {
-  opacity: 0.85;
 }
 
 .cursor-pointer {
   cursor: pointer;
 }
 
-/* =======================================
-   АДАПТИВ (МОБИЛЬНЫЕ УСТРОЙСТВА)
-   ======================================= */
+/* --- Адаптив для Android / PWA --- */
 @media (max-width: 900px) {
-  .bento-grid {
+  .premium-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 600px) {
-  .modern-dashboard-page {
+  .premium-dashboard-page {
     padding: 16px 12px;
   }
 
-  .bento-card {
-    padding: 20px;
+  .container {
+    gap: 16px;
   }
 
-  .profile-content {
+  .surface-card, .wallet-card {
+    padding: 24px;
+    border-radius: 24px;
+  }
+
+  .profile-row {
     flex-direction: column;
     text-align: center;
-    gap: 12px;
+    gap: 16px;
   }
 
-  .user-role {
-    justify-content: center;
+  .avatar-glow {
+    width: 80px;
+    height: 80px;
   }
 
-  .address-btn {
-    margin: 8px auto 0;
+  .profile-info h2 {
+    font-size: 28px;
   }
 
-  /* Grid для мобилок: 2 строки */
-  .order-row {
+  /* Специфичная сетка для карточек заказов на мобилках */
+  .order-pill {
+    padding: 16px;
     display: grid;
-    grid-template-columns: 40px 1fr auto;
+    grid-template-columns: 48px 1fr auto;
     grid-template-rows: auto auto;
-    gap: 6px 12px;
-    padding: 12px;
-    background: #FFF;
+    gap: 12px 16px;
   }
 
-  .o-icon {
+  .op-icon {
     grid-column: 1;
     grid-row: 1 / 3;
     margin: 0;
+    align-self: center;
   }
 
-  .o-main {
+  .op-info {
     grid-column: 2;
     grid-row: 1;
-    justify-content: center;
+    align-self: end;
   }
 
-  .o-price {
+  .op-price {
     grid-column: 3;
     grid-row: 1;
     margin: 0;
     text-align: right;
+    align-self: end;
+    font-size: 16px;
   }
 
-  .o-status {
+  .op-status {
     grid-column: 2;
     grid-row: 2;
     margin: 0;
     width: fit-content;
-    padding: 2px 8px;
-    font-size: 11px;
+    padding: 4px 10px;
+    font-size: 12px;
+    align-self: start;
   }
 
-  .o-actions {
+  .op-actions {
     grid-column: 3;
     grid-row: 2;
     justify-content: flex-end;
+    align-self: start;
+  }
+
+  .btn-elegant {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
   }
 }
 </style>
