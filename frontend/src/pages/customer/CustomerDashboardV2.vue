@@ -295,7 +295,7 @@ import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import api from '../../services/api'
-import { getServiceCategories, type ServiceNode } from '../../api/services'
+import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
 export default defineComponent({
   name: 'CustomerDashboardV2',
