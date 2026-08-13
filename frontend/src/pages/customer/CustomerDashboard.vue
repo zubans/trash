@@ -519,7 +519,7 @@
       class="image-preview-modal-wrapper"
     >
       <div class="text-center p-3">
-        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" referrerpolicy="no-referrer" crossorigin="anonymous" />
+        <img :src="previewImageUrl" class="img-preview-content rounded shadow-lg" alt="preview" />
         <div class="mt-3 text-right">
           <va-button color="secondary" @click="showImagePreviewModal = false">
             {{ $t('common.close') }}
@@ -1167,10 +1167,25 @@ export default defineComponent({
     const showImagePreviewModal = ref(false)
     const previewImageUrl = ref('')
 
-    const openImagePreview = (url: string) => {
+    const openImagePreview = async (url: string) => {
       if (!url) return
       previewImageUrl.value = url
       showImagePreviewModal.value = true
+
+      // On Android native, ensure previewImageUrl is loaded via blob if HTTP img fails
+      if (isNative && !url.startsWith('blob:')) {
+        try {
+          const res = await fetch(url)
+          if (res.ok) {
+            const blob = await res.blob()
+            if (blob.size > 0) {
+              previewImageUrl.value = URL.createObjectURL(blob)
+            }
+          }
+        } catch (e) {
+          console.warn('[CustomerDashboard] preview fetch failed:', e)
+        }
+      }
     }
 
     const deleteMessage = async (messageID: string) => {
