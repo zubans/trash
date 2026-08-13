@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core'
 function resolveApiUrl(): string {
   const isNative = Capacitor.isNativePlatform()
   if (isNative) {
-    return (import.meta.env.VITE_MOBILE_API_URL as string) || 'https://94.103.9.172:8443'
+    return (import.meta.env.VITE_MOBILE_API_URL as string) || 'http://94.103.9.172:8089'
   }
   const url = (import.meta.env.VITE_API_URL as string) || ''
   if (!url) {
@@ -49,16 +49,19 @@ api.interceptors.request.use((config) => {
 })
 
 // Build a WebSocket URL for the chat endpoint based on the active API base URL.
-// Native apps use plain ws:// or wss:// against the active port.
+// Native apps use plain ws:// against the mobile HTTP port, while the web uses
+// wss:// against the HTTPS port. The /api prefix matches the backend route
+// mounting so SPA and API paths never collide.
 export function buildChatWebSocketUrl(orderId: string, token: string): string {
-  const wsBase = apiUrl.replace(/^https/, 'wss').replace(/^http/, 'ws').replace(/\/$/, '')
+  const wsBase = apiUrl.replace(/^http/, 'ws').replace(/\/$/, '')
   return `${wsBase}/api/chats/${orderId}/ws?token=${encodeURIComponent(token)}`
 }
 
 // Convert a relative file path (e.g. /uploads/chat/...) into a full accessible URL.
 // On web apps, relative paths (/uploads/...) are returned as-is so nginx
 // serves them over the active origin (HTTPS / port 8443 or 443).
-// On Android native apps, they are resolved against HTTPS backend host.
+// On Android native apps, images are served via Nginx HTTPS (https://94.103.9.172:8443)
+// so Android WebView allows loading without HTTP cleartext/mixed content blocks.
 export function resolveFileUrl(path?: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://')) return path
@@ -66,8 +69,8 @@ export function resolveFileUrl(path?: string): string {
   const isNative = Capacitor.isNativePlatform()
 
   if (isNative || !window.location.origin || window.location.protocol === 'file:') {
-    const base = apiUrl.replace(/\/$/, '')
-    return `${base}${cleanPath}`
+    const mediaBase = (import.meta.env.VITE_MOBILE_MEDIA_URL as string) || 'https://94.103.9.172:8443'
+    return `${mediaBase}${cleanPath}`
   }
 
   // On standard web browsers (HTTPS / 8443 or nginx), clean relative path allows origin proxying
