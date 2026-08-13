@@ -31,9 +31,8 @@
           <label class="form-label">{{ $t('customer.category') }}</label>
           <div class="select-wrapper">
             <select
-              :value="selectedCategoryId || ''"
+              v-model="categoryIdProxy"
               class="form-select"
-              @change="$emit('update:selectedCategoryId', ($event.target as HTMLSelectElement).value)"
             >
               <option value="" disabled>Выберите категорию</option>
               <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
@@ -49,9 +48,8 @@
           <label class="form-label">{{ $t('customer.subCategory') }}</label>
           <div class="select-wrapper">
             <select
-              :value="selectedSubCategoryId || ''"
+              v-model="subCategoryIdProxy"
               class="form-select"
-              @change="$emit('update:selectedSubCategoryId', ($event.target as HTMLSelectElement).value)"
             >
               <option value="" disabled>Выберите подкатегорию</option>
               <option v-for="opt in subCategoryOptions" :key="opt.value" :value="opt.value">
@@ -67,9 +65,8 @@
           <label class="form-label">{{ $t('customer.serviceVariant') }}</label>
           <div class="select-wrapper">
             <select
-              :value="selectedVariantId || ''"
+              v-model="variantIdProxy"
               class="form-select"
-              @change="$emit('update:selectedVariantId', ($event.target as HTMLSelectElement).value)"
             >
               <option value="" disabled>Выберите вариант услуги</option>
               <option v-for="opt in variantOptions" :key="opt.value" :value="opt.value">
@@ -169,6 +166,21 @@ export default defineComponent({
       set: (val) => emit('update:modelValue', val),
     })
 
+    const categoryIdProxy = computed({
+      get: () => props.selectedCategoryId || '',
+      set: (val) => emit('update:selectedCategoryId', val),
+    })
+
+    const subCategoryIdProxy = computed({
+      get: () => props.selectedSubCategoryId || '',
+      set: (val) => emit('update:selectedSubCategoryId', val),
+    })
+
+    const variantIdProxy = computed({
+      get: () => props.selectedVariantId || '',
+      set: (val) => emit('update:selectedVariantId', val),
+    })
+
     const loadPhosphorIcons = () => {
       if (!document.getElementById('phosphor-icons-script')) {
         const script = document.createElement('script')
@@ -182,7 +194,12 @@ export default defineComponent({
       loadPhosphorIcons()
     })
 
-    return { show }
+    return {
+      show,
+      categoryIdProxy,
+      subCategoryIdProxy,
+      variantIdProxy,
+    }
   },
 })
 </script>
@@ -358,23 +375,32 @@ export default defineComponent({
 .form-select {
   width: 100%;
   appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   padding: 16px 48px 16px 20px;
   border-radius: 16px;
-  background: var(--surface-input);
+  background-color: var(--surface-input);
   border: 1.5px solid rgba(255, 255, 255, 0.8);
   font-family: inherit;
   font-size: 15px;
   color: var(--text-title);
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
 }
 
+.form-select option {
+  background-color: #ffffff;
+  color: #0f172a;
+  padding: 12px 16px;
+  font-weight: 500;
+}
+
 .form-select:focus {
   outline: none;
   border-color: var(--accent-main);
-  background: #ffffff;
+  background-color: #ffffff;
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
 }
 
