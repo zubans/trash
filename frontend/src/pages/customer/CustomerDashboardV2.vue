@@ -102,27 +102,24 @@
         </div>
 
         <div v-else class="orders-stack">
-          <div v-for="order in activeOrders" :key="order.id" class="order-pill">
+          <div
+            v-for="order in activeOrders"
+            :key="order.id"
+            class="order-pill cursor-pointer"
+            @click="openOrderDetails(order)"
+          >
             <div :class="['op-icon', order.is_urgent ? 'orange' : 'purple']">
               <i :class="['ph', order.is_urgent ? 'ph-rocket-launch' : 'ph-package']"></i>
             </div>
             <div class="op-info">
               <div class="op-title">{{ formatOrderType(order) }}</div>
-              <div class="op-id cursor-pointer" @click="openOrderDetails(order)">#{{ order.id.slice(0, 8) }}</div>
+              <div class="op-id">#{{ order.id.slice(0, 8) }}</div>
             </div>
             <div class="op-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
             <div class="op-status">
               {{ order.status === 'ASSIGNED' ? 'Назначен' : 'Поиск' }}
             </div>
-            <div class="op-actions">
-              <button
-                type="button"
-                class="btn-elegant"
-                title="Детали"
-                @click="openOrderDetails(order)"
-              >
-                <i class="ph ph-info"></i>
-              </button>
+            <div class="op-actions" @click.stop>
               <button
                 v-if="order.status === 'ASSIGNED'"
                 type="button"
@@ -172,8 +169,9 @@
           <div
             v-for="order in historyOrders"
             :key="order.id"
-            class="order-pill"
+            class="order-pill cursor-pointer"
             style="box-shadow: none; border-color: rgba(0,0,0,0.05); background: transparent;"
+            @click="openOrderDetails(order)"
           >
             <div class="op-icon" style="background: #e2e8f0; width: 40px; height: 40px; border-radius: 12px;">
               <i :class="['ph', order.status === 'COMPLETED' ? 'ph-check-circle' : 'ph-x-circle']"></i>
@@ -187,11 +185,6 @@
             </div>
             <div class="op-status" style="background: transparent; color: var(--text-muted);">
               {{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}
-            </div>
-            <div class="op-actions">
-              <button type="button" class="btn-elegant" title="Детали" @click="openOrderDetails(order)">
-                <i class="ph ph-info"></i>
-              </button>
             </div>
           </div>
         </div>
