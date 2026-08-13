@@ -45,8 +45,8 @@ func (r *executorGeoRepository) UpdateExecutorLocation(executorID uuid.UUID, lat
 	now := time.Now()
 	if isManual {
 		query := `
-			INSERT INTO executor_profiles (user_id, current_lat, current_lon, last_manual_location_change_at)
-			VALUES ($4, $1, $2, $3)
+			INSERT INTO executor_profiles (user_id, full_name, current_lat, current_lon, last_manual_location_change_at)
+			VALUES ($4, 'Исполнитель', $1, $2, $3)
 			ON CONFLICT (user_id) DO UPDATE
 			SET current_lat = EXCLUDED.current_lat,
 			    current_lon = EXCLUDED.current_lon,
@@ -56,8 +56,8 @@ func (r *executorGeoRepository) UpdateExecutorLocation(executorID uuid.UUID, lat
 		return err
 	}
 	query := `
-		INSERT INTO executor_profiles (user_id, current_lat, current_lon)
-		VALUES ($3, $1, $2)
+		INSERT INTO executor_profiles (user_id, full_name, current_lat, current_lon)
+		VALUES ($3, 'Исполнитель', $1, $2)
 		ON CONFLICT (user_id) DO UPDATE
 		SET current_lat = EXCLUDED.current_lat,
 		    current_lon = EXCLUDED.current_lon

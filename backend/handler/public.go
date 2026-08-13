@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"healthlogin/backend/middleware"
+	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -118,4 +120,22 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	resp := AuthResponse{Token: token}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// MeHandler returns the current authenticated user details.
+func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":       user.ID,
+		"phone":    user.Phone,
+		"role":     user.Role,
+		"balance":  user.Balance,
+		"status":   user.Status,
+	})
 }

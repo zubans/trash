@@ -155,6 +155,7 @@ func main() {
 		// Authenticated shared routes (customer + executor)
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
+			r.Get("/auth/me", ph.MeHandler)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
