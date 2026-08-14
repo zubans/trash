@@ -99,3 +99,36 @@ func TestAutocomplete_KurskGrigorova40(t *testing.T) {
 		t.Errorf("display = %q, want %q", suggestions[0].Display, want)
 	}
 }
+
+func TestGeocode(t *testing.T) {
+	mockData := []NominatimResponse{
+		{
+			Lat:         "55.7558",
+			Lon:         "37.6173",
+			DisplayName: "Москва, Россия",
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(mockData)
+	}))
+	defer server.Close()
+
+	g := NewGeocoder(nil)
+	g.baseURL = server.URL
+
+	res, err := g.Geocode("Москва")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Lat != 55.7558 || res.Lon != 37.6173 {
+		t.Errorf("expected 55.7558, 37.6173, got %f, %f", res.Lat, res.Lon)
+	}
+
+	// Geocode empty address
+	_, err = g.Geocode("")
+	if err == nil {
+		t.Error("expected error for empty address")
+	}
+}

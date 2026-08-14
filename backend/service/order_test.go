@@ -206,6 +206,16 @@ func (m *mockOrderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]
 	return nil, nil
 }
 
+func (m *mockOrderRepo) Execute(orderID uuid.UUID) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			o.Status = repository.OrderStatusExecuted
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
 var (
 	standardVariantID    = uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	largeVariantID       = uuid.MustParse("66666666-6666-6666-6666-666666666666")
@@ -385,7 +395,9 @@ func (m *mockOrderRepo) FindAllByExecutor(executorID uuid.UUID) ([]repository.Or
 	return nil, nil
 }
 
-type mockTransactionRepo struct{}
+type mockTransactionRepo struct {
+	txs []*repository.Transaction
+}
 
 func (m *mockTransactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
 	return 10000.0, nil
@@ -396,6 +408,7 @@ func (m *mockTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta 
 }
 
 func (m *mockTransactionRepo) CreateTransaction(tx *sql.Tx, t *repository.Transaction) error {
+	m.txs = append(m.txs, t)
 	return nil
 }
 
@@ -485,6 +498,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	order, _ := srv.CreateOrder(customerID, standardVariantID, false, false, "", nil, nil)
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(order.ID, executorID)
+	_ = orderRepo.Execute(order.ID)
 
 	err := srv.ConfirmOrder(order.ID)
 	if err != nil {
@@ -541,6 +555,7 @@ func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 	for _, o := range orderRepo.orders {
 		if o.ID == order.ID {
 			o.DeadlineAt = &past
+			o.Status = repository.OrderStatusExecuted
 		}
 	}
 

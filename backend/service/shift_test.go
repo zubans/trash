@@ -338,13 +338,13 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 		t.Errorf("expected status PENALIZED, got %s", ended.Status)
 	}
 
-	// Assigned order should be canceled.
+	// Assigned order should be unassigned (SEARCHING).
 	updatedOrder, err := orderRepo.GetOrderByID(orderID)
 	if err != nil {
 		t.Fatalf("unexpected error fetching order: %v", err)
 	}
-	if updatedOrder.Status != repository.OrderStatusCanceled {
-		t.Errorf("expected order status CANCELED, got %s", updatedOrder.Status)
+	if updatedOrder.Status != repository.OrderStatusSearching {
+		t.Errorf("expected order status SEARCHING, got %s", updatedOrder.Status)
 	}
 	if shift.Status != repository.ShiftStatusPenalized {
 		t.Errorf("expected original shift status PENALIZED, got %s", shift.Status)

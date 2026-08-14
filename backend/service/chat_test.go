@@ -79,11 +79,36 @@ func (m *mockChatRepo) MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid
 }
 
 func (m *mockChatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
-	return nil, nil
+	fn := fileName
+	msg := &repository.Message{
+		ID:        uuid.New(),
+		ChatID:    chatID,
+		SenderID:  senderID,
+		Text:      text,
+		FileURL:   &fileURL,
+		FileName:  &fn,
+		FileType:  &fileType,
+		FileSize:  &fileSize,
+		CreatedAt: time.Now(),
+	}
+	m.messages = append(m.messages, msg)
+	return msg, nil
 }
 
 func (m *mockChatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
 	return nil
+}
+
+func (m *mockChatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) (*repository.Message, error) {
+	for _, msg := range m.messages {
+		if msg.ID == messageID && msg.SenderID == senderID {
+			msg.Text = newText
+			now := time.Now()
+			msg.UpdatedAt = &now
+			return msg, nil
+		}
+	}
+	return nil, errors.New("not found")
 }
 
 func TestChatService_GetMessagesAccessControl(t *testing.T) {
@@ -120,5 +145,34 @@ func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	_, err = srv.GetMessages(order.ID, strangerID)
 	if err == nil {
 		t.Error("expected error for stranger accessing messages")
+	}
+}
+
+func TestChatService_EditAndDeleteMessage(t *testing.T) {
+	chatRepo := &mockChatRepo{}
+	orderRepo := &mockOrderRepo{}
+	srv := NewChatService(chatRepo, orderRepo)
+
+	customerID := uuid.New()
+	orderID := uuid.New()
+	chat, _ := chatRepo.CreateChat(orderID)
+	msg, _ := chatRepo.SaveMessage(chat.ID, customerID, "Initial Message")
+
+	// Test EditMessage
+	editedMsg, err := srv.EditMessage(msg.ID, customerID, orderID, "Edited Message Text")
+	if err != nil {
+		t.Fatalf("unexpected error editing message: %v", err)
+	}
+	if editedMsg.Text != "Edited Message Text" {
+		t.Errorf("expected text 'Edited Message Text', got '%s'", editedMsg.Text)
+	}
+	if editedMsg.UpdatedAt == nil {
+		t.Errorf("expected UpdatedAt timestamp to be set")
+	}
+
+	// Test DeleteMessage
+	err = srv.DeleteMessage(msg.ID, customerID, orderID)
+	if err != nil {
+		t.Fatalf("unexpected error deleting message: %v", err)
 	}
 }
