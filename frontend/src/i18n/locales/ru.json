@@ -361,7 +361,21 @@
     "searchAddressPlaceholder": "Введите город, улицу...",
     "chatConnecting": "Подключение к чату...",
     "errorChatHistory": "Не удалось загрузить историю чата.",
-    "errorChatConnection": "Ошибка подключения к чату."
+    "errorChatConnection": "Ошибка подключения к чату.",
+    "executed": "Исполнил",
+    "executedStatus": "Исполнен",
+    "waitingForAssignment": "Ожидание назначения заказов в вашей смене",
+    "executorDashboardTitle": "Кабинет исполнителя",
+    "verifiedExecutor": "Верифицированный исполнитель",
+    "availableBalance": "Доступный баланс",
+    "requestPayoutHistory": "Запросить вывод / История",
+    "shiftActive": "Смена активна",
+    "shiftClosed": "Смена закрыта",
+    "shiftRemaining": "Осталось: {timer} (План до {end})",
+    "openNewShiftHint": "Выберите длительность и откройте новую смену для получения заказов",
+    "openShift": "Открыть смену",
+    "mapTitle": "Карта (10км / 2км)",
+    "statusPill": "Статус: {status}"
   },
   "common": {
     "loading": "Загрузка...",
@@ -385,6 +399,7 @@
   "orderStatus": {
     "SEARCHING": "Поиск",
     "ASSIGNED": "Назначен",
+    "EXECUTED": "Исполнен",
     "COMPLETED": "Завершён",
     "CANCELED": "Отменён"
   },

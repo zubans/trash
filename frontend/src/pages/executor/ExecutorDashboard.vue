@@ -5,13 +5,13 @@
       <header class="glass-header">
         <div class="logo-text">
           <i class="ph-fill ph-planet" style="color: var(--accent-main);"></i>
-          <span>Кабинет <span style="font-weight: 400; color: var(--text-muted); font-size: 20px;">исполнителя</span></span>
+          <span>{{ $t('executor.executorDashboardTitle') }}</span>
         </div>
         <div class="top-actions">
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
-          <button type="button" class="btn-glass" title="Выход" @click="handleLogout">
+          <button type="button" class="btn-glass" :title="$t('common.logout')" @click="handleLogout">
             <i class="ph ph-sign-out"></i>
           </button>
         </div>
@@ -41,10 +41,10 @@
               <div class="online-dot" title="Онлайн"></div>
             </div>
             <div class="profile-info">
-              <div class="role-badge">Верифицированный исполнитель</div>
+              <div class="role-badge">{{ $t('executor.verifiedExecutor') }}</div>
               <h2>{{ phone || '7 999 745 46 56' }}</h2>
               <div class="status-pill-badge" :class="status === 'ACTIVE' ? 'active' : 'inactive'">
-                <i class="ph-fill ph-check-circle"></i> Статус: {{ status }}
+                <i class="ph-fill ph-check-circle"></i> {{ $t('executor.statusPill', { status: status }) }}
               </div>
             </div>
           </div>
@@ -53,12 +53,12 @@
         <!-- Кошелек исполнителя -->
         <div class="wallet-card" @click="openFinancialHistoryModal">
           <div class="wallet-inner">
-            <div class="w-label">Доступный баланс</div>
+            <div class="w-label">{{ $t('executor.availableBalance') }}</div>
             <div class="w-amount">
               {{ currencySymbol }}{{ Number(balance).toFixed(2) }}
             </div>
             <button type="button" class="btn-wallet-action">
-              <i class="ph-bold ph-plus-circle"></i> Запросить вывод / История
+              <i class="ph-bold ph-plus-circle"></i> {{ $t('executor.requestPayoutHistory') }}
             </button>
           </div>
         </div>
@@ -72,14 +72,14 @@
           </div>
           <div class="shift-text">
             <div class="shift-title">
-              {{ activeShift && activeShift.status === 'ACTIVE' ? 'Смена активна' : 'Смена закрыта' }}
+              {{ activeShift && activeShift.status === 'ACTIVE' ? $t('executor.shiftActive') : $t('executor.shiftClosed') }}
             </div>
             <div class="shift-timer">
               <template v-if="activeShift && activeShift.status === 'ACTIVE'">
-                Осталось: {{ shiftCountdown || '00:00:00' }} (План до {{ formatDate(activeShift.planned_end_at) }})
+                {{ $t('executor.shiftRemaining', { timer: shiftCountdown || '00:00:00', end: formatDate(activeShift.planned_end_at) }) }}
               </template>
               <template v-else>
-                Выберите длительность и откройте новую смену для получения заказов
+                {{ $t('executor.openNewShiftHint') }}
               </template>
             </div>
           </div>
@@ -88,20 +88,20 @@
         <div class="shift-controls">
           <div v-if="!activeShift || activeShift.status !== 'ACTIVE'" class="start-shift-group">
             <select v-model="shiftDuration" class="shift-select">
-              <option v-for="d in durationOptions" :key="d" :value="d">{{ d }} ч.</option>
+              <option v-for="d in durationOptions" :key="d" :value="d">{{ d }} {{ $t('common.hours') }}</option>
             </select>
             <button type="button" class="btn-action-primary" :disabled="startingShift" @click="startShift">
               <span v-if="startingShift" class="spinner-sm"></span>
-              <template v-else>Открыть смену <i class="ph-bold ph-play"></i></template>
+              <template v-else>{{ $t('executor.openShift') }} <i class="ph-bold ph-play"></i></template>
             </button>
           </div>
           <button v-else type="button" class="btn-end-shift" :disabled="endingShiftEarly" @click="earlyEndShift">
             <span v-if="endingShiftEarly" class="spinner-sm"></span>
-            <template v-else>Завершить досрочно</template>
+            <template v-else>{{ $t('executor.endShiftEarly') }}</template>
           </button>
 
           <button type="button" class="btn-map-trigger" @click="showExecutorMapModal = true">
-            <i class="ph-bold ph-map-trifold"></i> Карта (10км / 2км)
+            <i class="ph-bold ph-map-trifold"></i> {{ $t('executor.mapTitle') }}
           </button>
         </div>
       </div>
@@ -109,7 +109,7 @@
       <!-- Назначенные заказы -->
       <div class="section-container">
         <div class="section-title-row">
-          <h3>Назначенные заказы</h3>
+          <h3>{{ $t('executor.assignedOrders') }}</h3>
           <span class="count-badge">({{ assignedOrders.length }})</span>
           <button type="button" class="btn-icon-refresh" @click="fetchAssignedOrders">
             <i class="ph-bold ph-arrows-clockwise"></i>
@@ -118,7 +118,7 @@
 
         <div v-if="assignedOrders.length === 0" class="empty-state-card">
           <i class="ph ph-hourglass-empty"></i>
-          <p>Ожидание назначения заказов в вашей смене</p>
+          <p>{{ $t('executor.waitingForAssignment') }}</p>
         </div>
 
         <div v-else class="orders-stack">
@@ -140,7 +140,7 @@
               </div>
               <div class="o-status">
                 <span class="badge-status" :style="{ backgroundColor: getStatusColor(order.status) }">
-                  {{ order.status }}
+                  {{ $t('orderStatus.' + order.status, order.status) }}
                 </span>
               </div>
               <div class="o-actions" @click.stop>
@@ -148,10 +148,10 @@
                   v-if="order.status === 'ASSIGNED'"
                   type="button"
                   class="btn-action-execute"
-                  title="Исполнил"
+                  :title="$t('executor.executed')"
                   @click="markOrderAsExecuted(order.id)"
                 >
-                  <i class="ph-bold ph-check-circle"></i> Исполнил
+                  <i class="ph-bold ph-check-circle"></i> {{ $t('executor.executed') }}
                 </button>
                 <button
                   type="button"
@@ -230,7 +230,7 @@
       <!-- GPS и Заказы рядом -->
       <div class="section-container">
         <div class="section-title-row">
-          <h3>GPS и Заказы рядом</h3>
+          <h3>{{ $t('executor.nearbyOrders') }}</h3>
           <button type="button" class="btn-icon-refresh" @click="updateCurrentPosition(true)">
             <i class="ph-bold ph-arrows-clockwise"></i>
           </button>
@@ -241,16 +241,16 @@
             <i class="ph-fill ph-crosshair"></i>
           </div>
           <div class="gps-info">
-            <div class="gps-label">Текущие координаты</div>
+            <div class="gps-label">{{ $t('executor.currentCoordinates') }}</div>
             <input type="text" class="gps-input-value" :value="`${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`" readonly />
           </div>
-          <button type="button" class="btn-edit-gps" title="Изменить" @click="openMapPicker">
+          <button type="button" class="btn-edit-gps" :title="$t('common.save')" @click="openMapPicker">
             <i class="ph-bold ph-pencil-simple"></i>
           </button>
         </div>
 
         <div v-if="availableOrders.length === 0" class="empty-state-card">
-          <p>Нет доступных заказов в вашем текущем радиусе</p>
+          <p>{{ $t('executor.noAvailableOrders') }}</p>
         </div>
         <div v-else class="orders-stack">
           <div v-for="order in availableOrders" :key="order.id" class="order-row">
@@ -260,14 +260,14 @@
               </div>
               <div class="o-info">
                 <div class="o-title">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">{{ order.address || 'Адрес не указан' }}</div>
+                <div class="o-subtitle">{{ order.address || '' }}</div>
               </div>
               <div class="o-price">
                 {{ currencySymbol }}{{ Number(order.hold_amount).toFixed(2) }}
               </div>
               <div class="o-actions">
                 <button type="button" class="btn-action-accept" @click="acceptOrder(order.id)">
-                  Принять <i class="ph-bold ph-check"></i>
+                  {{ $t('common.accept') }} <i class="ph-bold ph-check"></i>
                 </button>
               </div>
             </div>
@@ -282,14 +282,14 @@
           @click="isHistoryCollapsed = !isHistoryCollapsed"
         >
           <i class="ph-bold ph-clock-counter-clockwise" style="color: var(--text-muted); font-size: 20px;"></i>
-          <h3>История смен и заказов</h3>
+          <h3>{{ $t('executor.financialHistoryTitle') }}</h3>
           <span class="count-badge">({{ executorHistoryOrders.length }})</span>
           <i :class="['ph-bold', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="margin-left: auto;"></i>
         </div>
 
         <div v-if="!isHistoryCollapsed" class="orders-stack">
           <div v-if="executorHistoryOrders.length === 0" class="empty-state-card">
-            История пуста
+            {{ $t('customer.noHistoryOrders') }}
           </div>
           <div
             v-for="order in executorHistoryOrders"
@@ -308,7 +308,7 @@
                 {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
               </div>
               <div class="o-status">
-                <span class="status-dot-gray">{{ order.status }}</span>
+                <span class="status-dot-gray">{{ $t('orderStatus.' + order.status, order.status) }}</span>
               </div>
             </div>
           </div>
@@ -347,7 +347,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { compressImage } from '../../utils/imageCompressor'
-import type { ServiceNode } from '../../api/services'
+import { getServiceVariants, type ServiceNode } from '../../api/services'
 
 export default defineComponent({
   name: 'ExecutorDashboard',
@@ -672,8 +672,35 @@ export default defineComponent({
       fetchHistoryOrders()
     }
 
+    const serviceVariantsMap = ref<Record<string, ServiceNode>>({})
+
+    const fetchServiceVariants = async () => {
+      try {
+        const variants = await getServiceVariants()
+        const map: Record<string, ServiceNode> = {}
+        for (const v of variants) {
+          map[v.id] = v
+        }
+        serviceVariantsMap.value = map
+      } catch (err) {
+        console.error('Failed to load service variants:', err)
+      }
+    }
+
     const formatOrderType = (order: any) => {
-      return order.service_variant_id || 'Заказ вывоза мусора'
+      if (order?.service_variant) {
+        const nameObj = order.service_variant.name
+        if (nameObj && typeof nameObj === 'object') {
+          return nameObj['ru'] || nameObj['en'] || order.service_variant.code || ''
+        }
+      }
+      if (order?.service_variant_id && serviceVariantsMap.value[order.service_variant_id]) {
+        const node = serviceVariantsMap.value[order.service_variant_id]
+        if (node.name && typeof node.name === 'object') {
+          return node.name['ru'] || node.name['en'] || node.code || ''
+        }
+      }
+      return 'Заказ вывоза мусора'
     }
 
     const getStatusColor = (statusStr: string) => {
@@ -706,6 +733,7 @@ export default defineComponent({
     let intervalId: any = null
 
     onMounted(() => {
+      fetchServiceVariants()
       fetchProfile()
       fetchActiveShift()
       fetchAssignedOrders()
@@ -1581,5 +1609,28 @@ export default defineComponent({
   .shift-controls { flex-direction: column; width: 100%; }
   .start-shift-group { width: 100%; }
   .btn-action-primary, .btn-end-shift, .btn-map-trigger { width: 100%; justify-content: center; }
+}
+
+@media (max-width: 600px) {
+  .order-summary {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px;
+  }
+  .o-info {
+    min-width: 140px;
+  }
+  .o-price {
+    margin-left: auto;
+  }
+  .o-status {
+    width: 100%;
+    margin-top: 4px;
+  }
+  .o-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 6px;
+  }
 }
 </style>

@@ -327,8 +327,20 @@
     "searchOnMap": "Search on map",
     "searchAddressPlaceholder": "Enter city, street...",
     "chatConnecting": "Connecting to chat...",
-    "errorChatHistory": "Failed to load chat history.",
-    "errorChatConnection": "Chat connection error."
+    "executed": "Executed",
+    "executedStatus": "Executed",
+    "waitingForAssignment": "Waiting for orders assignment in your shift",
+    "executorDashboardTitle": "Executor Dashboard",
+    "verifiedExecutor": "Verified Executor",
+    "availableBalance": "Available balance",
+    "requestPayoutHistory": "Request payout / History",
+    "shiftActive": "Shift Active",
+    "shiftClosed": "Shift Closed",
+    "shiftRemaining": "Remaining: {timer} (Plan until {end})",
+    "openNewShiftHint": "Select duration and open a new shift to receive orders",
+    "openShift": "Open shift",
+    "mapTitle": "Map (10km / 2km)",
+    "statusPill": "Status: {status}"
   },
   "common": {
     "loading": "Loading...",
@@ -352,6 +364,7 @@
   "orderStatus": {
     "SEARCHING": "Searching",
     "ASSIGNED": "Assigned",
+    "EXECUTED": "Executed",
     "COMPLETED": "Completed",
     "CANCELED": "Cancelled"
   },
