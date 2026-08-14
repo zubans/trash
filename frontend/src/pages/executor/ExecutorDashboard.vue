@@ -341,6 +341,8 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
@@ -611,12 +613,42 @@ export default defineComponent({
       }
     }
 
-    const triggerImageSelect = () => {
-      const el = chatFileInputRef.value
-      if (Array.isArray(el)) {
-        (el[0] as HTMLInputElement)?.click()
-      } else if (el) {
-        el.click()
+    const triggerImageSelect = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const photo = await Camera.getPhoto({
+            quality: 85,
+            allowEditing: false,
+            resultType: CameraResultType.Uri,
+            source: CameraSource.Prompt,
+          })
+
+          if (photo.webPath && selectedChatOrder.value) {
+            uploadingChatFile.value = true
+            const response = await fetch(photo.webPath)
+            const blob = await response.blob()
+            let file = new File([blob], `photo_${Date.now()}.${photo.format || 'jpg'}`, { type: `image/${photo.format || 'jpeg'}` })
+            const compressedBlob = await compressImage(file)
+
+            const formData = new FormData()
+            formData.append('file', compressedBlob, file.name)
+            await api.post(`/chats/${selectedChatOrder.value.id}/upload`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+            fetchChatMessages(selectedChatOrder.value.id)
+          }
+        } catch (err: any) {
+          console.warn('[ExecutorDashboard] Camera capture error/cancel:', err)
+        } finally {
+          uploadingChatFile.value = false
+        }
+      } else {
+        const el = chatFileInputRef.value
+        if (Array.isArray(el)) {
+          (el[0] as HTMLInputElement)?.click()
+        } else if (el) {
+          el.click()
+        }
       }
     }
 
@@ -1402,6 +1434,28 @@ export default defineComponent({
 .btn-action-accept:hover {
   background: #10b981;
   color: white;
+}
+
+.btn-action-execute {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+  transition: all 0.2s ease;
+}
+
+.btn-action-execute:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
 }
 
 /* --- GPS Bar --- */

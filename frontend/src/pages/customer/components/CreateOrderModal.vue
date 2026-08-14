@@ -14,9 +14,6 @@
         <div class="info-icon"><i class="ph-fill ph-map-pin"></i></div>
         <div class="info-text">
           <div class="info-address">{{ orderAddress || 'Адрес не указан' }}</div>
-          <div v-if="orderLat !== null && orderLon !== null" class="info-coords">
-            {{ $t('customer.coordinates') }}: {{ orderLat.toFixed(5) }}, {{ orderLon.toFixed(5) }}
-          </div>
           <div v-if="geocodeError" class="text-danger text-xs mt-1">
             {{ geocodeError }}
           </div>

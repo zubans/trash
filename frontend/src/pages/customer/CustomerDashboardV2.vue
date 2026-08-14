@@ -92,9 +92,14 @@
       <div>
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h2 class="section-title m-0">Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span></h2>
-          <button type="button" class="btn-glass" style="width:40px; height:40px; font-size:18px;" title="Обновить" @click="fetchOrders">
-            <i class="ph ph-arrows-clockwise"></i>
-          </button>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn-glass" style="padding: 0 16px; height:40px; font-size:14px; gap: 6px;" title="Карта заказов" @click="showCustomerMapModal = true">
+              <i class="ph-bold ph-map-trifold"></i> Карта
+            </button>
+            <button type="button" class="btn-glass" style="width:40px; height:40px; font-size:18px;" title="Обновить" @click="fetchOrders">
+              <i class="ph ph-arrows-clockwise"></i>
+            </button>
+          </div>
         </div>
 
         <div v-if="activeOrders.length === 0" class="empty-orders-state">
@@ -336,6 +341,14 @@
         @remove-address="removeAddress"
       />
 
+      <!-- Customer Map Modal -->
+      <ExecutorMapModal
+        v-model="showCustomerMapModal"
+        :current-lat="orderLat || 55.7558"
+        :current-lon="orderLon || 37.6173"
+        :currency-symbol="currencySymbol"
+      />
+
       <!-- Image Preview Modal -->
       <div v-if="showImagePreviewModal" class="img-preview-overlay" @click.self="showImagePreviewModal = false">
         <div class="img-preview-card">
@@ -352,6 +365,8 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
@@ -359,6 +374,7 @@ import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
+import ExecutorMapModal from '../executor/components/ExecutorMapModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -372,6 +388,7 @@ export default defineComponent({
     CreateOrderModal,
     CustomerProfileModal,
     ReviewModal,
+    ExecutorMapModal,
   },
   setup() {
     const router = useRouter()
@@ -427,6 +444,7 @@ export default defineComponent({
     // Modals
     const showCreateOrderModal = ref(false)
     const showOrderDetailsModal = ref(false)
+    const showCustomerMapModal = ref(false)
     const showTopUpModal = ref(false)
     const showProfileModal = ref(false)
     const selectedOrderDetails = ref<any>(null)
@@ -696,13 +714,54 @@ export default defineComponent({
       showImagePreviewModal.value = true
     }
 
-    const triggerImageSelect = () => {
-      const el: any = chatFileInputRef.value
-      if (!el) return
-      if (Array.isArray(el)) {
-        if (el[0]) el[0].click()
-      } else if (typeof el.click === 'function') {
-        el.click()
+    const triggerImageSelect = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const photo = await Camera.getPhoto({
+            quality: 85,
+            allowEditing: false,
+            resultType: CameraResultType.Uri,
+            source: CameraSource.Prompt,
+          })
+
+          if (photo.webPath && openChatOrderId.value) {
+            uploadingChatFile.value = true
+            const response = await fetch(photo.webPath)
+            const blob = await response.blob()
+            let file = new File([blob], `photo_${Date.now()}.${photo.format || 'jpg'}`, { type: `image/${photo.format || 'jpeg'}` })
+            file = await compressImage(file, 150, 300)
+
+            const formData = new FormData()
+            formData.append('file', file)
+            if (chatInputText.value.trim()) {
+              formData.append('text', chatInputText.value.trim())
+            }
+
+            const res = await api.post(`/chats/${openChatOrderId.value}/upload`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+            if (res.data) {
+              const exists = chatMessages.value.some((m: any) => m.id === res.data.id)
+              if (!exists) {
+                chatMessages.value.push(res.data)
+                scrollToChatBottom()
+              }
+            }
+            chatInputText.value = ''
+          }
+        } catch (err: any) {
+          console.warn('[CustomerDashboardV2] Camera capture error/cancel:', err)
+        } finally {
+          uploadingChatFile.value = false
+        }
+      } else {
+        const el: any = chatFileInputRef.value
+        if (!el) return
+        if (Array.isArray(el)) {
+          if (el[0]) el[0].click()
+        } else if (typeof el.click === 'function') {
+          el.click()
+        }
       }
     }
 
@@ -959,6 +1018,7 @@ export default defineComponent({
       isHistoryCollapsed,
       showCreateOrderModal,
       showOrderDetailsModal,
+      showCustomerMapModal,
       showTopUpModal,
       showProfileModal,
       selectedOrderDetails,
