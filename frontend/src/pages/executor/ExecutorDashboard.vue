@@ -673,12 +673,18 @@ export default defineComponent({
       }
     }
 
+    const blobImageCache = ref<Record<string, string>>({})
+
     const isImageAttachment = (msg: any) => {
       return msg.file_url || (msg.content && msg.content.startsWith('/uploads/'))
     }
 
     const getImageSrc = (msg: any) => {
       const path = msg.file_url || msg.content
+      if (!path) return ''
+      if (blobImageCache.value[path]) {
+        return blobImageCache.value[path]
+      }
       return resolveFileUrl(path)
     }
 
@@ -687,8 +693,21 @@ export default defineComponent({
       showImagePreviewModal.value = true
     }
 
-    const onChatImgError = (e: Event) => {
-      console.warn('Chat image load error:', e)
+    const onChatImgError = async (msg: any) => {
+      const path = msg?.file_url || msg?.content
+      if (!path || blobImageCache.value[path]) return
+      const fullUrl = resolveFileUrl(path)
+      try {
+        const res = await fetch(fullUrl)
+        if (res.ok) {
+          const blob = await res.blob()
+          if (blob.size > 0) {
+            blobImageCache.value[path] = URL.createObjectURL(blob)
+          }
+        }
+      } catch (err) {
+        console.warn('[ExecutorDashboard] fetch blob fallback failed for:', fullUrl, err)
+      }
     }
 
     const scrollToBottom = () => {

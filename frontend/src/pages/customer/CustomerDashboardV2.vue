@@ -168,11 +168,11 @@
                     <!-- Image Attachment -->
                     <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
                       <img
-                        :src="getImageSrc(msg.file_url)"
+                        :src="getImageSrc(msg)"
                         alt="Фото"
                         class="chat-img"
-                        @error="onChatImgError(msg.file_url)"
-                        @click="openImagePreview(getImageSrc(msg.file_url))"
+                        @error="onChatImgError(msg.file_url || msg.content)"
+                        @click="openImagePreview(getImageSrc(msg))"
                       />
                     </div>
                     <span v-if="msg.text">{{ msg.text }}</span>
@@ -678,13 +678,16 @@ export default defineComponent({
     const currentUserId = computed(() => authStore.userID)
 
     const isImageAttachment = (msg: any) => {
-      if (!msg || !msg.file_url) return false
+      if (!msg) return false
+      const path = msg.file_url || msg.content
+      if (!path) return false
       if (msg.file_type === 'image') return true
-      const url = msg.file_url.toLowerCase()
-      return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif')
+      const url = path.toLowerCase()
+      return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif') || url.startsWith('/uploads/')
     }
 
-    const getImageSrc = (path?: string) => {
+    const getImageSrc = (msg: any) => {
+      const path = typeof msg === 'string' ? msg : (msg?.file_url || msg?.content)
       if (!path) return ''
       if (blobImageCache.value[path]) {
         return blobImageCache.value[path]
