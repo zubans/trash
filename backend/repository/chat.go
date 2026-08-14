@@ -28,6 +28,7 @@ type Message struct {
 	IsDeleted bool       `json:"is_deleted"`
 	CreatedAt time.Time  `json:"created_at"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
 // ChatRepository defines database operations for chats and messages.
@@ -42,6 +43,7 @@ type ChatRepository interface {
 	MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
 	GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error)
 	DeleteMessage(messageID, senderID uuid.UUID) error
+	UpdateMessage(messageID, senderID uuid.UUID, newText string) (*Message, error)
 }
 
 type chatRepo struct {
@@ -107,7 +109,7 @@ func (r *chatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, f
 
 func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	query := `
-		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at
+		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
 		FROM messages
 		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
 		ORDER BY created_at ASC`
@@ -120,7 +122,7 @@ func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	messages := make([]*Message, 0)
 	for rows.Next() {
 		var m Message
-		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.IsDeleted, &m.CreatedAt, &m.ReadAt)
+		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.IsDeleted, &m.CreatedAt, &m.ReadAt, &m.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -216,4 +218,19 @@ func (r *chatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (r *chatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) (*Message, error) {
+	var m Message
+	err := r.db.QueryRow(`
+		UPDATE messages
+		SET text = $3, updated_at = now()
+		WHERE id = $1 AND sender_id = $2 AND COALESCE(is_deleted, false) = false
+		RETURNING id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at`,
+		messageID, senderID, newText).Scan(
+		&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.IsDeleted, &m.CreatedAt, &m.ReadAt, &m.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
 }

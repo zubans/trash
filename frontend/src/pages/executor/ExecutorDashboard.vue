@@ -180,30 +180,53 @@
                 <div
                   v-for="msg in chatMessages"
                   :key="msg.id"
-                  :class="['msg', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
+                  :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
-                  <div class="bubble">
-                    <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
-                      <img
-                        :src="getImageSrc(msg)"
-                        alt="Фото"
-                        class="chat-img"
-                        @error="onChatImgError(msg)"
-                        @click="openImagePreview(getImageSrc(msg))"
-                      />
+                  <!-- Actions (Edit/Delete for outgoing messages) -->
+                  <div v-if="msg.sender_id === currentUserId" class="msg-actions">
+                    <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
+                      <i class="ph ph-pencil-simple"></i>
+                    </button>
+                    <button type="button" class="action-icon-btn danger" title="Удалить" @click="deleteChatMessage(msg.id)">
+                      <i class="ph ph-trash"></i>
+                    </button>
+                  </div>
+
+                  <div class="msg-content">
+                    <div :class="['bubble', { 'has-attachment': isImageAttachment(msg) }]">
+                      <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                        <img
+                          :src="getImageSrc(msg)"
+                          alt="Фото"
+                          class="msg-image"
+                          @error="onChatImgError(msg)"
+                          @click="openImagePreview(getImageSrc(msg))"
+                        />
+                      </div>
+                      <span v-if="msg.text || msg.content" class="msg-text">{{ msg.text || msg.content }}</span>
                     </div>
-                    <span v-if="msg.text || msg.content">{{ msg.text || msg.content }}</span>
+
+                    <div class="msg-meta">
+                      <span>{{ formatMessageTime(msg.created_at) }}</span>
+                      <span v-if="msg.updated_at" class="msg-edited">(изменено)</span>
+                      <i v-if="msg.sender_id === currentUserId" :class="['ph-bold', msg.status === 'read' ? 'ph-checks read-receipt' : 'ph-check']"></i>
+                    </div>
                   </div>
                 </div>
               </div>
 
+              <!-- Chat Input Area -->
               <div class="chat-input-area">
+                <div v-if="editingMessageId" class="edit-banner d-flex justify-content-between align-items-center mb-2 px-3 py-1 bg-light rounded border text-xs">
+                  <span><i class="ph ph-pencil-simple me-1"></i> Редактирование сообщения</span>
+                  <button type="button" class="btn-close-sm border-0 bg-transparent cursor-pointer" @click="cancelEditMessage">&times;</button>
+                </div>
                 <form class="input-group" @submit.prevent="sendChatMessage">
                   <button
                     type="button"
                     class="btn-attach"
                     title="Прикрепить фото"
-                    :disabled="uploadingChatFile"
+                    :disabled="uploadingChatFile || !!editingMessageId"
                     @click="triggerImageSelect"
                   >
                     <i v-if="uploadingChatFile" class="ph ph-spinner spinner"></i>
@@ -213,12 +236,12 @@
                   <input
                     v-model="chatInputText"
                     type="text"
-                    placeholder="Напишите сообщение..."
+                    :placeholder="editingMessageId ? 'Измените текст сообщения...' : 'Напишите сообщение...'"
                     class="inline-input"
                   />
 
                   <button type="submit" class="btn-inline-send" :disabled="!chatInputText.trim() && !uploadingChatFile">
-                    <i class="ph-bold ph-paper-plane-tilt"></i>
+                    <i :class="['ph-bold', editingMessageId ? 'ph-check' : 'ph-paper-plane-tilt']"></i>
                   </button>
                 </form>
               </div>
@@ -581,10 +604,41 @@ export default defineComponent({
     }
 
     // Chat Logic
+    const editingMessageId = ref<string | null>(null)
+
+    const startEditMessage = (msg: any) => {
+      editingMessageId.value = msg.id
+      chatInputText.value = msg.text || msg.content || ''
+    }
+
+    const cancelEditMessage = () => {
+      editingMessageId.value = null
+      chatInputText.value = ''
+    }
+
+    const formatMessageTime = (dateStr?: string) => {
+      if (!dateStr) return ''
+      const d = new Date(dateStr)
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+
+    const deleteChatMessage = async (messageId: string) => {
+      if (!selectedChatOrder.value || !messageId) return
+      if (!confirm('Удалить сообщение?')) return
+      try {
+        await api.delete(`/chats/${selectedChatOrder.value.id}/messages/${messageId}`)
+        chatMessages.value = chatMessages.value.filter((m: any) => m.id !== messageId)
+      } catch (err: any) {
+        console.error('[ExecutorDashboard] delete message error:', err)
+        errorMsg.value = 'Ошибка удаления сообщения'
+      }
+    }
+
     const toggleChat = (order: any) => {
       if (selectedChatOrder.value && selectedChatOrder.value.id === order.id) {
         selectedChatOrder.value = null
         chatMessages.value = []
+        cancelEditMessage()
       } else {
         selectedChatOrder.value = order
         fetchChatMessages(order.id)
@@ -604,6 +658,24 @@ export default defineComponent({
     const sendChatMessage = async () => {
       if (!chatInputText.value.trim() || !selectedChatOrder.value) return
       const text = chatInputText.value.trim()
+
+      if (editingMessageId.value) {
+        const msgId = editingMessageId.value
+        try {
+          const res = await api.put(`/chats/${selectedChatOrder.value.id}/messages/${msgId}`, { text })
+          const idx = chatMessages.value.findIndex((m: any) => m.id === msgId)
+          if (idx !== -1 && res.data) {
+            chatMessages.value[idx] = res.data
+          }
+        } catch (err: any) {
+          console.error('[ExecutorDashboard] edit message failed:', err)
+          errorMsg.value = 'Ошибка редактирования сообщения'
+        } finally {
+          cancelEditMessage()
+        }
+        return
+      }
+
       chatInputText.value = ''
       try {
         await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { text })
@@ -830,6 +902,11 @@ export default defineComponent({
       selectedChatOrder,
       chatMessages,
       chatInputText,
+      editingMessageId,
+      startEditMessage,
+      cancelEditMessage,
+      deleteChatMessage,
+      formatMessageTime,
       chatContainerRef,
       chatFileInputRef,
       uploadingChatFile,
@@ -1673,7 +1750,80 @@ export default defineComponent({
   cursor: pointer;
 }
 
+/* --- Message Actions & Container Styling --- */
+.msg-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 85%;
+  position: relative;
+}
+.msg-container.incoming { align-self: flex-start; flex-direction: row; }
+.msg-container.outgoing { align-self: flex-end; flex-direction: row-reverse; }
+
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transform: translateX(10px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.msg-container.outgoing .msg-actions { transform: translateX(10px); }
+.msg-container.incoming .msg-actions { transform: translateX(-10px); }
+
+.msg-container:hover .msg-actions {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.action-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.action-icon-btn:hover { background: #ffffff; color: var(--text-title); transform: scale(1.1); }
+.action-icon-btn.danger:hover { color: #ef4444; background: #fee2e2; border-color: #fca5a5; }
+
+.msg-content { display: flex; flex-direction: column; }
+.msg-container.outgoing .msg-content { align-items: flex-end; }
+.msg-container.incoming .msg-content { align-items: flex-start; }
+
+.msg-image {
+  max-width: 260px;
+  border-radius: 14px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid rgba(0,0,0,0.05);
+}
+
+.msg-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+.msg-edited { font-style: italic; opacity: 0.8; }
+.read-receipt { color: var(--accent-main, #6366f1); font-size: 13px; }
+
 @media (max-width: 768px) {
+  .msg-actions { opacity: 1; transform: translateX(0); }
+  .action-icon-btn { width: 28px; height: 28px; font-size: 14px; }
+  .msg-image { max-width: 200px; }
   .premium-grid { grid-template-columns: 1fr; }
   .profile-row { flex-direction: column; text-align: center; }
   .profile-info { align-items: center; }

@@ -403,6 +403,36 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 	go s.ReadPump(client, room)
 }
 
+// EditMessage updates message text if owned by sender and broadcasts message_edited event.
+func (s *ChatService) EditMessage(messageID, senderID, orderID uuid.UUID, newText string) (*repository.Message, error) {
+	msg, err := s.chatRepo.UpdateMessage(messageID, senderID, newText)
+	if err != nil {
+		return nil, err
+	}
+
+	// Broadcast edit event to room if active
+	editPayload, _ := json.Marshal(map[string]interface{}{
+		"type":       "message_edited",
+		"message_id": messageID,
+		"order_id":   orderID,
+		"text":       msg.Text,
+		"updated_at": msg.UpdatedAt,
+		"message":    msg,
+	})
+
+	s.mu.RLock()
+	room, exists := s.rooms[orderID]
+	s.mu.RUnlock()
+	if exists {
+		select {
+		case room.Broadcast <- editPayload:
+		default:
+		}
+	}
+
+	return msg, nil
+}
+
 // DeleteMessage deletes a message if owned by sender and broadcasts message_deleted event.
 func (s *ChatService) DeleteMessage(messageID, senderID, orderID uuid.UUID) error {
 	if err := s.chatRepo.DeleteMessage(messageID, senderID); err != nil {

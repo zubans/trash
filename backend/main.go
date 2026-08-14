@@ -159,6 +159,7 @@ func main() {
 			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
+			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)
 			r.Delete("/chats/{order_id}/messages/{message_id}", ch.DeleteMessageHandler)
 			r.Post("/chats/{order_id}/upload", ch.UploadAttachmentHandler)
 			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)

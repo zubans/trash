@@ -244,6 +244,51 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(msg)
 }
 
+// EditMessageHandler handles PUT /api/chats/{order_id}/messages/{message_id}.
+func (h *ChatHandler) EditMessageHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderIDStr := chi.URLParam(r, "order_id")
+	orderID, err := uuid.Parse(orderIDStr)
+	if err != nil {
+		http.Error(w, "invalid order ID", http.StatusBadRequest)
+		return
+	}
+
+	msgIDStr := chi.URLParam(r, "message_id")
+	messageID, err := uuid.Parse(msgIDStr)
+	if err != nil {
+		http.Error(w, "invalid message ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	if req.Text == "" {
+		http.Error(w, "text is required", http.StatusBadRequest)
+		return
+	}
+
+	msg, err := h.chatService.EditMessage(messageID, user.ID, orderID, req.Text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(msg)
+}
+
 // DeleteMessageHandler handles DELETE /api/chats/{order_id}/messages/{message_id}.
 func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
