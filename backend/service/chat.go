@@ -380,8 +380,11 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 		return
 	}
 	if chat == nil {
-		http.Error(w, "chat room does not exist yet", http.StatusNotFound)
-		return
+		chat, err = s.chatRepo.CreateChat(orderID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)

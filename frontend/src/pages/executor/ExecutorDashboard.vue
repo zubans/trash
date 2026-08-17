@@ -849,7 +849,7 @@ export default defineComponent({
                   return
                 }
               }
-              if (data && (data.text || data.content)) {
+              if (data && (data.text || data.content || data.id)) {
                 const exists = chatMessages.value.some((m) => m.id === data.id)
                 if (!exists) {
                   chatMessages.value.push(data)
@@ -863,17 +863,6 @@ export default defineComponent({
         } catch (e) {
           console.warn('WS connect failed:', e)
         }
-      }
-
-      // Start polling fallback if not already started
-      if (!chatPollTimer && selectedChatOrder.value) {
-        chatPollTimer = setInterval(async () => {
-          if (!selectedChatOrder.value) return
-          try {
-            const res = await api.get(`/chats/${orderId}/messages`)
-            chatMessages.value = res.data || []
-          } catch (e) {}
-        }, 3000)
       }
     }
 
@@ -899,9 +888,21 @@ export default defineComponent({
       }
 
       chatInputText.value = ''
+
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({ text }))
+        return
+      }
+
       try {
-        await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { text })
-        fetchChatMessages(selectedChatOrder.value.id)
+        const res = await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { text })
+        if (res.data) {
+          const exists = chatMessages.value.some((m) => m.id === res.data.id)
+          if (!exists) {
+            chatMessages.value.push(res.data)
+            scrollToBottom()
+          }
+        }
       } catch (err: any) {
         errorMsg.value = 'Ошибка отправки сообщения'
       }

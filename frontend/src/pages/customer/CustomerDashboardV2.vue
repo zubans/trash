@@ -905,7 +905,7 @@ export default defineComponent({
       closeInlineChat()
       openChatOrderId.value = order.id
 
-      // Fetch message history
+      // 1. Fetch message history
       try {
         const response = await api.get(`/chats/${order.id}/messages`)
         chatMessages.value = response.data || []
@@ -914,7 +914,7 @@ export default defineComponent({
         console.error('Failed to load chat messages:', err)
       }
 
-      // Setup WebSocket connection
+      // 2. Open WebSocket connection
       try {
         const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
         ws.value = new WebSocket(wsUrl)
@@ -932,7 +932,7 @@ export default defineComponent({
                 return
               }
             }
-            if (data && (data.text || data.content)) {
+            if (data && (data.text || data.content || data.id)) {
               const exists = chatMessages.value.some((m) => m.id === data.id)
               if (!exists) {
                 chatMessages.value.push(data)
@@ -946,15 +946,6 @@ export default defineComponent({
       } catch (e) {
         console.warn('WS connect failed:', e)
       }
-
-      // Polling fallback
-      chatPollTimer = setInterval(async () => {
-        if (!openChatOrderId.value) return
-        try {
-          const res = await api.get(`/chats/${order.id}/messages`)
-          chatMessages.value = res.data || []
-        } catch (e) {}
-      }, 3000)
     }
 
     const sendChatMessage = async () => {
@@ -988,8 +979,11 @@ export default defineComponent({
       try {
         const res = await api.post(`/chats/${openChatOrderId.value}/messages`, { text })
         if (res.data) {
-          chatMessages.value.push(res.data)
-          scrollToChatBottom()
+          const exists = chatMessages.value.some((m) => m.id === res.data.id)
+          if (!exists) {
+            chatMessages.value.push(res.data)
+            scrollToChatBottom()
+          }
         }
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка отправки сообщения'
