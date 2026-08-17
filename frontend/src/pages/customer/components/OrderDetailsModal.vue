@@ -103,12 +103,20 @@
       <!-- Футер -->
       <div class="modal-footer">
         <button
-          v-if="selectedOrderDetails && (selectedOrderDetails.status === 'SEARCHING' || selectedOrderDetails.status === 'ASSIGNED')"
+          v-if="selectedOrderDetails && role === 'CUSTOMER' && (selectedOrderDetails.status === 'SEARCHING' || selectedOrderDetails.status === 'ASSIGNED')"
           type="button"
           class="btn-danger-action"
           @click="confirmCancelOrder"
         >
           <i class="ph ph-trash"></i> Отменить заказ
+        </button>
+        <button
+          v-if="selectedOrderDetails && role === 'EXECUTOR' && selectedOrderDetails.status === 'ASSIGNED'"
+          type="button"
+          class="btn-danger-action"
+          @click="confirmRejectOrder"
+        >
+          <i class="ph ph-x-circle"></i> Отказаться от заказа
         </button>
         <button
           v-if="selectedOrderDetails && selectedOrderDetails.status === 'COMPLETED'"
@@ -141,8 +149,9 @@ export default defineComponent({
     formatOrderType: { type: Function, required: true },
     getStatusColor: { type: Function, required: true },
     formatDateFull: { type: Function, required: true },
+    role: { type: String, default: 'CUSTOMER' },
   },
-  emits: ['update:modelValue', 'cancel-order', 'open-review-modal'],
+  emits: ['update:modelValue', 'cancel-order', 'reject-order', 'open-review-modal'],
   setup(props, { emit }) {
     const show = computed({
       get: () => props.modelValue,
@@ -188,6 +197,14 @@ export default defineComponent({
       }
     }
 
+    const confirmRejectOrder = () => {
+      if (!props.selectedOrderDetails) return
+      if (confirm('Вы уверены, что хотите отказаться от выполнения этого заказа?')) {
+        emit('reject-order', props.selectedOrderDetails.id)
+        show.value = false
+      }
+    }
+
     const getStatusBadgeClass = (status: string) => {
       switch (status) {
         case 'SEARCHING': return 'status-searching'
@@ -208,6 +225,7 @@ export default defineComponent({
       hasReviewed,
       existingReview,
       confirmCancelOrder,
+      confirmRejectOrder,
       getStatusBadgeClass,
     }
   },

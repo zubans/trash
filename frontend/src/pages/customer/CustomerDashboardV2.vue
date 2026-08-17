@@ -117,6 +117,7 @@
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
                   <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                  <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
               <div class="o-actions item-actions" @click.stop>

@@ -128,14 +128,15 @@
             :key="order.id"
             :class="['order-row', { 'chat-open': selectedChatOrder && selectedChatOrder.id === order.id }]"
           >
-            <div class="order-summary list-item-compact cursor-pointer" @click="toggleChat(order)">
-              <div class="item-left-group">
+            <div class="order-summary list-item-compact">
+              <div class="item-left-group cursor-pointer" @click="openOrderDetails(order)">
                 <div class="o-icon item-icon">
                   <i class="ph-fill ph-package"></i>
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
                   <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                  <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
               <div class="o-actions item-actions" @click.stop>
@@ -394,13 +395,14 @@
         <div v-else class="orders-stack">
           <div v-for="order in availableOrders" :key="order.id" class="order-row">
             <div class="order-summary list-item-compact">
-              <div class="item-left-group">
+              <div class="item-left-group cursor-pointer" @click="openOrderDetails(order)">
                 <div class="o-icon item-icon">
                   <i class="ph-fill ph-package"></i>
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
                   <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                  <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
               <div class="o-actions item-actions">
@@ -431,13 +433,14 @@
           <div
             v-for="order in executorHistoryOrders"
             :key="order.id"
-            class="list-item-compact history-item"
+            class="list-item-compact history-item cursor-pointer"
+            @click="openOrderDetails(order)"
           >
             <div class="item-left-group">
               <div class="item-icon"><i class="ph-bold ph-check-circle"></i></div>
               <div class="item-text-stack">
                 <div class="item-title" style="font-size: 14px;">{{ formatOrderType(order) }}</div>
-                <div class="item-subtitle" style="font-family: inherit;">#{{ order?.id ? order.id.slice(0, 8) : '---' }}</div>
+                <div class="item-subtitle" style="font-family: inherit;">#{{ order?.id ? order.id.slice(0, 8) : '---' }}<span v-if="order.address"> • {{ order.address }}</span></div>
               </div>
             </div>
             <div>
@@ -454,6 +457,18 @@
         </div>
       </div>
     </div>
+
+    <!-- Order Details Modal for Executor -->
+    <OrderDetailsModal
+      v-model="showOrderDetailsModal"
+      :selected-order-details="selectedOrderDetails"
+      :currency-symbol="currencySymbol"
+      :format-order-type="formatOrderType"
+      :get-status-color="getStatusColor"
+      :format-date-full="formatDate"
+      role="EXECUTOR"
+      @reject-order="rejectAssignedOrder"
+    />
 
     <!-- Executor Map Modal -->
     <ExecutorMapModal
@@ -485,6 +500,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
@@ -497,6 +513,7 @@ export default defineComponent({
     UpdateBanner,
     LanguageSwitcher,
     ExecutorMapModal,
+    OrderDetailsModal,
   },
   setup() {
     const router = useRouter()
@@ -554,6 +571,26 @@ export default defineComponent({
     // Location state
     const currentLat = ref(55.7558)
     const currentLon = ref(37.6173)
+
+    // Order Details Modal state
+    const showOrderDetailsModal = ref(false)
+    const selectedOrderDetails = ref<any>(null)
+
+    const openOrderDetails = (order: any) => {
+      selectedOrderDetails.value = order
+      showOrderDetailsModal.value = true
+    }
+
+    const rejectAssignedOrder = async (orderId: string) => {
+      try {
+        await api.post(`/executor/orders/${orderId}/reject`)
+        successMsg.value = 'Вы отказались от заказа'
+        showOrderDetailsModal.value = false
+        fetchAssignedOrders()
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Ошибка отказа от заказа'
+      }
+    }
 
     // Map modal state
     const showExecutorMapModal = ref(false)
@@ -1133,6 +1170,10 @@ export default defineComponent({
       currentLat,
       currentLon,
       showExecutorMapModal,
+      showOrderDetailsModal,
+      selectedOrderDetails,
+      openOrderDetails,
+      rejectAssignedOrder,
       selectedChatOrder,
       chatMessages,
       chatInputText,
