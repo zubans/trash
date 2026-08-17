@@ -2,17 +2,20 @@
   <div class="premium-dashboard-page">
     <div class="container">
       <!-- Шапка -->
-      <header class="glass-header">
-        <div class="logo-text">
-          <i class="ph-fill ph-planet" style="color: var(--accent-main);"></i>
-          <span>{{ $t('executor.executorDashboardTitle') }}</span>
+      <header class="header">
+        <div class="logo">
+          <i class="ph-fill ph-planet"></i>
+          <div style="display: flex; flex-direction: column;">
+            <span>Кабинет</span>
+            <span style="font-weight: 500; color: var(--text-muted); font-size: 14px; line-height: 1;">исполнителя</span>
+          </div>
         </div>
-        <div class="top-actions">
+        <div class="header-controls">
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
-          <button type="button" class="btn-glass" :title="$t('common.logout')" @click="handleLogout">
-            <i class="ph ph-sign-out"></i>
+          <button type="button" class="control-icon" :title="$t('common.logout')" @click="handleLogout">
+            <i class="ph-bold ph-sign-out"></i>
           </button>
         </div>
       </header>
@@ -31,48 +34,45 @@
 
       <!-- Сетка Профиль и Кошелек -->
       <div class="premium-grid">
-        <!-- Карточка профиля исполнителя -->
-        <div class="surface-card">
-          <div class="profile-row">
-            <div class="avatar-glow">
-              <i class="ph ph-user"></i>
-              <div class="online-dot" title="Онлайн"></div>
+        <!-- Компактный профиль исполнителя -->
+        <div class="profile-card">
+          <div class="avatar-wrap">
+            <div class="avatar"><i class="ph ph-user"></i></div>
+            <div class="status-dot"></div>
+          </div>
+          <div class="profile-info">
+            <div class="profile-phone-row">
+              <div class="profile-phone">{{ phone || '79997454656' }}</div>
+              <div class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
             </div>
-            <div class="profile-info">
-              <div class="role-badge">{{ $t('executor.verifiedExecutor') }}</div>
-              <h2>{{ phone || '7 999 745 46 56' }}</h2>
-              <div class="status-pill-badge" :class="status === 'ACTIVE' ? 'active' : 'inactive'">
-                <i class="ph-fill ph-check-circle"></i> {{ $t('executor.statusPill', { status: status }) }}
-              </div>
-            </div>
+            <div class="badge-brand"><i class="ph-fill ph-check-circle"></i> Статус: {{ status }}</div>
           </div>
         </div>
 
-        <!-- Кошелек исполнителя -->
-        <div class="wallet-card" @click="openFinancialHistoryModal">
-          <div class="wallet-inner">
-            <div class="w-label">{{ $t('executor.availableBalance') }}</div>
-            <div class="w-amount">
-              {{ currencySymbol }}{{ Number(balance).toFixed(2) }}
+        <!-- Компактный баланс исполнителя -->
+        <div class="balance-card">
+          <div class="bc-label">Доступный баланс</div>
+          <div class="balance-bottom-row">
+            <div class="bc-value">
+              {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              <span class="bc-currency">{{ currencySymbol }}</span>
             </div>
-            <button type="button" class="btn-wallet-action">
-              <i class="ph-bold ph-plus-circle"></i> {{ $t('executor.requestPayoutHistory') }}
+            <button type="button" class="btn-balance" @click="openFinancialHistoryModal">
+              <i class="ph-bold ph-clock-counter-clockwise"></i> История/Вывод
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Панель управления сменой и карте -->
-      <div class="shift-action-bar">
-        <div class="shift-info">
-          <div class="shift-icon">
-            <i class="ph-bold ph-clock"></i>
-          </div>
-          <div class="shift-text">
+      <!-- Смена (Ультра-компактная) -->
+      <div class="shift-bar">
+        <div class="shift-info-group">
+          <div class="shift-icon"><i class="ph-bold ph-clock"></i></div>
+          <div class="shift-text-stack">
             <div class="shift-title">
               {{ activeShift && activeShift.status === 'ACTIVE' ? $t('executor.shiftActive') : $t('executor.shiftClosed') }}
             </div>
-            <div class="shift-timer">
+            <div class="shift-subtitle">
               <template v-if="activeShift && activeShift.status === 'ACTIVE'">
                 {{ $t('executor.shiftRemaining', { timer: shiftCountdown || '00:00:00', end: formatDate(activeShift.planned_end_at) }) }}
               </template>
@@ -82,44 +82,39 @@
             </div>
           </div>
         </div>
-
-        <div class="shift-controls">
-          <div v-if="!activeShift || activeShift.status !== 'ACTIVE'" class="start-shift-group">
+        <div class="shift-actions">
+          <template v-if="!activeShift || activeShift.status !== 'ACTIVE'">
             <select v-model="shiftDuration" class="shift-select">
-              <option v-for="d in durationOptions" :key="d" :value="d">{{ d }} {{ $t('common.hours') }}</option>
+              <option v-for="d in durationOptions" :key="d" :value="d">{{ d }} ч.</option>
             </select>
-            <button type="button" class="btn-action-primary" :disabled="startingShift" @click="startShift">
+            <button type="button" class="btn-start-shift" :disabled="startingShift" @click="startShift">
               <span v-if="startingShift" class="spinner-sm"></span>
-              <template v-else>{{ $t('executor.openShift') }} <i class="ph-bold ph-play"></i></template>
+              <template v-else>Открыть <i class="ph-bold ph-caret-right"></i></template>
             </button>
-          </div>
-          <button v-else type="button" class="btn-end-shift" :disabled="endingShiftEarly" @click="earlyEndShift">
-            <span v-if="endingShiftEarly" class="spinner-sm"></span>
-            <template v-else>{{ $t('executor.endShiftEarly') }}</template>
-          </button>
+          </template>
+          <template v-else>
+            <button type="button" class="btn-start-shift danger" :disabled="endingShiftEarly" @click="earlyEndShift">
+              <span v-if="endingShiftEarly" class="spinner-sm"></span>
+              <template v-else>{{ $t('executor.endShiftEarly') }}</template>
+            </button>
+          </template>
         </div>
       </div>
 
       <!-- Назначенные заказы -->
-      <div class="section-container">
-        <div class="section-title-row">
-          <div class="d-flex align-items-center gap-2">
-            <h3 class="m-0">{{ $t('executor.assignedOrders') }}</h3>
-            <span class="count-badge">({{ activeAssignedOrders.length }})</span>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <button type="button" class="btn-map-trigger" @click="showExecutorMapModal = true">
-              <i class="ph-bold ph-map-trifold"></i> {{ $t('executor.mapTitle') }}
-            </button>
-            <button type="button" class="btn-icon-refresh" title="Обновить" @click="fetchAssignedOrders">
-              <i class="ph-bold ph-arrows-clockwise"></i>
-            </button>
-          </div>
+      <div>
+        <div class="section-header">
+          <h2 class="section-title">Назначенные заказы <span class="section-count">({{ activeAssignedOrders.length }})</span></h2>
+          <button type="button" class="btn-header-action" @click="showExecutorMapModal = true">
+            <i class="ph-bold ph-map-trifold"></i> 10км / 2км
+          </button>
+          <button type="button" class="btn-header-action btn-refresh" title="Обновить" @click="fetchAssignedOrders">
+            <i class="ph-bold ph-arrows-clockwise"></i>
+          </button>
         </div>
 
-        <div v-if="activeAssignedOrders.length === 0" class="empty-state-card">
-          <i class="ph ph-hourglass-empty"></i>
-          <p>{{ $t('executor.waitingForAssignment') }}</p>
+        <div v-if="activeAssignedOrders.length === 0" class="empty-state">
+          Ожидание назначения заказов в вашей смене
         </div>
 
         <div v-else class="orders-stack">
@@ -245,12 +240,9 @@
       </div>
 
       <!-- Заказы на проверке -->
-      <div v-if="pendingVerificationOrders.length > 0" class="section-container mt-4">
-        <div class="section-title-row">
-          <div class="d-flex align-items-center gap-2">
-            <h3 class="m-0" style="color: #f59e0b;">Заказы на проверке</h3>
-            <span class="count-badge" style="background: #fffbeb; color: #f59e0b;">({{ pendingVerificationOrders.length }})</span>
-          </div>
+      <div v-if="pendingVerificationOrders.length > 0">
+        <div class="section-header">
+          <h2 class="section-title" style="color: var(--warning-main);">Заказы на проверке <span class="section-count">({{ pendingVerificationOrders.length }})</span></h2>
         </div>
 
         <div class="orders-stack">
@@ -365,11 +357,11 @@
         </div>
       </div>
 
-      <!-- GPS и Заказы рядом -->
-      <div class="section-container">
-        <div class="section-title-row">
-          <h3>{{ $t('executor.nearbyOrders') }}</h3>
-          <button type="button" class="btn-icon-refresh" @click="updateCurrentPosition(true)">
+      <!-- Заказы поблизости (GPS) -->
+      <div>
+        <div class="section-header">
+          <h2 class="section-title">{{ $t('executor.nearbyOrders') }}</h2>
+          <button type="button" class="btn-header-action btn-refresh" title="Обновить" @click="updateCurrentPosition(true)">
             <i class="ph-bold ph-arrows-clockwise"></i>
           </button>
         </div>
@@ -416,9 +408,9 @@
       </div>
 
       <!-- Финансовая история -->
-      <div class="section-container" style="margin-top: 8px;">
+      <div style="margin-top: 8px;">
         <div
-          class="section-title-row cursor-pointer"
+          class="section-header cursor-pointer"
           @click="isHistoryCollapsed = !isHistoryCollapsed"
         >
           <i class="ph-bold ph-clock-counter-clockwise" style="color: var(--text-muted); font-size: 18px;"></i>
@@ -1279,65 +1271,137 @@ export default defineComponent({
   gap: 12px;
 }
 
-.top-actions {
+/* --- Header --- */
+.header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+}
+.logo { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); line-height: 1.1; }
+.logo i { color: #5c60f5; font-size: 24px; }
+.header-controls { display: flex; gap: 8px; align-items: center; }
+.control-icon {
+  width: 36px; height: 36px; background: #ffffff; border: 1px solid rgba(0,0,0,0.05); border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--text-muted, #64748b);
+  cursor: pointer; transition: all 0.2s ease;
+}
+.control-icon:hover { color: var(--text-title, #0f172a); border-color: rgba(0,0,0,0.1); }
+
+/* --- Profile Card (New Compact Design) --- */
+.profile-card {
+  background: var(--surface-card, #ffffff);
+  border-radius: var(--rad-lg, 24px);
+  padding: 16px;
+  box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04));
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
-.btn-glass {
-  background: #ffffff;
-  border: 1px solid rgba(0,0,0,0.05);
-  width: 40px;
-  height: 40px;
-  border-radius: var(--rad-sm);
+.avatar-wrap { position: relative; flex-shrink: 0; }
+.avatar {
+  width: 56px; height: 56px;
+  background: #f1f5f9; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: #cbd5e1;
+}
+.status-dot {
+  position: absolute; bottom: -2px; right: -2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #10b981; border: 2px solid #ffffff;
+}
+
+.profile-info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+.profile-phone-row { display: flex; align-items: center; gap: 6px; }
+.profile-phone { font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); letter-spacing: -0.5px; line-height: 1; }
+.verified-badge { color: #10b981; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+
+.badge-brand {
+  background: #eef2ff; color: #5c60f5;
+  padding: 4px 12px; border-radius: 99px;
+  font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;
+}
+
+/* --- Balance Card (New Compact Dark Design) --- */
+.balance-card {
+  background: linear-gradient(135deg, #1e1b4b, #3b2c6b);
+  border-radius: var(--rad-lg, 24px);
+  padding: 20px 16px;
+  color: #ffffff;
+  display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 12px 24px -8px rgba(30, 27, 75, 0.4);
+  position: relative; overflow: hidden;
+}
+.bc-label { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.balance-bottom-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  color: var(--text-muted);
+  justify-content: space-between;
+}
+
+.bc-value { font-size: 32px; font-weight: 700; letter-spacing: -1px; display: flex; align-items: baseline; gap: 6px;}
+.bc-currency { font-size: 20px; color: rgba(255,255,255,0.5); font-weight: 400; }
+
+.btn-balance {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: #ffffff; padding: 10px 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
-  transition: var(--transition);
+  transition: all 0.2s ease;
 }
+.btn-balance:hover { background: rgba(255,255,255,0.2); }
 
-.btn-glass:hover {
-  color: var(--text-title);
-  border-color: rgba(0,0,0,0.1);
-}
-
-/* --- Toast Alerts --- */
-.toast-alert {
-  padding: 16px 20px;
-  border-radius: var(--rad-sm);
+/* --- Shift Control (Compact) --- */
+.shift-bar {
+  background: var(--surface-card, #ffffff);
+  border-radius: var(--rad-md, 16px);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04));
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  font-weight: 500;
-  box-shadow: var(--shadow-float);
-  animation: slideDown 0.3s ease;
+  border-left: 4px solid #10b981;
 }
 
-.toast-alert.success {
-  background: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
+.shift-info-group { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+
+.shift-icon {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  background: #ecfdf5; color: #10b981;
+  display: flex; align-items: center; justify-content: center; font-size: 20px;
 }
 
-.toast-alert.danger {
-  background: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
+.shift-text-stack { display: flex; flex-direction: column; overflow: hidden; }
+.shift-title { font-size: 15px; font-weight: 700; color: var(--text-title, #0f172a); line-height: 1.2; }
+.shift-subtitle { font-size: 12px; color: var(--text-muted, #64748b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.shift-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.shift-select {
+  background: #f3f5f9; border: 1px solid rgba(0,0,0,0.05); border-radius: 10px;
+  padding: 8px 12px; font-family: inherit; font-size: 14px; font-weight: 600; color: var(--text-title, #0f172a); outline: none;
 }
 
-.btn-toast-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  font-size: 20px;
+.btn-start-shift {
+  background: #5c60f5; color: white; border: none; padding: 10px 16px; border-radius: 10px;
+  font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 12px rgba(92, 96, 245, 0.2);
   cursor: pointer;
-  color: inherit;
 }
+.btn-start-shift.danger { background: #ef4444; }
+
+/* --- Section Headers --- */
+.section-header { display: flex; align-items: center; gap: 8px; margin-top: 8px; margin-bottom: 4px; }
+.section-title { font-size: 16px; font-weight: 700; color: var(--text-title, #0f172a); flex: 1; margin: 0; }
+.section-count { font-size: 16px; font-weight: 700; color: var(--text-muted, #64748b); }
+
+.btn-header-action {
+  height: 28px; border-radius: 8px; background: #ffffff; border: 1px solid rgba(0,0,0,0.05);
+  display: flex; align-items: center; justify-content: center; color: var(--text-title, #0f172a); font-size: 12px; font-weight: 600; padding: 0 10px; gap: 4px;
+  cursor: pointer;
+}
+.btn-refresh { width: 28px; padding: 0; color: var(--text-muted, #64748b); }
 
 /* --- Grid --- */
 .premium-grid {
