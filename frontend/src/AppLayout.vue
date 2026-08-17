@@ -42,6 +42,13 @@
           </va-sidebar-item-content>
         </va-sidebar-item>
 
+        <va-sidebar-item :active="currentRouteName === 'admin-withdrawals'" to="/admin/withdrawals" @click="closeSidebarOnMobile">
+          <va-sidebar-item-content>
+            <va-icon name="payments" />
+            <va-sidebar-item-title>{{ $t('app.withdrawals') }}</va-sidebar-item-title>
+          </va-sidebar-item-content>
+        </va-sidebar-item>
+
         <va-sidebar-item :active="currentRouteName === 'admin-transactions'" to="/admin/transactions" @click="closeSidebarOnMobile">
           <va-sidebar-item-content>
             <va-icon name="history" />

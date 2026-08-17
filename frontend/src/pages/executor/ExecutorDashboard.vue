@@ -460,6 +460,15 @@
       :format-date-full="formatDate"
       role="EXECUTOR"
       @reject-order="rejectAssignedOrder"
+      @open-review-modal="openReviewModal"
+    />
+
+    <!-- Review Modal for Executor -->
+    <ReviewModal
+      v-model="showReviewModal"
+      :order-id="reviewTargetOrderId"
+      role="EXECUTOR"
+      @reviewed="onReviewSubmitted"
     />
 
     <!-- Executor Map Modal -->
@@ -493,6 +502,7 @@ import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
+import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
@@ -506,6 +516,7 @@ export default defineComponent({
     LanguageSwitcher,
     ExecutorMapModal,
     OrderDetailsModal,
+    ReviewModal,
   },
   setup() {
     const router = useRouter()
@@ -582,6 +593,21 @@ export default defineComponent({
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка отказа от заказа'
       }
+    }
+
+    // Review Modal state
+    const showReviewModal = ref(false)
+    const reviewTargetOrderId = ref('')
+
+    const openReviewModal = (order: any) => {
+      reviewTargetOrderId.value = order.id
+      showReviewModal.value = true
+    }
+
+    const onReviewSubmitted = () => {
+      successMsg.value = 'Отзыв о заказчике успешно отправлен!'
+      showReviewModal.value = false
+      fetchHistoryOrders()
     }
 
     // Map modal state
@@ -1166,6 +1192,10 @@ export default defineComponent({
       selectedOrderDetails,
       openOrderDetails,
       rejectAssignedOrder,
+      showReviewModal,
+      reviewTargetOrderId,
+      openReviewModal,
+      onReviewSubmitted,
       selectedChatOrder,
       chatMessages,
       chatInputText,

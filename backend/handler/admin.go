@@ -220,6 +220,93 @@ func (h *AdminHandler) RejectTopUpRequestsHandler(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(map[string]string{"message": "top-up request rejected successfully"})
 }
 
+// CreateWithdrawalRequestHandler creates a withdrawal request for the authenticated user.
+func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Amount float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	wReq, err := h.adminService.CreateWithdrawalRequest(user.ID, req.Amount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(wReq)
+}
+
+// GetWithdrawalRequestsHandler lists all manual balance withdrawal requests.
+func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	reqs, err := h.adminService.GetWithdrawalRequests()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reqs)
+}
+
+// ApproveWithdrawalRequestsHandler approves a balance withdrawal request.
+func (h *AdminHandler) ApproveWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	reqID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid request ID", http.StatusBadRequest)
+		return
+	}
+
+	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.adminService.ApproveWithdrawalRequest(reqID, adminUser.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request approved successfully"})
+}
+
+// RejectWithdrawalRequestsHandler rejects a balance withdrawal request.
+func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	reqID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid request ID", http.StatusBadRequest)
+		return
+	}
+
+	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.adminService.RejectWithdrawalRequest(reqID, adminUser.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request rejected successfully"})
+}
+
 // GetTransactionsHandler retrieves audit logs of transactions.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	txs, err := h.adminService.GetTransactions()

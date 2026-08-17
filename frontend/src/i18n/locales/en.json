@@ -27,6 +27,7 @@
     "logout": "Logout",
     "users": "Users",
     "topups": "Top-Up Requests",
+    "withdrawals": "Withdrawal Requests",
     "transactions": "Transactions",
     "settings": "Settings",
     "activeShifts": "Active Shifts",
@@ -140,6 +141,23 @@
     "confirmApprove": "Approve Top-Up",
     "confirmReject": "Reject Top-Up",
     "confirmMessage": "Are you sure you want to proceed? This action cannot be undone.",
+    "operationFailed": "Operation failed"
+  },
+  "withdrawals": {
+    "title": "Balance Withdrawal Requests",
+    "userPhone": "User Phone",
+    "amount": "Amount",
+    "status": "Status",
+    "requestedAt": "Requested At",
+    "actions": "Actions",
+    "approve": "Approve",
+    "reject": "Reject",
+    "pending": "Pending",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "confirmApprove": "Approve Withdrawal",
+    "confirmReject": "Reject Withdrawal",
+    "confirmMessage": "Are you sure? User balance will be deducted upon approval.",
     "operationFailed": "Operation failed"
   },
   "transactions": {

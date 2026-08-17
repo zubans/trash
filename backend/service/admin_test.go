@@ -88,6 +88,26 @@ func (m *mockAdminRepo) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUI
 	return nil
 }
 
+func (m *mockAdminRepo) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
+	return nil, nil
+}
+
+func (m *mockAdminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*repository.WithdrawalRequest, error) {
+	return nil, errors.New("not found")
+}
+
+func (m *mockAdminRepo) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+	return &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}, nil
+}
+
+func (m *mockAdminRepo) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockAdminRepo) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
+	return nil
+}
+
 func (m *mockAdminRepo) GetTransactions() ([]*repository.Transaction, error) {
 	return m.transactions, nil
 }

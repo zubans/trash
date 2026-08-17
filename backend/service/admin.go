@@ -195,6 +195,57 @@ func (s *AdminService) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID
 	return s.adminRepo.RejectTopUpRequest(requestID, adminID)
 }
 
+// GetWithdrawalRequests lists all balance withdrawal requests.
+func (s *AdminService) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
+	return s.adminRepo.GetWithdrawalRequests()
+}
+
+// CreateWithdrawalRequest creates a pending balance withdrawal request.
+func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+	if amount <= 0 {
+		return nil, errors.New("amount must be greater than zero")
+	}
+
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status == "BANNED" {
+		return nil, errors.New("cannot request withdrawal for a banned user")
+	}
+	if user.Balance < amount {
+		return nil, errors.New("insufficient balance for withdrawal")
+	}
+
+	return s.adminRepo.CreateWithdrawalRequest(userID, amount)
+}
+
+// ApproveWithdrawalRequest approves a withdrawal request.
+func (s *AdminService) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
+	req, err := s.adminRepo.GetWithdrawalRequestByID(requestID)
+	if err != nil {
+		return err
+	}
+	if req.Status != "PENDING" {
+		return errors.New("request is not in PENDING status")
+	}
+
+	return s.adminRepo.ApproveWithdrawalRequest(requestID, adminID)
+}
+
+// RejectWithdrawalRequest rejects a withdrawal request.
+func (s *AdminService) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
+	req, err := s.adminRepo.GetWithdrawalRequestByID(requestID)
+	if err != nil {
+		return err
+	}
+	if req.Status != "PENDING" {
+		return errors.New("request is not in PENDING status")
+	}
+
+	return s.adminRepo.RejectWithdrawalRequest(requestID, adminID)
+}
+
 // GetTransactions retrieves transaction history.
 func (s *AdminService) GetTransactions() ([]*repository.Transaction, error) {
 	return s.adminRepo.GetTransactions()

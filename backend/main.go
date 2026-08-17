@@ -167,6 +167,7 @@ func main() {
 			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
 			r.Post("/orders/{id}/reviews", rh.CreateReview)
 			r.Get("/orders/{id}/reviews/mine", rh.GetOrderReview)
+			r.Post("/finances/withdrawals", ah.CreateWithdrawalRequestHandler)
 			r.Post("/logout", ah.LogoutHandler)
 		})
 
@@ -203,6 +204,9 @@ func main() {
 			r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
 			r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
 			r.Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)
+			r.Get("/admin/finances/withdrawals", ah.GetWithdrawalRequestsHandler)
+			r.Post("/admin/finances/withdrawals/{id}/approve", ah.ApproveWithdrawalRequestsHandler)
+			r.Post("/admin/finances/withdrawals/{id}/reject", ah.RejectWithdrawalRequestsHandler)
 			r.Get("/admin/transactions", ah.GetTransactionsHandler)
 			r.Get("/admin/settings", ah.GetSettingsHandler)
 			r.Post("/admin/settings", ah.UpdateSettingsHandler)

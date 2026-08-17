@@ -33,6 +33,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/TopUpRequests.vue'),
       },
       {
+        path: 'withdrawals',
+        name: 'admin-withdrawals',
+        component: () => import('../pages/admin/WithdrawalRequests.vue'),
+      },
+      {
         path: 'transactions',
         name: 'admin-transactions',
         component: () => import('../pages/admin/TransactionHistory.vue'),

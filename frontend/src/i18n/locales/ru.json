@@ -27,6 +27,7 @@
     "logout": "Выход",
     "users": "Пользователи",
     "topups": "Запросы пополнения",
+    "withdrawals": "Запросы вывода",
     "transactions": "Транзакции",
     "settings": "Настройки",
     "activeShifts": "Активные смены",
@@ -140,6 +141,23 @@
     "confirmApprove": "Одобрить пополнение",
     "confirmReject": "Отклонить пополнение",
     "confirmMessage": "Вы уверены? Это действие нельзя отменить.",
+    "operationFailed": "Операция не удалась"
+  },
+  "withdrawals": {
+    "title": "Запросы на вывод средств",
+    "userPhone": "Телефон пользователя",
+    "amount": "Сумма",
+    "status": "Статус",
+    "requestedAt": "Запрошено",
+    "actions": "Действия",
+    "approve": "Одобрить",
+    "reject": "Отклонить",
+    "pending": "Ожидает",
+    "approved": "Одобрено",
+    "rejected": "Отклонено",
+    "confirmApprove": "Одобрить вывод средств",
+    "confirmReject": "Отклонить вывод средств",
+    "confirmMessage": "Вы уверены? Средства будут списаны с баланса пользователя при одобрении.",
     "operationFailed": "Операция не удалась"
   },
   "transactions": {
