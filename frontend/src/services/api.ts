@@ -4,13 +4,14 @@ import { Capacitor } from '@capacitor/core'
 function resolveApiUrl(): string {
   const isNative = Capacitor.isNativePlatform()
   if (isNative) {
-    return (import.meta.env.VITE_MOBILE_API_URL as string) || 'http://94.103.9.172:8089'
-  }
-  const url = (import.meta.env.VITE_API_URL as string) || ''
-  if (!url) {
-    throw new Error('VITE_API_URL is not defined. Please check your .env file.')
-  }
-  return url
+    return (import.meta.env.VITE_MOBILE_API_URL as string)
+          || (import.meta.env.VITE_API_URL as string)
+          || 'http://94.103.9.172:8089'  }
+  // Web builds always use relative URLs (baseURL = ''). The browser resolves
+  // them against the current origin — whatever host/port/proto the user opened.
+  // This makes VITE_API_URL unnecessary for web and avoids mismatches when the
+  // external URL differs from the Docker-mapped port (8443 → 443, CDN, etc.).
+  return ''
 }
 
 export const apiUrl = resolveApiUrl()
@@ -53,7 +54,14 @@ api.interceptors.request.use((config) => {
 // wss:// against the HTTPS port. The /api prefix matches the backend route
 // mounting so SPA and API paths never collide.
 export function buildChatWebSocketUrl(orderId: string, token: string): string {
-  const wsBase = apiUrl.replace(/^http/, 'ws').replace(/\/$/, '')
+  // For web builds apiUrl may be empty (relative-URL mode). Derive the WS
+  // origin from window.location so the protocol/host/port always match the
+  // page the user actually opened.
+  let base = apiUrl
+  if (!base && typeof window !== 'undefined') {
+    base = window.location.origin
+  }
+  const wsBase = base.replace(/^http/, 'ws').replace(/\/$/, '')
   return `${wsBase}/api/chats/${orderId}/ws?token=${encodeURIComponent(token)}`
 }
 
