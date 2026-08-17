@@ -11,8 +11,6 @@
       @open-top-up-modal="showTopUpModal = true"
     />
 
-    <update-banner />
-
     <!-- Alert messages -->
     <va-alert v-if="successMsg" color="success" class="mb-3" closeable @dismissed="successMsg = ''">
       {{ successMsg }}

@@ -49,9 +49,6 @@
         </div>
       </div>
 
-      <!-- Update Banner -->
-      <update-banner />
-
       <!-- Toast Notifications Container -->
       <div class="toast-container">
         <!-- Success Toast -->

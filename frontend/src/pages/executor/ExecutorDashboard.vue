@@ -17,8 +17,6 @@
         </div>
       </header>
 
-      <update-banner class="mb-4" />
-
       <!-- Уведомления -->
       <div v-if="successMsg" class="toast-alert success">
         <i class="ph-fill ph-check-circle"></i>

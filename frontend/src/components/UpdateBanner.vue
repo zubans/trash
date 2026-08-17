@@ -42,46 +42,51 @@
     <!-- Regular update: dismissible banner -->
     <div
       v-else-if="showBanner"
-      class="update-banner mb-3"
+      class="update-banner-bar"
     >
-      <va-alert
-        color="info"
-        class="m-0"
-        closeable
-        @dismissed="dismissed = true"
-      >
-        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div class="flex-grow-1">
-            <div>
-              {{ $t('app.updateAvailable', { version: versionName }) }}
-            </div>
-            <div
-              v-if="releaseNotes"
-              class="release-notes-small"
-            >
-              {{ releaseNotes }}
-            </div>
-
-            <!-- Progress bar in banner -->
-            <div v-if="installing || isDownloading" class="progress-section mt-2" style="max-width: 300px;">
-              <va-progress-bar :model-value="downloadProgress" color="primary" class="mb-1" />
-              <div class="d-flex justify-content-between text-xs opacity-75">
-                <span>{{ formattedDownloaded }} / {{ formattedTotal }}</span>
-                <span>{{ downloadProgress }}%</span>
-              </div>
-            </div>
+      <div class="banner-content">
+        <div class="banner-icon">
+          <i class="ph-bold ph-sparkle"></i>
+        </div>
+        <div class="banner-text-box">
+          <div class="banner-title">
+            {{ $t('app.updateAvailable', { version: versionName }) }}
+          </div>
+          <div v-if="releaseNotes" class="banner-notes">
+            {{ releaseNotes }}
           </div>
 
-          <va-button
-            v-if="!installing && !isDownloading"
-            color="primary"
-            size="small"
-            @click="install"
-          >
-            {{ $t('app.installUpdate') }}
-          </va-button>
+          <!-- Progress bar in banner -->
+          <div v-if="installing || isDownloading" class="progress-section mt-2">
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" :style="{ width: downloadProgress + '%' }"></div>
+            </div>
+            <div class="progress-meta">
+              <span>{{ formattedDownloaded }} / {{ formattedTotal }}</span>
+              <span>{{ downloadProgress }}%</span>
+            </div>
+          </div>
         </div>
-      </va-alert>
+
+        <button
+          v-if="!installing && !isDownloading"
+          type="button"
+          class="btn-update-action"
+          @click="install"
+        >
+          <i class="ph-bold ph-download-simple"></i>
+          <span>{{ $t('app.installUpdate') }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="btn-dismiss"
+          title="Закрыть"
+          @click="dismissed = true"
+        >
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -147,8 +152,120 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.update-banner {
+.update-banner-bar {
+  margin: 12px 16px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 16px;
+  padding: 12px 16px;
+  box-shadow: 0 8px 24px -4px rgba(99, 102, 241, 0.12), 0 2px 6px rgba(0,0,0,0.04);
+  transition: all 0.3s ease;
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.banner-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.banner-text-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.3;
+}
+
+.banner-notes {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+  white-space: pre-line;
+}
+
+.btn-update-action {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+  transition: all 0.2s ease;
+}
+
+.btn-update-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+}
+
+.btn-dismiss {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.04);
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-dismiss:hover {
+  background: rgba(0,0,0,0.08);
+  color: #0f172a;
+}
+
+.progress-bar-bg {
   width: 100%;
+  height: 6px;
+  background: rgba(99, 102, 241, 0.15);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #3b82f6);
+  border-radius: 9999px;
+  transition: width 0.2s ease;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
 }
 
 .force-update-overlay {
@@ -157,39 +274,47 @@ export default defineComponent({
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: 20px;
 }
 
 .force-update-dialog {
-  background: white;
-  border-radius: 8px;
-  padding: 1.5rem;
-  max-width: 400px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 24px;
+  padding: 28px;
+  max-width: 380px;
   width: 100%;
   text-align: center;
+  box-shadow: 0 20px 50px -10px rgba(15, 23, 42, 0.2);
+  border: 1px solid rgba(255,255,255,0.8);
 }
 
 .release-notes {
-  font-size: 0.875rem;
-  color: #666;
-  margin-bottom: 1rem;
-  white-space: pre-line;
-}
-
-.release-notes-small {
-  font-size: 0.75rem;
-  color: #666;
-  margin-top: 0.25rem;
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 16px;
   white-space: pre-line;
 }
 
 .version {
-  font-size: 0.9rem;
-  color: #444;
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+@media (max-width: 576px) {
+  .banner-content {
+    flex-wrap: wrap;
+  }
+  .btn-update-action {
+    width: 100%;
+    justify-content: center;
+  }
 }
 </style>
