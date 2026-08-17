@@ -15,6 +15,8 @@
 <script lang="ts">
 import { defineComponent, ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
+import { Capacitor } from '@capacitor/core'
+import { apiUrl } from '../services/api'
 import { useAppUpdate } from '../composables/useAppUpdate'
 
 export default defineComponent({
@@ -31,12 +33,14 @@ export default defineComponent({
 
     const checkHealth = async () => {
       try {
-        // Use a relative URL so the request goes to the same origin the page
-        // was served from. Previously this used apiUrl (VITE_API_URL) which on
-        // the web build included the Docker-mapped port (8443). Browsers could
-        // not reach that port externally while nginx listened on 443 inside
-        // the container, causing ERR_CONNECTION_TIMED_OUT and a blank screen.
-        await axios.get('/health', { timeout: 5000 })
+        // Web builds use a relative URL so the request goes to the same origin
+        // the page was served from. Native builds must hit the real backend
+        // (VITE_MOBILE_API_URL / VITE_API_URL) because the app is served from
+        // https://localhost and /health would point to itself.
+        const healthUrl = Capacitor.isNativePlatform()
+          ? `${apiUrl.replace(/\/$/, '')}/health`
+          : '/health'
+        await axios.get(healthUrl, { timeout: 5000 })
         isOnline.value = true
       } catch (e) {
         isOnline.value = false
