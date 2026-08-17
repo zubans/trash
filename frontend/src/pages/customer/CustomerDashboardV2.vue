@@ -104,21 +104,22 @@
             :key="order.id"
             :class="['order-row', { 'chat-open': openChatOrderId === order.id }]"
           >
-            <!-- Summary Row -->
-            <div class="order-summary cursor-pointer" @click="openOrderDetails(order)">
-              <div :class="['o-icon', order.is_urgent ? 'orange' : 'purple']">
-                <i :class="['ph-fill', order.is_urgent ? 'ph-rocket-launch' : 'ph-package']"></i>
+            <!-- Ultra-compact Summary Row -->
+            <div class="order-summary list-item-compact cursor-pointer" @click="openOrderDetails(order)">
+              <div class="item-left-group">
+                <div :class="['o-icon item-icon', order.is_urgent ? 'orange' : 'purple']">
+                  <i :class="['ph-fill', order.is_urgent ? 'ph-rocket-launch' : 'ph-package']"></i>
+                </div>
+                <div class="o-info item-text-stack">
+                  <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+                  <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                </div>
               </div>
-              <div class="o-info">
-                <div class="o-title">{{ formatOrderType(order) }}</div>
-                <div class="o-id">#{{ order.id.slice(0, 8) }}</div>
-              </div>
-              <div class="o-price">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-              <div class="o-actions" @click.stop>
+              <div class="o-actions item-actions" @click.stop>
                 <button
                   v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
                   type="button"
-                  :class="['btn-action chat-btn', { active: openChatOrderId === order.id }]"
+                  :class="['btn-action primary chat-btn', { active: openChatOrderId === order.id }]"
                   title="Чат"
                   @click="toggleChat(order)"
                 >
@@ -127,11 +128,11 @@
                 <button
                   v-if="order.status === 'EXECUTED'"
                   type="button"
-                  class="btn-action confirm-btn"
+                  class="btn-action success confirm-btn"
                   title="Подтвердить выполнение и закрыть заказ"
                   @click="confirmOrder(order.id)"
                 >
-                  <i class="ph ph-check"></i>
+                  <i class="ph-bold ph-check"></i>
                 </button>
               </div>
             </div>
@@ -156,8 +157,8 @@
                   :key="msg.id"
                   :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
-                  <!-- Actions (Edit/Delete for outgoing messages) -->
-                  <div v-if="msg.sender_id === currentUserId" class="msg-actions">
+                  <!-- Actions (Edit/Delete for outgoing user messages only, hidden for system messages) -->
+                  <div v-if="msg.sender_id === currentUserId && !isSystemMessage(msg)" class="msg-actions">
                     <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
                       <i class="ph ph-pencil-simple"></i>
                     </button>
@@ -710,6 +711,13 @@ export default defineComponent({
 
     const currentUserId = computed(() => authStore.userID)
 
+    const isSystemMessage = (msg: any) => {
+      if (!msg) return false
+      if (msg.file_type === 'system' || msg.type === 'system') return true
+      const text = msg.text || msg.content || ''
+      return text.includes('Исполнитель отметил(а)') || text.includes('Исполнитель отметила(ся)') || text.startsWith('📦')
+    }
+
     const isImageAttachment = (msg: any) => {
       if (!msg) return false
       const path = msg.file_url || msg.content
@@ -1140,6 +1148,7 @@ export default defineComponent({
       chatMessages,
       chatInputText,
       editingMessageId,
+      isSystemMessage,
       startEditMessage,
       cancelEditMessage,
       deleteChatMessage,
@@ -2323,11 +2332,74 @@ export default defineComponent({
 .msg-edited { font-style: italic; opacity: 0.8; }
 .read-receipt { color: var(--accent-main, #6366f1); font-size: 13px; }
 
+/* --- Ultra-compact Order Item Styles --- */
+.list-item-compact {
+  background: var(--surface-card, #ffffff);
+  border-radius: var(--rad-md, 16px);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.item-left-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.item-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.item-text-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.item-price-top {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f59e0b;
+  line-height: 1;
+}
+
+.item-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-title, #0f172a);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-action.primary { background: #e0e7ff; color: #5c60f5; }
+.btn-action.success { background: #ecfdf5; color: #10b981; }
+
 @media (max-width: 768px) {
   .msg-actions { opacity: 1; transform: translateX(0); }
   .action-icon-btn { width: 28px; height: 28px; font-size: 14px; }
   .msg-image { max-width: 200px; }
-  .order-summary { flex-wrap: wrap; }
-  .o-price { width: 100%; margin-top: 8px; }
-  .o-actions { width: 100%; justify-content: flex-end; }
+  .list-item-compact { flex-wrap: nowrap; padding: 10px 14px; }
+  .order-summary { flex-wrap: nowrap; }
 }</style>

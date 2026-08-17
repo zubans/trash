@@ -264,7 +264,7 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 	if s.chatRepo != nil {
 		chat, err := s.chatRepo.GetChatByOrderID(orderID)
 		if err == nil && chat != nil {
-			_, _ = s.chatRepo.SaveMessage(chat.ID, executorID, "📦 Исполнитель отметила(ся) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
+			_, _ = s.chatRepo.SaveMessage(chat.ID, executorID, "📦 Исполнитель отметил(а) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
 		}
 	}
 

@@ -128,34 +128,28 @@
             :key="order.id"
             :class="['order-row', { 'chat-open': selectedChatOrder && selectedChatOrder.id === order.id }]"
           >
-            <div class="order-summary" @click="toggleChat(order)">
-              <div class="o-icon">
-                <i class="ph-fill ph-package"></i>
+            <div class="order-summary list-item-compact cursor-pointer" @click="toggleChat(order)">
+              <div class="item-left-group">
+                <div class="o-icon item-icon">
+                  <i class="ph-fill ph-package"></i>
+                </div>
+                <div class="o-info item-text-stack">
+                  <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+                  <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                </div>
               </div>
-              <div class="o-info">
-                <div class="o-title">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">#{{ order?.id ? order.id.slice(0, 8) : '---' }} • {{ order.customer_phone || '' }}</div>
-              </div>
-              <div class="o-price">
-                {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
-              </div>
-              <div class="o-status">
-                <span class="badge-status" :style="{ backgroundColor: getStatusColor(order.status) }">
-                  {{ $t('orderStatus.' + order.status, order.status) }}
-                </span>
-              </div>
-              <div class="o-actions" @click.stop>
+              <div class="o-actions item-actions" @click.stop>
                 <button
                   type="button"
-                  class="btn-action-execute"
+                  class="btn-action success"
                   :title="$t('executor.executed')"
                   @click="markOrderAsExecuted(order.id)"
                 >
-                  <i class="ph-bold ph-check-circle"></i> {{ $t('executor.executed') }}
+                  <i class="ph-bold ph-check"></i>
                 </button>
                 <button
                   type="button"
-                  :class="['btn-chat-toggle', { active: selectedChatOrder && selectedChatOrder.id === order.id }]"
+                  :class="['btn-action primary chat-btn', { active: selectedChatOrder && selectedChatOrder.id === order.id }]"
                   @click="toggleChat(order)"
                 >
                   <i class="ph-fill ph-chat-circle-dots"></i>
@@ -182,7 +176,7 @@
                   :key="msg.id"
                   :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
-                  <div v-if="msg.sender_id === currentUserId" class="msg-actions">
+                  <div v-if="msg.sender_id === currentUserId && !isSystemMessage(msg)" class="msg-actions">
                     <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
                       <i class="ph ph-pencil-simple"></i>
                     </button>
@@ -765,6 +759,13 @@ export default defineComponent({
     // Chat Logic
     const editingMessageId = ref<string | null>(null)
 
+    const isSystemMessage = (msg: any) => {
+      if (!msg) return false
+      if (msg.file_type === 'system' || msg.type === 'system') return true
+      const text = msg.text || msg.content || ''
+      return text.includes('Исполнитель отметил(а)') || text.includes('Исполнитель отметила(ся)') || text.startsWith('📦')
+    }
+
     const startEditMessage = (msg: any) => {
       editingMessageId.value = msg.id
       chatInputText.value = msg.text || msg.content || ''
@@ -1146,6 +1147,7 @@ export default defineComponent({
       chatMessages,
       chatInputText,
       editingMessageId,
+      isSystemMessage,
       startEditMessage,
       cancelEditMessage,
       deleteChatMessage,
@@ -2088,26 +2090,85 @@ export default defineComponent({
   .btn-action-primary, .btn-end-shift, .btn-map-trigger { width: 100%; justify-content: center; }
 }
 
+/* --- Ultra-compact Order Item Styles --- */
+.list-item-compact {
+  background: var(--surface-card, #ffffff);
+  border-radius: var(--rad-md, 16px);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.item-left-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.item-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.item-text-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.item-price-top {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f59e0b;
+  line-height: 1;
+}
+
+.item-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-title, #0f172a);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-action {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+}
+.btn-action.primary { background: #e0e7ff; color: #5c60f5; }
+.btn-action.success { background: #ecfdf5; color: #10b981; }
+
 @media (max-width: 600px) {
-  .order-summary {
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 16px;
-  }
-  .o-info {
-    min-width: 140px;
-  }
-  .o-price {
-    margin-left: auto;
-  }
-  .o-status {
-    width: 100%;
-    margin-top: 4px;
-  }
-  .o-actions {
-    width: 100%;
-    justify-content: flex-end;
-    margin-top: 6px;
+  .list-item-compact {
+    flex-wrap: nowrap;
+    padding: 10px 14px;
   }
 }
 </style>
