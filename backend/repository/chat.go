@@ -50,8 +50,9 @@ type chatRepo struct {
 	db *sql.DB
 }
 
-// NewChatRepository creates a new ChatRepository.
+// NewChatRepository creates a new ChatRepository and ensures required columns exist.
 func NewChatRepository(db *sql.DB) ChatRepository {
+	_, _ = db.Exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NULL;`)
 	return &chatRepo{db: db}
 }
 

@@ -149,4 +149,18 @@ router.beforeEach((to, from, next) => {
   }
 })
 
+router.onError((error, to) => {
+  if (
+    error.message.includes('Failed to fetch dynamically imported module') ||
+    error.message.includes('Importing a module script failed')
+  ) {
+    console.warn('Chunk load failed due to new build, reloading page to fetch latest version...', error)
+    if (to?.fullPath) {
+      window.location.href = to.fullPath
+    } else {
+      window.location.reload()
+    }
+  }
+})
+
 export default router
