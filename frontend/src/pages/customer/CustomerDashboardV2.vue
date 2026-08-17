@@ -92,14 +92,9 @@
       <div>
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h2 class="section-title m-0">Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span></h2>
-          <div class="d-flex gap-2">
-            <button type="button" class="btn-glass" style="padding: 0 16px; height:40px; font-size:14px; gap: 6px;" title="Карта заказов" @click="showCustomerMapModal = true">
-              <i class="ph-bold ph-map-trifold"></i> Карта
-            </button>
-            <button type="button" class="btn-glass" style="width:40px; height:40px; font-size:18px;" title="Обновить" @click="fetchOrders">
-              <i class="ph ph-arrows-clockwise"></i>
-            </button>
-          </div>
+          <button type="button" class="btn-glass" style="width:40px; height:40px; font-size:18px;" title="Обновить" @click="fetchOrders">
+            <i class="ph ph-arrows-clockwise"></i>
+          </button>
         </div>
 
         <div v-if="activeOrders.length === 0" class="empty-orders-state">
@@ -364,14 +359,6 @@
         @remove-address="removeAddress"
       />
 
-      <!-- Customer Map Modal -->
-      <ExecutorMapModal
-        v-model="showCustomerMapModal"
-        :current-lat="orderLat || 55.7558"
-        :current-lon="orderLon || 37.6173"
-        :currency-symbol="currencySymbol"
-      />
-
       <!-- Image Preview Modal -->
       <div v-if="showImagePreviewModal" class="img-preview-overlay" @click.self="showImagePreviewModal = false">
         <div class="img-preview-card">
@@ -397,7 +384,6 @@ import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
-import ExecutorMapModal from '../executor/components/ExecutorMapModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -411,7 +397,6 @@ export default defineComponent({
     CreateOrderModal,
     CustomerProfileModal,
     ReviewModal,
-    ExecutorMapModal,
   },
   setup() {
     const router = useRouter()
@@ -467,7 +452,6 @@ export default defineComponent({
     // Modals
     const showCreateOrderModal = ref(false)
     const showOrderDetailsModal = ref(false)
-    const showCustomerMapModal = ref(false)
     const showTopUpModal = ref(false)
     const showProfileModal = ref(false)
     const selectedOrderDetails = ref<any>(null)
@@ -1094,7 +1078,6 @@ export default defineComponent({
       isHistoryCollapsed,
       showCreateOrderModal,
       showOrderDetailsModal,
-      showCustomerMapModal,
       showTopUpModal,
       showProfileModal,
       selectedOrderDetails,

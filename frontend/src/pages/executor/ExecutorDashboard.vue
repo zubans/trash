@@ -99,21 +99,24 @@
             <span v-if="endingShiftEarly" class="spinner-sm"></span>
             <template v-else>{{ $t('executor.endShiftEarly') }}</template>
           </button>
-
-          <button type="button" class="btn-map-trigger" @click="showExecutorMapModal = true">
-            <i class="ph-bold ph-map-trifold"></i> {{ $t('executor.mapTitle') }}
-          </button>
         </div>
       </div>
 
       <!-- Назначенные заказы -->
       <div class="section-container">
         <div class="section-title-row">
-          <h3>{{ $t('executor.assignedOrders') }}</h3>
-          <span class="count-badge">({{ assignedOrders.length }})</span>
-          <button type="button" class="btn-icon-refresh" @click="fetchAssignedOrders">
-            <i class="ph-bold ph-arrows-clockwise"></i>
-          </button>
+          <div class="d-flex align-items-center gap-2">
+            <h3 class="m-0">{{ $t('executor.assignedOrders') }}</h3>
+            <span class="count-badge">({{ assignedOrders.length }})</span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn-map-trigger" @click="showExecutorMapModal = true">
+              <i class="ph-bold ph-map-trifold"></i> {{ $t('executor.mapTitle') }}
+            </button>
+            <button type="button" class="btn-icon-refresh" title="Обновить" @click="fetchAssignedOrders">
+              <i class="ph-bold ph-arrows-clockwise"></i>
+            </button>
+          </div>
         </div>
 
         <div v-if="assignedOrders.length === 0" class="empty-state-card">
