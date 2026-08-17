@@ -18,34 +18,38 @@
 
       <!-- Сетка Профиль + Кошелек -->
       <div class="premium-grid">
-        <!-- Карточка профиля (Светлая, матовое стекло) -->
-        <div class="surface-card">
-          <div class="profile-row">
-            <div class="avatar-glow" @click="showProfileModal = true">
-              <i class="ph ph-user"></i>
+        <!-- Компактный профиль -->
+        <div class="profile-card cursor-pointer" @click="showProfileModal = true">
+          <div class="avatar-wrap">
+            <div class="avatar"><i class="ph ph-user"></i></div>
+            <div class="status-dot"></div>
+          </div>
+          <div class="profile-info">
+            <!-- Телефон + Галочка -->
+            <div class="profile-phone-row">
+              <div class="profile-phone">{{ formattedPhone || '7 920 705 07 07' }}</div>
+              <div class="verified-badge" title="Верифицирован">
+                <i class="ph-fill ph-check-circle"></i>
+              </div>
             </div>
-            <div class="profile-info">
-              <div class="role-badge">Верифицированный заказчик</div>
-              <h2 @click="showProfileModal = true">{{ formattedPhone }}</h2>
-              <a href="#" class="link-elegant" @click.prevent="showProfileModal = true">
-                <i class="ph ph-map-pin"></i> Мои адреса
-              </a>
+            <div class="badge-brand" @click.stop="showProfileModal = true">
+              <i class="ph-fill ph-map-pin"></i> Мои адреса
             </div>
           </div>
         </div>
 
-        <!-- Кошелек (Темная премиум-карта) -->
-        <div class="wallet-card">
-          <div class="wallet-inner">
-            <div class="w-label">Доступный баланс</div>
-            <div class="w-balance">
+        <!-- Компактный баланс -->
+        <div class="balance-card">
+          <div class="bc-label">Доступный баланс</div>
+          <div class="balance-bottom-row">
+            <div class="bc-value">
               {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
-              <span class="w-currency">{{ currencySymbol }}</span>
+              <span class="bc-currency">{{ currencySymbol }}</span>
             </div>
+            <button type="button" class="btn-balance" @click="showTopUpModal = true">
+              <i class="ph-bold ph-plus"></i> Пополнить
+            </button>
           </div>
-          <button type="button" class="btn-topup-blur" @click="showTopUpModal = true">
-            <i class="ph ph-plus-circle"></i> Пополнить счет
-          </button>
         </div>
       </div>
 
@@ -1290,110 +1294,75 @@ export default defineComponent({
   gap: 24px;
 }
 
-/* --- Profile Card --- */
-.surface-card {
-  background: var(--surface-card);
-  backdrop-filter: blur(20px);
-  border-radius: var(--rad-lg);
-  padding: 32px;
-  box-shadow: var(--shadow-float);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+/* --- Profile Card (New Compact Design) --- */
+.profile-card {
+  background: var(--surface-card, #ffffff);
+  border-radius: var(--rad-lg, 24px);
+  padding: 16px;
+  box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04));
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.profile-row {
-  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
 }
 
-.avatar-glow {
-  width: 88px;
-  height: 88px;
-  border-radius: 28px;
-  background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40px;
-  color: #94a3b8;
-  box-shadow: inset 0 2px 4px rgba(255,255,255,0.8), 
-              0 8px 16px rgba(0,0,0,0.05);
-  position: relative;
-  cursor: pointer;
-  transition: var(--transition);
+.avatar-wrap { position: relative; flex-shrink: 0; }
+.avatar {
+  width: 56px; height: 56px;
+  background: #f1f5f9; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: #cbd5e1;
+}
+.status-dot {
+  position: absolute; bottom: -2px; right: -2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #10b981; border: 2px solid #ffffff;
 }
 
-.avatar-glow:hover {
-  transform: scale(1.03);
-}
+.profile-info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 
-.avatar-glow::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 20px;
-  height: 20px;
-  background: #10b981;
-  border: 3px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+.profile-phone-row {
+  display: flex; align-items: center; gap: 6px;
 }
+.profile-phone { font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); letter-spacing: -0.5px; line-height: 1; }
+.verified-badge { color: #10b981; font-size: 20px; display: flex; align-items: center; justify-content: center; }
 
-.profile-info h2 {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--text-title);
-  letter-spacing: -0.5px;
-  margin-bottom: 4px;
-  line-height: 1;
+.badge-brand {
+  background: #eef2ff; color: #5c60f5;
+  padding: 4px 12px; border-radius: 99px;
+  font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;
   cursor: pointer;
 }
 
-.role-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-muted);
+/* --- Balance Card (New Compact Dark Design) --- */
+.balance-card {
+  background: linear-gradient(135deg, #1e1b4b, #3b2c6b);
+  border-radius: var(--rad-lg, 24px);
+  padding: 20px 16px;
+  color: #ffffff;
+  display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 12px 24px -8px rgba(30, 27, 75, 0.4);
+  position: relative; overflow: hidden;
 }
+.bc-label { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 
-.link-elegant {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent-main);
-  text-decoration: none;
-  padding: 10px 20px;
-  background: rgba(99, 102, 241, 0.08);
-  border-radius: var(--rad-sm);
-  transition: var(--transition);
-}
-
-.link-elegant:hover {
-  background: rgba(99, 102, 241, 0.15);
-}
-
-/* --- Premium Wallet Card --- */
-.wallet-card {
-  background: linear-gradient(120deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%);
-  border-radius: var(--rad-lg);
-  padding: 32px;
-  color: white;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 20px 40px -10px rgba(30, 27, 75, 0.5);
+.balance-bottom-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   justify-content: space-between;
 }
+
+.bc-value { font-size: 32px; font-weight: 700; letter-spacing: -1px; display: flex; align-items: baseline; gap: 6px;}
+.bc-currency { font-size: 20px; color: rgba(255,255,255,0.5); font-weight: 400; }
+
+.btn-balance {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: #ffffff; padding: 10px 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-balance:hover { background: rgba(255,255,255,0.2); }
 
 .wallet-card::before {
   content: '';

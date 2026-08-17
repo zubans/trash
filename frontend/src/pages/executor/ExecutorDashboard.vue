@@ -247,8 +247,8 @@
       <div v-if="pendingVerificationOrders.length > 0" class="section-container mt-4">
         <div class="section-title-row">
           <div class="d-flex align-items-center gap-2">
-            <h3 class="m-0" style="color: #d97706;">Заказы на проверке</h3>
-            <span class="count-badge" style="background: #fef3c7; color: #92400e;">({{ pendingVerificationOrders.length }})</span>
+            <h3 class="m-0" style="color: #f59e0b;">Заказы на проверке</h3>
+            <span class="count-badge" style="background: #fffbeb; color: #f59e0b;">({{ pendingVerificationOrders.length }})</span>
           </div>
         </div>
 
@@ -257,28 +257,20 @@
             v-for="order in pendingVerificationOrders"
             :key="order.id"
             :class="['order-row', { 'chat-open': selectedChatOrder && selectedChatOrder.id === order.id }]"
-            style="border-left: 3px solid #f59e0b;"
           >
-            <div class="order-summary" @click="toggleChat(order)">
-              <div class="o-icon" style="background: #fef3c7; color: #d97706;">
-                <i class="ph-fill ph-hourglass"></i>
+            <div class="order-summary list-item-compact review cursor-pointer" @click="toggleChat(order)">
+              <div class="item-left-group">
+                <div class="item-icon"><i class="ph-fill ph-hourglass-high"></i></div>
+                <div class="item-text-stack">
+                  <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+                  <div class="item-title">{{ formatOrderType(order) }}</div>
+                  <div class="item-subtitle">Ожидает подтверждения</div>
+                </div>
               </div>
-              <div class="o-info">
-                <div class="o-title">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">#{{ order?.id ? order.id.slice(0, 8) : '---' }} • Ожидает подтверждения заказчиком</div>
-              </div>
-              <div class="o-price">
-                {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
-              </div>
-              <div class="o-status">
-                <span class="badge-status" style="background-color: #f59e0b; color: white;">
-                  На проверке
-                </span>
-              </div>
-              <div class="o-actions" @click.stop>
+              <div class="item-actions" @click.stop>
                 <button
                   type="button"
-                  :class="['btn-chat-toggle', { active: selectedChatOrder && selectedChatOrder.id === order.id }]"
+                  :class="['btn-action primary chat-btn', { active: selectedChatOrder && selectedChatOrder.id === order.id }]"
                   @click="toggleChat(order)"
                 >
                   <i class="ph-fill ph-chat-circle-dots"></i>
@@ -305,7 +297,7 @@
                   :key="msg.id"
                   :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
-                  <div v-if="msg.sender_id === currentUserId" class="msg-actions">
+                  <div v-if="msg.sender_id === currentUserId && !isSystemMessage(msg)" class="msg-actions">
                     <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
                       <i class="ph ph-pencil-simple"></i>
                     </button>
@@ -381,38 +373,39 @@
           </button>
         </div>
 
-        <div class="gps-card-bar">
-          <div class="gps-icon">
-            <i class="ph-fill ph-crosshair"></i>
+        <div class="list-item-compact" style="margin-bottom: 8px;">
+          <div class="item-left-group">
+            <div class="item-icon" style="background: #f1f5f9; color: var(--text-muted);"><i class="ph-fill ph-crosshair"></i></div>
+            <div class="item-text-stack" style="width: 100%;">
+              <div class="item-subtitle" style="color: var(--text-muted);">{{ $t('executor.currentCoordinates') }}</div>
+              <input type="text" class="gps-input" :value="`${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`" readonly />
+            </div>
           </div>
-          <div class="gps-info">
-            <div class="gps-label">{{ $t('executor.currentCoordinates') }}</div>
-            <input type="text" class="gps-input-value" :value="`${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`" readonly />
+          <div class="item-actions">
+            <button type="button" class="btn-action" style="background: #f1f5f9; color: var(--text-muted);" :title="$t('common.save')" @click="openMapPicker">
+              <i class="ph-bold ph-pencil-simple"></i>
+            </button>
           </div>
-          <button type="button" class="btn-edit-gps" :title="$t('common.save')" @click="openMapPicker">
-            <i class="ph-bold ph-pencil-simple"></i>
-          </button>
         </div>
 
-        <div v-if="availableOrders.length === 0" class="empty-state-card">
-          <p>{{ $t('executor.noAvailableOrders') }}</p>
+        <div v-if="availableOrders.length === 0" class="empty-state">
+          {{ $t('executor.noAvailableOrders') }}
         </div>
         <div v-else class="orders-stack">
           <div v-for="order in availableOrders" :key="order.id" class="order-row">
-            <div class="order-summary">
-              <div class="o-icon">
-                <i class="ph-fill ph-package"></i>
+            <div class="order-summary list-item-compact">
+              <div class="item-left-group">
+                <div class="o-icon item-icon">
+                  <i class="ph-fill ph-package"></i>
+                </div>
+                <div class="o-info item-text-stack">
+                  <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+                  <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                </div>
               </div>
-              <div class="o-info">
-                <div class="o-title">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">{{ order.address || '' }}</div>
-              </div>
-              <div class="o-price">
-                {{ currencySymbol }}{{ Number(order.hold_amount).toFixed(2) }}
-              </div>
-              <div class="o-actions">
-                <button type="button" class="btn-action-accept" @click="acceptOrder(order.id)">
-                  {{ $t('common.accept') }} <i class="ph-bold ph-check"></i>
+              <div class="o-actions item-actions">
+                <button type="button" class="btn-action success" :title="$t('common.accept')" @click="acceptOrder(order.id)">
+                  <i class="ph-bold ph-check"></i>
                 </button>
               </div>
             </div>
@@ -420,41 +413,38 @@
         </div>
       </div>
 
-      <!-- История смен и заказов -->
-      <div class="section-container">
+      <!-- Финансовая история -->
+      <div class="section-container" style="margin-top: 8px;">
         <div
           class="section-title-row cursor-pointer"
           @click="isHistoryCollapsed = !isHistoryCollapsed"
         >
-          <i class="ph-bold ph-clock-counter-clockwise" style="color: var(--text-muted); font-size: 20px;"></i>
-          <h3>{{ $t('executor.financialHistoryTitle') }}</h3>
-          <span class="count-badge">({{ executorHistoryOrders.length }})</span>
-          <i :class="['ph-bold', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="margin-left: auto;"></i>
+          <i class="ph-bold ph-clock-counter-clockwise" style="color: var(--text-muted); font-size: 18px;"></i>
+          <h2 class="section-title" style="font-size: 15px;">{{ $t('executor.financialHistoryTitle') }} <span class="section-count">({{ executorHistoryOrders.length }})</span></h2>
+          <i :class="['ph-bold', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="color: var(--text-muted);"></i>
         </div>
 
         <div v-if="!isHistoryCollapsed" class="orders-stack">
-          <div v-if="executorHistoryOrders.length === 0" class="empty-state-card">
+          <div v-if="executorHistoryOrders.length === 0" class="empty-state">
             {{ $t('customer.noHistoryOrders') }}
           </div>
           <div
             v-for="order in executorHistoryOrders"
             :key="order.id"
-            class="order-row history-row"
+            class="list-item-compact history-item"
           >
-            <div class="order-summary">
-              <div class="o-icon history">
-                <i class="ph-bold ph-check-circle"></i>
+            <div class="item-left-group">
+              <div class="item-icon"><i class="ph-bold ph-check-circle"></i></div>
+              <div class="item-text-stack">
+                <div class="item-title" style="font-size: 14px;">{{ formatOrderType(order) }}</div>
+                <div class="item-subtitle" style="font-family: inherit;">#{{ order?.id ? order.id.slice(0, 8) : '---' }}</div>
               </div>
-              <div class="o-info">
-                <div class="o-title gray">{{ formatOrderType(order) }}</div>
-                <div class="o-subtitle">#{{ order?.id ? order.id.slice(0, 8) : '---' }}</div>
-              </div>
-              <div class="o-price gray">
-                {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
-              </div>
-              <div class="o-status" style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                <span class="status-dot-gray">{{ $t('orderStatus.' + order.status, order.status) }}</span>
-                <span v-if="executorReviewsMap[order.id]" class="review-status-badge" title="Оценка клиента">
+            </div>
+            <div>
+              <div class="history-price">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+              <div class="history-status">
+                {{ $t('orderStatus.' + order.status, order.status) }}
+                <span v-if="executorReviewsMap[order.id]" class="review-status-badge ms-1" title="Оценка клиента">
                   <i class="ph-fill ph-star" style="color: #f59e0b; font-size: 11px;"></i>
                   <span>{{ executorReviewsMap[order.id].rating }}/5</span>
                 </span>
@@ -2164,6 +2154,24 @@ export default defineComponent({
 }
 .btn-action.primary { background: #e0e7ff; color: #5c60f5; }
 .btn-action.success { background: #ecfdf5; color: #10b981; }
+
+/* Modifiers for Review & History */
+.list-item-compact.review { border-left: 4px solid #f59e0b; }
+.list-item-compact.review .item-icon { background: #fffbeb; color: #f59e0b; }
+.list-item-compact.review .item-price-top { color: #f59e0b; }
+.list-item-compact.review .item-subtitle { font-size: 11px; color: #f59e0b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gps-input { flex: 1; border: none; outline: none; font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text-title, #0f172a); background: transparent; width: 100%; }
+
+.empty-state {
+  background: rgba(255,255,255,0.5); border: 1px dashed rgba(0,0,0,0.1); border-radius: var(--rad-md, 16px);
+  padding: 16px; text-align: center; font-size: 13px; color: var(--text-muted, #64748b); font-weight: 500;
+}
+
+.history-item { opacity: 0.85; box-shadow: none; border: 1px solid rgba(0,0,0,0.03); margin-bottom: 8px; padding: 10px 16px; }
+.history-item .item-icon { background: #f1f5f9; color: var(--text-muted, #64748b); width: 32px; height: 32px; font-size: 16px; border-radius: 10px; }
+.history-status { font-size: 12px; font-weight: 500; color: var(--text-muted, #64748b); text-align: right; }
+.history-price { font-size: 14px; font-weight: 700; color: var(--text-title, #0f172a); text-align: right; margin-bottom: 2px; }
 
 @media (max-width: 600px) {
   .list-item-compact {
