@@ -793,12 +793,29 @@ export default defineComponent({
       }
     }
 
+    const ws = ref<WebSocket | null>(null)
+    let chatPollTimer: any = null
+
+    const closeInlineChat = () => {
+      selectedChatOrder.value = null
+      chatMessages.value = []
+      chatInputText.value = ''
+      cancelEditMessage()
+      if (ws.value) {
+        ws.value.close()
+        ws.value = null
+      }
+      if (chatPollTimer) {
+        clearInterval(chatPollTimer)
+        chatPollTimer = null
+      }
+    }
+
     const toggleChat = (order: any) => {
       if (selectedChatOrder.value && selectedChatOrder.value.id === order.id) {
-        selectedChatOrder.value = null
-        chatMessages.value = []
-        cancelEditMessage()
+        closeInlineChat()
       } else {
+        closeInlineChat()
         selectedChatOrder.value = order
         fetchChatMessages(order.id)
       }
@@ -811,6 +828,52 @@ export default defineComponent({
         scrollToBottom()
       } catch (err) {
         console.error(err)
+      }
+
+      // Setup WebSocket connection if not already connected
+      if (!ws.value && selectedChatOrder.value) {
+        try {
+          const wsUrl = buildChatWebSocketUrl(orderId, authStore.token)
+          ws.value = new WebSocket(wsUrl)
+          ws.value.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data)
+              if (data.type === 'message_deleted') {
+                chatMessages.value = chatMessages.value.filter((m: any) => m.id !== data.message_id)
+                return
+              }
+              if (data.type === 'message_edited' || data.updated_at) {
+                const idx = chatMessages.value.findIndex((m: any) => m.id === (data.message_id || data.id))
+                if (idx !== -1) {
+                  chatMessages.value[idx] = { ...chatMessages.value[idx], text: data.text || data.message?.text, updated_at: data.updated_at || new Date().toISOString() }
+                  return
+                }
+              }
+              if (data && (data.text || data.content)) {
+                const exists = chatMessages.value.some((m) => m.id === data.id)
+                if (!exists) {
+                  chatMessages.value.push(data)
+                  scrollToBottom()
+                }
+              }
+            } catch (e) {
+              console.error('WS message parse error:', e)
+            }
+          }
+        } catch (e) {
+          console.warn('WS connect failed:', e)
+        }
+      }
+
+      // Start polling fallback if not already started
+      if (!chatPollTimer && selectedChatOrder.value) {
+        chatPollTimer = setInterval(async () => {
+          if (!selectedChatOrder.value) return
+          try {
+            const res = await api.get(`/chats/${orderId}/messages`)
+            chatMessages.value = res.data || []
+          } catch (e) {}
+        }, 3000)
       }
     }
 
@@ -1032,6 +1095,7 @@ export default defineComponent({
     })
 
     onUnmounted(() => {
+      closeInlineChat()
       if (intervalId) clearInterval(intervalId)
       if (countdownIntervalId) clearInterval(countdownIntervalId)
       if (successTimer) clearTimeout(successTimer)
