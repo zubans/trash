@@ -389,6 +389,11 @@ func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo 
 func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
 	return &repository.CustomerProfile{UserID: userID}, nil
 }
+func (m *mockUserRepo) FindByEmail(email string) (*repository.User, error) { return nil, nil }
+func (m *mockUserRepo) FindByEmailVerificationToken(token string) (*repository.User, error) { return nil, nil }
+func (m *mockUserRepo) VerifyEmailToken(token string) (*repository.User, error) { return nil, nil }
+func (m *mockUserRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error { return nil }
+func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) { return nil, nil }
 func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error { return nil }
 
 func (m *mockOrderRepo) FindAllByExecutor(executorID uuid.UUID) ([]repository.Order, error) {

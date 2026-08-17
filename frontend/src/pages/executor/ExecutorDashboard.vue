@@ -57,7 +57,7 @@
               {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
               <span class="bc-currency">{{ currencySymbol }}</span>
             </div>
-            <button type="button" class="btn-balance" @click="openFinancialHistoryModal">
+            <button type="button" class="btn-balance" @click="openWithdrawalModal">
               <i class="ph-bold ph-arrow-up-right"></i> Вывести
             </button>
           </div>
@@ -471,6 +471,47 @@
       @reviewed="onReviewSubmitted"
     />
 
+    <!-- Withdrawal Modal -->
+    <div v-if="showWithdrawalModal" class="topup-modal-overlay" @click.self="showWithdrawalModal = false">
+      <div class="topup-modal-card">
+        <div class="topup-modal-header">
+          <div class="topup-modal-title">Запрос на вывод средств</div>
+          <button type="button" class="btn-close-topup" aria-label="Закрыть" @click="showWithdrawalModal = false">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <form @submit.prevent="submitWithdrawal">
+          <div class="form-group mb-4">
+            <label class="form-label">Сумма вывода</label>
+            <div class="input-wrapper">
+              <input
+                v-model.number="withdrawalAmount"
+                type="number"
+                class="form-input"
+                min="1"
+                :max="balance"
+                required
+              />
+              <i class="ph ph-currency-rub input-icon"></i>
+            </div>
+            <div class="quick-amounts">
+              <button type="button" class="amount-pill" @click="withdrawalAmount = (Number(withdrawalAmount) || 0) + 500">+ 500 ₽</button>
+              <button type="button" class="amount-pill" @click="withdrawalAmount = (Number(withdrawalAmount) || 0) + 1000">+ 1 000 ₽</button>
+              <button type="button" class="amount-pill" @click="withdrawalAmount = balance">Всё ({{ Number(balance).toFixed(2) }} ₽)</button>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-submit-topup" :disabled="submittingWithdrawal || withdrawalAmount <= 0 || withdrawalAmount > balance">
+            <span v-if="submittingWithdrawal" class="spinner-sm"></span>
+            <template v-else>
+              Отправить заявку <i class="ph-bold ph-paper-plane-tilt"></i>
+            </template>
+          </button>
+        </form>
+      </div>
+    </div>
+
     <!-- Executor Map Modal -->
     <ExecutorMapModal
       v-model="showExecutorMapModal"
@@ -608,6 +649,30 @@ export default defineComponent({
       successMsg.value = 'Отзыв о заказчике успешно отправлен!'
       showReviewModal.value = false
       fetchHistoryOrders()
+    }
+
+    // Withdrawal Modal state
+    const showWithdrawalModal = ref(false)
+    const withdrawalAmount = ref(0)
+    const submittingWithdrawal = ref(false)
+
+    const openWithdrawalModal = () => {
+      withdrawalAmount.value = balance.value > 0 ? balance.value : 0
+      showWithdrawalModal.value = true
+    }
+
+    const submitWithdrawal = async () => {
+      if (withdrawalAmount.value <= 0 || withdrawalAmount.value > balance.value || submittingWithdrawal.value) return
+      submittingWithdrawal.value = true
+      try {
+        await api.post('/finances/withdrawals', { amount: withdrawalAmount.value })
+        successMsg.value = 'Заявка на вывод средства отправлена администратору!'
+        showWithdrawalModal.value = false
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Ошибка отправки заявки на вывод'
+      } finally {
+        submittingWithdrawal.value = false
+      }
     }
 
     // Map modal state
@@ -1196,6 +1261,11 @@ export default defineComponent({
       reviewTargetOrderId,
       openReviewModal,
       onReviewSubmitted,
+      showWithdrawalModal,
+      withdrawalAmount,
+      submittingWithdrawal,
+      openWithdrawalModal,
+      submitWithdrawal,
       selectedChatOrder,
       chatMessages,
       chatInputText,

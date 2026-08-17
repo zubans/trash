@@ -136,8 +136,23 @@
           </div>
         </div>
 
+        <!-- Email Input for Registration -->
+        <div v-if="mode === 'register'" class="form-group mb-3">
+          <label class="form-label">Email</label>
+          <div class="input-wrapper">
+            <input
+              v-model="email"
+              type="email"
+              placeholder="example@domain.com"
+              class="form-input"
+              required
+            />
+            <i class="ph ph-envelope input-icon"></i>
+          </div>
+        </div>
+
         <!-- Forgot Password Link (for login mode) -->
-        <a v-if="mode === 'login'" href="#" class="forgot-link" @click.prevent="error = 'Обратитесь к администратору для сброса пароля'">
+        <a v-if="mode === 'login'" href="#" class="forgot-link" @click.prevent="openForgotModal">
           Забыли пароль?
         </a>
 
@@ -150,6 +165,63 @@
           </template>
         </button>
       </form>
+    </div>
+
+    <!-- Forgot/Reset Password Modal -->
+    <div v-if="showForgotModal" class="forgot-modal-overlay" @click.self="showForgotModal = false">
+      <div class="forgot-modal-card">
+        <div class="forgot-modal-header">
+          <div class="forgot-modal-title">Сброс пароля</div>
+          <button type="button" class="btn-close-forgot" @click="showForgotModal = false">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <!-- Step 1: Request Code -->
+        <form v-if="resetStep === 1" @submit.prevent="requestResetCode">
+          <p class="forgot-desc">Введите ваш Email, чтобы получить 6-значный код восстановления.</p>
+          <div class="form-group mb-3">
+            <label class="form-label">Email</label>
+            <div class="input-wrapper">
+              <input v-model="resetEmail" type="email" class="form-input" placeholder="example@domain.com" required />
+              <i class="ph ph-envelope input-icon"></i>
+            </div>
+          </div>
+          <div v-if="resetError" class="custom-alert error-alert mb-3">
+            <span class="alert-text">{{ resetError }}</span>
+          </div>
+          <button type="submit" class="submit-btn" :disabled="resetLoading">
+            <span v-if="resetLoading" class="spinner"></span>
+            <template v-else>Получить код <i class="ph-bold ph-paper-plane-tilt"></i></template>
+          </button>
+        </form>
+
+        <!-- Step 2: Enter Code & New Password -->
+        <form v-else @submit.prevent="submitNewPassword">
+          <p class="forgot-desc">Код отправлен на {{ resetEmail }}. Введите код и новый пароль.</p>
+          <div class="form-group mb-3">
+            <label class="form-label">Код из Email</label>
+            <div class="input-wrapper">
+              <input v-model="resetCode" type="text" class="form-input" placeholder="123456" maxlength="6" required />
+              <i class="ph ph-key input-icon"></i>
+            </div>
+          </div>
+          <div class="form-group mb-3">
+            <label class="form-label">Новый пароль</label>
+            <div class="input-wrapper">
+              <input v-model="newPassword" type="password" class="form-input" placeholder="••••••••" required />
+              <i class="ph ph-lock-key input-icon"></i>
+            </div>
+          </div>
+          <div v-if="resetError" class="custom-alert error-alert mb-3">
+            <span class="alert-text">{{ resetError }}</span>
+          </div>
+          <button type="submit" class="submit-btn" :disabled="resetLoading">
+            <span v-if="resetLoading" class="spinner"></span>
+            <template v-else>Сохранить новый пароль <i class="ph-bold ph-check"></i></template>
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 </template>
@@ -189,6 +261,7 @@ export default defineComponent({
     const submitBtnRef = ref<HTMLButtonElement | null>(null)
     const mode = ref<'login' | 'register'>('login')
     const phone = ref('')
+    const email = ref('')
     const password = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
     const address = ref('')
@@ -200,6 +273,61 @@ export default defineComponent({
     const message = ref('')
     const loading = ref(false)
     let autocompleteTimeout: any = null
+
+    // Forgot Password Modal State
+    const showForgotModal = ref(false)
+    const resetStep = ref<1 | 2>(1)
+    const resetEmail = ref('')
+    const resetCode = ref('')
+    const newPassword = ref('')
+    const resetError = ref('')
+    const resetLoading = ref(false)
+
+    const openForgotModal = () => {
+      showForgotModal.value = true
+      resetStep.value = 1
+      resetEmail.value = ''
+      resetCode.value = ''
+      newPassword.value = ''
+      resetError.value = ''
+    }
+
+    const requestResetCode = async () => {
+      resetError.value = ''
+      if (!resetEmail.value) return
+      resetLoading.value = true
+      try {
+        const res = await api.post('/auth/forgot-password', { email: resetEmail.value })
+        resetStep.value = 2
+        // Show reset code if returned in dev
+        if (res.data.code) {
+          resetError.value = `[Тестовый режим] Код сброса: ${res.data.code}`
+        }
+      } catch (err: any) {
+        resetError.value = err.response?.data || 'Ошибка отправки кода сброса'
+      } finally {
+        resetLoading.value = false
+      }
+    }
+
+    const submitNewPassword = async () => {
+      resetError.value = ''
+      if (!resetCode.value || !newPassword.value) return
+      resetLoading.value = true
+      try {
+        await api.post('/auth/reset-password', {
+          email: resetEmail.value,
+          code: resetCode.value,
+          new_password: newPassword.value,
+        })
+        showForgotModal.value = false
+        message.value = 'Пароль успешно изменен! Войдите с новым паролем.'
+      } catch (err: any) {
+        resetError.value = err.response?.data || 'Ошибка изменения пароля'
+      } finally {
+        resetLoading.value = false
+      }
+    }
 
     const loadPhosphorIcons = () => {
       if (!document.getElementById('phosphor-icons-script')) {
@@ -311,6 +439,7 @@ export default defineComponent({
         } else {
           const payload: any = {
             phone: phone.value,
+            email: email.value,
             password: password.value,
             role: role.value,
           }
@@ -331,8 +460,9 @@ export default defineComponent({
           }
 
           await api.post('/register', payload)
-          message.value = t('login.registrationSuccess')
+          message.value = 'Регистрация успешна! Код/ссылка подтверждения отправлена на ' + email.value
           mode.value = 'login'
+          email.value = ''
           password.value = ''
           role.value = 'CUSTOMER'
           address.value = ''
@@ -350,6 +480,7 @@ export default defineComponent({
       submitBtnRef,
       mode,
       phone,
+      email,
       password,
       role,
       address,
@@ -362,6 +493,16 @@ export default defineComponent({
       handleSubmit,
       onAddressInput,
       selectAddress,
+      showForgotModal,
+      resetStep,
+      resetEmail,
+      resetCode,
+      newPassword,
+      resetError,
+      resetLoading,
+      openForgotModal,
+      requestResetCode,
+      submitNewPassword,
     }
   },
 })
@@ -672,6 +813,78 @@ h1 {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Forgot Password Modal Styles */
+.forgot-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  animation: fadeIn 0.3s ease;
+}
+
+.forgot-modal-card {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--rad-lg);
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow-float);
+  padding: 32px;
+  position: relative;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.forgot-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.forgot-modal-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-title);
+  letter-spacing: -0.5px;
+}
+
+.forgot-desc {
+  font-size: 14px;
+  color: var(--text-body);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.btn-close-forgot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-close-forgot:hover {
+  background: #ffffff;
+  color: #ef4444;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  transform: rotate(90deg);
 }
 
 /* Responsive */

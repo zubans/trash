@@ -29,6 +29,7 @@ type AuthRequest struct {
 // role and optional coordinates. Role must be CUSTOMER or EXECUTOR.
 type RegisterRequest struct {
 	Phone    string   `json:"phone"`
+	Email    string   `json:"email"`
 	Password string   `json:"password"`
 	Address  string   `json:"address"`
 	Role     string   `json:"role"`
@@ -45,6 +46,7 @@ type AuthResponse struct {
 type RegisterResponse struct {
 	ID    string `json:"id"`
 	Phone string `json:"phone"`
+	Email string `json:"email"`
 	Role  string `json:"role"`
 }
 
@@ -72,9 +74,9 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Password, req.Address, req.Role, req.Lat, req.Lon)
+	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Email, req.Password, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
-		if err.Error() == "user already exists" {
+		if err.Error() == "user with this phone already exists" || err.Error() == "user with this email already exists" {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -85,6 +87,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 	resp := RegisterResponse{
 		ID:    user.ID.String(),
 		Phone: user.Phone,
+		Email: user.Email,
 		Role:  user.Role,
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -134,8 +137,76 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":       user.ID,
 		"phone":    user.Phone,
+		"email":    user.Email,
 		"role":     user.Role,
 		"balance":  user.Balance,
 		"status":   user.Status,
+	})
+}
+
+// VerifyEmailHandler verifies email by token.
+func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "token parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authService.VerifyEmail(token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Email verified successfully",
+		"email":   user.Email,
+	})
+}
+
+// ForgotPasswordHandler sends a password reset code to the specified email.
+func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	code, err := h.authService.RequestPasswordReset(req.Email)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Password reset code sent to email",
+		"code":    code, // Returned for dev testing/verification
+	})
+}
+
+// ResetPasswordHandler resets user password with verification code.
+func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email       string `json:"email"`
+		Code        string `json:"code"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.authService.ResetPassword(req.Email, req.Code, req.NewPassword); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Password reset successfully. You can now login with your new password.",
 	})
 }

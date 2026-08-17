@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -90,6 +92,31 @@ func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.Custome
 	return &repository.CustomerProfile{UserID: userID}, nil
 }
 
+func (m *mockUserRepo) FindByEmail(email string) (*repository.User, error) {
+	for _, u := range m.users {
+		if strings.EqualFold(u.Email, email) {
+			return u, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockUserRepo) FindByEmailVerificationToken(token string) (*repository.User, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepo) VerifyEmailToken(token string) (*repository.User, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) {
+	return nil, nil
+}
+
 func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	return nil
 }
@@ -125,7 +152,7 @@ func TestHealthHandler(t *testing.T) {
 
 func TestRegisterHandler(t *testing.T) {
 	h := newTestPublicHandler()
-	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Password: "secret123", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "CUSTOMER"})
+	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Email: "test@example.com", Password: "secret123", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "CUSTOMER"})
 	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 
@@ -146,7 +173,7 @@ func TestRegisterHandler(t *testing.T) {
 
 func TestRegisterHandlerInvalidRole(t *testing.T) {
 	h := newTestPublicHandler()
-	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Password: "secret123", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "ADMIN"})
+	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Email: "admin@example.com", Password: "secret123", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "ADMIN"})
 	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 
@@ -159,7 +186,7 @@ func TestRegisterHandlerInvalidRole(t *testing.T) {
 
 func TestRegisterHandlerDuplicate(t *testing.T) {
 	h := newTestPublicHandler()
-	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Password: "secret123", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "CUSTOMER"})
+	body, _ := json.Marshal(RegisterRequest{Phone: "+79001234567", Email: "dup@example.com", Password: "secret123", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "CUSTOMER"})
 
 	req1 := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
 	h.RegisterHandler(httptest.NewRecorder(), req1)
@@ -182,7 +209,7 @@ func TestLoginHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to hash password: %v", err)
 	}
-	h.authService.Register(phone, password, "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	h.authService.Register(phone, "login@example.com", password, "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 
 	body, _ := json.Marshal(AuthRequest{Phone: phone, Password: password})
 	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
@@ -206,7 +233,7 @@ func TestLoginHandler(t *testing.T) {
 
 func TestLoginHandlerInvalidCredentials(t *testing.T) {
 	h := newTestPublicHandler()
-	h.authService.Register("+79001234567", "secret123", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	h.authService.Register("+79001234567", "invalidcreds@example.com", "secret123", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 
 	body, _ := json.Marshal(AuthRequest{Phone: "+79001234567", Password: "wrongpassword"})
 	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))

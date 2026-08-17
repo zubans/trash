@@ -73,19 +73,21 @@ func validRegistrationRole(role string) bool {
 	return role == "CUSTOMER" || role == "EXECUTOR"
 }
 
-// Register creates a new user with the given phone, password, pickup address and role.
-// The password is hashed before persisting. Role must be CUSTOMER or EXECUTOR.
-func (s *AuthService) Register(phone, password, address, role string) (*repository.User, error) {
-	return s.RegisterWithCoordinates(phone, password, address, role, nil, nil)
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+
+// Register creates a new user with the given phone, email, password, pickup address and role.
+func (s *AuthService) Register(phone, email, password, address, role string) (*repository.User, error) {
+	return s.RegisterWithCoordinates(phone, email, password, address, role, nil, nil)
 }
 
-// RegisterWithCoordinates creates a new user with the given phone, password,
-// pickup address, role and optional coordinates. When coordinates are provided they
-// are used for last_geo, otherwise the address is geocoded normally.
-// Role must be CUSTOMER or EXECUTOR; ADMIN is rejected.
-func (s *AuthService) RegisterWithCoordinates(phone, password, address, role string, lat, lon *float64) (*repository.User, error) {
+// RegisterWithCoordinates creates a new user with email, phone, password and address.
+func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
+	}
+	email = strings.TrimSpace(email)
+	if email == "" || !emailRegex.MatchString(email) {
+		return nil, errors.New("a valid email is required")
 	}
 	if !validRegistrationRole(role) {
 		return nil, errors.New("invalid role: must be CUSTOMER or EXECUTOR")
@@ -103,12 +105,20 @@ func (s *AuthService) RegisterWithCoordinates(phone, password, address, role str
 		}
 	}
 
-	existing, err := s.repo.FindByPhone(phone)
+	existingPhone, err := s.repo.FindByPhone(phone)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if existing != nil {
-		return nil, errors.New("user already exists")
+	if existingPhone != nil {
+		return nil, errors.New("user with this phone already exists")
+	}
+
+	existingEmail, err := s.repo.FindByEmail(email)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if existingEmail != nil {
+		return nil, errors.New("user with this email already exists")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -116,12 +126,17 @@ func (s *AuthService) RegisterWithCoordinates(phone, password, address, role str
 		return nil, err
 	}
 
+	verificationToken := uuid.New().String()
+
 	user := &repository.User{
-		Role:     role,
-		Phone:    phone,
-		Password: string(hash),
-		Balance:  0,
-		Status:   "ACTIVE",
+		Role:                   role,
+		Phone:                  phone,
+		Email:                  email,
+		EmailVerified:          false,
+		EmailVerificationToken: verificationToken,
+		Password:               string(hash),
+		Balance:                0,
+		Status:                 "ACTIVE",
 	}
 	if err := s.repo.Create(user); err != nil {
 		return nil, err
@@ -222,4 +237,53 @@ func (s *AuthService) ParseJWT(tokenStr string) (*JWTClaims, error) {
 		Phone:  phone,
 		Role:   role,
 	}, nil
+}
+
+// VerifyEmail confirms user email by token.
+func (s *AuthService) VerifyEmail(token string) (*repository.User, error) {
+	if token == "" {
+		return nil, errors.New("token is required")
+	}
+	return s.repo.VerifyEmailToken(token)
+}
+
+// RequestPasswordReset generates a 6-digit code for password reset.
+func (s *AuthService) RequestPasswordReset(email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", errors.New("email is required")
+	}
+	user, err := s.repo.FindByEmail(email)
+	if err != nil || user == nil {
+		return "", errors.New("user with this email not found")
+	}
+
+	// Generate 6-digit numeric reset code
+	code := fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	expiresAt := time.Now().Add(30 * time.Minute)
+
+	if err := s.repo.SetPasswordResetCode(user.ID, code, expiresAt); err != nil {
+		return "", err
+	}
+
+	// Development/production logging of code
+	fmt.Printf("[PASSWORD RESET] Code for %s: %s (Expires: %s)\n", email, code, expiresAt.Format(time.RFC3339))
+	return code, nil
+}
+
+// ResetPassword verifies the code and updates password.
+func (s *AuthService) ResetPassword(email, code, newPassword string) error {
+	email = strings.TrimSpace(email)
+	code = strings.TrimSpace(code)
+	if email == "" || code == "" || newPassword == "" {
+		return errors.New("email, code and new password are required")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.repo.ResetPasswordWithCode(email, code, string(hash))
+	return err
 }

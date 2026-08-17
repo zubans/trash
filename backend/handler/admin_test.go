@@ -80,6 +80,26 @@ func (m *mockUserRepository) GetCustomerProfile(userID uuid.UUID) (*repository.C
 	return &repository.CustomerProfile{UserID: userID}, nil
 }
 
+func (m *mockUserRepository) FindByEmail(email string) (*repository.User, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepository) FindByEmailVerificationToken(token string) (*repository.User, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepository) VerifyEmailToken(token string) (*repository.User, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepository) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *mockUserRepository) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) {
+	return nil, nil
+}
+
 func (m *mockUserRepository) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	if m.addresses == nil {
 		m.addresses = make(map[uuid.UUID]string)
