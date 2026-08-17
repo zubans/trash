@@ -921,11 +921,21 @@ export default defineComponent({
         ws.value.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data)
+            if (data.type === 'status_update' && Array.isArray(data.message_ids)) {
+              const updatedSet = new Set(data.message_ids)
+              chatMessages.value = chatMessages.value.map((m: any) => {
+                if (updatedSet.has(m.id)) {
+                  return { ...m, status: data.status }
+                }
+                return m
+              })
+              return
+            }
             if (data.type === 'message_deleted') {
               chatMessages.value = chatMessages.value.filter((m: any) => m.id !== data.message_id)
               return
             }
-            if (data.type === 'message_edited' || data.updated_at) {
+            if (data.type === 'message_edited' || (data.updated_at && data.type !== 'status_update')) {
               const idx = chatMessages.value.findIndex((m: any) => m.id === (data.message_id || data.id))
               if (idx !== -1) {
                 chatMessages.value[idx] = { ...chatMessages.value[idx], text: data.text || data.message?.text, updated_at: data.updated_at || new Date().toISOString() }

@@ -403,6 +403,20 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 	room.Register <- client
 
 	go client.WritePump()
+
+	// Automatically mark messages as read when user connects to room and notify partner
+	if updatedIDs, err := s.chatRepo.MarkMessagesAsRead(chat.ID, userID); err == nil && len(updatedIDs) > 0 {
+		ackBytes, _ := json.Marshal(map[string]interface{}{
+			"type":        "status_update",
+			"message_ids": updatedIDs,
+			"status":      "read",
+		})
+		select {
+		case room.Broadcast <- ackBytes:
+		default:
+		}
+	}
+
 	go s.ReadPump(client, room)
 }
 
