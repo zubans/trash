@@ -26,4 +26,8 @@ export default defineConfig({
     port: 8443,
     https: key && cert ? { key, cert } : undefined,
   },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
 })
