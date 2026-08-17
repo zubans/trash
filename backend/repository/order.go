@@ -155,8 +155,8 @@ func (r *orderRepo) GetOrderByID(id uuid.UUID) (*Order, error) {
 
 func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status = $2`,
-		executorID, OrderStatusAssigned,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3) ORDER BY o.created_at DESC`,
+		executorID, OrderStatusAssigned, OrderStatusExecuted,
 	)
 	if err != nil {
 		return nil, err

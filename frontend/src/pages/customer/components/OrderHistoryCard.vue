@@ -78,9 +78,14 @@
               <td class="font-bold text-dark">{{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}</td>
               <td class="text-secondary text-xs">{{ formatDate(order.created_at) }}</td>
               <td>
-                <span :class="['status-dot-badge', order.status === 'COMPLETED' ? 'dot-completed' : 'dot-canceled']">
-                  ● {{ order.status === 'COMPLETED' ? 'Завершён' : 'Отменён' }}
-                </span>
+                <div class="d-flex align-items-center gap-1 flex-wrap">
+                  <span :class="['status-dot-badge', order.status === 'COMPLETED' ? 'dot-completed' : 'dot-canceled']">
+                    ● {{ order.status === 'COMPLETED' ? 'Завершён' : 'Отменён' }}
+                  </span>
+                  <span v-if="orderReviewsMap[order.id]" class="review-pill-badge" title="Оценка вычислена">
+                    ⭐ {{ orderReviewsMap[order.id].rating }}/5
+                  </span>
+                </div>
               </td>
               <td class="text-secondary text-xs">
                 <span v-if="order.executor_phone">📱 {{ order.executor_phone }}</span>
@@ -112,7 +117,8 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed } from 'vue'
+import { defineComponent, ref, computed, watch } from 'vue'
+import { checkMyOrderReview, type OrderReview } from '../../../api/review'
 
 export default defineComponent({
   name: 'OrderHistoryCard',
@@ -127,6 +133,7 @@ export default defineComponent({
   setup(props) {
     const isHistoryCollapsed = ref(true)
     const visibleLimit = ref(5)
+    const orderReviewsMap = ref<Record<string, OrderReview>>({})
 
     const completedCount = computed(() =>
       props.historyOrders.filter((o) => o.status === 'COMPLETED').length
@@ -140,6 +147,28 @@ export default defineComponent({
       props.historyOrders.slice(0, visibleLimit.value)
     )
 
+    const fetchReviews = async () => {
+      const completed = props.historyOrders.filter((o) => o.status === 'COMPLETED')
+      for (const order of completed) {
+        if (!orderReviewsMap.value[order.id]) {
+          try {
+            const res = await checkMyOrderReview(order.id)
+            if (res && res.has_reviewed && res.review) {
+              orderReviewsMap.value[order.id] = res.review
+            }
+          } catch (err) {
+            // ignore
+          }
+        }
+      }
+    }
+
+    watch(
+      () => props.historyOrders,
+      () => { fetchReviews() },
+      { immediate: true, deep: true }
+    )
+
     const formatDate = (dateStr?: string) => {
       if (!dateStr) return ''
       const d = new Date(dateStr)
@@ -149,6 +178,7 @@ export default defineComponent({
     return {
       isHistoryCollapsed,
       visibleLimit,
+      orderReviewsMap,
       completedCount,
       canceledCount,
       displayedOrders,
@@ -218,6 +248,17 @@ export default defineComponent({
 
 .dot-canceled {
   color: #dc2626;
+}
+
+.review-pill-badge {
+  font-size: 0.72rem;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 9999px;
+  padding: 1px 6px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .btn-table-action {

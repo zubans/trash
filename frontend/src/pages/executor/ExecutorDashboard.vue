@@ -107,7 +107,7 @@
         <div class="section-title-row">
           <div class="d-flex align-items-center gap-2">
             <h3 class="m-0">{{ $t('executor.assignedOrders') }}</h3>
-            <span class="count-badge">({{ assignedOrders.length }})</span>
+            <span class="count-badge">({{ activeAssignedOrders.length }})</span>
           </div>
           <div class="d-flex align-items-center gap-2">
             <button type="button" class="btn-map-trigger" @click="showExecutorMapModal = true">
@@ -119,14 +119,14 @@
           </div>
         </div>
 
-        <div v-if="assignedOrders.length === 0" class="empty-state-card">
+        <div v-if="activeAssignedOrders.length === 0" class="empty-state-card">
           <i class="ph ph-hourglass-empty"></i>
           <p>{{ $t('executor.waitingForAssignment') }}</p>
         </div>
 
         <div v-else class="orders-stack">
           <div
-            v-for="order in assignedOrders"
+            v-for="order in activeAssignedOrders"
             :key="order.id"
             :class="['order-row', { 'chat-open': selectedChatOrder && selectedChatOrder.id === order.id }]"
           >
@@ -148,7 +148,6 @@
               </div>
               <div class="o-actions" @click.stop>
                 <button
-                  v-if="order.status === 'ASSIGNED'"
                   type="button"
                   class="btn-action-execute"
                   :title="$t('executor.executed')"
@@ -185,7 +184,135 @@
                   :key="msg.id"
                   :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
-                  <!-- Actions (Edit/Delete for outgoing messages) -->
+                  <div v-if="msg.sender_id === currentUserId" class="msg-actions">
+                    <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
+                      <i class="ph ph-pencil-simple"></i>
+                    </button>
+                    <button type="button" class="action-icon-btn danger" title="Удалить" @click="deleteChatMessage(msg.id)">
+                      <i class="ph ph-trash"></i>
+                    </button>
+                  </div>
+
+                  <div class="msg-content">
+                    <div :class="['bubble', { 'has-attachment': isImageAttachment(msg) }]">
+                      <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                        <img
+                          :src="getImageSrc(msg)"
+                          alt="Фото"
+                          class="msg-image"
+                          @error="onChatImgError(msg)"
+                          @click="openImagePreview(getImageSrc(msg))"
+                        />
+                      </div>
+                      <span v-if="msg.text || msg.content" class="msg-text">{{ msg.text || msg.content }}</span>
+                    </div>
+
+                    <div class="msg-meta">
+                      <span>{{ formatMessageTime(msg.created_at) }}</span>
+                      <span v-if="msg.updated_at" class="msg-edited">(изменено)</span>
+                      <i v-if="msg.sender_id === currentUserId" :class="['ph-bold', msg.status === 'read' ? 'ph-checks read-receipt' : 'ph-check']"></i>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Chat Input Area -->
+              <div class="chat-input-area">
+                <div v-if="editingMessageId" class="edit-banner d-flex justify-content-between align-items-center mb-2 px-3 py-1 bg-light rounded border text-xs">
+                  <span><i class="ph ph-pencil-simple me-1"></i> Редактирование сообщения</span>
+                  <button type="button" class="btn-close-sm border-0 bg-transparent cursor-pointer" @click="cancelEditMessage">&times;</button>
+                </div>
+                <form class="input-group" @submit.prevent="sendChatMessage">
+                  <button
+                    type="button"
+                    class="btn-attach"
+                    title="Прикрепить фото"
+                    :disabled="uploadingChatFile || !!editingMessageId"
+                    @click="triggerImageSelect"
+                  >
+                    <i v-if="uploadingChatFile" class="ph ph-spinner spinner"></i>
+                    <i v-else class="ph-bold ph-image"></i>
+                  </button>
+
+                  <input
+                    v-model="chatInputText"
+                    type="text"
+                    :placeholder="editingMessageId ? 'Измените текст сообщения...' : 'Напишите сообщение...'"
+                    class="inline-input"
+                  />
+
+                  <button type="submit" class="btn-inline-send" :disabled="!chatInputText.trim() && !uploadingChatFile">
+                    <i :class="['ph-bold', editingMessageId ? 'ph-check' : 'ph-paper-plane-tilt']"></i>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Заказы на проверке -->
+      <div v-if="pendingVerificationOrders.length > 0" class="section-container mt-4">
+        <div class="section-title-row">
+          <div class="d-flex align-items-center gap-2">
+            <h3 class="m-0" style="color: #d97706;">Заказы на проверке</h3>
+            <span class="count-badge" style="background: #fef3c7; color: #92400e;">({{ pendingVerificationOrders.length }})</span>
+          </div>
+        </div>
+
+        <div class="orders-stack">
+          <div
+            v-for="order in pendingVerificationOrders"
+            :key="order.id"
+            :class="['order-row', { 'chat-open': selectedChatOrder && selectedChatOrder.id === order.id }]"
+            style="border-left: 3px solid #f59e0b;"
+          >
+            <div class="order-summary" @click="toggleChat(order)">
+              <div class="o-icon" style="background: #fef3c7; color: #d97706;">
+                <i class="ph-fill ph-hourglass"></i>
+              </div>
+              <div class="o-info">
+                <div class="o-title">{{ formatOrderType(order) }}</div>
+                <div class="o-subtitle">#{{ order?.id ? order.id.slice(0, 8) : '---' }} • Ожидает подтверждения заказчиком</div>
+              </div>
+              <div class="o-price">
+                {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
+              </div>
+              <div class="o-status">
+                <span class="badge-status" style="background-color: #f59e0b; color: white;">
+                  На проверке
+                </span>
+              </div>
+              <div class="o-actions" @click.stop>
+                <button
+                  type="button"
+                  :class="['btn-chat-toggle', { active: selectedChatOrder && selectedChatOrder.id === order.id }]"
+                  @click="toggleChat(order)"
+                >
+                  <i class="ph-fill ph-chat-circle-dots"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Inline chat inside pending verification order -->
+            <div v-if="selectedChatOrder && selectedChatOrder.id === order.id" class="inline-chat">
+              <input
+                ref="chatFileInputRef"
+                type="file"
+                accept="image/*"
+                style="display: none;"
+                @change="onChatFileSelected"
+              />
+
+              <div ref="chatContainerRef" class="chat-msgs">
+                <div v-if="chatMessages.length === 0" class="text-center text-muted text-sm py-3">
+                  Сообщений пока нет. Напишите заказчику!
+                </div>
+                <div
+                  v-for="msg in chatMessages"
+                  :key="msg.id"
+                  :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
+                >
                   <div v-if="msg.sender_id === currentUserId" class="msg-actions">
                     <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
                       <i class="ph ph-pencil-simple"></i>
@@ -333,8 +460,12 @@
               <div class="o-price gray">
                 {{ currencySymbol }}{{ Number(order.final_amount || order.hold_amount).toFixed(2) }}
               </div>
-              <div class="o-status">
+              <div class="o-status" style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
                 <span class="status-dot-gray">{{ $t('orderStatus.' + order.status, order.status) }}</span>
+                <span v-if="executorReviewsMap[order.id]" class="review-status-badge" title="Оценка клиента">
+                  <i class="ph-fill ph-star" style="color: #f59e0b; font-size: 11px;"></i>
+                  <span>{{ executorReviewsMap[order.id].rating }}/5</span>
+                </span>
               </div>
             </div>
           </div>
@@ -374,6 +505,7 @@ import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
+import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceVariants, type ServiceNode } from '../../api/services'
 
@@ -426,7 +558,16 @@ export default defineComponent({
     const assignedOrders = ref<any[]>([])
     const availableOrders = ref<any[]>([])
     const executorHistoryOrders = ref<any[]>([])
+    const executorReviewsMap = ref<Record<string, OrderReview>>({})
     const isHistoryCollapsed = ref(false)
+
+    const activeAssignedOrders = computed(() =>
+      assignedOrders.value.filter((o) => o.status === 'ASSIGNED')
+    )
+
+    const pendingVerificationOrders = computed(() =>
+      assignedOrders.value.filter((o) => o.status === 'EXECUTED')
+    )
 
     // Location state
     const currentLat = ref(55.7558)
@@ -543,10 +684,27 @@ export default defineComponent({
       }
     }
 
+    const fetchReviewsForExecutorHistory = async () => {
+      const completed = executorHistoryOrders.value.filter((o) => o.status === 'COMPLETED')
+      for (const order of completed) {
+        if (!executorReviewsMap.value[order.id]) {
+          try {
+            const res = await checkMyOrderReview(order.id)
+            if (res && res.has_reviewed && res.review) {
+              executorReviewsMap.value[order.id] = res.review
+            }
+          } catch (err) {
+            // ignore
+          }
+        }
+      }
+    }
+
     const fetchHistoryOrders = async () => {
       try {
         const res = await api.get('/executor/history')
-        executorHistoryOrders.value = res.data || []
+        executorHistoryOrders.value = res.data?.orders || res.data || []
+        fetchReviewsForExecutorHistory()
       } catch (err) {
         console.error(err)
       }
@@ -896,8 +1054,11 @@ export default defineComponent({
       endingShiftEarly,
       shiftCountdown,
       assignedOrders,
+      activeAssignedOrders,
+      pendingVerificationOrders,
       availableOrders,
       executorHistoryOrders,
+      executorReviewsMap,
       isHistoryCollapsed,
       currentLat,
       currentLon,
@@ -1822,6 +1983,20 @@ export default defineComponent({
 }
 .msg-edited { font-style: italic; opacity: 0.8; }
 .read-receipt { color: var(--accent-main, #6366f1); font-size: 13px; }
+
+.review-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 12px;
+  padding: 1px 6px;
+  line-height: 1.2;
+}
 
 @media (max-width: 768px) {
   .msg-actions { opacity: 1; transform: translateX(0); }

@@ -257,8 +257,12 @@
             <div class="op-price" style="color: var(--text-muted); font-size: 16px;">
               {{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}
             </div>
-            <div class="op-status" style="background: transparent; color: var(--text-muted);">
-              {{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}
+            <div class="op-status" style="background: transparent; color: var(--text-muted); display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+              <span>{{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}</span>
+              <span v-if="orderReviewsMap[order.id]" class="review-status-badge" title="Оценка отправлена">
+                <i class="ph-fill ph-star" style="color: #f59e0b; font-size: 11px;"></i>
+                <span>{{ orderReviewsMap[order.id].rating }}/5</span>
+              </span>
             </div>
           </div>
         </div>
@@ -385,6 +389,7 @@ import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
+import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
@@ -448,6 +453,7 @@ export default defineComponent({
     // Orders
     const orders = ref<any[]>([])
     const isHistoryCollapsed = ref(false)
+    const orderReviewsMap = ref<Record<string, OrderReview>>({})
 
     // Modals
     const showCreateOrderModal = ref(false)
@@ -558,10 +564,27 @@ export default defineComponent({
       }
     }
 
+    const fetchReviewsForHistory = async () => {
+      const completed = orders.value.filter((o) => o.status === 'COMPLETED')
+      for (const order of completed) {
+        if (!orderReviewsMap.value[order.id]) {
+          try {
+            const res = await checkMyOrderReview(order.id)
+            if (res && res.has_reviewed && res.review) {
+              orderReviewsMap.value[order.id] = res.review
+            }
+          } catch (err) {
+            // ignore
+          }
+        }
+      }
+    }
+
     const fetchOrders = async () => {
       try {
         const response = await api.get('/customer/orders')
         orders.value = response.data || []
+        fetchReviewsForHistory()
       } catch (err) {
         console.error('Failed to fetch orders:', err)
       }
@@ -662,6 +685,10 @@ export default defineComponent({
 
     const onReviewSubmitted = () => {
       successMsg.value = 'Спасибо за отзыв!'
+      if (reviewTargetOrderId.value) {
+        delete orderReviewsMap.value[reviewTargetOrderId.value]
+      }
+      fetchReviewsForHistory()
     }
 
     const openOrderDetails = (order: any) => {
@@ -1076,6 +1103,7 @@ export default defineComponent({
       activeOrders,
       historyOrders,
       isHistoryCollapsed,
+      orderReviewsMap,
       showCreateOrderModal,
       showOrderDetailsModal,
       showTopUpModal,
@@ -1750,6 +1778,20 @@ export default defineComponent({
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
+}
+
+.review-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 12px;
+  padding: 1px 6px;
+  line-height: 1.2;
 }
 
 .topup-modal-title {
