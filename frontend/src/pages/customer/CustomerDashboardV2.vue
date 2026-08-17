@@ -580,7 +580,9 @@ export default defineComponent({
     const fetchOrders = async () => {
       try {
         const response = await api.get('/customer/orders')
-        orders.value = response.data || []
+        const newOrders = response.data || []
+        // Update items in place or update orders if structure changed to prevent re-rendering active chat accordion
+        orders.value = newOrders
         fetchReviewsForHistory()
       } catch (err) {
         console.error('Failed to fetch orders:', err)
@@ -935,12 +937,18 @@ export default defineComponent({
               chatMessages.value = chatMessages.value.filter((m: any) => m.id !== data.message_id)
               return
             }
-            if (data.type === 'message_edited' || (data.updated_at && data.type !== 'status_update')) {
-              const idx = chatMessages.value.findIndex((m: any) => m.id === (data.message_id || data.id))
+            if (data.type === 'message_edited') {
+              const targetId = data.message_id || data.id
+              const newText = data.text || data.message?.text
+              const idx = chatMessages.value.findIndex((m: any) => m.id === targetId)
               if (idx !== -1) {
-                chatMessages.value[idx] = { ...chatMessages.value[idx], text: data.text || data.message?.text, updated_at: data.updated_at || new Date().toISOString() }
-                return
+                chatMessages.value[idx] = {
+                  ...chatMessages.value[idx],
+                  text: newText,
+                  updated_at: data.updated_at || new Date().toISOString(),
+                }
               }
+              return
             }
             if (data && (data.text || data.content || data.id)) {
               const exists = chatMessages.value.some((m) => m.id === data.id)
@@ -2263,16 +2271,13 @@ export default defineComponent({
   display: flex;
   align-items: center;
   gap: 4px;
-  opacity: 0;
-  transform: translateX(10px);
+  opacity: 0.7;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.msg-container.outgoing .msg-actions { transform: translateX(10px); }
-.msg-container.incoming .msg-actions { transform: translateX(-10px); }
 
-.msg-container:hover .msg-actions {
+.msg-container:hover .msg-actions,
+.msg-container:focus-within .msg-actions {
   opacity: 1;
-  transform: translateX(0);
 }
 
 .action-icon-btn {

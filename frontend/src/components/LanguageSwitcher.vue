@@ -5,7 +5,6 @@
       :options="AVAILABLE_LOCALES"
       text-by="name"
       value-by="code"
-      :label="$t('language')"
       dense
       style="width: 140px"
       @update:modelValue="onChange"
