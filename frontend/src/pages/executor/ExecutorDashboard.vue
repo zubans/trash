@@ -58,7 +58,7 @@
               <span class="bc-currency">{{ currencySymbol }}</span>
             </div>
             <button type="button" class="btn-balance" @click="openFinancialHistoryModal">
-              <i class="ph-bold ph-clock-counter-clockwise"></i> История/Вывод
+              <i class="ph-bold ph-arrow-up-right"></i> Вывести
             </button>
           </div>
         </div>
