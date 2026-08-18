@@ -98,10 +98,9 @@ jobs:
             cd /home/user/projects/trash || exit 1
             echo "Fetching latest repository files..."
             git pull origin main
-            echo "Pulling latest images..."
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml pull
-            echo "Restarting production services..."
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            echo "Restarting services..."
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose pull
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose up -d --build --remove-orphans
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=168h"
             
