@@ -11,8 +11,36 @@ env:
   FRONTEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/healthlogin-frontend
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Run Backend Tests
+        run: |
+          cd backend
+          go test ./...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Frontend Tests
+        run: |
+          cd frontend
+          npm ci
+          npx vitest run
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -72,10 +100,15 @@ jobs:
             git pull origin main
             echo "Pulling latest images..."
             DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml pull
-            echo "Stopping old containers to free ports..."
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml down --remove-orphans || true
-            echo "Restarting services..."
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            echo "Restarting services via make restart..."
+            make restart
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=168h"
-            echo "Deployment finished."
+            
+            echo "Building and registering Android release APK..."
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+            RELEASE_NOTES="${COMMIT_MSG:-доработка}"
+            echo "Release notes: $RELEASE_NOTES"
+            make release-android VERSION=1.0.9 RELEASE_NOTES="$RELEASE_NOTES"
+            
+            echo "Deployment and release registration finished successfully."
