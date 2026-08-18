@@ -1,103 +1,102 @@
 <template>
-  <div class="app-layout">
-    <!-- Navbar -->
-    <va-navbar color="primary" class="app-layout__navbar">
-      <template #left>
-        <va-button
-          color="primary"
-          icon="menu"
-          class="mr-2 d-md-none-btn"
-          @click="sidebarMinimized = !sidebarMinimized"
-        />
-        <div class="logo">
-          <strong>{{ $t('app.adminTitle') }}</strong>
+  <div class="admin-app">
+    <!-- Premium Sidebar -->
+    <aside :class="['sidebar', { 'minimized': sidebarMinimized }]">
+      <div class="logo">
+        <i class="ph-fill ph-planet"></i>
+        <div v-if="!sidebarMinimized" class="logo-text">
+          <div class="brand">TRASH</div>
+          <div class="sub">ADMIN PANEL</div>
         </div>
-      </template>
-      <template #right>
-        <div class="d-flex align-items-center flex-wrap">
-          <LanguageSwitcher class="mr-2" />
-          <span class="user-info mr-2 d-none d-sm-inline">{{ phone }}</span>
-          <va-button color="danger" size="small" @click="doLogout">{{ $t('app.logout') }}</va-button>
+      </div>
+
+      <div v-if="!sidebarMinimized" class="nav-section">Управление</div>
+      <div class="nav-list">
+        <router-link to="/admin/users" class="nav-item" :class="{ active: currentRouteName === 'admin-users' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-users"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.users') }}</span>
+        </router-link>
+
+        <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
+          <i class="ph-fill ph-wallet"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.topups') }}</span>
+        </router-link>
+
+        <router-link to="/admin/withdrawals" class="nav-item" :class="{ active: currentRouteName === 'admin-withdrawals' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-bank"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.withdrawals') }}</span>
+        </router-link>
+
+        <router-link to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-arrows-left-right"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.transactions') }}</span>
+        </router-link>
+
+        <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-megaphone"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.broadcasts') }}</span>
+        </router-link>
+      </div>
+
+      <div v-if="!sidebarMinimized" class="nav-section">Система</div>
+      <div class="nav-list">
+        <router-link to="/admin/shifts" class="nav-item" :class="{ active: currentRouteName === 'admin-shifts' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-clock-user"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.activeShifts') }}</span>
+        </router-link>
+
+        <router-link to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-package"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.activeOrders') }}</span>
+        </router-link>
+
+        <router-link to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-check-circle"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.completedOrders') }}</span>
+        </router-link>
+
+        <router-link to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-list-dashes"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.serviceCatalog') }}</span>
+        </router-link>
+
+        <router-link to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-gear"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.settings') }}</span>
+        </router-link>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-wrapper">
+      <!-- Top Header Controls -->
+      <header class="top-header">
+        <div class="d-flex align-items-center gap-3">
+          <button class="btn-toggle-sidebar" @click="sidebarMinimized = !sidebarMinimized">
+            <i class="ph ph-list"></i>
+          </button>
+          <h1 class="page-title">{{ pageTitle }}</h1>
         </div>
-      </template>
-    </va-navbar>
 
-    <!-- Sidebar and Main Panel -->
-    <div class="app-layout__container">
-      <va-sidebar
-        :minimized="sidebarMinimized"
-        :class="['app-layout__sidebar', { 'mobile-hidden': sidebarMinimized }]"
-      >
-        <va-sidebar-item :active="currentRouteName === 'admin-users'" to="/admin/users" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="people" />
-            <va-sidebar-item-title>{{ $t('app.users') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
+        <div class="header-controls">
+          <LanguageSwitcher />
 
-        <va-sidebar-item :active="currentRouteName === 'admin-topups'" to="/admin/topups" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="account_balance_wallet" />
-            <va-sidebar-item-title>{{ $t('app.topups') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
+          <div class="control-pill user-pill">
+            <i class="ph-fill ph-user-circle"></i>
+            <span>{{ phone || '7 999 999 99 99' }}</span>
+          </div>
 
-        <va-sidebar-item :active="currentRouteName === 'admin-withdrawals'" to="/admin/withdrawals" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="payments" />
-            <va-sidebar-item-title>{{ $t('app.withdrawals') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-
-        <va-sidebar-item :active="currentRouteName === 'admin-transactions'" to="/admin/transactions" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="history" />
-            <va-sidebar-item-title>{{ $t('app.transactions') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-
-        <va-sidebar-item :active="currentRouteName === 'admin-settings'" to="/admin/settings" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="settings" />
-            <va-sidebar-item-title>{{ $t('app.settings') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-
-        <va-sidebar-item :active="currentRouteName === 'admin-shifts'" to="/admin/shifts" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="schedule" />
-            <va-sidebar-item-title>{{ $t('app.activeShifts') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-
-        <va-sidebar-item :active="currentRouteName === 'admin-active-orders'" to="/admin/orders/active" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="pending_actions" />
-            <va-sidebar-item-title>{{ $t('app.activeOrders') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-
-        <va-sidebar-item :active="currentRouteName === 'admin-completed-orders'" to="/admin/orders/completed" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="check_circle" />
-            <va-sidebar-item-title>{{ $t('app.completedOrders') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-
-        <va-sidebar-item :active="currentRouteName === 'admin-service-catalog'" to="/admin/service-catalog" @click="closeSidebarOnMobile">
-          <va-sidebar-item-content>
-            <va-icon name="category" />
-            <va-sidebar-item-title>{{ $t('app.serviceCatalog') }}</va-sidebar-item-title>
-          </va-sidebar-item-content>
-        </va-sidebar-item>
-      </va-sidebar>
-
-      <main class="app-layout__main">
-        <div class="main-content">
-          <router-view />
+          <button class="btn-logout" :title="$t('app.logout')" @click="doLogout">
+            <i class="ph-bold ph-sign-out"></i>
+          </button>
         </div>
-      </main>
-    </div>
+      </header>
+
+      <!-- View Slot Container -->
+      <div class="page-card">
+        <router-view />
+      </div>
+    </main>
   </div>
 </template>
 
@@ -135,6 +134,22 @@ export default defineComponent({
     const phone = computed(() => authStore.phone)
     const currentRouteName = computed(() => route.name)
 
+    const pageTitle = computed(() => {
+      switch (route.name) {
+        case 'admin-users': return 'Пользователи'
+        case 'admin-topups': return 'Запросы на пополнение'
+        case 'admin-withdrawals': return 'Запросы на вывод'
+        case 'admin-transactions': return 'Транзакции'
+        case 'admin-broadcasts': return 'Рассылки писем'
+        case 'admin-shifts': return 'Активные смены'
+        case 'admin-active-orders': return 'Активные заказы'
+        case 'admin-completed-orders': return 'Выполненные заказы'
+        case 'admin-service-catalog': return 'Каталог услуг'
+        case 'admin-settings': return 'Системные настройки'
+        default: return 'Панель администратора'
+      }
+    })
+
     const doLogout = async () => {
       try {
         await api.post('/logout')
@@ -150,6 +165,7 @@ export default defineComponent({
       phone,
       currentRouteName,
       sidebarMinimized,
+      pageTitle,
       closeSidebarOnMobile,
       doLogout,
     }
@@ -158,80 +174,231 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.app-layout {
+:root {
+  --bg-body: #f3f5f9;
+  --surface-card: #ffffff;
+  --surface-sidebar: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --brand-primary: #5c60f5;
+  --brand-light: #eef2ff;
+  --danger-main: #ef4444;
+  --danger-bg: #fef2f2;
+}
+
+.admin-app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  font-family: 'Outfit', sans-serif;
+  background-color: #f3f5f9;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(92, 96, 245, 0.05) 0px, transparent 40%),
+    radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.03) 0px, transparent 40%);
+  background-attachment: fixed;
+  color: #0f172a;
+  overflow: hidden;
+}
+
+/* Sidebar Styles */
+.sidebar {
+  width: 260px;
+  background: #ffffff;
+  border-right: 1px solid rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-}
-
-.app-layout__navbar {
-  min-height: 56px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  z-index: 1001;
-  padding: 0 8px;
-}
-
-.app-layout__container {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-}
-
-.app-layout__sidebar {
-  width: 240px !important;
-  flex-shrink: 0;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+  padding: 24px 16px;
+  z-index: 10;
   transition: all 0.3s ease;
-  z-index: 1000;
+  flex-shrink: 0;
 }
 
-.app-layout__main {
-  flex: 1;
-  padding: 12px;
-  background-color: #f6f8fa;
-  overflow-y: auto;
-  overflow-x: auto;
-}
-
-.main-content {
-  padding: 16px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-  min-height: 80vh;
-  overflow-x: auto;
+.sidebar.minimized {
+  width: 80px;
+  padding: 24px 12px;
 }
 
 .logo {
-  font-size: 1.1rem;
-  color: white;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.5px;
+  margin-bottom: 32px;
+  padding: 0 8px;
 }
 
-.user-info {
-  color: white;
-  font-size: 0.85rem;
+.logo i {
+  color: #5c60f5;
+  font-size: 28px;
+}
+
+.logo-text .brand {
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.logo-text .sub {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.nav-section {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 16px 0 8px 12px;
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: #64748b;
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+}
+
+.nav-item:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.nav-item.active {
+  background: #eef2ff;
+  color: #5c60f5;
+  font-weight: 600;
+}
+
+.nav-item i {
+  font-size: 20px;
+}
+
+/* Main Content Wrapper */
+.main-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 32px 40px;
+  gap: 24px;
+}
+
+/* Top Header */
+.top-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-toggle-sidebar {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.05);
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #0f172a;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+
+.header-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.control-pill {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.05);
+  border-radius: 99px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.user-pill i {
+  color: #5c60f5;
+  font-size: 20px;
+}
+
+.btn-logout {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fef2f2;
+  color: #ef4444;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-logout:hover {
+  background: #fee2e2;
+  transform: scale(1.05);
+}
+
+/* Page Card Box */
+.page-card {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.04);
+  padding: 28px;
+  min-height: calc(100vh - 160px);
 }
 
 @media (max-width: 767px) {
-  .app-layout__sidebar.mobile-hidden {
-    display: none !important;
+  .main-wrapper {
+    padding: 16px;
   }
-  .app-layout__sidebar {
+  .page-card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+  .sidebar {
     position: absolute;
     top: 0;
     left: 0;
     height: 100%;
-    background: white;
-    width: 240px !important;
-  }
-  .app-layout__main {
-    padding: 8px;
-  }
-  .main-content {
-    padding: 12px;
   }
 }
 </style>
+

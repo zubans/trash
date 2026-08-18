@@ -14,8 +14,10 @@ type User struct {
 	Role                   string     `json:"role"`
 	Phone                  string     `json:"phone"`
 	Email                  string     `json:"email"`
+	PendingEmail           string     `json:"pending_email,omitempty"`
 	EmailVerified          bool       `json:"email_verified"`
 	EmailVerificationToken string     `json:"-"`
+	EmailTokenExpiresAt    *time.Time `json:"-"`
 	PasswordResetCode      string     `json:"-"`
 	PasswordResetExpiresAt *time.Time `json:"-"`
 	Password               string     `json:"-"` // bcrypt hash, managed by the service layer
@@ -50,7 +52,7 @@ type UserRepository interface {
 	VerifyEmailToken(token string) (*User, error)
 	SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
 	ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
-	UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*User, error)
+	UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -157,9 +159,9 @@ func (r *repo) Create(user *User) error {
 		user.ID = id
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO users (id, role, phone, email, email_verified, email_verification_token, password, balance, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		id, user.Role, user.Phone, user.Email, user.EmailVerified, user.EmailVerificationToken, user.Password, user.Balance, user.Status, time.Now(),
+		`INSERT INTO users (id, role, phone, email, pending_email, email_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		id, user.Role, user.Phone, user.Email, user.PendingEmail, user.EmailVerified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
 	)
 	return err
 }
@@ -167,12 +169,19 @@ func (r *repo) Create(user *User) error {
 func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	var userID uuid.UUID
 	err := r.db.QueryRow(
-		`UPDATE users SET email_verified = true, email_verification_token = NULL WHERE email_verification_token = $1 RETURNING id`,
+		`UPDATE users 
+		 SET email = COALESCE(NULLIF(pending_email, ''), email),
+		     pending_email = NULL,
+		     email_verified = true, 
+		     email_verification_token = NULL,
+		     email_token_expires_at = NULL
+		 WHERE email_verification_token = $1 AND (email_token_expires_at IS NULL OR email_token_expires_at > now())
+		 RETURNING id`,
 		token,
 	).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("invalid or expired verification token")
+			return nil, errors.New("invalid or expired verification token (valid 60m)")
 		}
 		return nil, err
 	}
@@ -265,21 +274,24 @@ func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	return err
 }
 
-func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*User, error) {
+func (r *repo) UpdateUserEmail(userID uuid.UUID, pendingEmail, verificationToken string, expiresAt time.Time) (*User, error) {
 	row := r.db.QueryRow(
 		`UPDATE users
-		 SET email = $1, email_verified = false, email_verification_token = $2
-		 WHERE id = $3
-		 RETURNING id, role, phone, email, email_verified, email_verification_token, balance, status, created_at`,
-		email, verificationToken, userID,
+		 SET pending_email = $1, email_verification_token = $2, email_token_expires_at = $3
+		 WHERE id = $4
+		 RETURNING id, role, phone, COALESCE(email, ''), email_verified, email_verification_token, balance, status, created_at`,
+		pendingEmail, verificationToken, expiresAt, userID,
 	)
 	var u User
+	var emailStr string
 	err := row.Scan(
-		&u.ID, &u.Role, &u.Phone, &u.Email, &u.EmailVerified,
+		&u.ID, &u.Role, &u.Phone, &emailStr, &u.EmailVerified,
 		&u.EmailVerificationToken, &u.Balance, &u.Status, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	u.Email = emailStr
+	u.PendingEmail = pendingEmail
 	return &u, nil
 }

@@ -117,7 +117,7 @@ func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword stri
 	return nil, nil
 }
 
-func (m *mockUserRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*repository.User, error) {
+func (m *mockUserRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
 }
 

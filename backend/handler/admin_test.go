@@ -100,7 +100,7 @@ func (m *mockUserRepository) ResetPasswordWithCode(email, code, newHashedPasswor
 	return nil, nil
 }
 
-func (m *mockUserRepository) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*repository.User, error) {
+func (m *mockUserRepository) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
 }
 
@@ -241,7 +241,7 @@ func setupTestHandler() (*AdminHandler, *mockUserRepository, *mockAdminRepositor
 	sr := &mockSettingsRepository{settings: make(map[string]string)}
 	tr := &mockTokenRepository{}
 
-	svc := service.NewAdminService(ur, ar, sr, tr, "secret")
+	svc := service.NewAdminService(ur, ar, sr, tr, "secret", nil)
 	h := NewAdminHandler(svc)
 	return h, ur, ar, sr
 }

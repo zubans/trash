@@ -313,7 +313,7 @@ func TestAdminService_Extended(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "test-secret")
+	srv := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "test-secret", nil)
 
 	u := &repository.User{ID: uuid.New(), Phone: "70000000000", Role: "CUSTOMER"}
 	userRepo.users[u.Phone] = u
@@ -488,7 +488,7 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, &mockTokenRepo{}, "secret")
+	srv := NewAdminService(userRepo, adminRepo, settingsRepo, &mockTokenRepo{}, "secret", nil)
 
 	u := &repository.User{ID: uuid.New(), Phone: "79998887766"}
 	userRepo.users[u.Phone] = u

@@ -70,8 +70,8 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 2. Валидирует синтаксис email по регулярному выражению `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`.
 3. Проверяет уникальность телефона и email.
 4. Хеширует пароль `bcrypt`.
-5. Генерирует UUID токен верификации почты `email_verification_token` (`email_verified = false`).
-6. Создаёт запись в `users` и базовый профиль с геокодированием начального адреса для поиска заказов (как для `CUSTOMER`, так и для `EXECUTOR`).
+5. Генерирует UUID токен верификации почты `email_verification_token` со сроком действия **60 минут** (`email_token_expires_at`). Введённая почта сохраняется во временном поле `pending_email`, а основное поле `email` остаётся пустым до перехода по ссылке.
+6. На указанный `pending_email` отправляется одноразовая ссылка подтверждения. Поле `email` активируется и сохраняется только после успешного перехода пользователя по ссылке.
 
 ### VerifyEmail / RequestPasswordReset / ResetPassword
 
@@ -81,7 +81,7 @@ func (s *AuthService) RequestPasswordReset(email string) (string, error)
 func (s *AuthService) ResetPassword(email, code, newPassword string) (*repository.User, error)
 ```
 
-- `VerifyEmail`: проверяет токен и устанавливает `email_verified = true`.
+- `VerifyEmail`: проверяет токен (активен 60 минут), переносит `pending_email` в поле `email`, очищает `pending_email` и устанавливает `email_verified = true`. В противном случае почта не сохраняется.
 - `RequestPasswordReset`: генерирует 6-значный цифровой код восстановления (срок действия 30 минут).
 - `ResetPassword`: проверяет код и устанавливает новый хеш пароля.
 
@@ -111,6 +111,17 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
 
 * **`SendEmailVerification(toEmail, token)`**: генерирует HTML-письмо с кнопкой подтверждения аккаунта или смены почты (`/api/auth/verify-email?token=...`).
 * **`SendPasswordResetCode(toEmail, code)`**: генерирует HTML-письмо с одноразовым 6-значным цифровым кодом безопасности.
+* **`SendBroadcastEmail(req)`**: производит массовую рассылку рекламных и информационных писем по выборочным сегментам (Заказчики, Исполнители или произвольный список Email клиентов).
+
+## Рассылка по учётным записям (`EmailBroadcasts.vue`)
+
+В панели администратора добавлена страница **Рассылки** (`/admin/broadcasts`), позволяющая:
+1. Выбирать аудиторию для рассылки:
+   - **Заказчики (`CUSTOMERS`)**;
+   - **Исполнители (`EXECUTORS`)**;
+   - **Рекламные / Произвольные клиенты (`CUSTOM_EMAILS`)** — ввод списка адресов через запятую или с новой строки.
+2. Вводить тему и HTML-содержимое письма.
+3. Получать подробный отчет о количестве успешно доставленных писем и возникающих ошибках.
 
 ## Управление Профилями и Email (Клиентская часть)
 

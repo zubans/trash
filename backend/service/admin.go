@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,6 +22,7 @@ type AdminService struct {
 	adminRepo    repository.AdminRepository
 	settingsRepo repository.SettingsRepository
 	tokenRepo    repository.TokenRepository
+	mailer       MailSender
 	jwtSecret    []byte
 }
 
@@ -30,16 +33,21 @@ func NewAdminService(
 	settingsRepo repository.SettingsRepository,
 	tokenRepo repository.TokenRepository,
 	jwtSecret string,
+	mailer MailSender,
 ) *AdminService {
 	secret := jwtSecret
 	if secret == "" {
 		secret = "dev-secret-change-me"
+	}
+	if mailer == nil {
+		mailer = NewSmtpMailSender()
 	}
 	return &AdminService{
 		userRepo:     userRepo,
 		adminRepo:    adminRepo,
 		settingsRepo: settingsRepo,
 		tokenRepo:    tokenRepo,
+		mailer:       mailer,
 		jwtSecret:    []byte(secret),
 	}
 }
@@ -334,4 +342,86 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 		}
 	}
 	return s.settingsRepo.UpdateSettings(settings)
+}
+
+// BroadcastEmailRequest defines payload for email broadcast.
+type BroadcastEmailRequest struct {
+	TargetGroup string   `json:"target_group"` // CUSTOMERS, EXECUTORS, CUSTOM_EMAILS
+	CustomEmails []string `json:"custom_emails,omitempty"`
+	Subject     string   `json:"subject"`
+	BodyHTML    string   `json:"body_html"`
+}
+
+// BroadcastEmailResult contains summary of sent emails.
+type BroadcastEmailResult struct {
+	Total     int      `json:"total"`
+	Successful int     `json:"successful"`
+	Failed     int      `json:"failed"`
+	Failures   []string `json:"failures,omitempty"`
+}
+
+// SendBroadcastEmail dispatches email broadcasts to selected user groups or custom recipient list.
+func (s *AdminService) SendBroadcastEmail(req BroadcastEmailRequest) (*BroadcastEmailResult, error) {
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.BodyHTML = strings.TrimSpace(req.BodyHTML)
+	if req.Subject == "" || req.BodyHTML == "" {
+		return nil, errors.New("subject and body_html are required")
+	}
+
+	var recipientEmails []string
+	switch strings.ToUpper(req.TargetGroup) {
+	case "CUSTOMERS":
+		users, _, err := s.adminRepo.GetUsers(1, 10000, "CUSTOMER", "", "")
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			if u.Email != "" && u.EmailVerified {
+				recipientEmails = append(recipientEmails, u.Email)
+			}
+		}
+	case "EXECUTORS":
+		users, _, err := s.adminRepo.GetUsers(1, 10000, "EXECUTOR", "", "")
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			if u.Email != "" && u.EmailVerified {
+				recipientEmails = append(recipientEmails, u.Email)
+			}
+		}
+	case "CUSTOM_EMAILS":
+		for _, email := range req.CustomEmails {
+			trimmed := strings.TrimSpace(email)
+			if trimmed != "" {
+				recipientEmails = append(recipientEmails, trimmed)
+			}
+		}
+	default:
+		return nil, errors.New("invalid target_group: must be CUSTOMERS, EXECUTORS, or CUSTOM_EMAILS")
+	}
+
+	if len(recipientEmails) == 0 {
+		return nil, errors.New("no valid recipient emails found for specified target group")
+	}
+
+	result := &BroadcastEmailResult{
+		Total: len(recipientEmails),
+	}
+
+	smtpSender, ok := s.mailer.(*SmtpMailSender)
+	for _, email := range recipientEmails {
+		var err error
+		if ok {
+			err = smtpSender.SendEmail(email, req.Subject, req.BodyHTML)
+		}
+		if err != nil {
+			result.Failed++
+			result.Failures = append(result.Failures, fmt.Sprintf("%s: %v", email, err))
+		} else {
+			result.Successful++
+		}
+	}
+
+	return result, nil
 }

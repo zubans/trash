@@ -30,6 +30,7 @@
     "withdrawals": "Withdrawal Requests",
     "transactions": "Transactions",
     "settings": "Settings",
+    "broadcasts": "Broadcasts",
     "activeShifts": "Active Shifts",
     "activeOrders": "Active Orders",
     "completedOrders": "Completed Orders",

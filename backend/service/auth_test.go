@@ -124,6 +124,10 @@ func (m *mockRepo) FindByEmailVerificationToken(token string) (*repository.User,
 func (m *mockRepo) VerifyEmailToken(token string) (*repository.User, error) {
 	for _, u := range m.users {
 		if u.EmailVerificationToken == token {
+			if u.PendingEmail != "" {
+				u.Email = u.PendingEmail
+				u.PendingEmail = ""
+			}
 			u.EmailVerified = true
 			u.EmailVerificationToken = ""
 			return u, nil
@@ -155,10 +159,10 @@ func (m *mockRepo) ResetPasswordWithCode(email, code, newHashedPassword string) 
 	return nil, errors.New("invalid or expired reset code")
 }
 
-func (m *mockRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*repository.User, error) {
+func (m *mockRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	for _, u := range m.users {
 		if u.ID == userID {
-			u.Email = email
+			u.PendingEmail = email
 			u.EmailVerified = false
 			u.EmailVerificationToken = verificationToken
 			return u, nil

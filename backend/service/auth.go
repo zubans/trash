@@ -131,13 +131,16 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 	}
 
 	verificationToken := uuid.New().String()
+	tokenExpiresAt := time.Now().Add(60 * time.Minute)
 
 	user := &repository.User{
 		Role:                   role,
 		Phone:                  phone,
-		Email:                  email,
+		Email:                  "", // Email is empty until verified via token
+		PendingEmail:           email,
 		EmailVerified:          false,
 		EmailVerificationToken: verificationToken,
+		EmailTokenExpiresAt:    &tokenExpiresAt,
 		Password:               string(hash),
 		Balance:                0,
 		Status:                 "ACTIVE",
@@ -182,7 +185,7 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 	}
 
 	if s.mailer != nil {
-		_ = s.mailer.SendEmailVerification(created.Email, verificationToken)
+		_ = s.mailer.SendEmailVerification(email, verificationToken)
 	}
 
 	return created, nil
@@ -317,13 +320,14 @@ func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repos
 	}
 
 	verificationToken := uuid.New().String()
-	user, err := s.repo.UpdateUserEmail(userID, newEmail, verificationToken)
+	tokenExpiresAt := time.Now().Add(60 * time.Minute)
+	user, err := s.repo.UpdateUserEmail(userID, newEmail, verificationToken, tokenExpiresAt)
 	if err != nil {
 		return nil, err
 	}
 
 	if s.mailer != nil {
-		_ = s.mailer.SendEmailVerification(user.Email, verificationToken)
+		_ = s.mailer.SendEmailVerification(newEmail, verificationToken)
 	}
 
 	return user, nil

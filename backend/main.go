@@ -67,7 +67,7 @@ func main() {
 	geocoder := service.NewGeocoder(db)
 	mailer := service.NewSmtpMailSender()
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder, mailer)
-	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
+	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret, mailer)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
@@ -224,6 +224,7 @@ func main() {
 			r.Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
 			r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
 			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
+			r.Post("/admin/broadcast-email", ah.SendBroadcastEmailHandler)
 		})
 	}
 

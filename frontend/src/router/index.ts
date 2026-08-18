@@ -67,6 +67,11 @@ const routes: Array<RouteRecordRaw> = [
         name: 'admin-service-catalog',
         component: () => import('../pages/admin/ServiceCatalog.vue'),
       },
+      {
+        path: 'broadcasts',
+        name: 'admin-broadcasts',
+        component: () => import('../pages/admin/EmailBroadcasts.vue'),
+      },
     ],
   },
   {
