@@ -69,9 +69,9 @@ jobs:
             set -e
             cd /home/user/projects/trash || exit 1
             echo "Pulling latest images..."
-            docker compose -f docker-compose.prod.yml pull
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml pull
             echo "Restarting services..."
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml up -d --remove-orphans
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=168h"
             echo "Deployment finished."
