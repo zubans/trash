@@ -36,80 +36,90 @@
       </div>
     </div>
 
-    <!-- Data Table -->
-    <va-data-table :items="users" :columns="columns" :loading="loading" class="mb-4 custom-grid-table">
-      <template #cell(phone)="{ value, rowData }">
+    <!-- Modern Grid Table -->
+    <div class="grid-table mb-4">
+      <!-- Headers -->
+      <div class="grid-row grid-header">
+        <div>Телефон</div>
+        <div>Роль</div>
+        <div>Баланс</div>
+        <div>Адрес</div>
+        <div>Статус</div>
+        <div>Дата регистрации</div>
+        <div style="text-align: right; padding-right: 12px;">Действия</div>
+      </div>
+
+      <!-- Rows -->
+      <div v-for="u in users" :key="u.id" class="grid-row grid-item">
         <div class="cell-phone">
-          <div class="user-avatar" :class="{ 'executor-av': rowData.role === 'EXECUTOR', 'admin-av': rowData.role === 'ADMIN' }">
-            {{ (rowData.role || 'U').charAt(0) }}
+          <div class="avatar" :class="getAvatarClass(u.role)">
+            {{ getAvatarChar(u.role) }}
           </div>
-          <span>{{ value }}</span>
+          <span>{{ u.phone }}</span>
         </div>
-      </template>
 
-      <template #cell(balance)="{ value }">
-        <span class="cell-amount">{{ currencySymbol }}{{ Number(value).toFixed(2) }}</span>
-      </template>
+        <div class="cell-role">{{ u.role }}</div>
 
-      <template #cell(status)="{ value }">
-        <span :class="['status-pill', value === 'ACTIVE' ? 'success' : 'danger']">
-          {{ value }}
-        </span>
-      </template>
+        <div class="cell-amount">{{ currencySymbol }}{{ Number(u.balance || 0).toFixed(2) }}</div>
 
-      <template #cell(address)="{ value }">
-        <span class="cell-address">{{ value || '-' }}</span>
-      </template>
+        <div class="cell-address" :title="u.address || '-'">{{ u.address || '-' }}</div>
 
-      <template #cell(created_at)="{ value }">
+        <div>
+          <span class="status-pill" :class="u.status === 'ACTIVE' ? 'success' : 'danger'">
+            {{ u.status }}
+          </span>
+        </div>
+
         <div class="cell-date">
-          <span>{{ formatDate(value).split(',')[0] }}</span>
-          <span class="date-time">{{ formatDate(value).split(',')[1] || '' }}</span>
+          <span>{{ formatDate(u.created_at).split(',')[0] }}</span>
+          <span class="date-time">{{ formatDate(u.created_at).split(',')[1] || '' }}</span>
         </div>
-      </template>
 
-      <template #cell(actions)="{ rowData }">
-        <div class="actions-container">
+        <div class="cell-actions">
+          <!-- Fast Top Up Icon Button -->
           <button
-            class="btn-action btn-topup"
-            title="Пополнить"
-            @click="openTopUpModal(rowData)"
+            class="btn-ghost topup"
+            data-tooltip="Пополнить"
+            @click="openTopUpModal(u)"
           >
-            {{ $t('users.topUp') }}
+            <i class="ph-bold ph-plus-circle"></i>
           </button>
-          <button
-            class="btn-action btn-role"
-            title="Роль"
-            @click="openRoleModal(rowData)"
-          >
-            {{ $t('users.roleBtn') }}
-          </button>
-          <button
-            class="btn-action btn-address"
-            title="Адрес"
-            @click="openAddressModal(rowData)"
-          >
-            {{ $t('users.addressBtn') }}
-          </button>
-          <button
-            v-if="rowData.status === 'ACTIVE'"
-            class="btn-action btn-ban"
-            title="Забанить"
-            @click="toggleUserStatus(rowData)"
-          >
-            {{ $t('users.ban') }}
-          </button>
-          <button
-            v-else
-            class="btn-action btn-activate"
-            title="Активировать"
-            @click="toggleUserStatus(rowData)"
-          >
-            {{ $t('users.activate') }}
-          </button>
+
+          <!-- Kebab Dropdown Menu -->
+          <div class="dropdown-wrapper">
+            <button class="btn-ghost" data-tooltip="Меню">
+              <i class="ph-bold ph-dots-three-vertical"></i>
+            </button>
+            <div class="dropdown-menu">
+              <button class="dropdown-item" @click="openTopUpModal(u)">
+                <i class="ph-bold ph-wallet"></i> Пополнить баланс
+              </button>
+              <button class="dropdown-item" @click="openRoleModal(u)">
+                <i class="ph-bold ph-user-gear"></i> Изменить роль
+              </button>
+              <button class="dropdown-item" @click="openAddressModal(u)">
+                <i class="ph-bold ph-map-pin"></i> Редактировать адрес
+              </button>
+              <div class="menu-divider"></div>
+              <button
+                v-if="u.status === 'ACTIVE'"
+                class="dropdown-item danger"
+                @click="toggleUserStatus(u)"
+              >
+                <i class="ph-bold ph-prohibit"></i> Заблокировать
+              </button>
+              <button
+                v-else
+                class="dropdown-item"
+                @click="toggleUserStatus(u)"
+              >
+                <i class="ph-bold ph-check"></i> Активировать
+              </button>
+            </div>
+          </div>
         </div>
-      </template>
-    </va-data-table>
+      </div>
+    </div>
 
     <!-- Pagination -->
     <div class="d-flex justify-content-between align-items-center mt-3">
@@ -383,6 +393,19 @@ export default defineComponent({
       fetchUsers()
     })
 
+    const getAvatarClass = (role: string) => {
+      switch (role) {
+        case 'CUSTOMER': return 'customer'
+        case 'EXECUTOR': return 'executor'
+        case 'ADMIN': return 'admin'
+        default: return 'customer'
+      }
+    }
+
+    const getAvatarChar = (role: string) => {
+      return (role || 'U').charAt(0).toUpperCase()
+    }
+
     return {
       users,
       totalUsers,
@@ -398,6 +421,8 @@ export default defineComponent({
       columns,
       currencySymbol,
       totalPages,
+      getAvatarClass,
+      getAvatarChar,
       fetchUsers,
       debouncedFetch,
       clearFilters,
@@ -513,6 +538,45 @@ export default defineComponent({
   border-color: rgba(0,0,0,0.15);
 }
 
+.grid-table {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.grid-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.5fr) 120px;
+  align-items: center;
+  gap: 16px;
+}
+
+.grid-row > div {
+  min-width: 0;
+}
+
+.grid-header {
+  padding: 0 16px 12px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.grid-item {
+  padding: 16px;
+  border-bottom: 1px dashed rgba(0,0,0,0.04);
+  transition: all 0.2s ease-in-out;
+}
+
+.grid-item:hover {
+  background: #f8fafc;
+  border-radius: 8px;
+  border-bottom-color: transparent;
+}
+
 .cell-phone {
   font-size: 15px;
   font-weight: 600;
@@ -522,47 +586,65 @@ export default defineComponent({
   gap: 12px;
 }
 
-.user-avatar {
+.avatar {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #eef2ff;
-  color: #5c60f5;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   flex-shrink: 0;
 }
 
-.user-avatar.executor-av {
-  background: #fff7ed;
-  color: #d97706;
+.avatar.customer {
+  background: #eef2ff;
+  color: #5c60f5;
 }
 
-.user-avatar.admin-av {
+.avatar.executor {
+  background: #fffbeb;
+  color: #f59e0b;
+}
+
+.avatar.admin {
   background: #f3e8ff;
-  color: #9333ea;
+  color: #d946ef;
+}
+
+.cell-role {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.5px;
 }
 
 .cell-amount {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: #0f172a;
 }
 
+.cell-address {
+  font-size: 13px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .cell-date {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 12px;
   color: #64748b;
   display: flex;
   flex-direction: column;
 }
 
 .date-time {
-  font-size: 11px;
+  font-size: 10px;
   opacity: 0.7;
 }
 
@@ -570,10 +652,9 @@ export default defineComponent({
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  border-radius: 99px;
   font-size: 12px;
   font-weight: 600;
+  color: #10b981;
 }
 
 .status-pill::before {
@@ -584,74 +665,158 @@ export default defineComponent({
   background: currentColor;
 }
 
-.status-pill.success {
-  background: #ecfdf5;
-  color: #10b981;
+.status-pill.danger {
+  color: #ef4444;
 }
 
-.status-pill.danger {
+/* Actions & Kebab Dropdown */
+.cell-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  align-items: center;
+  opacity: 0.5;
+  transition: all 0.2s ease-in-out;
+}
+
+.grid-item:hover .cell-actions {
+  opacity: 1;
+}
+
+.btn-ghost {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  position: relative;
+}
+
+.btn-ghost:hover {
+  background: rgba(0,0,0,0.05);
+  color: #0f172a;
+}
+
+.btn-ghost.topup:hover {
+  background: #eef2ff;
+  color: #5c60f5;
+}
+
+.btn-ghost.danger:hover {
   background: #fef2f2;
   color: #ef4444;
 }
 
-.actions-container {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+/* Tooltip */
+.btn-ghost::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  background: #0f172a;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s ease-in-out;
+  z-index: 10;
 }
 
-.btn-action {
-  border: none;
-  padding: 5px 12px;
+.btn-ghost:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+.dropdown-wrapper {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 100;
+  background: rgba(255,255,255,0.98);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 10px 40px -10px rgba(15, 23, 42, 0.15), 0 1px 3px rgba(15, 23, 42, 0.05);
+  min-width: 200px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  transform-origin: top right;
+  animation: scaleIn 0.2s ease-out;
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.dropdown-wrapper:hover .dropdown-menu,
+.dropdown-wrapper:focus-within .dropdown-menu {
+  display: flex;
+}
+
+.dropdown-item {
+  padding: 8px 12px;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  text-align: left;
+  width: 100%;
+}
+
+.dropdown-item i {
+  font-size: 16px;
+  color: #64748b;
   transition: all 0.2s ease-in-out;
 }
 
-.btn-topup {
-  background: #5c60f5;
-  color: #ffffff;
+.dropdown-item:hover {
+  background: #f8fafc;
+  color: #5c60f5;
 }
 
-.btn-topup:hover {
-  background: #4f46e5;
+.dropdown-item:hover i {
+  color: #5c60f5;
 }
 
-.btn-role {
-  background: #3b82f6;
-  color: #ffffff;
+.dropdown-item.danger:hover {
+  background: #fef2f2;
+  color: #ef4444;
 }
 
-.btn-role:hover {
-  background: #2563eb;
+.dropdown-item.danger:hover i {
+  color: #ef4444;
 }
 
-.btn-address {
-  background: #64748b;
-  color: #ffffff;
-}
-
-.btn-address:hover {
-  background: #475569;
-}
-
-.btn-ban {
-  background: #ef4444;
-  color: #ffffff;
-}
-
-.btn-ban:hover {
-  background: #dc2626;
-}
-
-.btn-activate {
-  background: #10b981;
-  color: #ffffff;
-}
-
-.btn-activate:hover {
-  background: #059669;
+.menu-divider {
+  height: 1px;
+  background: rgba(0,0,0,0.06);
+  margin: 4px 0;
 }
 </style>
