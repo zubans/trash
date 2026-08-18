@@ -1,7 +1,6 @@
 package service
 
 import (
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net/smtp"
@@ -50,6 +49,16 @@ func NewSmtpMailSender() *SmtpMailSender {
 	}
 }
 
+type unencryptedAuth struct {
+	smtp.Auth
+}
+
+func (a unencryptedAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	s := *server
+	s.TLS = true
+	return a.Auth.Start(&s)
+}
+
 func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 	if m.host == "" {
 		log.Printf("[SmtpMailSender] SMTP_HOST not set. Logging email to stdout instead of sending:\nTo: %s\nSubject: %s\nBody: %s\n", to, subject, bodyHTML)
@@ -70,19 +79,19 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 		auth = smtp.PlainAuth("", m.user, m.password, m.host)
 	}
 
-	// Try standard dial & send
+	// Try standard dial & send first
 	err := smtp.SendMail(addr, auth, m.from, []string{to}, msg)
-	if err != nil && strings.Contains(err.Error(), "unencrypted connection") {
-		// Fallback for unencrypted/insecure SMTP connections in local dev/testing
+	if err != nil && (strings.Contains(err.Error(), "unencrypted connection") || strings.Contains(err.Error(), "short response")) {
+		// Fallback for internal Docker container unencrypted SMTP (e.g. Maddy on port 25 without TLS requirement)
 		c, dialErr := smtp.Dial(addr)
 		if dialErr != nil {
 			return dialErr
 		}
 		defer c.Close()
+
 		if auth != nil {
-			config := &tls.Config{InsecureSkipVerify: true, ServerName: m.host}
-			_ = c.StartTLS(config)
-			if authErr := c.Auth(auth); authErr != nil {
+			// Wrap auth to allow plain auth over unencrypted docker internal network connection
+			if authErr := c.Auth(unencryptedAuth{auth}); authErr != nil {
 				return authErr
 			}
 		}
