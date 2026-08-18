@@ -57,6 +57,7 @@ services:
     volumes:
       - ./releases:/app/releases
       - uploads_data:/app/uploads
+      - ./certs:/app/certs:ro
     ports:
       - "8088:8080"
       - "8089:8081"
