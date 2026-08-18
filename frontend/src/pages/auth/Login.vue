@@ -55,11 +55,12 @@
           <label class="form-label">{{ $t('login.phone') }}</label>
           <div class="input-wrapper">
             <input
-              v-model="phone"
+              v-model="displayPhone"
               type="tel"
               placeholder="+7 (999) 999-99-99"
               class="form-input"
               required
+              @input="onPhoneInput"
             />
             <i class="ph ph-phone input-icon"></i>
           </div>
@@ -233,6 +234,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api, { formatApiError } from '../../services/api'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import { formatPhoneMask, cleanPhoneDigits } from '../../utils/phoneMask'
 
 function parseJwt(token: string) {
   try {
@@ -260,7 +262,15 @@ export default defineComponent({
 
     const submitBtnRef = ref<HTMLButtonElement | null>(null)
     const mode = ref<'login' | 'register'>('login')
+    const displayPhone = ref('')
     const phone = ref('')
+
+    const onPhoneInput = (e: Event) => {
+      const target = e.target as HTMLInputElement
+      const formatted = formatPhoneMask(target.value)
+      displayPhone.value = formatted
+      phone.value = cleanPhoneDigits(formatted)
+    }
     const email = ref('')
     const password = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
@@ -477,7 +487,9 @@ export default defineComponent({
     return {
       submitBtnRef,
       mode,
+      displayPhone,
       phone,
+      onPhoneInput,
       email,
       password,
       role,
