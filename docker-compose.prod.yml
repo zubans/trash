@@ -72,7 +72,8 @@ services:
     volumes:
       - ./certs:/etc/nginx/certs:ro
     ports:
-      - "8443:443"
+      - "443:443"
+      - "80:80"
 
 volumes:
   postgres_data:
