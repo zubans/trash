@@ -67,7 +67,7 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           script: |
             set -e
-            cd /opt/healthlogin || exit 1
+            cd /home/user/projects/trash || exit 1
             echo "Pulling latest images..."
             docker compose -f docker-compose.prod.yml pull
             echo "Restarting services..."
