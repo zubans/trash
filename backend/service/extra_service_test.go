@@ -342,7 +342,7 @@ func TestAdminService_Extended(t *testing.T) {
 	}
 
 	// Revoke tokens
-	authSrv := NewAuthServiceWithSecret(userRepo, "test-secret", nil)
+	authSrv := NewAuthServiceWithSecret(userRepo, "test-secret", nil, nil)
 	token, _ := authSrv.GenerateJWT(u)
 	_ = srv.RevokeToken(token)
 	rev, _ := srv.IsTokenRevoked(token)
@@ -427,7 +427,7 @@ func TestShiftService_Extended(t *testing.T) {
 
 func TestAuthService_ParseJWT(t *testing.T) {
 	userRepo := newMockRepo()
-	srv := NewAuthServiceWithSecret(userRepo, "test-secret", nil)
+	srv := NewAuthServiceWithSecret(userRepo, "test-secret", nil, nil)
 
 	u := &repository.User{ID: uuid.New(), Phone: "79001112233", Role: "CUSTOMER"}
 	tokenStr, err := srv.GenerateJWT(u)

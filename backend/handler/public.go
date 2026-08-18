@@ -210,3 +210,32 @@ func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 		"message": "Password reset successfully. You can now login with your new password.",
 	})
 }
+
+// UpdateEmailHandler updates user's email address and triggers a verification email.
+func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	updatedUser, err := h.authService.UpdateUserEmail(user.ID, req.Email)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"email":  updatedUser.Email,
+	})
+}

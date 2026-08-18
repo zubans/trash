@@ -100,6 +100,10 @@ func (m *mockUserRepository) ResetPasswordWithCode(email, code, newHashedPasswor
 	return nil, nil
 }
 
+func (m *mockUserRepository) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*repository.User, error) {
+	return nil, nil
+}
+
 func (m *mockUserRepository) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	if m.addresses == nil {
 		m.addresses = make(map[uuid.UUID]string)

@@ -50,6 +50,7 @@ type UserRepository interface {
 	VerifyEmailToken(token string) (*User, error)
 	SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
 	ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
+	UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*User, error)
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -262,4 +263,23 @@ func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 		userID, address,
 	)
 	return err
+}
+
+func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*User, error) {
+	row := r.db.QueryRow(
+		`UPDATE users
+		 SET email = $1, email_verified = false, email_verification_token = $2
+		 WHERE id = $3
+		 RETURNING id, role, phone, email, email_verified, email_verification_token, balance, status, created_at`,
+		email, verificationToken, userID,
+	)
+	var u User
+	err := row.Scan(
+		&u.ID, &u.Role, &u.Phone, &u.Email, &u.EmailVerified,
+		&u.EmailVerificationToken, &u.Balance, &u.Status, &u.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
 }

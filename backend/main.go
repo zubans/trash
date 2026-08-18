@@ -65,7 +65,8 @@ func main() {
 
 	// Services
 	geocoder := service.NewGeocoder(db)
-	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder)
+	mailer := service.NewSmtpMailSender()
+	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder, mailer)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
@@ -160,6 +161,7 @@ func main() {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 			r.Get("/auth/me", ph.MeHandler)
+			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
 			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)

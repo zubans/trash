@@ -155,12 +155,24 @@ func (m *mockRepo) ResetPasswordWithCode(email, code, newHashedPassword string) 
 	return nil, errors.New("invalid or expired reset code")
 }
 
+func (m *mockRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string) (*repository.User, error) {
+	for _, u := range m.users {
+		if u.ID == userID {
+			u.Email = email
+			u.EmailVerified = false
+			u.EmailVerificationToken = verificationToken
+			return u, nil
+		}
+	}
+	return nil, errors.New("user not found")
+}
+
 func (m *mockRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	return nil
 }
 
 func TestRegister_Success(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	phone := "+79001234567"
 	password := "strong-password"
 
@@ -189,7 +201,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_Success_Kursk(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	phone := "+79001234568"
 	password := "strong-password"
 
@@ -203,7 +215,7 @@ func TestRegister_Success_Kursk(t *testing.T) {
 }
 
 func TestRegister_ExecutorSuccess(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	phone := "+79001234569"
 	password := "strong-password"
 
@@ -217,7 +229,7 @@ func TestRegister_ExecutorSuccess(t *testing.T) {
 }
 
 func TestRegister_InvalidRoleAdmin(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Register("+79001234567", "admin@example.com", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "ADMIN")
 	if err == nil {
 		t.Fatal("expected error for ADMIN role")
@@ -228,7 +240,7 @@ func TestRegister_InvalidRoleAdmin(t *testing.T) {
 }
 
 func TestRegister_InvalidRoleEmpty(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Register("+79001234567", "empty@example.com", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "")
 	if err == nil {
 		t.Fatal("expected error for empty role")
@@ -236,7 +248,7 @@ func TestRegister_InvalidRoleEmpty(t *testing.T) {
 }
 
 func TestRegister_EmptyPhone(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Register("", "emptyphone@example.com", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
@@ -247,7 +259,7 @@ func TestRegister_EmptyPhone(t *testing.T) {
 }
 
 func TestRegister_EmptyPassword(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Register("+79001234567", "emptypass@example.com", "", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error for empty password")
@@ -256,7 +268,7 @@ func TestRegister_EmptyPassword(t *testing.T) {
 
 func TestRegister_UserAlreadyExists(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 	phone := "+79001234567"
 
 	if _, err := svc.Register(phone, "exists@example.com", "password-one", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
@@ -275,7 +287,7 @@ func TestRegister_UserAlreadyExists(t *testing.T) {
 func TestRegister_FindByPhoneError(t *testing.T) {
 	repo := newMockRepo()
 	repo.findErr = errors.New("db is down")
-	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 
 	_, err := svc.Register("+79001234567", "dberr@example.com", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
@@ -289,7 +301,7 @@ func TestRegister_FindByPhoneError(t *testing.T) {
 func TestRegister_CreateError(t *testing.T) {
 	repo := newMockRepo()
 	repo.createErr = errors.New("insert failed")
-	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 
 	_, err := svc.Register("+79001234567", "createerr@example.com", "password", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
@@ -302,7 +314,7 @@ func TestRegister_CreateError(t *testing.T) {
 
 func TestAuthenticate_Success(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 	phone := "+79001234567"
 	password := "correct-password"
 
@@ -320,7 +332,7 @@ func TestAuthenticate_Success(t *testing.T) {
 }
 
 func TestAuthenticate_EmptyPhone(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Authenticate("", "password")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
@@ -328,7 +340,7 @@ func TestAuthenticate_EmptyPhone(t *testing.T) {
 }
 
 func TestAuthenticate_EmptyPassword(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Authenticate("+79001234567", "")
 	if err == nil {
 		t.Fatal("expected error for empty password")
@@ -336,7 +348,7 @@ func TestAuthenticate_EmptyPassword(t *testing.T) {
 }
 
 func TestAuthenticate_UserNotFound(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	_, err := svc.Authenticate("+79001234567", "password")
 	if err == nil {
 		t.Fatal("expected error for unknown user")
@@ -348,7 +360,7 @@ func TestAuthenticate_UserNotFound(t *testing.T) {
 
 func TestAuthenticate_WrongPassword(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 	phone := "+79001234567"
 
 	if _, err := svc.Register(phone, "wrongpass@example.com", "correct-password", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
@@ -367,7 +379,7 @@ func TestAuthenticate_WrongPassword(t *testing.T) {
 func TestAuthenticate_RepositoryError(t *testing.T) {
 	repo := newMockRepo()
 	repo.findErr = errors.New("db error")
-	svc := NewAuthServiceWithSecret(repo, "test-secret", nil)
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 
 	_, err := svc.Authenticate("+79001234567", "password")
 	if err == nil {
@@ -379,7 +391,7 @@ func TestAuthenticate_RepositoryError(t *testing.T) {
 }
 
 func TestGenerateJWT_Success(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	user := &repository.User{
 		ID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		Phone: "+79001234567",
@@ -432,7 +444,7 @@ func TestGenerateJWT_Success(t *testing.T) {
 }
 
 func TestGenerateJWT_InvalidWithWrongSecret(t *testing.T) {
-	svc := NewAuthServiceWithSecret(newMockRepo(), "secret-a", nil)
+	svc := NewAuthServiceWithSecret(newMockRepo(), "secret-a", nil, nil)
 	user := &repository.User{
 		ID:    uuid.New(),
 		Phone: "+79001234567",

@@ -105,6 +105,13 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
 - `role` — роль;
 - `exp` — `now + 15 минут`.
 
+## Модуль отправки почты (`SmtpMailSender`)
+
+В бэкенде реализована служба [`service.SmtpMailSender`](file:///Users/sergeyzyuban/projects/trash/backend/service/mailer.go), интегрированная с встроенным **Maddy Mail Server** (`system@moya-usluga.ru`):
+
+* **`SendEmailVerification(toEmail, token)`**: генерирует HTML-письмо с кнопкой подтверждения аккаунта или смены почты (`/api/auth/verify-email?token=...`).
+* **`SendPasswordResetCode(toEmail, code)`**: генерирует HTML-письмо с одноразовым 6-значным цифровым кодом безопасности.
+
 ## Управление Профилями и Email (Клиентская часть)
 
 1. **Профиль Заказчика (`CustomerProfileModal.vue`)**:

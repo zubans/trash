@@ -12,6 +12,20 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
 
+  mailserver:
+    image: foxcpp/maddy:0.7.0
+    container_name: healthlogin_mail
+    hostname: moya-usluga.ru
+    environment:
+      MADDY_HOSTNAME: moya-usluga.ru
+    volumes:
+      - ./maddy.conf:/data/maddy.conf:ro
+      - maddy_data:/var/lib/maddy
+    ports:
+      - "25:25"
+      - "587:587"
+      - "143:143"
+
   backend:
     image: ${DOCKER_USERNAME:-healthlogin}/healthlogin-backend:${BACKEND_TAG:-latest}
     container_name: healthlogin_backend
@@ -31,8 +45,15 @@ services:
       RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
       UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
       ACCEPT_RADIUS_KM: ${ACCEPT_RADIUS_KM:-0.5}
+      SMTP_HOST: ${SMTP_HOST:-mailserver}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-system@moya-usluga.ru}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-systempass123}
+      SMTP_FROM: ${SMTP_FROM:-system@moya-usluga.ru}
+      APP_BASE_URL: ${APP_BASE_URL:-https://moya-usluga.ru:8443}
     depends_on:
       - db
+      - mailserver
     volumes:
       - ./releases:/app/releases
       - uploads_data:/app/uploads
@@ -55,6 +76,8 @@ volumes:
   postgres_data:
     driver: local
   uploads_data:
+    driver: local
+  maddy_data:
     driver: local
 
 networks:

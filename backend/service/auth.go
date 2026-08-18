@@ -40,6 +40,7 @@ func normalizeAddress(address string) (string, error) {
 type AuthService struct {
 	repo     repository.UserRepository
 	geocoder GeoCoder
+	mailer   MailSender
 	secret   []byte
 }
 
@@ -58,13 +59,16 @@ func NewAuthService(repo repository.UserRepository, geocoder GeoCoder) *AuthServ
 	if secret == "" {
 		secret = "dev-secret-change-me"
 	}
-	return NewAuthServiceWithSecret(repo, secret, geocoder)
+	return NewAuthServiceWithSecret(repo, secret, geocoder, NewSmtpMailSender())
 }
 
 // NewAuthServiceWithSecret creates an AuthService with an explicit JWT secret.
 // Useful for tests and for environments where the secret is injected directly.
-func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geocoder GeoCoder) *AuthService {
-	return &AuthService{repo: repo, geocoder: geocoder, secret: []byte(secret)}
+func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geocoder GeoCoder, mailer MailSender) *AuthService {
+	if mailer == nil {
+		mailer = NewSmtpMailSender()
+	}
+	return &AuthService{repo: repo, geocoder: geocoder, mailer: mailer, secret: []byte(secret)}
 }
 
 // validRegistrationRole reports whether a role may be chosen during registration.
@@ -177,6 +181,10 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 		_ = s.repo.UpdateLastGeo(created.ID, lastGeo)
 	}
 
+	if s.mailer != nil {
+		_ = s.mailer.SendEmailVerification(created.Email, verificationToken)
+	}
+
 	return created, nil
 }
 
@@ -275,6 +283,10 @@ func (s *AuthService) RequestPasswordReset(email string) (string, error) {
 		return "", err
 	}
 
+	if s.mailer != nil {
+		_ = s.mailer.SendPasswordResetCode(email, code)
+	}
+
 	// Development/production logging of code
 	fmt.Printf("[PASSWORD RESET] Code for %s: %s (Expires: %s)\n", email, code, expiresAt.Format(time.RFC3339))
 	return code, nil
@@ -295,4 +307,24 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) error {
 
 	_, err = s.repo.ResetPasswordWithCode(email, code, string(hash))
 	return err
+}
+
+// UpdateUserEmail updates the email for a user and triggers verification.
+func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repository.User, error) {
+	newEmail = strings.TrimSpace(newEmail)
+	if newEmail == "" || !emailRegex.MatchString(newEmail) {
+		return nil, errors.New("a valid email is required")
+	}
+
+	verificationToken := uuid.New().String()
+	user, err := s.repo.UpdateUserEmail(userID, newEmail, verificationToken)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.mailer != nil {
+		_ = s.mailer.SendEmailVerification(user.Email, verificationToken)
+	}
+
+	return user, nil
 }
