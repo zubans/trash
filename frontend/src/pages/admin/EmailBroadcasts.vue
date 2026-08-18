@@ -113,6 +113,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import api from '../../services/api'
 
 const targetGroup = ref<'CUSTOMERS' | 'EXECUTORS' | 'CUSTOM_EMAILS'>('CUSTOMERS')
 const customEmailsInput = ref('')
@@ -157,25 +158,10 @@ async function sendBroadcast() {
       payload.custom_emails = parsedCustomEmails.value
     }
 
-    const token = localStorage.getItem('token') || ''
-    const resp = await fetch('/api/admin/broadcast-email', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(payload)
-    })
-
-    if (!resp.ok) {
-      const txt = await resp.text()
-      throw new Error(txt || 'Ошибка отправки рассылки')
-    }
-
-    const data = await resp.json()
-    result.value = data
+    const response = await api.post('/admin/broadcast-email', payload)
+    result.value = response.data
   } catch (err: any) {
-    error.value = err.message || 'Произошла ошибка при выполнении рассылки'
+    error.value = err.response?.data || err.message || 'Произошла ошибка при выполнении рассылки'
   } finally {
     sending.value = false
   }

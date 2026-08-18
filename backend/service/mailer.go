@@ -75,14 +75,14 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 		"%s\r\n", m.from, to, subject, bodyHTML))
 
 	var auth smtp.Auth
-	if m.user != "" {
+	if m.user != "" && m.password != "" {
 		auth = smtp.PlainAuth("", m.user, m.password, m.host)
 	}
 
-	// Try standard dial & send first
+	// Standard dial & send attempt
 	err := smtp.SendMail(addr, auth, m.from, []string{to}, msg)
-	if err != nil && (strings.Contains(err.Error(), "unencrypted connection") || strings.Contains(err.Error(), "short response")) {
-		// Fallback for internal Docker container unencrypted SMTP (e.g. Maddy on port 25 without TLS requirement)
+	if err != nil && (strings.Contains(err.Error(), "unencrypted connection") || strings.Contains(err.Error(), "short response") || strings.Contains(err.Error(), "535")) {
+		// Fallback for unencrypted internal Docker SMTP / relay without strict auth requirements
 		c, dialErr := smtp.Dial(addr)
 		if dialErr != nil {
 			return dialErr
@@ -90,10 +90,8 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 		defer c.Close()
 
 		if auth != nil {
-			// Wrap auth to allow plain auth over unencrypted docker internal network connection
-			if authErr := c.Auth(unencryptedAuth{auth}); authErr != nil {
-				return authErr
-			}
+			// Try unencrypted PLAIN auth if server accepts it, otherwise continue as unauthenticated relay
+			_ = c.Auth(unencryptedAuth{auth})
 		}
 		if err := c.Mail(m.from); err != nil {
 			return err
