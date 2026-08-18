@@ -1,86 +1,119 @@
 <template>
   <div class="user-list">
-    <h1 class="va-h3 mb-4">{{ $t('users.title') }}</h1>
+    <!-- Table Toolbar -->
+    <div class="table-toolbar mb-4">
+      <div class="search-box">
+        <i class="ph ph-magnifying-glass"></i>
+        <input
+          v-model="searchQuery"
+          type="text"
+          :placeholder="$t('users.searchPlaceholder')"
+          @input="debouncedFetch"
+        />
+      </div>
 
-    <!-- Filters and Search -->
-    <div class="row g-3 mb-4 align-items-end">
-      <div class="col-md-4">
-        <va-input v-model="searchQuery" :placeholder="$t('users.searchPlaceholder')" :label="$t('users.search')" @input="debouncedFetch" />
-      </div>
-      <div class="col-md-3">
-        <va-select v-model="selectedRole" :options="roleOptions" :label="$t('users.role')" @update:modelValue="fetchUsers" />
-      </div>
-      <div class="col-md-3">
-        <va-select v-model="selectedStatus" :options="statusOptions" :label="$t('users.status')" @update:modelValue="fetchUsers" />
-      </div>
-      <div class="col-md-2">
-        <va-button color="secondary" outline @click="clearFilters">{{ $t('users.clear') }}</va-button>
+      <div class="filters">
+        <div class="filter-select-wrapper">
+          <select v-model="selectedRole" class="btn-filter-select" @change="fetchUsers">
+            <option value="">Все роли</option>
+            <option value="CUSTOMER">CUSTOMER</option>
+            <option value="EXECUTOR">EXECUTOR</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+        </div>
+
+        <div class="filter-select-wrapper">
+          <select v-model="selectedStatus" class="btn-filter-select" @change="fetchUsers">
+            <option value="">Все статусы</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="BLOCKED">BLOCKED</option>
+          </select>
+        </div>
+
+        <button class="btn-filter" title="Сбросить" @click="clearFilters">
+          <i class="ph-bold ph-arrows-clockwise"></i>
+        </button>
       </div>
     </div>
 
     <!-- Data Table -->
-    <va-data-table :items="users" :columns="columns" :loading="loading" class="mb-4">
+    <va-data-table :items="users" :columns="columns" :loading="loading" class="mb-4 custom-grid-table">
+      <template #cell(phone)="{ value, rowData }">
+        <div class="cell-phone">
+          <div class="user-avatar" :class="{ 'executor-av': rowData.role === 'EXECUTOR', 'admin-av': rowData.role === 'ADMIN' }">
+            {{ (rowData.role || 'U').charAt(0) }}
+          </div>
+          <span>{{ value }}</span>
+        </div>
+      </template>
+
       <template #cell(balance)="{ value }">
-        <strong>{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
+        <span class="cell-amount">{{ currencySymbol }}{{ Number(value).toFixed(2) }}</span>
+      </template>
+
+      <template #cell(status)="{ value }">
+        <span :class="['status-pill', value === 'ACTIVE' ? 'success' : 'danger']">
+          {{ value }}
+        </span>
       </template>
 
       <template #cell(address)="{ value }">
-        <span class="text-sm">{{ value || '-' }}</span>
+        <span class="cell-address">{{ value || '-' }}</span>
       </template>
 
       <template #cell(created_at)="{ value }">
-        {{ formatDate(value) }}
+        <div class="cell-date">
+          <span>{{ formatDate(value).split(',')[0] }}</span>
+          <span class="date-time">{{ formatDate(value).split(',')[1] || '' }}</span>
+        </div>
       </template>
 
       <template #cell(actions)="{ rowData }">
         <div class="actions-container">
-          <va-button
-            color="primary"
-            size="small"
-            class="mr-2"
+          <button
+            class="btn-action btn-topup"
+            title="Пополнить"
             @click="openTopUpModal(rowData)"
           >
             {{ $t('users.topUp') }}
-          </va-button>
-          <va-button
-            color="info"
-            size="small"
-            class="mr-2"
+          </button>
+          <button
+            class="btn-action btn-role"
+            title="Роль"
             @click="openRoleModal(rowData)"
           >
             {{ $t('users.roleBtn') }}
-          </va-button>
-          <va-button
-            color="secondary"
-            size="small"
-            class="mr-2"
+          </button>
+          <button
+            class="btn-action btn-address"
+            title="Адрес"
             @click="openAddressModal(rowData)"
           >
             {{ $t('users.addressBtn') }}
-          </va-button>
-          <va-button
+          </button>
+          <button
             v-if="rowData.status === 'ACTIVE'"
-            color="danger"
-            size="small"
+            class="btn-action btn-ban"
+            title="Забанить"
             @click="toggleUserStatus(rowData)"
           >
             {{ $t('users.ban') }}
-          </va-button>
-          <va-button
+          </button>
+          <button
             v-else
-            color="success"
-            size="small"
+            class="btn-action btn-activate"
+            title="Активировать"
             @click="toggleUserStatus(rowData)"
           >
             {{ $t('users.activate') }}
-          </va-button>
+          </button>
         </div>
       </template>
     </va-data-table>
 
     <!-- Pagination -->
-    <div class="d-flex justify-content-between align-items-center">
-      <span>{{ $t('users.total', { count: totalUsers }) }}</span>
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <span class="text-muted font-weight-500">{{ $t('users.total', { count: totalUsers }) }}</span>
       <va-pagination
         v-model="page"
         :pages="totalPages"
@@ -393,29 +426,232 @@ export default defineComponent({
 
 <style scoped>
 .user-list {
-  padding: 4px;
-}
-.row {
   display: flex;
-  flex-wrap: wrap;
-  margin-left: -6px;
-  margin-right: -6px;
+  flex-direction: column;
 }
-.row > [class*="col-"] {
-  padding-left: 6px;
-  padding-right: 6px;
+
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
 }
-.col-md-4, .col-md-3, .col-md-2 {
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 12px;
+  padding: 10px 16px;
+  width: 320px;
+  transition: all 0.2s ease-in-out;
+}
+
+.search-box:focus-within {
+  background: #ffffff;
+  border-color: #5c60f5;
+  box-shadow: 0 0 0 3px rgba(92, 96, 245, 0.1);
+}
+
+.search-box i {
+  color: #64748b;
+  font-size: 18px;
+}
+
+.search-box input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+  color: #0f172a;
   width: 100%;
 }
-@media (min-width: 768px) {
-  .col-md-4 { width: 33.333333%; }
-  .col-md-3 { width: 25%; }
-  .col-md-2 { width: 16.666667%; }
+
+.filters {
+  display: flex;
+  gap: 8px;
 }
+
+.btn-filter-select {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-filter-select:hover {
+  background: #f8fafc;
+  border-color: rgba(0,0,0,0.15);
+}
+
+.btn-filter {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0f172a;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-filter:hover {
+  background: #f8fafc;
+  border-color: rgba(0,0,0,0.15);
+}
+
+.cell-phone {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #eef2ff;
+  color: #5c60f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.user-avatar.executor-av {
+  background: #fff7ed;
+  color: #d97706;
+}
+
+.user-avatar.admin-av {
+  background: #f3e8ff;
+  color: #9333ea;
+}
+
+.cell-amount {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cell-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+}
+
+.date-time {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-pill.success {
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.status-pill.danger {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
 .actions-container {
   display: flex;
+  gap: 6px;
   flex-wrap: wrap;
-  gap: 4px;
+}
+
+.btn-action {
+  border: none;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-topup {
+  background: #5c60f5;
+  color: #ffffff;
+}
+
+.btn-topup:hover {
+  background: #4f46e5;
+}
+
+.btn-role {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.btn-role:hover {
+  background: #2563eb;
+}
+
+.btn-address {
+  background: #64748b;
+  color: #ffffff;
+}
+
+.btn-address:hover {
+  background: #475569;
+}
+
+.btn-ban {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.btn-ban:hover {
+  background: #dc2626;
+}
+
+.btn-activate {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.btn-activate:hover {
+  background: #059669;
 }
 </style>
