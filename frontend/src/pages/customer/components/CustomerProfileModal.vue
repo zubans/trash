@@ -625,13 +625,41 @@ export default defineComponent({
   margin-bottom: 24px;
 }
 
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.form-input {
+  width: 100%;
+  padding: 14px 110px 14px 16px;
+  border-radius: 14px;
+  background: var(--surface-input);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-title);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+  transition: var(--transition);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent-main);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+}
+
 .btn-save-email {
   position: absolute;
   right: 6px;
   top: 6px;
   bottom: 6px;
-  padding: 0 16px;
-  border-radius: 12px;
+  padding: 0 18px;
+  border-radius: 10px;
   background: var(--accent-main);
   color: white;
   border: none;
