@@ -120,9 +120,9 @@ export default defineComponent({
           fillOpacity: 0.03,
         }).addTo(map)
 
-        // 2km Accept Circle
+        // 0.5km (500m) Accept Circle
         zone2kmCircle = L.circle([props.currentLat, props.currentLon], {
-          radius: 2000,
+          radius: 500,
           color: '#10b981',
           weight: 2,
           fillColor: '#10b981',

@@ -35,7 +35,7 @@
       <!-- Сетка Профиль и Кошелек -->
       <div class="premium-grid">
         <!-- Компактный профиль исполнителя -->
-        <div class="profile-card">
+        <div class="profile-card clickable-profile" @click="showProfileModal = true">
           <div class="avatar-wrap">
             <div class="avatar"><i class="ph ph-user"></i></div>
             <div class="status-dot"></div>
@@ -522,6 +522,17 @@
       @location-changed="onMapLocationChanged"
     />
 
+    <!-- Executor Profile Modal -->
+    <ExecutorProfileModal
+      v-model="showProfileModal"
+      :phone="phone"
+      :user-email="userEmail"
+      :status="status"
+      :base-address="baseAddress"
+      @email-updated="userEmail = $event"
+      @address-updated="baseAddress = $event"
+    />
+
     <!-- Image Preview Modal -->
     <div v-if="showImagePreviewModal" class="img-preview-overlay" @click="showImagePreviewModal = false">
       <div class="img-preview-card" @click.stop>
@@ -545,6 +556,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
+import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
@@ -556,6 +568,7 @@ export default defineComponent({
     UpdateBanner,
     LanguageSwitcher,
     ExecutorMapModal,
+    ExecutorProfileModal,
     OrderDetailsModal,
     ReviewModal,
   },
@@ -564,8 +577,11 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const phone = ref('')
+    const userEmail = ref('')
+    const baseAddress = ref('')
     const balance = ref(0)
     const status = ref('ACTIVE')
+    const showProfileModal = ref(false)
 
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
@@ -700,8 +716,13 @@ export default defineComponent({
         const res = await api.get('/auth/me')
         if (res.data) {
           phone.value = res.data.phone || phone.value
+          userEmail.value = res.data.email || ''
           balance.value = res.data.balance ?? balance.value
           status.value = res.data.status || status.value
+        }
+        const custProfRes = await api.get('/customer/profile')
+        if (custProfRes.data && custProfRes.data.address) {
+          baseAddress.value = custProfRes.data.address
         }
       } catch (err) {
         // Fallback to authStore
@@ -1231,6 +1252,9 @@ export default defineComponent({
     })
 
     return {
+      showProfileModal,
+      userEmail,
+      baseAddress,
       phone,
       balance,
       status,

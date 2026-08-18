@@ -232,9 +232,10 @@ func main() {
 	registerAPIRoutes(r)
 
 	// Serve uploaded files and release APKs
-	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir("releases"))).ServeHTTP)
-	r.Get("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))).ServeHTTP)
-	r.Get("/api/uploads/*", http.StripPrefix("/api/uploads/", http.FileServer(http.Dir("uploads"))).ServeHTTP)
+	uploadsDir := getEnv("UPLOADS_DIR", "uploads")
+	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir(getEnv("RELEASES_DIR", "releases")))).ServeHTTP)
+	r.Get("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir))).ServeHTTP)
+	r.Get("/api/uploads/*", http.StripPrefix("/api/uploads/", http.FileServer(http.Dir(uploadsDir))).ServeHTTP)
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {

@@ -29,10 +29,13 @@ services:
       TLS_KEY_FILE: /app/certs/localhost-key.pem
       MOBILE_HTTP_ADDR: :8081
       RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
+      UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
+      ACCEPT_RADIUS_KM: ${ACCEPT_RADIUS_KM:-0.5}
     depends_on:
       - db
     volumes:
       - ./releases:/app/releases
+      - uploads_data:/app/uploads
     ports:
       - "8088:8080"
       - "8089:8081"
@@ -49,6 +52,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  uploads_data:
     driver: local
 
 networks:

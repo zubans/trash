@@ -4,7 +4,8 @@
 
 `AuthService` отвечает за:
 
-- регистрацию нового пользователя по номеру телефона, паролю и адресу забора мусора;
+- регистрацию нового пользователя по номеру телефона, обязательному email, паролю и адресу начала работы/забора мусора;
+- верификацию email и процедуру сброса пароля по 6-значному коду;
 - аутентификацию существующего пользователя;
 - выпуск подписанного JWT-токена после успешной аутентификации.
 
@@ -15,13 +16,13 @@
 ```
 backend/
 ├── service/
-│   ├── auth.go       # реализация AuthService
+│   ├── auth.go       # реализация AuthService (регистрация, подтверждение email, сброс пароля)
 │   ├── geocoder.go   # геокодирование адресов
 │   └── auth_test.go  # юнит-тесты
 ├── repository/
 │   └── user.go       # контракт UserRepository и реализация на SQL
 └── handler/
-    └── public.go     # HTTP-обработчики регистрации/входа
+    └── public.go     # HTTP-обработчики регистрации/входа/сброса пароля
 ```
 
 ## Зависимости
@@ -29,6 +30,11 @@ backend/
 ```go
 type UserRepository interface {
     FindByPhone(phone string) (*User, error)
+    FindByEmail(email string) (*User, error)
+    FindByEmailVerificationToken(token string) (*User, error)
+    VerifyEmailToken(token string) (*User, error)
+    SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
+    ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
     Create(user *User) error
     FindByID(id uuid.UUID) (*User, error)
     UpdateStatus(id uuid.UUID, status string) error
@@ -51,26 +57,33 @@ authSvc := service.NewAuthService(repo, geocoder) // читает JWT_SECRET и�
 
 ## Публичные методы
 
-### Register
+### RegisterWithCoordinates
 
 ```go
-func (s *AuthService) Register(phone, password, address string) (*repository.User, error)
+func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, role string, lat, lon *float64) (*repository.User, error)
 ```
 
-Создаёт нового пользователя-заказчика.
+Создаёт нового пользователя (`CUSTOMER` или `EXECUTOR`).
 
 **Поведение:**
-1. Проверяет, что `phone`, `password` и `address` не пустые.
-2. Проверяет уникальность телефона.
-3. Хеширует пароль `bcrypt`.
-4. Создаёт запись в `users` (роль `CUSTOMER`, статус `ACTIVE`).
-5. Геокодирует адрес через `GeoCoder` для получения координат.
-6. Создаёт профиль в `customer_profiles` с адресом и координатами (`last_geo`).
+1. Проверяет, что `phone`, `email`, `password` и `address` заполнены.
+2. Валидирует синтаксис email по регулярному выражению `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`.
+3. Проверяет уникальность телефона и email.
+4. Хеширует пароль `bcrypt`.
+5. Генерирует UUID токен верификации почты `email_verification_token` (`email_verified = false`).
+6. Создаёт запись в `users` и базовый профиль с геокодированием начального адреса для поиска заказов (как для `CUSTOMER`, так и для `EXECUTOR`).
 
-**Возвращаемые ошибки:**
-- `phone and password are required`
-- `address is required`
-- `user already exists`
+### VerifyEmail / RequestPasswordReset / ResetPassword
+
+```go
+func (s *AuthService) VerifyEmail(token string) (*repository.User, error)
+func (s *AuthService) RequestPasswordReset(email string) (string, error)
+func (s *AuthService) ResetPassword(email, code, newPassword string) (*repository.User, error)
+```
+
+- `VerifyEmail`: проверяет токен и устанавливает `email_verified = true`.
+- `RequestPasswordReset`: генерирует 6-значный цифровой код восстановления (срок действия 30 минут).
+- `ResetPassword`: проверяет код и устанавливает новый хеш пароля.
 
 ### Authenticate
 
@@ -92,22 +105,24 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
 - `role` — роль;
 - `exp` — `now + 15 минут`.
 
+## Управление Профилями и Email (Клиентская часть)
+
+1. **Профиль Заказчика (`CustomerProfileModal.vue`)**:
+   - Позволяет изменять имеющиеся адреса доставки и привязанную почту Email.
+   - При смене Email отправляется `POST /api/user/email`, требующий повторной верификации.
+2. **Профиль Исполнителя (`ExecutorProfileModal.vue`)**:
+   - Отображает ФИО, телефон, Email и **базовый адрес начала поиска заказов**.
+   - Позволяет редактировать базовый адрес (автокомплит с геокодированием) и электронную почту.
+
 ## Безопасность
 
 * Пароли хешируются `bcrypt`.
 * JWT-подпись через `JWT_SECRET`.
 * Ошибки аутентификации не раскрывают существование аккаунта.
+* Обязательная проверка формата Email и верификация токеном.
 
 ## Переменные окружения
 
 | Переменная | Назначение | Значение по умолчанию |
 |------------|------------|----------------------|
 | `JWT_SECRET` | Секрет для подписи JWT | `dev-secret-change-me` |
-
-## Ограничения текущей реализации
-
-* Нет SMS-верификации номера телефона.
-* Нет проверки формата телефона.
-* Нет требований к сложности пароля.
-* Нет механизма сброса/обновления пароля.
-* Нет refresh-токенов.

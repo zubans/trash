@@ -92,7 +92,7 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 	if !validRegistrationRole(role) {
 		return nil, errors.New("invalid role: must be CUSTOMER or EXECUTOR")
 	}
-	if role == "CUSTOMER" && address == "" {
+	if address == "" {
 		return nil, errors.New("address is required")
 	}
 
@@ -147,25 +147,34 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 		return nil, err
 	}
 
-	// Customer profile is only needed for CUSTOMER accounts.
-	if role == "CUSTOMER" {
-		var lastGeo string
-		if lat != nil && lon != nil {
-			lastGeo = fmt.Sprintf("%f,%f", *lat, *lon)
-			// Cache the coordinates for the normalized address so the geocoder knows this point.
-			if gc, ok := s.geocoder.(*Geocoder); ok && gc != nil {
-				_ = gc.saveCache(normalizedAddress, *lat, *lon)
-			}
-		} else if s.geocoder != nil {
-			geo, err := s.geocoder.Geocode(normalizedAddress)
-			if err == nil && geo != nil {
-				lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
-			}
+	// Save profile and base address location for both CUSTOMER and EXECUTOR
+	var lastGeo string
+	if lat != nil && lon != nil {
+		lastGeo = fmt.Sprintf("%f,%f", *lat, *lon)
+		// Cache the coordinates for the normalized address so the geocoder knows this point.
+		if gc, ok := s.geocoder.(*Geocoder); ok && gc != nil {
+			_ = gc.saveCache(normalizedAddress, *lat, *lon)
 		}
+	} else if s.geocoder != nil {
+		geo, err := s.geocoder.Geocode(normalizedAddress)
+		if err == nil && geo != nil {
+			lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
+		}
+	}
 
-		if err := s.repo.CreateCustomerProfile(created.ID, normalizedAddress, lastGeo); err != nil {
-			return nil, err
+	if err := s.repo.CreateCustomerProfile(created.ID, normalizedAddress, lastGeo); err != nil {
+		return nil, err
+	}
+
+	// Set initial executor location
+	if role == "EXECUTOR" && (lat != nil && lon != nil || lastGeo != "") {
+		var eLat, eLon float64
+		if lat != nil && lon != nil {
+			eLat, eLon = *lat, *lon
+		} else {
+			fmt.Sscanf(lastGeo, "%f,%f", &eLat, &eLon)
 		}
+		_ = s.repo.UpdateLastGeo(created.ID, lastGeo)
 	}
 
 	return created, nil

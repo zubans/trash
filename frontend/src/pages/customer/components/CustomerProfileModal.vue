@@ -29,6 +29,32 @@
           </div>
         </div>
       </div>
+      <!-- Email Management -->
+      <div class="section-header">
+        <div class="section-title">
+          <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
+          Электронная почта
+        </div>
+        <div class="section-subtitle">При изменении потребуется повторная верификация</div>
+      </div>
+
+      <div class="email-box mb-4">
+        <div class="input-wrapper">
+          <input
+            v-model="emailInput"
+            type="email"
+            class="form-input"
+            placeholder="example@domain.com"
+          />
+          <button type="button" class="btn-save-email" :disabled="savingEmail || !emailInput || emailInput === currentEmail" @click="saveEmail">
+            <span v-if="savingEmail" class="spinner-sm"></span>
+            <template v-else>Сохранить</template>
+          </button>
+        </div>
+        <div v-if="emailMsg" class="email-msg-text" :class="{ error: emailMsgIsError }">
+          {{ emailMsg }}
+        </div>
+      </div>
 
       <!-- Address Management -->
       <div class="section-header">
@@ -106,13 +132,15 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, onMounted } from 'vue'
+import { defineComponent, computed, onMounted, ref, watch } from 'vue'
+import api from '../../../services/api'
 
 export default defineComponent({
   name: 'CustomerProfileModal',
   props: {
     modelValue: { type: Boolean, required: true },
     isVerified: { type: Boolean, default: true },
+    userEmail: { type: String, default: '' },
     customerAddresses: { type: Array as () => any[], default: () => [] },
     defaultAddress: { type: String, default: '' },
     newAddressInput: { type: String, default: '' },
@@ -123,12 +151,40 @@ export default defineComponent({
     'setActiveAddress',
     'addNewAddress',
     'removeAddress',
+    'emailUpdated',
   ],
   setup(props, { emit }) {
     const show = computed({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
     })
+
+    const currentEmail = computed(() => props.userEmail)
+    const emailInput = ref(props.userEmail)
+    const savingEmail = ref(false)
+    const emailMsg = ref('')
+    const emailMsgIsError = ref(false)
+
+    watch(() => props.userEmail, (val) => {
+      emailInput.value = val
+    })
+
+    const saveEmail = async () => {
+      if (!emailInput.value || emailInput.value === props.userEmail || savingEmail.value) return
+      savingEmail.value = true
+      emailMsg.value = ''
+      emailMsgIsError.value = false
+      try {
+        await api.post('/user/email', { email: emailInput.value })
+        emailMsg.value = 'Email обновлен! На указанный адрес отправлено письмо для повторной верификации.'
+        emit('emailUpdated', emailInput.value)
+      } catch (err: any) {
+        emailMsgIsError.value = true
+        emailMsg.value = err.response?.data || 'Ошибка обновления Email'
+      } finally {
+        savingEmail.value = false
+      }
+    }
 
     const loadPhosphorIcons = () => {
       if (!document.getElementById('phosphor-icons-script')) {
@@ -143,7 +199,15 @@ export default defineComponent({
       loadPhosphorIcons()
     })
 
-    return { show }
+    return { 
+      show,
+      currentEmail,
+      emailInput,
+      savingEmail,
+      emailMsg,
+      emailMsgIsError,
+      saveEmail
+    }
   },
 })
 </script>
@@ -555,6 +619,42 @@ export default defineComponent({
 .btn-cancel:hover {
   background: rgba(15, 23, 42, 0.1);
   color: var(--text-title);
+}
+
+.email-box {
+  margin-bottom: 24px;
+}
+
+.btn-save-email {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  bottom: 6px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--accent-main);
+  color: white;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-save-email:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.email-msg-text {
+  font-size: 13px;
+  color: #10b981;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.email-msg-text.error {
+  color: #ef4444;
 }
 
 /* Responsive */

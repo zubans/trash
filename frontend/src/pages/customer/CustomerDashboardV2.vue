@@ -359,6 +359,7 @@
         v-model="showProfileModal"
         v-model:new-address-input="newAddressInput"
         :is-verified="true"
+        :user-email="userEmail"
         :customer-addresses="customerAddresses"
         :default-address="defaultAddress"
         @set-active-address="setActiveAddress"
@@ -533,8 +534,14 @@ export default defineComponent({
       }
     }
 
+    const userEmail = ref('')
+
     const fetchProfile = async () => {
       try {
+        const meRes = await api.get('/auth/me')
+        if (meRes.data && meRes.data.email) {
+          userEmail.value = meRes.data.email
+        }
         const response = await api.get('/customer/profile')
         if (response.data) {
           if (response.data.phone) phone.value = response.data.phone
@@ -1113,6 +1120,7 @@ export default defineComponent({
     })
 
     return {
+      userEmail,
       phone,
       formattedPhone,
       balance,

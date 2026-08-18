@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -39,6 +40,18 @@ type SetLocationResponse struct {
 	Lon                     float64  `json:"lon"`
 }
 
+func getAcceptRadiusKM() float64 {
+	valStr := os.Getenv("ACCEPT_RADIUS_KM")
+	if valStr == "" {
+		return 0.5
+	}
+	var val float64
+	if _, err := fmt.Sscanf(valStr, "%f", &val); err != nil || val <= 0 {
+		return 0.5
+	}
+	return val
+}
+
 func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRequest) (*SetLocationResponse, error) {
 	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
 		return nil, fmt.Errorf("invalid coordinates")
@@ -50,6 +63,7 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 	}
 
 	now := time.Now()
+	acceptRadiusKM := getAcceptRadiusKM()
 
 	// Check manual shift distance
 	var shiftDist float64
@@ -57,8 +71,18 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 		shiftDist = HaversineDistanceKM(*oldLat, *oldLon, req.Lat, req.Lon)
 	}
 
-	if req.IsManual && shiftDist > 2.0 {
-		// District change (>2km) requires 10 min cooldown
+	if req.IsManual && oldLat != nil && oldLon != nil {
+		// Reject manual moves within inner circle
+		if shiftDist <= acceptRadiusKM {
+			return &SetLocationResponse{
+				Success: false,
+				Message: fmt.Sprintf("Ручное перемещение разрешено только за пределы разрешенного круга (более %.1f км)", acceptRadiusKM),
+				Lat:     *oldLat,
+				Lon:     *oldLon,
+			}, nil
+		}
+
+		// District change requires 10 min cooldown
 		var lastManualTime time.Time
 		if val, ok := s.cooldownMap.Load(executorID); ok {
 			lastManualTime = val.(time.Time)
@@ -71,11 +95,11 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 			if elapsed < 10*time.Minute {
 				remaining := int((10*time.Minute - elapsed).Seconds())
 				return &SetLocationResponse{
-					Success:                 false,
-					Message:                 fmt.Sprintf("Ручная смена района возможна не чаще 1 раза в 10 минут. Осталось: %d сек", remaining),
+					Success:                  false,
+					Message:                  fmt.Sprintf("Смена района возможна не чаще 1 раза в 10 минут. Осталось: %d сек", remaining),
 					CooldownRemainingSeconds: remaining,
-					Lat:                     req.Lat,
-					Lon:                     req.Lon,
+					Lat:                      *oldLat,
+					Lon:                      *oldLon,
 				}, nil
 			}
 		}
@@ -113,7 +137,7 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 		return nil, err
 	}
 
-	if req.IsManual && shiftDist > 2.0 {
+	if req.IsManual && shiftDist > acceptRadiusKM {
 		s.cooldownMap.Store(executorID, now)
 	}
 
@@ -128,7 +152,7 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
 	// Find pending orders within 10km
 	const overviewRadiusKM = 10.0
-	const acceptRadiusKM = 2.0
+	acceptRadiusKM := getAcceptRadiusKM()
 
 	// Use existing orderRepo to get searching orders
 	pendingOrders, err := s.orderRepo.GetPendingOrders()

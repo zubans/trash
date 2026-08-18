@@ -198,8 +198,11 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 
 	text := strings.TrimSpace(r.FormValue("text"))
 
-	// Create uploads directory if not exists
-	uploadDir := filepath.Join(".", "uploads", "chat")
+	uploadsBaseDir := os.Getenv("UPLOADS_DIR")
+	if uploadsBaseDir == "" {
+		uploadsBaseDir = "uploads"
+	}
+	uploadDir := filepath.Join(uploadsBaseDir, "chat")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
 		return

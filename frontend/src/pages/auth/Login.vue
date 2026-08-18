@@ -92,9 +92,9 @@
           </div>
         </div>
 
-        <!-- Address Autocomplete for Customer Registration -->
-        <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-3 address-autocomplete">
-          <label class="form-label">{{ $t('login.pickupAddress') }}</label>
+        <!-- Address Autocomplete for Registration -->
+        <div v-if="mode === 'register'" class="form-group mb-3 address-autocomplete">
+          <label class="form-label">{{ role === 'CUSTOMER' ? $t('login.pickupAddress') : 'Базовый адрес (откуда искать заказы)' }}</label>
           <div class="input-wrapper">
             <input
               v-model="address"
@@ -444,19 +444,17 @@ export default defineComponent({
             role: role.value,
           }
 
-          if (role.value === 'CUSTOMER') {
-            let normalizedAddress: string
-            try {
-              normalizedAddress = normalizeAddress(address.value, flatNumber.value)
-            } catch (addrErr: any) {
-              error.value = addrErr.message || t('login.addressFormatError')
-              return
-            }
-            payload.address = normalizedAddress
-            if (selectedCoords.value) {
-              payload.lat = selectedCoords.value.lat
-              payload.lon = selectedCoords.value.lon
-            }
+          let normalizedAddress: string
+          try {
+            normalizedAddress = normalizeAddress(address.value, flatNumber.value)
+          } catch (addrErr: any) {
+            error.value = addrErr.message || t('login.addressFormatError')
+            return
+          }
+          payload.address = normalizedAddress
+          if (selectedCoords.value) {
+            payload.lat = selectedCoords.value.lat
+            payload.lon = selectedCoords.value.lon
           }
 
           await api.post('/register', payload)
