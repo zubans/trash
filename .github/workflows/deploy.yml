@@ -68,6 +68,8 @@ jobs:
           script: |
             set -e
             cd /home/user/projects/trash || exit 1
+            echo "Fetching latest repository files..."
+            git pull origin main
             echo "Pulling latest images..."
             DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose -f docker-compose.prod.yml pull
             echo "Stopping old containers to free ports..."
