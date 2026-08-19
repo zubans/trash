@@ -138,11 +138,10 @@ export default defineComponent({
       emailMsgIsError.value = false
       try {
         await api.post('/user/email', { email: emailInput.value })
-        emailMsg.value = 'Email обновлен! Отправлено письмо подтверждения.'
-        emit('emailUpdated', emailInput.value)
+        emailMsg.value = 'Ссылка подтверждения отправлена на ' + emailInput.value + '. Email изменится после перехода по ссылке (действительна 60 минут).'
       } catch (err: any) {
         emailMsgIsError.value = true
-        emailMsg.value = err.response?.data || 'Ошибка обновления Email'
+        emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
       } finally {
         savingEmail.value = false
       }

@@ -181,6 +181,14 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			var isExpired bool
+			errExp := r.db.QueryRow(
+				`SELECT EXISTS(SELECT 1 FROM users WHERE email_verification_token = $1 AND email_token_expires_at <= now())`,
+				token,
+			).Scan(&isExpired)
+			if errExp == nil && isExpired {
+				return nil, errors.New("verification_token_expired")
+			}
 			return nil, errors.New("invalid or expired verification token (valid 60m)")
 		}
 		return nil, err

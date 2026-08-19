@@ -154,13 +154,25 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 
 	user, err := h.authService.VerifyEmail(token)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if err.Error() == "verification_token_expired" {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":     "Срок действия ссылки истек (60 минут). Пожалуйста, запросите изменение почты заново.",
+				"code":      "TOKEN_EXPIRED",
+				"can_retry": true,
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+		})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Email verified successfully",
+		"message": "Email успешно подтверждён!",
 		"email":   user.Email,
 	})
 }

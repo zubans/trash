@@ -229,7 +229,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, watch, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api, { formatApiError } from '../../services/api'
@@ -257,6 +257,7 @@ export default defineComponent({
   components: { LanguageSwitcher },
   setup() {
     const router = useRouter()
+    const route = useRoute()
     const authStore = useAuthStore()
     const { t } = useI18n()
 
@@ -354,9 +355,23 @@ export default defineComponent({
       })
     }
 
-    onMounted(() => {
+    onMounted(async () => {
       loadPhosphorIcons()
       focusSubmitButton()
+
+      const token = route.query.token as string
+      if (token) {
+        try {
+          const res = await api.get('/auth/verify-email', { params: { token } })
+          message.value = res.data?.message || 'Email успешно подтверждён!'
+        } catch (err: any) {
+          if (err.response?.data?.can_retry || err.response?.data?.code === 'TOKEN_EXPIRED') {
+            error.value = err.response.data.error || 'Срок действия ссылки истек (60 минут). Запросите изменение почты заново в профиле.'
+          } else {
+            error.value = err.response?.data?.error || err.response?.data || 'Ошибка подтверждения Email'
+          }
+        }
+      }
     })
 
     watch(mode, () => {
