@@ -15,9 +15,10 @@ services:
   mailserver:
     image: foxcpp/maddy:0.7.0
     container_name: healthlogin_mail
-    hostname: moya-usluga.ru
+    hostname: mail.moya-usluga.ru
     environment:
-      MADDY_HOSTNAME: moya-usluga.ru
+      MADDY_HOSTNAME: mail.moya-usluga.ru
+      MADDY_PRIMARY_DOMAIN: healthlogin.local
     volumes:
       - ./maddy.conf:/data/maddy.conf:ro
       - maddy_data:/var/lib/maddy
@@ -37,7 +38,7 @@ services:
       DB_USER: healthlogin
       DB_PASSWORD: healthlogin
       DB_NAME: healthlogin
-      CORS_ORIGIN: ${CORS_ORIGIN:-https://moya-usluga.ru:8443}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://moya-usluga.ru}
       JWT_SECRET: ${JWT_SECRET}
       TLS_CERT_FILE: /app/certs/localhost-cert.pem
       TLS_KEY_FILE: /app/certs/localhost-key.pem
@@ -50,7 +51,7 @@ services:
       SMTP_USER: ${SMTP_USER:-system@moya-usluga.ru}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-systempass123}
       SMTP_FROM: ${SMTP_FROM:-system@moya-usluga.ru}
-      APP_BASE_URL: ${APP_BASE_URL:-https://moya-usluga.ru:8443}
+      APP_BASE_URL: ${APP_BASE_URL:-https://moya-usluga.ru}
     depends_on:
       - db
       - mailserver

@@ -19,11 +19,24 @@
 
 Для автоматической отправки системных писем (верификации регистраций, смены почты и восстановления паролей) в стек добавлен контейнер **Maddy Mail Server** (`foxcpp/maddy:0.7.0`).
 
-- **Основной домен**: `moya-usluga.ru`
+Maddy **не хранит почту** для `moya-usluga.ru` и не обрабатывает его как локальный домен. Вместо этого он принимает письма от backend через порт `587` и отправляет их **напрямую** на MX-серверы получателей от имени `mail.moya-usluga.ru`.
+
+- **Хост Maddy (HELO/EHLO)**: `mail.moya-usluga.ru`
+- **Внутренний домен Maddy**: `healthlogin.local` (не `moya-usluga.ru`)
 - **Системный ящик отправителя**: `system@moya-usluga.ru`
-- **Хранение писем и авторизационной БД (Persistent Volume)**: `maddy_data` (сохраняется при перезапусках контейнеров).
-- **Конфигурация**: [`maddy.conf`](file:///Users/sergeyzyuban/projects/trash/maddy.conf)
-- **Порты**: `25` (SMTP), `587` (Submission), `143` (IMAP).
+- **Авторизационная БД для backend (Persistent Volume)**: `maddy_data` (сохраняется при перезапусках контейнеров).
+- **Конфигурация**: [`maddy.conf`](../maddy.conf)
+- **Порты**: `25` (SMTP, входящие соединения отклоняются), `587` (Submission для backend), `143` (IMAP, не используется).
+
+### Настройка учётной записи для backend
+
+После первого запуска (или при смене пароля) в Maddy должна существовать учётная запись, под которой backend авторизуется для отправки почты. Создать/обновить её можно командой:
+
+```bash
+docker compose exec mailserver /bin/maddy -config /data/maddy.conf creds create system@moya-usluga.ru
+```
+
+Пароль должен совпадать со значением `SMTP_PASSWORD` в `.env` (по умолчанию `systempass123` для локальной разработки; в проде обязательно задайте свой).
 
 ---
 
@@ -34,10 +47,10 @@
 | `ACCEPT_RADIUS_KM` | Радиус (в км), в пределах которого исполнитель может взять заказ в работу | `0.5` (500 м) |
 | `UPLOADS_DIR` | Директория монтирования persistent volume для хранения изображений и файлов чата | `/app/uploads` |
 | `RELEASES_DIR` | Директория для хранения релизных APK файлов | `releases` |
-| `SMTP_HOST` | Хост почтового сервера | `mailserver` |
-| `SMTP_PORT` | Порт подключения SMTP Submission | `587` |
-| `SMTP_USER` | Почтовый адрес авторизации | `system@moya-usluga.ru` |
-| `SMTP_PASSWORD` | Пароль системного почтового ящика | `systempass123` |
+| `SMTP_HOST` | Хост внутреннего почтового сервера (Maddy), к которому подключается backend | `mailserver` |
+| `SMTP_PORT` | Порт подключения SMTP Submission к Maddy | `587` |
+| `SMTP_USER` | Логин backend во внутреннем Maddy | `system@moya-usluga.ru` |
+| `SMTP_PASSWORD` | Пароль backend во внутреннем Maddy | `systempass123` |
 | `SMTP_FROM` | Адрес отправителя системных писем | `system@moya-usluga.ru` |
 | `APP_BASE_URL` | Базовый URL приложения для генерации ссылок подтверждения | `https://moya-usluga.ru:8443` |
 | `JWT_SECRET` | Секретный ключ подписи JWT-токенов | — |
