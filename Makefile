@@ -126,6 +126,8 @@ sign-apk: $(KEYSTORE_FILE)
 	echo "Keystore: $(KEYSTORE_FILE)"; \
 	echo "Password file: $(KEYSTORE_PASSWORD_FILE)"
 
+release: release-android
+
 release-android: build-android-release
 	@echo "Registering APK release in database..."
 	@BUILT_VERSION_CODE=$$(node -e "const fs=require('fs'); const c=fs.readFileSync('frontend/android/app/build.gradle','utf8'); const m=c.match(/versionCode\\s+(\\d+)/); console.log(m ? m[1] : '');"); \
@@ -170,8 +172,27 @@ stop:
 	$(call compose,down)
 	@echo "Services stopped."
 
+# Register existing APK file into DB and releases directory
+register-release:
+	@echo "Registering APK release in database..."
+	@if [ -f healthlogin-app.apk ]; then \
+		$(call compose,exec -T backend go run ./cmd/release \
+			-apk /app/healthlogin-app.apk \
+			-platform android \
+			-releases-dir /app/releases \
+			-version-file /app/frontend/android/app/build.gradle 2>/dev/null) || \
+		$(call compose,run --rm -v $(PWD):/host -w /host backend go run ./backend/cmd/release \
+			-apk /host/healthlogin-app.apk \
+			-platform android \
+			-releases-dir /host/releases \
+			-version-file /host/frontend/android/app/build.gradle || true) ; \
+		echo "Release registered."; \
+	else \
+		echo "healthlogin-app.apk not found, skipping release registration."; \
+	fi
+
 # Restart all running services
-restart: stop start
+restart: stop start register-release
 	@echo "Services restarted."
 
 # Show logs from all services

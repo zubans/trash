@@ -98,9 +98,14 @@ jobs:
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
             echo "Fetching latest repository files..."
             git pull origin main
-            echo "Restarting services..."
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose pull
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} docker compose up -d --build --remove-orphans
+            echo "Restarting services via make restart..."
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} make restart
+            
+            echo "Building and releasing new Android APK on server..."
+            VERSION_NAME=$(git describe --tags --always 2>/dev/null || echo "1.0.0")
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+            make release VERSION="${VERSION_NAME}" RELEASE_NOTES="${COMMIT_MSG}" || echo "Release build skipped or failed."
+            
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=168h"
             
