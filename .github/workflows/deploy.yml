@@ -95,7 +95,7 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           script: |
             set -e
-            cd /home/user/projects/trash || exit 1
+            cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
             echo "Fetching latest repository files..."
             git pull origin main
             echo "Restarting services..."
