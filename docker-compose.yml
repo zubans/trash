@@ -18,7 +18,7 @@ services:
     hostname: mail.moya-usluga.ru
     environment:
       MADDY_HOSTNAME: mail.moya-usluga.ru
-      MADDY_PRIMARY_DOMAIN: healthlogin.local
+      MADDY_PRIMARY_DOMAIN: moya-usluga.ru
     volumes:
       - ./maddy.conf:/data/maddy.conf:ro
       - maddy_data:/var/lib/maddy
