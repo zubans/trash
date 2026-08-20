@@ -8,14 +8,18 @@ RUN go mod download
 # Copy backend source files, including nested packages
 COPY backend/ .
 
-# Build the binary
+# Build the main binary
 RUN go build -o /app/healthlogin .
+
+# Build the release registration tool
+RUN go build -o /app/release ./cmd/release
 
 # Runtime image
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=build /app/healthlogin .
+COPY --from=build /app/release .
 RUN mkdir -p /app/certs
 EXPOSE 8080
 CMD ["./healthlogin"]

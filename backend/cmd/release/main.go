@@ -65,6 +65,15 @@ func main() {
 		resolvedVersionCode = parsedCode
 	}
 
+	// Skip registration if this version is already in the database.
+	if existing, err := releaseRepo.GetReleaseByVersionCode(*platform, resolvedVersionCode); err != nil {
+		log.Fatalf("failed to check existing release: %v", err)
+	} else if existing != nil {
+		fmt.Printf("Release already registered: platform=%s version=%s code=%d\n",
+			existing.Platform, existing.VersionName, existing.VersionCode)
+		return
+	}
+
 	fileName := fmt.Sprintf("app-release-%s-%d.apk", resolvedVersionName, resolvedVersionCode)
 	relFilePath := filepath.Join("releases", *platform, fileName)
 	fullDestPath := filepath.Join(*releasesDir, *platform, fileName)

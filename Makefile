@@ -172,20 +172,21 @@ stop:
 	$(call compose,down)
 	@echo "Services stopped."
 
-# Register existing APK file into DB and releases directory
+# Register existing APK file into DB and releases directory.
+# The release binary is built into the backend image, so we run it via
+# docker compose run with temporary mounts for the APK and build.gradle.
 register-release:
 	@echo "Registering APK release in database..."
 	@if [ -f healthlogin-app.apk ]; then \
-		$(call compose,exec -T backend go run ./cmd/release \
+		$(call compose,run --rm \
+			-v $(PWD)/healthlogin-app.apk:/app/healthlogin-app.apk:ro \
+			-v $(PWD)/frontend/android/app/build.gradle:/app/frontend/android/app/build.gradle:ro \
+			backend \
+			/app/release \
 			-apk /app/healthlogin-app.apk \
 			-platform android \
 			-releases-dir /app/releases \
-			-version-file /app/frontend/android/app/build.gradle 2>/dev/null) || \
-		$(call compose,run --rm -v $(PWD):/host -w /host backend go run ./backend/cmd/release \
-			-apk /host/healthlogin-app.apk \
-			-platform android \
-			-releases-dir /host/releases \
-			-version-file /host/frontend/android/app/build.gradle || true) ; \
+			-version-file /app/frontend/android/app/build.gradle) ; \
 		echo "Release registered."; \
 	else \
 		echo "healthlogin-app.apk not found, skipping release registration."; \

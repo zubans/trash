@@ -24,6 +24,7 @@ type AppRelease struct {
 // AppReleaseRepository defines storage operations for mobile app releases.
 type AppReleaseRepository interface {
 	GetActiveRelease(platform string) (*AppRelease, error)
+	GetReleaseByVersionCode(platform string, versionCode int) (*AppRelease, error)
 	GetNextVersionCode(platform string) (int, error)
 	CreateRelease(release *AppRelease) error
 	DeactivateOldReleases(platform string, excludeID uuid.UUID) error
@@ -47,6 +48,27 @@ func (r *appReleaseRepo) GetActiveRelease(platform string) (*AppRelease, error) 
 		ORDER BY version_code DESC
 		LIMIT 1`
 	err := r.db.QueryRow(query, platform).Scan(
+		&release.ID, &release.Platform, &release.VersionName, &release.VersionCode,
+		&release.FileName, &release.FilePath, &release.ReleaseNotes, &release.IsActive,
+		&release.ForceUpdate, &release.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &release, nil
+}
+
+func (r *appReleaseRepo) GetReleaseByVersionCode(platform string, versionCode int) (*AppRelease, error) {
+	var release AppRelease
+	query := `
+		SELECT id, platform, version_name, version_code, file_name, file_path, release_notes, is_active, force_update, created_at
+		FROM mobile_app_releases
+		WHERE platform = $1 AND version_code = $2
+		LIMIT 1`
+	err := r.db.QueryRow(query, platform, versionCode).Scan(
 		&release.ID, &release.Platform, &release.VersionName, &release.VersionCode,
 		&release.FileName, &release.FilePath, &release.ReleaseNotes, &release.IsActive,
 		&release.ForceUpdate, &release.CreatedAt,
