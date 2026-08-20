@@ -1,0 +1,28 @@
+{
+  "kind": "collectionType",
+  "collectionName": "system_settings",
+  "info": {
+    "singularName": "system-setting",
+    "pluralName": "system-settings",
+    "displayName": "System Setting",
+    "description": "Dynamic platform system settings"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "key": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "value": {
+      "type": "text",
+      "required": true
+    },
+    "description": {
+      "type": "string"
+    }
+  }
+}

@@ -69,10 +69,25 @@ services:
     container_name: healthlogin_frontend
     depends_on:
       - backend
+      - strapi
     volumes:
       - ./certs:/etc/nginx/certs:ro
     ports:
       - "8443:443"
+
+  strapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.strapi
+    container_name: healthlogin_strapi
+    environment:
+      DATABASE_CLIENT: sqlite
+      HOST: 0.0.0.0
+      PORT: 1337
+    volumes:
+      - strapi_uploads:/opt/app/public/uploads
+    ports:
+      - "1337:1337"
 
 volumes:
   postgres_data:
@@ -81,7 +96,10 @@ volumes:
     driver: local
   maddy_data:
     driver: local
+  strapi_uploads:
+    driver: local
 
 networks:
   default:
     driver: bridge
+

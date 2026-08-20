@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "geofences",
+  "info": {
+    "singularName": "geofence",
+    "pluralName": "geofences",
+    "displayName": "Geofence",
+    "description": "Geofence Zone Configuration"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "CIRCLE",
+        "POLYGON"
+      ],
+      "default": "CIRCLE",
+      "required": true
+    },
+    "coordinates": {
+      "type": "json",
+      "required": true
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

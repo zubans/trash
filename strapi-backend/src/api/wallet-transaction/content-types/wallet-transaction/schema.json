@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "wallet_transactions",
+  "info": {
+    "singularName": "wallet-transaction",
+    "pluralName": "wallet-transactions",
+    "displayName": "Wallet Transaction",
+    "description": "Financial System Transactions"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "user_id": {
+      "type": "integer",
+      "required": true
+    },
+    "amount": {
+      "type": "decimal",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "DEPOSIT",
+        "WITHDRAWAL",
+        "HOLD",
+        "PAYOUT",
+        "FINE"
+      ],
+      "required": true
+    },
+    "description": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "bids",
+  "info": {
+    "singularName": "bid",
+    "pluralName": "bids",
+    "displayName": "Bid",
+    "description": "Auction Bids for Construction Waste"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "order_id": {
+      "type": "integer",
+      "required": true
+    },
+    "executor_id": {
+      "type": "integer",
+      "required": true
+    },
+    "amount": {
+      "type": "decimal",
+      "required": true
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": [
+        "PENDING",
+        "ACCEPTED",
+        "REJECTED"
+      ],
+      "default": "PENDING",
+      "required": true
+    }
+  }
+}
