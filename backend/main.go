@@ -161,6 +161,7 @@ func main() {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
 			r.Get("/auth/me", ph.MeHandler)
+			r.Get("/user/profile", ah.GetProfileHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
