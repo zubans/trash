@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/repository"
@@ -147,11 +148,17 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// VerifyEmailHandler verifies email by token.
+// VerifyEmailHandler verifies email by token or redirects legacy clicks to frontend /login page.
 func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		http.Error(w, "token parameter is required", http.StatusBadRequest)
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	// If request comes directly from a browser click (not AJAX JSON request), redirect to frontend /login?token=...
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		http.Redirect(w, r, "/login?token="+token, http.StatusFound)
 		return
 	}
 

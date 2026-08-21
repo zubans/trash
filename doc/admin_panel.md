@@ -59,3 +59,11 @@ Content-Type: application/json
 | `tariff_asap_mult` | `FLOAT` | Множитель тарифа «ASAP (15 минут)» (по умолчанию `8.0`). |
 | `geofence_penalty_amount` | `FLOAT` | Сумма штрафа за нарушение геозоны смены. |
 | `early_exit_penalty_amount` | `FLOAT` | Сумма штрафа за досрочное завершение смены. |
+| `min_balance_limit` | `FLOAT` | Лимит отрицательного баланса (ухода в минус) исполнителя (по умолчанию `0`). |
+
+### 2.5 Чат поддержки клиентов (`AdminSupportChats.vue`)
+
+- **`GET /api/admin/support/chats`** — получение списка всех пользовательских диалогов с нечитанными сообщениями, ФИО, телефоном и ролью.
+- **`GET /api/support/chats/{chat_id}/messages`** — история диалога с клиентом.
+- **`POST /api/support/chats/{chat_id}/messages`** — отправка текстового ответа сотрудника поддержки.
+- **`POST /api/support/chats/{chat_id}/upload`** — загрузка медиа и вложений.

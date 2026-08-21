@@ -130,7 +130,7 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 }
 
 func (m *SmtpMailSender) SendEmailVerification(toEmail, token string) error {
-	verifyURL := fmt.Sprintf("%s/api/auth/verify-email?token=%s", m.baseURL, token)
+	verifyURL := fmt.Sprintf("%s/login?token=%s", m.baseURL, token)
 	subject := "Подтверждение регистрации на портале moya-usluga.ru"
 	body := fmt.Sprintf(`
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">

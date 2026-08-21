@@ -465,10 +465,13 @@ export default defineComponent({
           const res = await api.get('/auth/verify-email', { params: { token } })
           message.value = res.data?.message || 'Email успешно подтверждён!'
         } catch (err: any) {
-          if (err.response?.data?.can_retry || err.response?.data?.code === 'TOKEN_EXPIRED') {
-            error.value = err.response.data.error || 'Срок действия ссылки истек (60 минут). Запросите изменение почты заново в профиле.'
+          const errData = err.response?.data
+          if (errData?.code === 'TOKEN_EXPIRED' || errData?.error?.includes('expired')) {
+            error.value = 'Срок действия ссылки подтверждения истек (60 минут). Запросите подтверждение или смену почты заново в профиле.'
+          } else if (typeof errData?.error === 'string') {
+            error.value = errData.error
           } else {
-            error.value = err.response?.data?.error || err.response?.data || 'Ошибка подтверждения Email'
+            error.value = 'Ссылка подтверждения недействительна или уже была использована.'
           }
         }
       }
