@@ -80,14 +80,20 @@ func validRegistrationRole(role string) bool {
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // Register creates a new user with the given phone, email, password, pickup address and role.
-func (s *AuthService) Register(phone, email, password, address, role string) (*repository.User, error) {
-	return s.RegisterWithCoordinates(phone, email, password, address, role, nil, nil)
+func (s *AuthService) Register(phone, email, password, lastName, firstName, patronymic, address, role string) (*repository.User, error) {
+	return s.RegisterWithCoordinates(phone, email, password, lastName, firstName, patronymic, address, role, nil, nil)
 }
 
 // RegisterWithCoordinates creates a new user with email, phone, password and address.
-func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, role string, lat, lon *float64) (*repository.User, error) {
+func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, firstName, patronymic, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
+	}
+	lastName = strings.TrimSpace(lastName)
+	firstName = strings.TrimSpace(firstName)
+	patronymic = strings.TrimSpace(patronymic)
+	if lastName == "" || firstName == "" || patronymic == "" {
+		return nil, errors.New("last_name, first_name, and patronymic are required")
 	}
 	email = strings.TrimSpace(email)
 	if email == "" || !emailRegex.MatchString(email) {
@@ -137,6 +143,9 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 		Role:                   role,
 		Phone:                  phone,
 		Email:                  "", // Email is empty until verified via token
+		LastName:               lastName,
+		FirstName:              firstName,
+		Patronymic:             patronymic,
 		PendingEmail:           email,
 		EmailVerified:          false,
 		EmailVerificationToken: verificationToken,

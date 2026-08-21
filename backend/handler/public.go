@@ -28,13 +28,16 @@ type AuthRequest struct {
 // RegisterRequest extends AuthRequest with the required pickup address,
 // role and optional coordinates. Role must be CUSTOMER or EXECUTOR.
 type RegisterRequest struct {
-	Phone    string   `json:"phone"`
-	Email    string   `json:"email"`
-	Password string   `json:"password"`
-	Address  string   `json:"address"`
-	Role     string   `json:"role"`
-	Lat      *float64 `json:"lat,omitempty"`
-	Lon      *float64 `json:"lon,omitempty"`
+	Phone      string   `json:"phone"`
+	Email      string   `json:"email"`
+	Password   string   `json:"password"`
+	LastName   string   `json:"last_name"`
+	FirstName  string   `json:"first_name"`
+	Patronymic string   `json:"patronymic"`
+	Address    string   `json:"address"`
+	Role       string   `json:"role"`
+	Lat        *float64 `json:"lat,omitempty"`
+	Lon        *float64 `json:"lon,omitempty"`
 }
 
 // AuthResponse returns a JWT after successful login.
@@ -74,7 +77,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Email, req.Password, req.Address, req.Role, req.Lat, req.Lon)
+	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
 		if err.Error() == "user with this phone already exists" || err.Error() == "user with this email already exists" {
 			http.Error(w, err.Error(), http.StatusConflict)

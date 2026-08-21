@@ -127,7 +127,10 @@
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                  <div class="o-title item-title">
+                    <span class="font-bold text-base">{{ getOrderTitles(order).category }}</span>
+                    <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
+                  </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
@@ -390,7 +393,10 @@
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                  <div class="o-title item-title">
+                    <span class="font-bold text-base">{{ getOrderTitles(order).category }}</span>
+                    <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
+                  </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
@@ -1187,6 +1193,19 @@ export default defineComponent({
       }
     }
 
+    const getOrderTitles = (order: any) => {
+      const variantName = formatOrderType(order)
+      const variant = order?.service_variant
+      if (variant && variant.parent_id && categoriesMap.value[variant.parent_id]) {
+        const parent = categoriesMap.value[variant.parent_id]
+        const catName = parent.name && typeof parent.name === 'object' ? (parent.name['ru'] || parent.name['en'] || '') : ''
+        if (catName) {
+          return { category: catName, variant: variantName }
+        }
+      }
+      return { category: 'Вывоз мусора', variant: variantName }
+    }
+
     const formatOrderType = (order: any) => {
       if (order?.service_variant) {
         const nameObj = order.service_variant.name
@@ -1330,6 +1349,7 @@ export default defineComponent({
       onChatImgError,
       openFinancialHistoryModal,
       formatOrderType,
+      getOrderTitles,
       getStatusColor,
       formatDate,
       handleLogout,

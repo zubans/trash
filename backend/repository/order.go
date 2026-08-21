@@ -24,6 +24,8 @@ type Order struct {
 	ID               uuid.UUID    `json:"id"`
 	CustomerID       uuid.UUID    `json:"customer_id"`
 	ExecutorID       *uuid.UUID   `json:"executor_id,omitempty"`
+	ExecutorPhone    string       `json:"executor_phone,omitempty"`
+	ExecutorName     string       `json:"executor_name,omitempty"`
 	ServiceVariantID uuid.UUID    `json:"service_variant_id"`
 	ServiceVariant   *ServiceNode `json:"service_variant,omitempty"`
 	IsUrgent         bool         `json:"is_urgent"`

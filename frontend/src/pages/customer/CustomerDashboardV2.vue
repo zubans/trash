@@ -117,7 +117,10 @@
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="o-title item-title">{{ formatOrderType(order) }}</div>
+                  <div class="o-title item-title">
+                    <span class="font-bold text-base">{{ getOrderTitles(order).category }}</span>
+                    <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
+                  </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
@@ -1055,10 +1058,25 @@ export default defineComponent({
       customerAddresses.value.splice(idx, 1)
     }
 
-    const formatOrderType = (order: any) => {
+    const getOrderTitles = (order: any) => {
       const variant = order.service_variant
-      if (!variant) return 'Большой обычный'
-      return localizedName(variant)
+      if (!variant) {
+        return { category: 'Вывоз мусора', variant: 'Стандартный вывоз' }
+      }
+      const variantName = localizedName(variant)
+      // Find parent category from serviceCategories if parent_id exists
+      if (variant.parent_id && serviceCategories.value && serviceCategories.value.length > 0) {
+        const parent = serviceCategories.value.find((c: any) => c.id === variant.parent_id)
+        if (parent) {
+          return { category: localizedName(parent), variant: variantName }
+        }
+      }
+      return { category: 'Вывоз мусора', variant: variantName }
+    }
+
+    const formatOrderType = (order: any) => {
+      const { category, variant } = getOrderTitles(order)
+      return `${category} (${variant})`
     }
 
     const getStatusColor = (status: string) => {
@@ -1205,6 +1223,7 @@ export default defineComponent({
       setActiveAddress,
       addNewAddress,
       removeAddress,
+      getOrderTitles,
       formatOrderType,
       getStatusColor,
       formatDateFull,

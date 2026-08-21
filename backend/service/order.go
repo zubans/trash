@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,11 +44,28 @@ func (s *OrderService) hydrateServiceVariant(order *repository.Order) {
 	if order == nil {
 		return
 	}
-	variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID)
-	if err != nil || variant == nil {
-		return
+	if variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID); err == nil && variant != nil {
+		order.ServiceVariant = variant
 	}
-	order.ServiceVariant = variant
+	if order.ExecutorID != nil && s.userRepo != nil {
+		if execUser, err := s.userRepo.FindByID(*order.ExecutorID); err == nil && execUser != nil {
+			order.ExecutorPhone = execUser.Phone
+			var nameParts []string
+			if execUser.FirstName != "" {
+				nameParts = append(nameParts, execUser.FirstName)
+			}
+			if execUser.Patronymic != "" {
+				nameParts = append(nameParts, execUser.Patronymic)
+			}
+			if execUser.LastName != "" {
+				runes := []rune(strings.TrimSpace(execUser.LastName))
+				if len(runes) > 0 {
+					nameParts = append(nameParts, string(runes[0])+".")
+				}
+			}
+			order.ExecutorName = strings.Join(nameParts, " ")
+		}
+	}
 }
 
 func (s *OrderService) loadSettings() map[string]float64 {

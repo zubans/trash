@@ -14,6 +14,9 @@ type User struct {
 	Role                   string     `json:"role"`
 	Phone                  string     `json:"phone"`
 	Email                  string     `json:"email"`
+	LastName               string     `json:"last_name"`
+	FirstName              string     `json:"first_name"`
+	Patronymic             string     `json:"patronymic"`
 	PendingEmail           string     `json:"pending_email,omitempty"`
 	EmailVerified          bool       `json:"email_verified"`
 	EmailVerificationToken string     `json:"-"`
@@ -68,6 +71,9 @@ func New(db *sql.DB) UserRepository {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255) NULL;
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_code VARCHAR(10) NULL;
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP WITH TIME ZONE NULL;
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100) NOT NULL DEFAULT '';
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100) NOT NULL DEFAULT '';
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS patronymic VARCHAR(100) NOT NULL DEFAULT '';
 	`)
 	return &repo{db: db}
 }
@@ -77,9 +83,9 @@ func (r *repo) FindByPhone(phone string) (*User, error) {
 	var email, token, resetCode sql.NullString
 	var resetExp sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE phone = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE phone = $1`,
 		phone,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +103,9 @@ func (r *repo) FindByEmail(email string) (*User, error) {
 	var em, token, resetCode sql.NullString
 	var resetExp sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
 		email,
-	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -117,9 +123,9 @@ func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
 	var email, tok, resetCode sql.NullString
 	var resetExp sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
 		token,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.EmailVerified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -137,9 +143,9 @@ func (r *repo) FindByID(id uuid.UUID) (*User, error) {
 	var email, token, resetCode sql.NullString
 	var resetExp sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -159,9 +165,9 @@ func (r *repo) Create(user *User) error {
 		user.ID = id
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO users (id, role, phone, email, pending_email, email_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		id, user.Role, user.Phone, user.Email, user.PendingEmail, user.EmailVerified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
+		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, pending_email, email_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.PendingEmail, user.EmailVerified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
 	)
 	return err
 }

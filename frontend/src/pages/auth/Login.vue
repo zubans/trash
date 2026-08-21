@@ -94,6 +94,49 @@
           </div>
         </div>
 
+        <!-- FIO Inputs for Registration -->
+        <div v-if="mode === 'register'" class="form-group mb-3">
+          <label class="form-label">Фамилия</label>
+          <div class="input-wrapper">
+            <input
+              v-model="lastName"
+              type="text"
+              placeholder="Иванов"
+              class="form-input"
+              required
+            />
+            <i class="ph ph-user-card input-icon"></i>
+          </div>
+        </div>
+
+        <div v-if="mode === 'register'" class="form-group mb-3">
+          <label class="form-label">Имя</label>
+          <div class="input-wrapper">
+            <input
+              v-model="firstName"
+              type="text"
+              placeholder="Иван"
+              class="form-input"
+              required
+            />
+            <i class="ph ph-user-card input-icon"></i>
+          </div>
+        </div>
+
+        <div v-if="mode === 'register'" class="form-group mb-3">
+          <label class="form-label">Отчество</label>
+          <div class="input-wrapper">
+            <input
+              v-model="patronymic"
+              type="text"
+              placeholder="Иванович"
+              class="form-input"
+              required
+            />
+            <i class="ph ph-user-card input-icon"></i>
+          </div>
+        </div>
+
         <!-- Address Autocomplete for Registration -->
         <div v-if="mode === 'register'" class="form-group mb-3 address-autocomplete">
           <label class="form-label">{{ role === 'CUSTOMER' ? $t('login.pickupAddress') : 'Базовый адрес (откуда искать заказы)' }}</label>
@@ -323,6 +366,9 @@ export default defineComponent({
     }
     const email = ref('')
     const password = ref('')
+    const lastName = ref('')
+    const firstName = ref('')
+    const patronymic = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
     const address = ref('')
     const flatNumber = ref('')
@@ -364,15 +410,15 @@ export default defineComponent({
           resetError.value = `[Тестовый режим] Код сброса: ${res.data.code}`
         }
       } catch (err: any) {
-        resetError.value = err.response?.data || 'Ошибка отправки кода сброса'
+        resetError.value = formatApiError(err, 'Не удалось отправить код')
       } finally {
         resetLoading.value = false
       }
     }
 
-    const submitNewPassword = async () => {
+    const resetPasswordWithCode = async () => {
       resetError.value = ''
-      if (!resetCode.value || !newPassword.value) return
+      if (!resetEmail.value || !resetCode.value || !newPassword.value) return
       resetLoading.value = true
       try {
         await api.post('/auth/reset-password', {
@@ -380,10 +426,10 @@ export default defineComponent({
           code: resetCode.value,
           new_password: newPassword.value,
         })
+        message.value = 'Пароль успешно изменён! Войдите с новым паролем.'
         showForgotModal.value = false
-        message.value = 'Пароль успешно изменен! Войдите с новым паролем.'
       } catch (err: any) {
-        resetError.value = err.response?.data || 'Ошибка изменения пароля'
+        resetError.value = formatApiError(err, 'Ошибка сброса пароля')
       } finally {
         resetLoading.value = false
       }
@@ -408,6 +454,11 @@ export default defineComponent({
       loadPhosphorIcons()
       focusSubmitButton()
 
+      const modeParam = route.query.mode as string
+      if (modeParam === 'register' || modeParam === 'login') {
+        mode.value = modeParam
+      }
+
       const token = route.query.token as string
       if (token) {
         try {
@@ -429,6 +480,9 @@ export default defineComponent({
       addressSuggestions.value = []
       autocompleteLoading.value = false
       role.value = 'CUSTOMER'
+      lastName.value = ''
+      firstName.value = ''
+      patronymic.value = ''
       flatNumber.value = ''
       selectedCoords.value = null
       focusSubmitButton()
@@ -515,6 +569,9 @@ export default defineComponent({
             phone: phone.value,
             email: email.value,
             password: password.value,
+            last_name: lastName.value,
+            first_name: firstName.value,
+            patronymic: patronymic.value,
             role: role.value,
           }
 
@@ -536,6 +593,9 @@ export default defineComponent({
           mode.value = 'login'
           email.value = ''
           password.value = ''
+          lastName.value = ''
+          firstName.value = ''
+          patronymic.value = ''
           role.value = 'CUSTOMER'
           address.value = ''
           flatNumber.value = ''

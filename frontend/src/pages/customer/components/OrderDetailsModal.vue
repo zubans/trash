@@ -85,11 +85,14 @@
           </div>
           <div class="executor-info">
             <div class="executor-title">{{ $t('customer.executorDetails') }}</div>
-            <div v-if="selectedOrderDetails.executor_id || selectedOrderDetails.executor_phone" class="executor-details">
+            <div v-if="selectedOrderDetails.executor_id || selectedOrderDetails.executor_phone || selectedOrderDetails.executor_name" class="executor-details">
+              <div v-if="selectedOrderDetails.executor_name" class="executor-name font-bold">
+                👤 {{ selectedOrderDetails.executor_name }}
+              </div>
               <div v-if="selectedOrderDetails.executor_phone" class="executor-phone">
                 📱 {{ selectedOrderDetails.executor_phone }}
               </div>
-              <div v-if="selectedOrderDetails.executor_id" class="executor-id">
+              <div v-if="selectedOrderDetails.executor_id" class="executor-id text-xs text-muted">
                 ID: {{ selectedOrderDetails.executor_id }}
               </div>
             </div>
