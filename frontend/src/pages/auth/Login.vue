@@ -61,6 +61,7 @@
               class="form-input"
               required
               @input="onPhoneInput"
+              @keydown="onPhoneKeydown"
             />
             <i class="ph ph-phone input-icon"></i>
           </div>
@@ -266,11 +267,59 @@ export default defineComponent({
     const displayPhone = ref('')
     const phone = ref('')
 
+    const onPhoneKeydown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLInputElement
+      if (e.key === 'Backspace') {
+        const start = target.selectionStart ?? 0
+        const end = target.selectionEnd ?? 0
+
+        // If user pressed Backspace with cursor right after a formatting character (space, dash, paren), delete preceding digit
+        if (start === end && start > 0) {
+          const charBefore = target.value[start - 1]
+          if (/\D/.test(charBefore)) {
+            e.preventDefault()
+            // find nearest digit index before cursor
+            let newEnd = start - 1
+            while (newEnd > 0 && /\D/.test(target.value[newEnd - 1])) {
+              newEnd--
+            }
+            if (newEnd > 0) {
+              const val = target.value.slice(0, newEnd - 1) + target.value.slice(start)
+              const formatted = formatPhoneMask(val)
+              displayPhone.value = formatted
+              phone.value = cleanPhoneDigits(formatted)
+              nextTick(() => {
+                const pos = Math.max(0, newEnd - 1)
+                target.setSelectionRange(pos, pos)
+              })
+            } else {
+              displayPhone.value = ''
+              phone.value = ''
+            }
+          }
+        }
+      }
+    }
+
     const onPhoneInput = (e: Event) => {
       const target = e.target as HTMLInputElement
+      const oldVal = displayPhone.value
+      const selectionPos = target.selectionStart || 0
       const formatted = formatPhoneMask(target.value)
       displayPhone.value = formatted
       phone.value = cleanPhoneDigits(formatted)
+
+      // Maintain cursor position if input was made in the middle
+      if (target.value.length > selectionPos) {
+        nextTick(() => {
+          let pos = selectionPos
+          // Adjust position if mask added characters
+          if (formatted.length > oldVal.length && pos < formatted.length) {
+            pos += (formatted.length - target.value.length)
+          }
+          target.setSelectionRange(pos, pos)
+        })
+      }
     }
     const email = ref('')
     const password = ref('')
@@ -505,6 +554,7 @@ export default defineComponent({
       displayPhone,
       phone,
       onPhoneInput,
+      onPhoneKeydown,
       email,
       password,
       role,
