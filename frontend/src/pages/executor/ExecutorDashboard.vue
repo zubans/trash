@@ -752,6 +752,20 @@ export default defineComponent({
           balance.value = res.data.balance ?? balance.value
           status.value = res.data.status || status.value
         }
+        const userProfRes = await api.get('/user/profile')
+        if (userProfRes.data) {
+          if (userProfRes.data.last_geo) {
+            const parts = userProfRes.data.last_geo.split(',')
+            if (parts.length === 2) {
+              const lat = parseFloat(parts[0])
+              const lon = parseFloat(parts[1])
+              if (!isNaN(lat) && !isNaN(lon)) {
+                currentLat.value = lat
+                currentLon.value = lon
+              }
+            }
+          }
+        }
         const custProfRes = await api.get('/customer/profile')
         if (custProfRes.data && custProfRes.data.address) {
           baseAddress.value = custProfRes.data.address
@@ -1280,9 +1294,9 @@ export default defineComponent({
 
     let intervalId: any = null
 
-    onMounted(() => {
+    onMounted(async () => {
       fetchServiceVariants()
-      fetchProfile()
+      await fetchProfile()
       fetchActiveShift()
       fetchAssignedOrders()
       fetchAvailableOrders()
