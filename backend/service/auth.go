@@ -329,6 +329,18 @@ func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repos
 		return nil, errors.New("a valid email is required")
 	}
 
+	currentUser, err := s.repo.FindByID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	existingUser, err := s.repo.FindByEmail(newEmail)
+	if err == nil && existingUser != nil && existingUser.ID != userID {
+		log.Printf("[SECURITY NOTICE] User with phone %s (ID: %s) attempted to attach email %s which is already bound to user with phone %s (ID: %s)",
+			currentUser.Phone, currentUser.ID, newEmail, existingUser.Phone, existingUser.ID)
+		return nil, errors.New("что-то пошло не так")
+	}
+
 	verificationToken := uuid.New().String()
 	tokenExpiresAt := time.Now().Add(60 * time.Minute)
 	user, err := s.repo.UpdateUserEmail(userID, newEmail, verificationToken, tokenExpiresAt)

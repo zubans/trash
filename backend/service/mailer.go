@@ -36,7 +36,7 @@ func NewSmtpMailSender() *SmtpMailSender {
 	}
 	baseURL := os.Getenv("APP_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://moya-usluga.ru:8443"
+		baseURL = "https://moya-usluga.ru"
 	}
 
 	return &SmtpMailSender{
