@@ -378,18 +378,25 @@
           <h2 class="section-title">{{ $t('executor.nearbyOrders') }}</h2>
         </div>
 
-        <div class="list-item-compact" style="margin-bottom: 8px;">
-          <div class="item-left-group">
-            <div class="item-icon" style="background: #f1f5f9; color: var(--text-muted);"><i class="ph-fill ph-crosshair"></i></div>
-            <div class="item-text-stack" style="width: 100%;">
-              <div class="item-subtitle" style="color: var(--text-muted);">{{ $t('executor.currentCoordinates') }}</div>
-              <input type="text" class="gps-input" :value="`${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`" readonly />
+        <!-- Интерактивный виджет карты заказов поблизости -->
+        <div class="map-widget mb-3" title="Открыть карту" @click="openMapPicker">
+          <!-- Анимация геопозиции -->
+          <div class="map-user-dot"></div>
+          <!-- Фейковые метки заказов -->
+          <div class="map-order-pin p1"><i class="ph-bold ph-package"></i></div>
+          <div class="map-order-pin p2"><i class="ph-bold ph-package"></i></div>
+
+          <!-- Градиент и текст -->
+          <div class="map-overlay">
+            <div class="map-content-row">
+              <div class="map-text">
+                <div class="map-title">Карта заказов</div>
+                <div class="map-subtitle"><i class="ph-fill ph-navigation-arrow"></i> Геопозиция активна</div>
+              </div>
+              <button type="button" class="btn-expand-map" @click.stop="openMapPicker">
+                <i class="ph-bold ph-map-trifold"></i> Карта
+              </button>
             </div>
-          </div>
-          <div class="item-actions">
-            <button type="button" class="btn-map-edit" title="Редактировать местоположение и открыть карту" @click="openMapPicker">
-              <i class="ph-bold ph-map-trifold"></i> Карта и локация
-            </button>
           </div>
         </div>
 
@@ -2482,6 +2489,55 @@ export default defineComponent({
   .shift-controls { flex-direction: column; width: 100%; }
   .start-shift-group { width: 100%; }
   .btn-action-primary, .btn-end-shift, .btn-map-trigger { width: 100%; justify-content: center; }
+}
+
+/* =========================================================
+   МИНИ-КАРТА (Интерактивный виджет)
+   ========================================================= */
+.map-widget {
+    position: relative; width: 100%; height: 130px; border-radius: 20px;
+    overflow: hidden; box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04)); cursor: pointer; transition: all 0.2s ease-in-out;
+    background-color: #e2e8f0;
+    background-image: url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=600');
+    background-size: cover; background-position: center;
+}
+.map-widget:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+
+.map-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(to top, rgba(255,255,255,1) 0%, rgba(255,255,255,0.7) 40%, rgba(255,255,255,0) 100%);
+    display: flex; flex-direction: column; justify-content: flex-end; padding: 16px;
+}
+
+/* Имитация метки пользователя */
+.map-user-dot {
+    position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+    width: 16px; height: 16px; background: var(--brand-primary, #5c60f5);
+    border: 3px solid #ffffff; border-radius: 50%; box-shadow: 0 2px 8px rgba(92, 96, 245, 0.5);
+}
+.map-user-dot::after {
+    content: ''; position: absolute; inset: -10px; border-radius: 50%;
+    background: var(--brand-primary, #5c60f5); opacity: 0.2; animation: pulse 2s infinite;
+}
+@keyframes pulse { 0% { transform: scale(0.5); opacity: 0.4; } 100% { transform: scale(1.5); opacity: 0; } }
+
+/* Имитация заказов вокруг */
+.map-order-pin {
+    position: absolute; width: 24px; height: 24px; background: var(--warning-main, #f59e0b);
+    color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.4); border: 2px solid #ffffff;
+}
+.map-order-pin.p1 { top: 20%; left: 20%; }
+.map-order-pin.p2 { top: 30%; right: 25%; }
+
+.map-content-row { display: flex; justify-content: space-between; align-items: flex-end; z-index: 2; }
+.map-text { display: flex; flex-direction: column; }
+.map-title { font-size: 16px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.2; }
+.map-subtitle { font-size: 13px; font-weight: 600; color: var(--success-main, #10b981); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+
+.btn-expand-map {
+    background: var(--brand-light, #eef2ff); color: var(--brand-primary, #5c60f5); border: none; border-radius: 12px;
+    padding: 8px 14px; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; cursor: pointer;
 }
 
 /* --- Ultra-compact Order Item Styles --- */
