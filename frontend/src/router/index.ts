@@ -177,10 +177,18 @@ router.onError((error, to) => {
     error.message.includes('Importing a module script failed')
   ) {
     console.warn('Chunk load failed due to new build, reloading page to fetch latest version...', error)
-    if (to?.fullPath) {
-      window.location.href = to.fullPath
+    if (Capacitor.isNativePlatform()) {
+      if (to?.fullPath) {
+        window.location.hash = `#${to.fullPath}`
+      } else {
+        window.location.reload()
+      }
     } else {
-      window.location.reload()
+      if (to?.fullPath) {
+        window.location.href = to.fullPath
+      } else {
+        window.location.reload()
+      }
     }
   }
 })

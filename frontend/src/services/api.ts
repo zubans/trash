@@ -128,8 +128,14 @@ api.interceptors.response.use(
         // localStorage may be unavailable in some environments
       }
 
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+      if (Capacitor.isNativePlatform()) {
+        if (window.location.hash !== '#/login') {
+          window.location.hash = '#/login'
+        }
+      } else {
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
       }
     }
     return Promise.reject(error)

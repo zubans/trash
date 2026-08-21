@@ -91,6 +91,7 @@ func NewAdminRepository(db *sql.DB) AdminRepository {
 		    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'withdrawal_status') THEN
 		        CREATE TYPE withdrawal_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 		    END IF;
+		    ALTER TYPE transaction_type ADD VALUE IF NOT EXISTS 'WITHDRAWAL';
 		END$$;
 		CREATE TABLE IF NOT EXISTS balance_withdrawal_requests (
 		    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

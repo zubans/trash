@@ -15,8 +15,9 @@ const (
 	TransactionTypePayment TransactionType = "PAYMENT"
 	TransactionTypeReward  TransactionType = "REWARD"
 	TransactionTypeRefund  TransactionType = "REFUND"
-	TransactionTypeFine    TransactionType = "FINE"
-	TransactionTypeTopUp   TransactionType = "TOP_UP"
+	TransactionTypeFine       TransactionType = "FINE"
+	TransactionTypeTopUp      TransactionType = "TOP_UP"
+	TransactionTypeWithdrawal TransactionType = "WITHDRAWAL"
 )
 
 // TransactionRepository defines storage operations for financial transactions and balance.
