@@ -205,6 +205,7 @@ func main() {
 			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
 			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
 			r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
+			r.Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
 			r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
 			r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
 			r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)

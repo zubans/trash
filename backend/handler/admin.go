@@ -128,6 +128,34 @@ func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(map[string]string{"message": "address updated successfully"})
 }
 
+// UpdateUserNameHandler updates a user's full name (admin-only).
+func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		LastName   string `json:"last_name"`
+		FirstName  string `json:"first_name"`
+		Patronymic string `json:"patronymic"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.adminService.UpdateUserName(userID, req.LastName, req.FirstName, req.Patronymic); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "name updated successfully"})
+}
+
 // TopUpUserBalanceHandler adds funds directly to a user's balance.
 func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")

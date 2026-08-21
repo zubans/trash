@@ -175,6 +175,18 @@ func (m *mockRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error
 	return nil
 }
 
+func (m *mockRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+	for _, u := range m.users {
+		if u.ID == userID {
+			u.LastName = lastName
+			u.FirstName = firstName
+			u.Patronymic = patronymic
+			return nil
+		}
+	}
+	return errors.New("user not found")
+}
+
 func TestRegister_Success(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	phone := "+79001234567"

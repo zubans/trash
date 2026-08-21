@@ -396,6 +396,7 @@ func (m *mockUserRepo) SetPasswordResetCode(userID uuid.UUID, code string, expir
 func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) { return nil, nil }
 func (m *mockUserRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) { return nil, nil }
 func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error { return nil }
+func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error { return nil }
 
 func (m *mockOrderRepo) FindAllByExecutor(executorID uuid.UUID) ([]repository.Order, error) {
 	return nil, nil

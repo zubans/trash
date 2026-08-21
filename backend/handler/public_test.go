@@ -125,6 +125,10 @@ func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) e
 	return nil
 }
 
+func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+	return nil
+}
+
 func newTestPublicHandler() *PublicHandler {
 	repo := newMockUserRepo()
 	return NewPublicHandler(service.NewAuthService(repo, nil))

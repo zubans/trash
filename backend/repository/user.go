@@ -56,6 +56,7 @@ type UserRepository interface {
 	SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
 	ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
 	UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
+	UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -308,4 +309,12 @@ func (r *repo) UpdateUserEmail(userID uuid.UUID, pendingEmail, verificationToken
 	u.Email = emailStr
 	u.PendingEmail = pendingEmail
 	return &u, nil
+}
+
+func (r *repo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+	_, err := r.db.Exec(
+		`UPDATE users SET last_name = $1, first_name = $2, patronymic = $3 WHERE id = $4`,
+		lastName, firstName, patronymic, userID,
+	)
+	return err
 }

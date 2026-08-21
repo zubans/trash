@@ -112,6 +112,15 @@ func (m *mockUserRepository) UpdateCustomerAddress(userID uuid.UUID, address str
 	return nil
 }
 
+func (m *mockUserRepository) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+	if u, ok := m.users[userID]; ok {
+		u.LastName = lastName
+		u.FirstName = firstName
+		u.Patronymic = patronymic
+	}
+	return nil
+}
+
 // mockAdminRepository implements repository.AdminRepository.
 type mockAdminRepository struct {
 	users    []*repository.User

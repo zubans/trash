@@ -128,6 +128,20 @@ func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error
 	return s.userRepo.UpdateCustomerAddress(userID, normalizedAddress)
 }
 
+// UpdateUserName updates a user's full name (admin-only).
+func (s *AdminService) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+	lastName = strings.TrimSpace(lastName)
+	firstName = strings.TrimSpace(firstName)
+	patronymic = strings.TrimSpace(patronymic)
+	if lastName == "" || firstName == "" || patronymic == "" {
+		return errors.New("last_name, first_name and patronymic are required")
+	}
+	if _, err := s.userRepo.FindByID(userID); err != nil {
+		return errors.New("user not found")
+	}
+	return s.userRepo.UpdateUserName(userID, lastName, firstName, patronymic)
+}
+
 // TopUpUserBalance adds funds directly to a user's balance.
 // Only non-admin users may be topped up, and an admin cannot credit themselves.
 func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {

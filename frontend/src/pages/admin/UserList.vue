@@ -41,6 +41,7 @@
       <!-- Headers -->
       <div class="grid-row grid-header">
         <div>Телефон</div>
+        <div>ФИО</div>
         <div>Роль</div>
         <div>Баланс</div>
         <div>Адрес</div>
@@ -57,6 +58,8 @@
           </div>
           <span>{{ u.phone }}</span>
         </div>
+
+        <div class="cell-name" :title="formatFullName(u)">{{ formatFullName(u) }}</div>
 
         <div class="cell-role">{{ u.role }}</div>
 
@@ -91,6 +94,9 @@
               <i class="ph-bold ph-dots-three-vertical"></i>
             </button>
             <div class="dropdown-menu">
+              <button class="dropdown-item" @click="openNameModal(u)">
+                <i class="ph-bold ph-user"></i> Редактировать ФИО
+              </button>
               <button class="dropdown-item" @click="openTopUpModal(u)">
                 <i class="ph-bold ph-wallet"></i> Пополнить баланс
               </button>
@@ -184,6 +190,39 @@
         :label="$t('users.newAddress')"
         required
       />
+    </va-modal>
+
+    <!-- Change Name Modal -->
+    <va-modal
+      v-model="showNameModal"
+      title="Редактировать ФИО"
+      :ok-text="$t('users.save')"
+      :cancel-text="$t('users.cancel')"
+      @ok="saveName"
+      @cancel="closeNameModal"
+    >
+      <p class="mb-3">{{ $t('users.user') }}: <strong>{{ selectedUser?.phone }}</strong></p>
+      <div class="mb-3">
+        <va-input
+          v-model="newLastName"
+          label="Фамилия"
+          required
+        />
+      </div>
+      <div class="mb-3">
+        <va-input
+          v-model="newFirstName"
+          label="Имя"
+          required
+        />
+      </div>
+      <div class="mb-3">
+        <va-input
+          v-model="newPatronymic"
+          label="Отчество"
+          required
+        />
+      </div>
     </va-modal>
   </div>
 </template>
@@ -328,6 +367,55 @@ export default defineComponent({
     const showAddressModal = ref(false)
     const newAddress = ref('')
 
+    const showNameModal = ref(false)
+    const newLastName = ref('')
+    const newFirstName = ref('')
+    const newPatronymic = ref('')
+
+    const formatFullName = (user: any) => {
+      if (!user) return '-'
+      const parts = [user.last_name, user.first_name, user.patronymic].filter((p: string) => p && p.trim())
+      return parts.length > 0 ? parts.join(' ') : '-'
+    }
+
+    const openNameModal = (user: any) => {
+      selectedUser.value = user
+      newLastName.value = user.last_name || ''
+      newFirstName.value = user.first_name || ''
+      newPatronymic.value = user.patronymic || ''
+      showNameModal.value = true
+    }
+
+    const closeNameModal = () => {
+      showNameModal.value = false
+      selectedUser.value = null
+      newLastName.value = ''
+      newFirstName.value = ''
+      newPatronymic.value = ''
+    }
+
+    const saveName = async () => {
+      if (!selectedUser.value) return
+      if (!newLastName.value.trim() || !newFirstName.value.trim() || !newPatronymic.value.trim()) {
+        alert('Заполните все поля (Фамилия, Имя, Отчество)')
+        return
+      }
+      try {
+        await api.post(`/admin/users/${selectedUser.value.id}/name`, {
+          last_name: newLastName.value.trim(),
+          first_name: newFirstName.value.trim(),
+          patronymic: newPatronymic.value.trim(),
+        })
+        selectedUser.value.last_name = newLastName.value.trim()
+        selectedUser.value.first_name = newFirstName.value.trim()
+        selectedUser.value.patronymic = newPatronymic.value.trim()
+        closeNameModal()
+      } catch (err: any) {
+        alert(err.response?.data || 'Ошибка обновления ФИО')
+        console.error(err)
+      }
+    }
+
     const openTopUpModal = (user: any) => {
       selectedUser.value = user
       topUpAmount.value = 100
@@ -431,10 +519,15 @@ export default defineComponent({
       showRoleModal,
       showTopUpModal,
       showAddressModal,
+      showNameModal,
       selectedUser,
       newRole,
       topUpAmount,
       newAddress,
+      newLastName,
+      newFirstName,
+      newPatronymic,
+      formatFullName,
       openRoleModal,
       closeRoleModal,
       saveRole,
@@ -444,6 +537,9 @@ export default defineComponent({
       openAddressModal,
       closeAddressModal,
       saveAddress,
+      openNameModal,
+      closeNameModal,
+      saveName,
     }
   },
 })
@@ -546,7 +642,7 @@ export default defineComponent({
 
 .grid-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.5fr) 120px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.8fr) minmax(0, 0.9fr) minmax(0, 1.3fr) 120px;
   align-items: center;
   gap: 16px;
 }
@@ -584,6 +680,15 @@ export default defineComponent({
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.cell-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .avatar {
