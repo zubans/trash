@@ -143,11 +143,10 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	user := &repository.User{
 		Role:                   role,
 		Phone:                  phone,
-		Email:                  "", // Email is empty until verified via token
+		Email:                  email,
 		LastName:               lastName,
 		FirstName:              firstName,
 		Patronymic:             patronymic,
-		PendingEmail:           email,
 		EmailVerified:          false,
 		EmailVerificationToken: verificationToken,
 		EmailTokenExpiresAt:    &tokenExpiresAt,

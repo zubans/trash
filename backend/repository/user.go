@@ -141,16 +141,17 @@ func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
 
 func (r *repo) FindByID(id uuid.UUID) (*User, error) {
 	var u User
-	var email, token, resetCode sql.NullString
+	var email, pendingEmail, token, resetCode sql.NullString
 	var resetExp sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), COALESCE(pending_email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &pendingEmail, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	u.Email = email.String
+	u.PendingEmail = pendingEmail.String
 	u.EmailVerificationToken = token.String
 	u.PasswordResetCode = resetCode.String
 	if resetExp.Valid {
@@ -177,9 +178,7 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	var userID uuid.UUID
 	err := r.db.QueryRow(
 		`UPDATE users 
-		 SET email = COALESCE(NULLIF(pending_email, ''), email),
-		     pending_email = NULL,
-		     email_verified = true, 
+		 SET email_verified = true, 
 		     email_verification_token = NULL,
 		     email_token_expires_at = NULL
 		 WHERE email_verification_token = $1 AND (email_token_expires_at IS NULL OR email_token_expires_at > now())
@@ -289,13 +288,13 @@ func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	return err
 }
 
-func (r *repo) UpdateUserEmail(userID uuid.UUID, pendingEmail, verificationToken string, expiresAt time.Time) (*User, error) {
+func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
 	row := r.db.QueryRow(
 		`UPDATE users
-		 SET pending_email = $1, email_verification_token = $2, email_token_expires_at = $3
+		 SET email = $1, pending_email = NULL, email_verified = false, email_verification_token = $2, email_token_expires_at = $3
 		 WHERE id = $4
 		 RETURNING id, role, phone, COALESCE(email, ''), email_verified, email_verification_token, balance, status, created_at`,
-		pendingEmail, verificationToken, expiresAt, userID,
+		email, verificationToken, expiresAt, userID,
 	)
 	var u User
 	var emailStr string
@@ -307,7 +306,6 @@ func (r *repo) UpdateUserEmail(userID uuid.UUID, pendingEmail, verificationToken
 		return nil, err
 	}
 	u.Email = emailStr
-	u.PendingEmail = pendingEmail
 	return &u, nil
 }
 

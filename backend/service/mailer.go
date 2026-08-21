@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/smtp"
@@ -68,13 +69,15 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 	addr := fmt.Sprintf("%s:%s", m.host, m.port)
 	log.Printf("[SmtpMailSender] Attempting to send email via SMTP addr=%s, from=%s, to=%s", addr, m.from, to)
 
+	encodedSubject := fmt.Sprintf("=?UTF-8?B?%s?=", base64.StdEncoding.EncodeToString([]byte(subject)))
+
 	msg := []byte(fmt.Sprintf("From: %s\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
 		"MIME-Version: 1.0\r\n"+
 		"Content-Type: text/html; charset=UTF-8\r\n"+
 		"\r\n"+
-		"%s\r\n", m.from, to, subject, bodyHTML))
+		"%s\r\n", m.from, to, encodedSubject, bodyHTML))
 
 	var auth smtp.Auth
 	if m.user != "" && m.password != "" {
@@ -131,7 +134,7 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 
 func (m *SmtpMailSender) SendEmailVerification(toEmail, token string) error {
 	verifyURL := fmt.Sprintf("%s/login?token=%s", m.baseURL, token)
-	subject := "Подтверждение регистрации на портале moya-usluga.ru"
+	subject := "Подтверждение электронной почты"
 	body := fmt.Sprintf(`
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
 			<h2 style="color: #4f46e5;">Подтверждение электронной почты</h2>
