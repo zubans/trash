@@ -17,6 +17,11 @@
           <span v-if="!sidebarMinimized">{{ $t('app.users') }}</span>
         </router-link>
 
+        <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-chats-teardrop"></i>
+          <span v-if="!sidebarMinimized">{{ $t('app.supportChats') }}</span>
+        </router-link>
+
         <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
           <i class="ph-fill ph-wallet"></i>
           <span v-if="!sidebarMinimized">{{ $t('app.topups') }}</span>

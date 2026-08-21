@@ -50,7 +50,7 @@ func (m *mockBidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
 func TestBidService_CreateBid(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewBidService(bidRepo, nil, shiftRepo)
+	srv := NewBidService(bidRepo, nil, shiftRepo, nil)
 
 	orderID := uuid.New()
 	executorID := uuid.New()

@@ -111,6 +111,25 @@ func (m *mockChatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText stri
 	return nil, errors.New("not found")
 }
 
+func (m *mockChatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*repository.SupportChat, error) {
+	return &repository.SupportChat{ID: uuid.New(), UserID: userID}, nil
+}
+func (m *mockChatRepo) GetSupportMessages(chatID uuid.UUID) ([]*repository.Message, error) {
+	return nil, nil
+}
+func (m *mockChatRepo) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
+	return &repository.Message{ID: uuid.New(), ChatID: chatID, SenderID: senderID, Text: text}, nil
+}
+func (m *mockChatRepo) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	return &repository.Message{ID: uuid.New(), ChatID: chatID, SenderID: senderID, Text: text}, nil
+}
+func (m *mockChatRepo) GetAdminSupportChatList() ([]*repository.SupportChatListItem, error) {
+	return nil, nil
+}
+func (m *mockChatRepo) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
+	return nil
+}
+
 func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	chatRepo := &mockChatRepo{}
 	orderRepo := &mockOrderRepo{}

@@ -10,9 +10,10 @@ import (
 
 // BidService manages bidding business operations.
 type BidService struct {
-	bidRepo   repository.BidRepository
-	orderRepo repository.OrderRepository
-	shiftRepo repository.ShiftRepository
+	bidRepo         repository.BidRepository
+	orderRepo       repository.OrderRepository
+	shiftRepo       repository.ShiftRepository
+	transactionRepo repository.TransactionRepository
 }
 
 // NewBidService creates a new BidService.
@@ -20,11 +21,13 @@ func NewBidService(
 	bidRepo repository.BidRepository,
 	orderRepo repository.OrderRepository,
 	shiftRepo repository.ShiftRepository,
+	transactionRepo repository.TransactionRepository,
 ) *BidService {
 	return &BidService{
-		bidRepo:   bidRepo,
-		orderRepo: orderRepo,
-		shiftRepo: shiftRepo,
+		bidRepo:         bidRepo,
+		orderRepo:       orderRepo,
+		shiftRepo:       shiftRepo,
+		transactionRepo: transactionRepo,
 	}
 }
 
@@ -41,6 +44,16 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice float
 	}
 	if shift == nil {
 		return nil, errors.New("cannot place a bid without an active work shift")
+	}
+
+	if s.transactionRepo != nil {
+		balance, err := s.transactionRepo.GetBalance(executorID)
+		if err != nil {
+			return nil, err
+		}
+		if balance < 0 {
+			return nil, errors.New("нельзя делать ставки при отрицательном балансе (уход в минус)")
+		}
 	}
 
 	return s.bidRepo.CreateBid(orderID, executorID, offeredPrice)

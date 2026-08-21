@@ -488,3 +488,33 @@ func (s *ChatService) BroadcastSystemMessage(orderID uuid.UUID, msg interface{})
 		}
 	}
 }
+
+// GetOrCreateSupportChat returns user's support chat.
+func (s *ChatService) GetOrCreateSupportChat(userID uuid.UUID) (*repository.SupportChat, error) {
+	return s.chatRepo.GetOrCreateSupportChat(userID)
+}
+
+// GetSupportMessages returns all messages for a support chat.
+func (s *ChatService) GetSupportMessages(chatID uuid.UUID) ([]*repository.Message, error) {
+	return s.chatRepo.GetSupportMessages(chatID)
+}
+
+// SaveSupportMessage saves a new support text message.
+func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
+	return s.chatRepo.SaveSupportMessage(chatID, senderID, text)
+}
+
+// SaveSupportMessageWithAttachment saves a new support message with file attachment.
+func (s *ChatService) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	return s.chatRepo.SaveSupportMessageWithAttachment(chatID, senderID, text, fileURL, fileName, fileType, fileSize)
+}
+
+// GetAdminSupportChatList returns all user support chats for Telegram-style admin UI.
+func (s *ChatService) GetAdminSupportChatList() ([]*repository.SupportChatListItem, error) {
+	return s.chatRepo.GetAdminSupportChatList()
+}
+
+// MarkSupportMessagesAsRead marks unread messages in a support chat as read.
+func (s *ChatService) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
+	return s.chatRepo.MarkSupportMessagesAsRead(chatID, readerID)
+}

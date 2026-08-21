@@ -34,6 +34,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/UserList.vue'),
       },
       {
+        path: 'support-chats',
+        name: 'admin-support-chats',
+        component: () => import('../pages/admin/AdminSupportChats.vue'),
+      },
+      {
         path: 'topups',
         name: 'admin-topups',
         component: () => import('../pages/admin/TopUpRequests.vue'),

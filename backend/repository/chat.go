@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +32,29 @@ type Message struct {
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
+// SupportChat represents a support conversation between a user and admins.
+type SupportChat struct {
+	ID        uuid.UUID  `json:"id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// SupportChatListItem represents a user chat item in the admin Telegram-style list.
+type SupportChatListItem struct {
+	ChatID      uuid.UUID  `json:"chat_id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Phone       string     `json:"phone"`
+	FirstName   string     `json:"first_name"`
+	LastName    string     `json:"last_name"`
+	Patronymic  string     `json:"patronymic"`
+	FullName    string     `json:"full_name"`
+	Role        string     `json:"role"`
+	UnreadCount int        `json:"unread_count"`
+	LastMessage *string    `json:"last_message,omitempty"`
+	LastTime    *time.Time `json:"last_time,omitempty"`
+}
+
 // ChatRepository defines database operations for chats and messages.
 type ChatRepository interface {
 	GetChatByOrderID(orderID uuid.UUID) (*Chat, error)
@@ -44,6 +68,13 @@ type ChatRepository interface {
 	GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error)
 	DeleteMessage(messageID, senderID uuid.UUID) error
 	UpdateMessage(messageID, senderID uuid.UUID, newText string) (*Message, error)
+
+	GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error)
+	GetSupportMessages(chatID uuid.UUID) ([]*Message, error)
+	SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*Message, error)
+	SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
+	GetAdminSupportChatList() ([]*SupportChatListItem, error)
+	MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error
 }
 
 type chatRepo struct {
@@ -53,6 +84,29 @@ type chatRepo struct {
 // NewChatRepository creates a new ChatRepository and ensures required columns exist.
 func NewChatRepository(db *sql.DB) ChatRepository {
 	_, _ = db.Exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NULL;`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS support_chats (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+		CREATE TABLE IF NOT EXISTS support_messages (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			chat_id UUID NOT NULL REFERENCES support_chats(id) ON DELETE CASCADE,
+			sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			text TEXT NOT NULL DEFAULT '',
+			status VARCHAR(32) NOT NULL DEFAULT 'sent',
+			file_url TEXT NULL,
+			file_name TEXT NULL,
+			file_type VARCHAR(32) NULL,
+			file_size BIGINT NULL,
+			is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			read_at TIMESTAMPTZ NULL,
+			updated_at TIMESTAMPTZ NULL
+		);
+	`)
 	return &chatRepo{db: db}
 }
 
@@ -234,4 +288,129 @@ func (r *chatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) 
 		return nil, err
 	}
 	return &m, nil
+}
+
+func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error) {
+	var sc SupportChat
+	err := r.db.QueryRow(`
+		INSERT INTO support_chats (user_id, updated_at)
+		VALUES ($1, now())
+		ON CONFLICT (user_id) DO UPDATE SET updated_at = support_chats.updated_at
+		RETURNING id, user_id, created_at, updated_at`, userID).Scan(&sc.ID, &sc.UserID, &sc.CreatedAt, &sc.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &sc, nil
+}
+
+func (r *chatRepo) GetSupportMessages(chatID uuid.UUID) ([]*Message, error) {
+	query := `
+		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
+		FROM support_messages
+		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
+		ORDER BY created_at ASC`
+	rows, err := r.db.Query(query, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := make([]*Message, 0)
+	for rows.Next() {
+		var m Message
+		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.IsDeleted, &m.CreatedAt, &m.ReadAt, &m.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, &m)
+	}
+	return messages, nil
+}
+
+func (r *chatRepo) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*Message, error) {
+	var m Message
+	err := r.db.QueryRow(`
+		INSERT INTO support_messages (chat_id, sender_id, text, status, created_at)
+		VALUES ($1, $2, $3, 'sent', now())
+		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
+		chatID, senderID, text).Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = r.db.Exec(`UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
+	return &m, nil
+}
+
+func (r *chatRepo) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error) {
+	var m Message
+	err := r.db.QueryRow(`
+		INSERT INTO support_messages (chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at)
+		VALUES ($1, $2, $3, 'sent', $4, $5, $6, $7, now())
+		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
+		chatID, senderID, text, fileURL, fileName, fileType, fileSize).Scan(
+		&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = r.db.Exec(`UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
+	return &m, nil
+}
+
+func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
+	query := `
+		SELECT 
+			sc.id,
+			sc.user_id,
+			u.phone,
+			COALESCE(u.first_name, ''),
+			COALESCE(u.last_name, ''),
+			COALESCE(u.patronymic, ''),
+			u.role,
+			COUNT(sm.id) FILTER (WHERE sm.sender_id != u.id AND sm.read_at IS NULL) as unread_count,
+			(SELECT text FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_message,
+			(SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_time
+		FROM support_chats sc
+		JOIN users u ON u.id = sc.user_id
+		LEFT JOIN support_messages sm ON sm.chat_id = sc.id AND sm.sender_id = u.id AND sm.read_at IS NULL
+		GROUP BY sc.id, sc.user_id, u.phone, u.first_name, u.last_name, u.patronymic, u.role
+		ORDER BY COALESCE((SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1), sc.created_at) DESC
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]*SupportChatListItem, 0)
+	for rows.Next() {
+		var item SupportChatListItem
+		var lastMsg sql.NullString
+		var lastTime sql.NullTime
+		err := rows.Scan(
+			&item.ChatID, &item.UserID, &item.Phone,
+			&item.FirstName, &item.LastName, &item.Patronymic,
+			&item.Role, &item.UnreadCount, &lastMsg, &lastTime,
+		)
+		if err != nil {
+			return nil, err
+		}
+		fullName := strings.TrimSpace(item.LastName + " " + item.FirstName + " " + item.Patronymic)
+		if fullName == "" {
+			fullName = item.Phone
+		}
+		item.FullName = fullName
+		if lastMsg.Valid {
+			item.LastMessage = &lastMsg.String
+		}
+		if lastTime.Valid {
+			item.LastTime = &lastTime.Time
+		}
+		items = append(items, &item)
+	}
+	return items, nil
+}
+
+func (r *chatRepo) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
+	_, err := r.db.Exec(`UPDATE support_messages SET read_at = now(), status = 'read' WHERE chat_id = $1 AND sender_id != $2 AND read_at IS NULL`, chatID, readerID)
+	return err
 }

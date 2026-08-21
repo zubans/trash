@@ -321,3 +321,162 @@ func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Reques
 
 	w.WriteHeader(http.StatusOK)
 }
+
+// GetUserSupportChatHandler returns or creates the support chat for current user.
+func (h *ChatHandler) GetUserSupportChatHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	chat, err := h.chatService.GetOrCreateSupportChat(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(chat)
+}
+
+// GetSupportMessagesHandler retrieves support messages.
+func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	chatIDStr := chi.URLParam(r, "chat_id")
+	chatID, err := uuid.Parse(chatIDStr)
+	if err != nil {
+		http.Error(w, "invalid chat ID", http.StatusBadRequest)
+		return
+	}
+
+	_ = h.chatService.MarkSupportMessagesAsRead(chatID, user.ID)
+	messages, err := h.chatService.GetSupportMessages(chatID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
+}
+
+// SendSupportMessageHandler posts text message to support chat.
+func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	chatIDStr := chi.URLParam(r, "chat_id")
+	chatID, err := uuid.Parse(chatIDStr)
+	if err != nil {
+		http.Error(w, "invalid chat ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	msg, err := h.chatService.SaveSupportMessage(chatID, user.ID, req.Text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(msg)
+}
+
+// UploadSupportAttachmentHandler uploads an attachment for support chat.
+func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	chatIDStr := chi.URLParam(r, "chat_id")
+	chatID, err := uuid.Parse(chatIDStr)
+	if err != nil {
+		http.Error(w, "invalid chat ID", http.StatusBadRequest)
+		return
+	}
+
+	r.ParseMultipartForm(10 << 20) // 10 MB limit
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "invalid file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ext := filepath.Ext(header.Filename)
+	fileName := fmt.Sprintf("support_%s_%d%s", chatID.String()[:8], time.Now().UnixNano(), ext)
+	uploadsDir := os.Getenv("UPLOADS_DIR")
+	if uploadsDir == "" {
+		uploadsDir = "/app/uploads"
+	}
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
+		return
+	}
+	dstPath := filepath.Join(uploadsDir, fileName)
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		http.Error(w, "failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "failed to write file", http.StatusInternalServerError)
+		return
+	}
+
+	fileURL := fmt.Sprintf("/uploads/%s", fileName)
+	fileType := "document"
+	mime := header.Header.Get("Content-Type")
+	if strings.HasPrefix(mime, "image/") {
+		fileType = "image"
+	}
+
+	text := r.FormValue("text")
+	msg, err := h.chatService.SaveSupportMessageWithAttachment(chatID, user.ID, text, fileURL, header.Filename, fileType, header.Size)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(msg)
+}
+
+// GetAdminSupportChatListHandler returns Telegram-style chat list for admin panel.
+func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil || user.Role != "ADMIN" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	list, err := h.chatService.GetAdminSupportChatList()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}

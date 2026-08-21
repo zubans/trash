@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -230,6 +231,27 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 	}
 	if shift.Status == repository.ShiftStatusPenalized {
 		return errors.New("executor is penalized")
+	}
+
+	balance, err := s.transactionRepo.GetBalance(executorID)
+	if err != nil {
+		return err
+	}
+	minBalanceLimit := 0.0
+	if s.settingsRepo != nil {
+		st, _ := s.settingsRepo.GetSettings()
+		if valStr, ok := st["min_balance_limit"]; ok {
+			if parsed, pErr := strconv.ParseFloat(valStr, 64); pErr == nil {
+				minBalanceLimit = parsed
+			}
+		}
+	}
+	// Limit is specified as negative threshold (e.g. -500.0 or 0.0)
+	if minBalanceLimit > 0 {
+		minBalanceLimit = -minBalanceLimit
+	}
+	if balance < minBalanceLimit {
+		return errors.New(fmt.Sprintf("нельзя брать новые заказы: баланс %.2f ниже допустимого лимита (%.2f)", balance, minBalanceLimit))
 	}
 
 	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(executorID)

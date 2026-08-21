@@ -147,7 +147,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, nil)
 
 	custID := uuid.New()
 	execID := uuid.New()

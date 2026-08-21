@@ -67,6 +67,17 @@
           required
         />
 
+        <!-- Min Balance Limit -->
+        <va-input
+          v-model="values.min_balance_limit"
+          type="number"
+          :label="$t('settings.minBalanceLimit')"
+          step="10"
+          min="0"
+          class="mb-4"
+          required
+        />
+
         <!-- Currency -->
         <va-select
           v-model="values.currency"
@@ -114,6 +125,7 @@ export default defineComponent({
       urgent_tariff_coeff: '3.0',
       asap_tariff_coeff: '8.0',
       geofence_fine_amount: '500',
+      min_balance_limit: '0',
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',
     })

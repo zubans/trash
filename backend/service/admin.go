@@ -331,6 +331,7 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 		"urgent_tariff_coeff":    true,
 		"asap_tariff_coeff":      true,
 		"geofence_fine_amount":   true,
+		"min_balance_limit":      true,
 	}
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,
