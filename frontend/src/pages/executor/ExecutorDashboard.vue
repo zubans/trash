@@ -546,6 +546,7 @@ import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick
 import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { Geolocation } from '@capacitor/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
@@ -863,16 +864,32 @@ export default defineComponent({
       }
     }
 
-    const updateCurrentPosition = (force = false) => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
+    const updateCurrentPosition = async (force = false) => {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const pos = await Geolocation.getCurrentPosition({
+            enableHighAccuracy: false,
+            timeout: 5000,
+            maximumAge: 30000,
+          })
+          if (pos && pos.coords) {
             currentLat.value = pos.coords.latitude
             currentLon.value = pos.coords.longitude
             if (force) fetchAvailableOrders()
-          },
-          (err) => console.warn(err)
-        )
+          }
+        } else if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              currentLat.value = pos.coords.latitude
+              currentLon.value = pos.coords.longitude
+              if (force) fetchAvailableOrders()
+            },
+            (err) => console.warn('[Geolocation web error]:', err),
+            { timeout: 5000, maximumAge: 30000 }
+          )
+        }
+      } catch (err) {
+        console.warn('[Geolocation native error]:', err)
       }
     }
 
