@@ -173,6 +173,11 @@ export default defineComponent({
           if (zone2kmCircle) zone2kmCircle.setLatLng([lat, lon])
           if (zone50kmCircle) zone50kmCircle.setLatLng([lat, lon])
           fetchMapOrders()
+        } else if (res.data && !res.data.success) {
+          alert(res.data.message || 'Ручное перемещение отклонено')
+          if (userMarker && res.data.lat && res.data.lon) {
+            userMarker.setLatLng([res.data.lat, res.data.lon])
+          }
         }
       } catch (err: any) {
         alert(err.response?.data?.message || err.response?.data || 'Ошибка изменения метки (10 мин кулдаун)')

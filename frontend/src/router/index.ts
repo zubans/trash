@@ -2,6 +2,12 @@ import { createRouter, createWebHistory, createWebHashHistory, RouteRecordRaw } 
 import { Capacitor } from '@capacitor/core'
 import { useAuthStore } from '../stores/auth-store'
 
+import LoginView from '../pages/auth/Login.vue'
+import CustomerDashboardV2View from '../pages/customer/CustomerDashboardV2.vue'
+import CustomerProfilePageView from '../pages/customer/CustomerProfilePage.vue'
+import ExecutorDashboardView from '../pages/executor/ExecutorDashboard.vue'
+import ExecutorProfilePageView from '../pages/executor/ExecutorProfilePage.vue'
+
 const routes: Array<RouteRecordRaw> = [
   {
     path: '/',
@@ -10,7 +16,7 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/login',
     name: 'login',
-    component: () => import('../pages/auth/Login.vue'),
+    component: LoginView,
     meta: { requiresGuest: true },
   },
   {
@@ -77,31 +83,31 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/customer',
     name: 'customer-dashboard',
-    component: () => import('../pages/customer/CustomerDashboardV2.vue'),
+    component: CustomerDashboardV2View,
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {
     path: '/customer/profile',
     name: 'customer-profile',
-    component: () => import('../pages/customer/CustomerProfilePage.vue'),
+    component: CustomerProfilePageView,
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {
     path: '/customer-v2',
     name: 'customer-dashboard-v2',
-    component: () => import('../pages/customer/CustomerDashboardV2.vue'),
+    component: CustomerDashboardV2View,
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {
     path: '/executor',
     name: 'executor-dashboard',
-    component: () => import('../pages/executor/ExecutorDashboard.vue'),
+    component: ExecutorDashboardView,
     meta: { requiresAuth: true, role: 'EXECUTOR' },
   },
   {
     path: '/executor/profile',
     name: 'executor-profile',
-    component: () => import('../pages/executor/ExecutorProfilePage.vue'),
+    component: ExecutorProfilePageView,
     meta: { requiresAuth: true, role: 'EXECUTOR' },
   },
   {
