@@ -19,7 +19,7 @@
       <!-- Сетка Профиль + Кошелек -->
       <div class="premium-grid">
         <!-- Компактный профиль -->
-        <div class="profile-card cursor-pointer" @click="showProfileModal = true">
+        <div class="profile-card cursor-pointer" @click="$router.push('/customer/profile')">
           <div class="avatar-wrap">
             <div class="avatar"><i class="ph ph-user"></i></div>
             <div class="status-dot"></div>
@@ -28,11 +28,11 @@
             <!-- Телефон + Галочка -->
             <div class="profile-phone-row">
               <div class="profile-phone">{{ formattedPhone || '7 920 705 07 07' }}</div>
-              <div class="verified-badge" title="Верифицирован">
+              <div v-if="isVerified" class="verified-badge" title="Верифицирован">
                 <i class="ph-fill ph-check-circle"></i>
               </div>
             </div>
-            <div class="badge-brand" @click.stop="showProfileModal = true">
+            <div class="badge-brand" @click.stop="$router.push('/customer/profile')">
               <i class="ph-fill ph-map-pin"></i> Мои адреса
             </div>
           </div>
@@ -358,7 +358,7 @@
       <CustomerProfileModal
         v-model="showProfileModal"
         v-model:new-address-input="newAddressInput"
-        :is-verified="true"
+        :is-verified="false"
         :user-email="userEmail"
         :customer-addresses="customerAddresses"
         :default-address="defaultAddress"
@@ -464,6 +464,15 @@ export default defineComponent({
     const showOrderDetailsModal = ref(false)
     const showTopUpModal = ref(false)
     const showProfileModal = ref(false)
+
+    watch([showCreateOrderModal, showOrderDetailsModal, showTopUpModal], (modalStates) => {
+      const isAnyModalOpen = modalStates.some(state => state === true)
+      if (isAnyModalOpen) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    })
     const selectedOrderDetails = ref<any>(null)
     const topUpAmount = ref<number>(100)
     const submitting = ref(false)

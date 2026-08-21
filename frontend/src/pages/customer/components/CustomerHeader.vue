@@ -31,12 +31,7 @@
               <h2 class="user-phone font-bold m-0 cursor-pointer" @click="$emit('openProfileModal')">
                 {{ phone }}
               </h2>
-            </div>
-            
-            <div class="d-flex align-items-center gap-2 mt-1">
-              <span v-if="isVerified" class="verified-status-tag d-inline-flex align-items-center gap-1">
-                <span class="check-dot">✓</span> Верифицирован
-              </span>
+              <i v-if="isVerified" class="ph-fill ph-check-circle text-emerald-500" style="font-size: 1.2rem; color: #10b981;" title="Верифицирован"></i>
             </div>
 
             <div class="mt-1">
@@ -74,7 +69,7 @@ export default defineComponent({
     phone: { type: String, default: '' },
     balance: { type: Number, default: 0 },
     currencySymbol: { type: String, default: '₽' },
-    isVerified: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: false },
   },
   emits: ['logout', 'openProfileModal', 'openTopUpModal'],
 })

@@ -10,13 +10,11 @@
 
         <!-- Phone & Info -->
         <div>
-          <div class="d-flex align-items-center gap-3">
+          <div class="d-flex align-items-center gap-2">
             <h2 class="user-phone font-bold m-0 cursor-pointer text-dark" @click="$emit('openProfileModal')">
               {{ phone }}
             </h2>
-            <span v-if="isVerified" class="verified-pill-badge">
-              Верифицирован
-            </span>
+            <i v-if="isVerified" class="ph-fill ph-check-circle" style="font-size: 1.2rem; color: #10b981;" title="Верифицирован"></i>
           </div>
 
           <div class="text-secondary text-sm mt-1">
@@ -79,7 +77,7 @@ export default defineComponent({
     phone: { type: String, default: '' },
     balance: { type: Number, default: 0 },
     currencySymbol: { type: String, default: '₽' },
-    isVerified: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: false },
   },
   emits: ['logout', 'openProfileModal', 'openTopUpModal'],
 })

@@ -81,7 +81,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed } from 'vue'
+import { defineComponent, ref, computed, watch } from 'vue'
 import { submitOrderReview } from '../../../api/review'
 
 export default defineComponent({
@@ -97,6 +97,14 @@ export default defineComponent({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
     })
+
+    watch(show, (val) => {
+      if (val) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    }, { immediate: true })
 
     const selectedRating = ref(5)
     const hoverRating = ref(0)

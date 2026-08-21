@@ -81,6 +81,12 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {
+    path: '/customer/profile',
+    name: 'customer-profile',
+    component: () => import('../pages/customer/CustomerProfilePage.vue'),
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
     path: '/customer-v2',
     name: 'customer-dashboard-v2',
     component: () => import('../pages/customer/CustomerDashboardV2.vue'),
@@ -90,6 +96,12 @@ const routes: Array<RouteRecordRaw> = [
     path: '/executor',
     name: 'executor-dashboard',
     component: () => import('../pages/executor/ExecutorDashboard.vue'),
+    meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    path: '/executor/profile',
+    name: 'executor-profile',
+    component: () => import('../pages/executor/ExecutorProfilePage.vue'),
     meta: { requiresAuth: true, role: 'EXECUTOR' },
   },
   {

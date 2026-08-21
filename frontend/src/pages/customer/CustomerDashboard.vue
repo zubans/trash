@@ -2,12 +2,12 @@
   <div class="customer-dashboard">
     <!-- Header: phone + balance -->
     <CustomerHeader
-      :phone="phone"
-      :balance="balance"
+      :phone="userPhone"
+      :balance="customerBalance"
       :currency-symbol="currencySymbol"
       :is-verified="isVerified"
-      @logout="handleLogout"
-      @open-profile-modal="showProfileModal = true"
+      @logout="logout"
+      @open-profile-modal="$router.push('/customer/profile')"
       @open-top-up-modal="showTopUpModal = true"
     />
 

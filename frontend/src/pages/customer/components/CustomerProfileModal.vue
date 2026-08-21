@@ -12,23 +12,7 @@
         </button>
       </div>
 
-      <!-- Verification Status Box -->
-      <div class="verification-box">
-        <i class="ph-fill ph-shield-check v-icon"></i>
-        <div class="v-content">
-          <div class="v-header">
-            <div class="v-title">
-              {{ isVerified ? 'Пользователь верифицирован' : 'Статус верификации' }}
-            </div>
-            <div class="v-badge">
-              {{ isVerified ? 'Подтвержден' : 'Не верифицирован' }}
-            </div>
-          </div>
-          <div class="v-desc">
-            {{ isVerified ? 'Ваш паспорт проверен администратором системы' : 'Для верификации передайте данные администратору' }}
-          </div>
-        </div>
-      </div>
+
       <!-- Email Management -->
       <div class="section-header">
         <div class="section-title">
@@ -139,7 +123,7 @@ export default defineComponent({
   name: 'CustomerProfileModal',
   props: {
     modelValue: { type: Boolean, required: true },
-    isVerified: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: false },
     userEmail: { type: String, default: '' },
     customerAddresses: { type: Array as () => any[], default: () => [] },
     defaultAddress: { type: String, default: '' },

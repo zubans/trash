@@ -35,7 +35,7 @@
       <!-- Сетка Профиль и Кошелек -->
       <div class="premium-grid">
         <!-- Компактный профиль исполнителя -->
-        <div class="profile-card clickable-profile" @click="showProfileModal = true">
+        <div class="profile-card clickable-profile" @click="$router.push('/executor/profile')">
           <div class="avatar-wrap">
             <div class="avatar"><i class="ph ph-user"></i></div>
             <div class="status-dot"></div>
@@ -43,7 +43,7 @@
           <div class="profile-info">
             <div class="profile-phone-row">
               <div class="profile-phone">{{ phone || '79997454656' }}</div>
-              <div class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
+              <div v-if="isVerified" class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
             </div>
             <div class="badge-brand"><i class="ph-fill ph-check-circle"></i> Статус: {{ status }}</div>
           </div>
@@ -703,6 +703,15 @@ export default defineComponent({
     const uploadingChatFile = ref(false)
     const showImagePreviewModal = ref(false)
     const previewImageUrl = ref('')
+
+    watch([showOrderDetailsModal, showReviewModal, showWithdrawalModal, showExecutorMapModal, showImagePreviewModal], (modalStates) => {
+      const isAnyModalOpen = modalStates.some(state => state === true)
+      if (isAnyModalOpen) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    })
 
     const currentUserId = computed(() => authStore.userID)
 

@@ -1,0 +1,469 @@
+<template>
+  <div class="profile-page-wrapper">
+    <div class="profile-container">
+      <!-- Top Navigation Header -->
+      <div class="top-nav">
+        <button type="button" class="btn-back" @click="goBack">
+          <i class="ph-bold ph-arrow-left"></i>
+          Вернуться на главную
+        </button>
+        <div class="page-header-title">
+          <i class="ph-fill ph-user-gear icon-title"></i>
+          Профиль исполнителя
+        </div>
+      </div>
+
+      <div class="profile-card">
+        <!-- Phone & Status Banner -->
+        <div class="user-phone-banner mb-4">
+          <div class="banner-avatar">
+            <i class="ph ph-user"></i>
+          </div>
+          <div class="banner-info">
+            <div class="banner-phone-row">
+              <span class="banner-phone">{{ phone || '7 999 745 46 56' }}</span>
+            </div>
+            <span class="banner-subtitle"><i class="ph-fill ph-check-circle" style="color: #10b981;"></i> Статус: {{ status || 'Активный' }}</span>
+          </div>
+        </div>
+
+        <!-- Email Management -->
+        <div class="section-header">
+          <div class="section-title">
+            <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
+            Электронная почта
+          </div>
+          <div class="section-subtitle">При изменении потребуется подтверждение</div>
+        </div>
+
+        <div class="email-box mb-4">
+          <div class="input-wrapper">
+            <input
+              v-model="emailInput"
+              type="email"
+              class="form-input"
+              placeholder="example@domain.com"
+            />
+            <button type="button" class="btn-save-email" :disabled="savingEmail || !emailInput || emailInput === currentEmail" @click="saveEmail">
+              <span v-if="savingEmail" class="spinner-sm"></span>
+              <template v-else>Сохранить</template>
+            </button>
+          </div>
+          <div v-if="emailMsg" class="email-msg-text" :class="{ error: emailMsgIsError }">
+            {{ emailMsg }}
+          </div>
+        </div>
+
+        <!-- Password Change Section -->
+        <div class="section-header">
+          <div class="section-title">
+            <i class="ph-fill ph-lock-key" style="color: #f59e0b;"></i>
+            Безопасность и пароль
+          </div>
+          <div class="section-subtitle">Смена пароля для входа в кабинет</div>
+        </div>
+
+        <div class="password-box mb-4">
+          <div class="form-group mb-3">
+            <label class="form-label">Текущий пароль</label>
+            <input v-model="oldPassword" type="password" class="form-input" placeholder="••••••••" />
+          </div>
+          <div class="form-group mb-3">
+            <label class="form-label">Новый пароль</label>
+            <input v-model="newPassword" type="password" class="form-input" placeholder="Не менее 6 символов" />
+          </div>
+          <div class="form-group mb-3">
+            <label class="form-label">Подтверждение нового пароля</label>
+            <input v-model="confirmPassword" type="password" class="form-input" placeholder="Повторите новый пароль" />
+          </div>
+          <button type="button" class="btn-save-email" :disabled="changingPassword || !oldPassword || !newPassword" @click="changePassword">
+            <span v-if="changingPassword" class="spinner-sm"></span>
+            <template v-else>Обновить пароль</template>
+          </button>
+          <div v-if="pwdMsg" class="email-msg-text" :class="{ error: pwdMsgIsError }">
+            {{ pwdMsg }}
+          </div>
+        </div>
+
+        <!-- Action Footer -->
+        <div class="profile-actions">
+          <button type="button" class="btn-back-home" @click="goBack">
+            <i class="ph-bold ph-house"></i>
+            Вернуться на главную
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script lang="ts">
+import { defineComponent, ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import api from '../../services/api'
+import { useAuthStore } from '../../stores/auth-store'
+
+export default defineComponent({
+  name: 'ExecutorProfilePage',
+  setup() {
+    const router = useRouter()
+    const authStore = useAuthStore()
+
+    const phone = ref('')
+    const status = ref('Активный')
+    const userEmail = ref('')
+    const emailInput = ref('')
+
+    const savingEmail = ref(false)
+    const emailMsg = ref('')
+    const emailMsgIsError = ref(false)
+
+    const oldPassword = ref('')
+    const newPassword = ref('')
+    const confirmPassword = ref('')
+    const changingPassword = ref(false)
+    const pwdMsg = ref('')
+    const pwdMsgIsError = ref(false)
+
+    const currentEmail = computed(() => userEmail.value)
+
+    const fetchUserProfile = async () => {
+      try {
+        const res = await api.get('/user/profile')
+        phone.value = res.data.phone || authStore.userPhone || ''
+        status.value = res.data.status || 'ACTIVE'
+        userEmail.value = res.data.email || ''
+        emailInput.value = userEmail.value
+      } catch (err) {
+        console.error('Failed to load executor profile:', err)
+      }
+    }
+
+    const saveEmail = async () => {
+      if (!emailInput.value || emailInput.value === userEmail.value || savingEmail.value) return
+      savingEmail.value = true
+      emailMsg.value = ''
+      emailMsgIsError.value = false
+      try {
+        await api.post('/user/email', { email: emailInput.value })
+        emailMsg.value = 'Ссылка для подтверждения отправлена на ' + emailInput.value + '. Почта изменится после перехода по ссылке.'
+      } catch (err: any) {
+        emailMsgIsError.value = true
+        emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
+      } finally {
+        savingEmail.value = false
+      }
+    }
+
+    const changePassword = async () => {
+      if (newPassword.value !== confirmPassword.value) {
+        pwdMsgIsError.value = true
+        pwdMsg.value = 'Пароли не совпадают'
+        return
+      }
+      changingPassword.value = true
+      pwdMsg.value = ''
+      pwdMsgIsError.value = false
+      try {
+        await api.post('/user/change-password', {
+          old_password: oldPassword.value,
+          new_password: newPassword.value
+        })
+        pwdMsg.value = 'Пароль успешно изменен'
+        oldPassword.value = ''
+        newPassword.value = ''
+        confirmPassword.value = ''
+      } catch (err: any) {
+        pwdMsgIsError.value = true
+        pwdMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка при смене пароля'
+      } finally {
+        changingPassword.value = false
+      }
+    }
+
+    const goBack = () => {
+      router.push('/executor')
+    }
+
+    const loadPhosphorIcons = () => {
+      if (!document.getElementById('phosphor-icons-script')) {
+        const script = document.createElement('script')
+        script.id = 'phosphor-icons-script'
+        script.src = 'https://unpkg.com/@phosphor-icons/web'
+        document.head.appendChild(script)
+      }
+    }
+
+    onMounted(() => {
+      loadPhosphorIcons()
+      fetchUserProfile()
+    })
+
+    return {
+      phone,
+      status,
+      userEmail,
+      emailInput,
+      savingEmail,
+      emailMsg,
+      emailMsgIsError,
+      oldPassword,
+      newPassword,
+      confirmPassword,
+      changingPassword,
+      pwdMsg,
+      pwdMsgIsError,
+      currentEmail,
+      saveEmail,
+      changePassword,
+      goBack
+    }
+  }
+})
+</script>
+
+<style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+.profile-page-wrapper {
+  min-height: 100vh;
+  background: #f8fafc;
+  font-family: 'Outfit', sans-serif;
+  padding: 32px 16px;
+  color: #334155;
+}
+
+.profile-container {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 10px 18px;
+  border-radius: 12px;
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+
+.btn-back:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: translateX(-2px);
+}
+
+.page-header-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-title {
+  font-size: 26px;
+  color: #6366f1;
+}
+
+.profile-card {
+  background: #ffffff;
+  border-radius: 24px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+  padding: 32px;
+}
+
+/* User phone banner */
+.user-phone-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #f1f5f9;
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.banner-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: #6366f1;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.banner-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.banner-phone-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.banner-phone {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.banner-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Section Header */
+.section-header {
+  margin-bottom: 14px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-subtitle {
+  font-size: 13px;
+  color: #8b98a5;
+  margin-top: 2px;
+}
+
+/* Email & Password Box */
+.email-box, .password-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.input-wrapper {
+  display: flex;
+  gap: 12px;
+}
+
+.form-input {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 15px;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.form-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.btn-save-email {
+  background: #6366f1;
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-save-email:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.btn-save-email:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.email-msg-text {
+  font-size: 13px;
+  color: #10b981;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.email-msg-text.error {
+  color: #ef4444;
+}
+
+.profile-actions {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-back-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-back-home:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+@media (max-width: 640px) {
+  .profile-card { padding: 20px; border-radius: 20px; }
+  .top-nav { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .input-wrapper { flex-direction: column; }
+  .btn-save-email { width: 100%; justify-content: center; }
+  .btn-back-home { width: 100%; justify-content: center; }
+}
+</style>

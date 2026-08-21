@@ -141,7 +141,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, onMounted } from 'vue'
+import { defineComponent, computed, onMounted, watch } from 'vue'
 
 export default defineComponent({
   name: 'CreateOrderModal',
@@ -203,9 +203,13 @@ export default defineComponent({
       }
     }
 
-    onMounted(() => {
-      loadPhosphorIcons()
-    })
+    watch(show, (val) => {
+      if (val) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    }, { immediate: true })
 
     return {
       show,

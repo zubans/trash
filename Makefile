@@ -151,11 +151,12 @@ release-android: build-android-release
 
 # Start backend, frontend and database via Docker Compose
 start:
-	@echo "Starting backend, frontend and database..."
+	@echo "Starting backend, frontend, strapi and database..."
 	$(call compose,up -d --build)
 	@echo "Services started."
 	@echo "  Backend:  https://localhost:8088"
 	@echo "  Frontend: https://localhost:8443"
+	@echo "  Strapi:   http://localhost:1337"
 
 # Start backend with Delve remote debugger, frontend and database via Docker Compose
 start-debug:
