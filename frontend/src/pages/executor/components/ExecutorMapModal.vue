@@ -3,8 +3,8 @@
     <div class="map-modal-card">
       <div class="map-modal-header">
         <div>
-          <h3 class="map-modal-title">Карта заказов (Зона 10 км)</h3>
-          <p class="map-modal-subtitle">Зеленый круг (2 км) — зона мгновенного взятия заказа</p>
+          <h3 class="map-modal-title">Редактирование местоположения и карта заказов</h3>
+          <p class="map-modal-subtitle">Кликните на карту за пределами круга 0.5 км, чтобы сменить рабочий район</p>
         </div>
         <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
           <i class="ph ph-x"></i>

@@ -18,6 +18,8 @@ export const apiUrl = resolveApiUrl()
 
 export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 
+export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 15) * 1000
+
 export function formatApiError(err: any, fallbackMessage: string): string {
   if (isDebug) {
     const baseURL = err.config?.baseURL || ''

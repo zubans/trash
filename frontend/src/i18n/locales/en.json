@@ -359,7 +359,8 @@
     "openNewShiftHint": "Select duration and open a new shift to receive orders",
     "openShift": "Open shift",
     "mapTitle": "Map (10km / 2km)",
-    "statusPill": "Status: {status}"
+    "statusPill": "Status: {status}",
+    "financialHistoryTitle": "Financial History & Orders"
   },
   "common": {
     "loading": "Loading...",

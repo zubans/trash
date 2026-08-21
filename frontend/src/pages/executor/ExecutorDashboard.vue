@@ -42,7 +42,9 @@
               <div class="profile-phone">{{ phone || '79997454656' }}</div>
               <div v-if="isVerified" class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
             </div>
-            <div class="badge-brand"><i class="ph-fill ph-check-circle"></i> Статус: {{ status }}</div>
+            <div class="badge-brand">
+              <i class="ph-fill ph-user font-bold"></i> Мой профиль
+            </div>
           </div>
         </div>
 
@@ -102,12 +104,6 @@
       <div>
         <div class="section-header">
           <h2 class="section-title">Назначенные заказы <span class="section-count">({{ activeAssignedOrders.length }})</span></h2>
-          <button type="button" class="btn-header-action" @click="showExecutorMapModal = true">
-            <i class="ph-bold ph-map-trifold"></i> 10км / 2км
-          </button>
-          <button type="button" class="btn-header-action btn-refresh" title="Обновить" @click="fetchAssignedOrders">
-            <i class="ph-bold ph-arrows-clockwise"></i>
-          </button>
         </div>
 
         <div v-if="activeAssignedOrders.length === 0" class="empty-state">
@@ -361,9 +357,6 @@
       <div>
         <div class="section-header">
           <h2 class="section-title">{{ $t('executor.nearbyOrders') }}</h2>
-          <button type="button" class="btn-header-action btn-refresh" title="Обновить" @click="updateCurrentPosition(true)">
-            <i class="ph-bold ph-arrows-clockwise"></i>
-          </button>
         </div>
 
         <div class="list-item-compact" style="margin-bottom: 8px;">
@@ -375,8 +368,8 @@
             </div>
           </div>
           <div class="item-actions">
-            <button type="button" class="btn-action" style="background: #f1f5f9; color: var(--text-muted);" :title="$t('common.save')" @click="openMapPicker">
-              <i class="ph-bold ph-pencil-simple"></i>
+            <button type="button" class="btn-map-edit" title="Редактировать местоположение и открыть карту" @click="openMapPicker">
+              <i class="ph-bold ph-map-trifold"></i> Карта и локация
             </button>
           </div>
         </div>
@@ -560,7 +553,7 @@ import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
-import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceVariants, type ServiceNode } from '../../api/services'
@@ -621,7 +614,7 @@ export default defineComponent({
     const availableOrders = ref<any[]>([])
     const executorHistoryOrders = ref<any[]>([])
     const executorReviewsMap = ref<Record<string, OrderReview>>({})
-    const isHistoryCollapsed = ref(false)
+    const isHistoryCollapsed = ref(true)
 
     const activeAssignedOrders = computed(() =>
       assignedOrders.value.filter((o) => o.status === 'ASSIGNED')
@@ -1266,7 +1259,7 @@ export default defineComponent({
         fetchActiveShift()
         fetchAssignedOrders()
         fetchAvailableOrders()
-      }, 5000)
+      }, pollIntervalMs)
     })
 
     onUnmounted(() => {
@@ -1834,6 +1827,27 @@ export default defineComponent({
 .btn-map-trigger:hover {
   border-color: var(--accent-main);
   color: var(--accent-main);
+}
+
+.btn-map-edit {
+  background: var(--brand-light, #eef2ff);
+  color: var(--brand-primary, #5c60f5);
+  border: 1px solid rgba(92, 96, 245, 0.2);
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: var(--transition, all 0.2s ease);
+}
+
+.btn-map-edit:hover {
+  background: var(--brand-primary, #5c60f5);
+  color: #ffffff;
 }
 
 /* --- Section Container --- */

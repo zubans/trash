@@ -396,7 +396,7 @@ import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
-import api, { buildChatWebSocketUrl, resolveFileUrl } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -1135,7 +1135,7 @@ export default defineComponent({
       intervalId = setInterval(() => {
         fetchProfile()
         fetchOrders()
-      }, 5000)
+      }, pollIntervalMs)
     })
 
     onUnmounted(() => {
