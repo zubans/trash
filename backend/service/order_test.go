@@ -90,6 +90,26 @@ func (m *mockOrderRepo) AssignOrder(orderID uuid.UUID, executorID uuid.UUID) err
 	return errors.New("not found")
 }
 
+func (m *mockOrderRepo) CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error) {
+	var count int
+	for _, o := range m.orders {
+		if o.ExecutorID != nil && *o.ExecutorID == executorID && (o.Status == repository.OrderStatusAssigned || o.Status == "ASSIGNED") {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockOrderRepo) CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error) {
+	var count int
+	for _, o := range m.orders {
+		if o.ExecutorID != nil && *o.ExecutorID == executorID && (o.Status == repository.OrderStatusExecuted || o.Status == "EXECUTED") {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *mockOrderRepo) GetExecutorAssignedOrders(executorID uuid.UUID) ([]*repository.Order, error) {
 	var assigned []*repository.Order
 	for _, o := range m.orders {
@@ -580,5 +600,57 @@ func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 				t.Errorf("expected final amount 100.0 after downgrade, got %f", o.FinalAmount)
 			}
 		}
+	}
+}
+
+func TestOrderService_AcceptLimits(t *testing.T) {
+	orderRepo := &mockOrderRepo{}
+	shiftRepo := &orderMockShiftRepo{}
+	catalog := newMockCatalogRepo()
+	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), shiftRepo, nil, catalog, nil)
+
+	executorID := uuid.New()
+
+	// Test 3 active orders limit
+	for i := 0; i < 3; i++ {
+		oID := uuid.New()
+		orderRepo.orders = append(orderRepo.orders, &repository.Order{
+			ID:         oID,
+			ExecutorID: &executorID,
+			Status:     repository.OrderStatusAssigned,
+		})
+	}
+
+	newOrderID := uuid.New()
+	orderRepo.orders = append(orderRepo.orders, &repository.Order{
+		ID:     newOrderID,
+		Status: repository.OrderStatusSearching,
+	})
+
+	err := srv.Accept(newOrderID, executorID)
+	if err == nil || err.Error() != "превышен лимит активных заказов (не более 3)" {
+		t.Errorf("expected active orders limit error, got: %v", err)
+	}
+
+	// Reset assigned orders and test 6 executed unconfirmed limit
+	orderRepo.orders = nil
+	for i := 0; i < 6; i++ {
+		oID := uuid.New()
+		orderRepo.orders = append(orderRepo.orders, &repository.Order{
+			ID:         oID,
+			ExecutorID: &executorID,
+			Status:     repository.OrderStatusExecuted,
+		})
+	}
+
+	newOrderID2 := uuid.New()
+	orderRepo.orders = append(orderRepo.orders, &repository.Order{
+		ID:     newOrderID2,
+		Status: repository.OrderStatusSearching,
+	})
+
+	err2 := srv.Accept(newOrderID2, executorID)
+	if err2 == nil || err2.Error() != "превышен лимит непотвержденных заказчиком исполненных заказов (не более 6)" {
+		t.Errorf("expected executed unconfirmed orders limit error, got: %v", err2)
 	}
 }

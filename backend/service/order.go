@@ -231,6 +231,23 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 	if shift.Status == repository.ShiftStatusPenalized {
 		return errors.New("executor is penalized")
 	}
+
+	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(executorID)
+	if err != nil {
+		return err
+	}
+	if activeCount >= 3 {
+		return errors.New("превышен лимит активных заказов (не более 3)")
+	}
+
+	executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(executorID)
+	if err != nil {
+		return err
+	}
+	if executedCount >= 6 {
+		return errors.New("превышен лимит непотвержденных заказчиком исполненных заказов (не более 6)")
+	}
+
 	return s.orderRepo.Assign(orderID, executorID)
 }
 

@@ -852,7 +852,8 @@ export default defineComponent({
         await fetchAssignedOrders()
         await fetchAvailableOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка принятия заказа'
+        const rawErr = err.response?.data
+        errorMsg.value = typeof rawErr === 'string' ? rawErr : (rawErr?.error || 'Ошибка принятия заказа')
       }
     }
 

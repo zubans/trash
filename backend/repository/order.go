@@ -61,6 +61,8 @@ type OrderRepository interface {
 	Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
 	Cancel(orderID uuid.UUID) error
 	Unassign(orderID uuid.UUID) error
+	CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error)
+	CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error)
 
 	// Legacy/test-compatible methods
 	CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*Order, error)
@@ -423,4 +425,22 @@ func (r *orderRepo) GetAvailableAuctionOrders() ([]*Order, error) {
 		orders = append(orders, &o)
 	}
 	return orders, rows.Err()
+}
+
+func (r *orderRepo) CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'ASSIGNED'`,
+		executorID,
+	).Scan(&count)
+	return count, err
+}
+
+func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'EXECUTED'`,
+		executorID,
+	).Scan(&count)
+	return count, err
 }

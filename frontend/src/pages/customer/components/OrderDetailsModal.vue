@@ -1,63 +1,65 @@
 <template>
   <div v-if="show" class="modal-overlay" @click.self="show = false">
     <div class="modal-card">
-      <!-- Шапка карточки -->
-      <div class="modal-header">
-        <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
-          <i class="ph ph-x"></i>
-        </button>
-        <div class="overline">Карточка заказа</div>
-        <div v-if="selectedOrderDetails" class="order-title-row">
-          <div class="order-id">#{{ selectedOrderDetails.id }}</div>
-          <div :class="['status-badge', getStatusBadgeClass(selectedOrderDetails.status)]">
-            {{ selectedOrderDetails.status }}
-          </div>
-        </div>
-      </div>
+      <!-- Кнопка закрытия -->
+      <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
+        <i class="ph ph-x"></i>
+      </button>
 
-      <div v-if="selectedOrderDetails">
-        <!-- Сетка деталей заказа -->
-        <div class="details-grid">
-          <div class="detail-item">
-            <div class="detail-label">{{ $t('customer.orderType') }}</div>
-            <div class="detail-value">{{ formatOrderType(selectedOrderDetails) }}</div>
+      <div v-if="selectedOrderDetails" class="modal-body-content">
+        <!-- 1. Название, Статус и Цена -->
+        <div class="order-header">
+          <div class="title-row">
+            <h1 class="main-title">{{ getCategoryTitle(selectedOrderDetails) }}</h1>
+            <span :class="['status-pill', getStatusBadgeClass(selectedOrderDetails.status)]">
+              {{ selectedOrderDetails.status }}
+            </span>
           </div>
-          
-          <div class="detail-item">
-            <div class="detail-label">{{ $t('customer.created') }}</div>
-            <div class="detail-value">{{ formatDateFull(selectedOrderDetails.created_at) }}</div>
-          </div>
-
-          <div v-if="selectedOrderDetails.assigned_at" class="detail-item">
-            <div class="detail-label">{{ $t('customer.assignedAt') }}</div>
-            <div class="detail-value">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</div>
-          </div>
-
-          <div v-if="selectedOrderDetails.completed_at" class="detail-item">
-            <div class="detail-label">{{ $t('customer.completedAt') }}</div>
-            <div class="detail-value">{{ formatDateFull(selectedOrderDetails.completed_at) }}</div>
-          </div>
-
-          <div v-if="selectedOrderDetails.canceled_at" class="detail-item">
-            <div class="detail-label">{{ $t('customer.canceledAt') }}</div>
-            <div class="detail-value">{{ formatDateFull(selectedOrderDetails.canceled_at) }}</div>
-          </div>
-
-          <div v-if="selectedOrderDetails.address" class="detail-item full-width">
-            <div class="detail-label">{{ $t('customer.pickupAddress') }}</div>
-            <div class="detail-value">{{ selectedOrderDetails.address }}</div>
-          </div>
-
-          <div class="detail-item full-width">
-            <div class="detail-label">{{ $t('customer.totalAmount') }}</div>
-            <div class="detail-value price-value">
+          <div class="meta-row">
+            <div class="order-type">
+              <i class="ph-fill ph-package"></i> {{ getVariantTitle(selectedOrderDetails) }}
+            </div>
+            <div class="order-price">
               {{ Number(selectedOrderDetails.final_amount || selectedOrderDetails.hold_amount).toFixed(2) }} {{ currencySymbol }}
             </div>
           </div>
         </div>
 
+        <div class="divider"></div>
+
+        <!-- 2. Даты в одну строку (grid 1fr 1fr) -->
+        <div class="dates-grid">
+          <div class="date-block">
+            <span class="label">{{ $t('customer.created') }}</span>
+            <span class="value">{{ formatDateFull(selectedOrderDetails.created_at) }}</span>
+          </div>
+          <div v-if="selectedOrderDetails.assigned_at" class="date-block">
+            <span class="label">{{ $t('customer.assignedAt') }}</span>
+            <span class="value">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</span>
+          </div>
+          <div v-else-if="selectedOrderDetails.completed_at" class="date-block">
+            <span class="label">{{ $t('customer.completedAt') }}</span>
+            <span class="value">{{ formatDateFull(selectedOrderDetails.completed_at) }}</span>
+          </div>
+          <div v-else-if="selectedOrderDetails.canceled_at" class="date-block">
+            <span class="label">{{ $t('customer.canceledAt') }}</span>
+            <span class="value">{{ formatDateFull(selectedOrderDetails.canceled_at) }}</span>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 3. Адрес -->
+        <div v-if="selectedOrderDetails.address" class="address-block">
+          <span class="label">{{ $t('customer.pickupAddress') }}</span>
+          <div class="address-content">
+            <i class="ph-fill ph-map-pin address-icon"></i>
+            <span class="address-text">{{ selectedOrderDetails.address }}</span>
+          </div>
+        </div>
+
         <!-- Блок отзыва (если уже проставлен) -->
-        <div v-if="existingReview" class="review-display-box">
+        <div v-if="existingReview" class="review-display-box mt-3">
           <div class="review-display-header">
             <div class="review-stars">
               <i
@@ -78,59 +80,50 @@
           </div>
         </div>
 
-        <!-- Блок исполнителя -->
-        <div class="executor-box">
-          <div class="executor-icon">
-            <i class="ph-fill ph-user"></i>
-          </div>
-          <div class="executor-info">
-            <div class="executor-title">{{ $t('customer.executorDetails') }}</div>
-            <div v-if="selectedOrderDetails.executor_id || selectedOrderDetails.executor_name" class="executor-details">
-              <div v-if="selectedOrderDetails.executor_name" class="executor-name font-bold">
-                👤 {{ selectedOrderDetails.executor_name }}
-              </div>
-              <div v-if="selectedOrderDetails.executor_id" class="executor-id text-xs text-muted">
-                ID: {{ selectedOrderDetails.executor_id }}
-              </div>
+        <!-- 4. Исполнитель (Компактная карточка) -->
+        <div class="executor-card">
+          <div class="exec-left">
+            <div class="exec-avatar">
+              <i class="ph-fill ph-user"></i>
             </div>
-            <div v-else class="executor-status">
-              {{ $t('customer.notAssigned') }}
+            <div class="exec-info">
+              <span class="exec-label">{{ $t('customer.executorDetails') }}</span>
+              <span class="exec-name">
+                {{ selectedOrderDetails.executor_name || $t('customer.notAssigned') }}
+              </span>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Футер -->
-      <div class="modal-footer">
-        <button
-          v-if="selectedOrderDetails && role === 'CUSTOMER' && (selectedOrderDetails.status === 'SEARCHING' || selectedOrderDetails.status === 'ASSIGNED')"
-          type="button"
-          class="btn-danger-action"
-          @click="confirmCancelOrder"
-        >
-          <i class="ph ph-trash"></i> Отменить заказ
-        </button>
-        <button
-          v-if="selectedOrderDetails && role === 'EXECUTOR' && selectedOrderDetails.status === 'ASSIGNED'"
-          type="button"
-          class="btn-danger-action"
-          @click="confirmRejectOrder"
-        >
-          <i class="ph ph-x-circle"></i> Отказаться от заказа
-        </button>
-        <button
-          v-if="selectedOrderDetails && selectedOrderDetails.status === 'COMPLETED'"
-          type="button"
-          :class="['btn-review-action', { disabled: hasReviewed }]"
-          :disabled="hasReviewed"
-          @click="!hasReviewed && $emit('open-review-modal', selectedOrderDetails)"
-        >
-          <i class="ph-fill ph-star"></i>
-          {{ hasReviewed ? 'Оценка выставлена' : 'Оценить выполнение' }}
-        </button>
-        <button type="button" class="btn-cancel" @click="show = false">
-          {{ $t('common.close') }}
-        </button>
+        <!-- Действия / кнопки -->
+        <div class="modal-actions-row">
+          <button
+            v-if="role === 'CUSTOMER' && (selectedOrderDetails.status === 'SEARCHING' || selectedOrderDetails.status === 'ASSIGNED')"
+            type="button"
+            class="btn-danger-action"
+            @click="confirmCancelOrder"
+          >
+            <i class="ph ph-trash"></i> Отменить заказ
+          </button>
+          <button
+            v-if="role === 'EXECUTOR' && selectedOrderDetails.status === 'ASSIGNED'"
+            type="button"
+            class="btn-danger-action"
+            @click="confirmRejectOrder"
+          >
+            <i class="ph ph-x-circle"></i> Отказаться от заказа
+          </button>
+          <button
+            v-if="selectedOrderDetails.status === 'COMPLETED'"
+            type="button"
+            :class="['btn-review-action', { disabled: hasReviewed }]"
+            :disabled="hasReviewed"
+            @click="!hasReviewed && $emit('open-review-modal', selectedOrderDetails)"
+          >
+            <i class="ph-fill ph-star"></i>
+            {{ hasReviewed ? 'Оценка выставлена' : 'Оценить выполнение' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -224,8 +217,27 @@ export default defineComponent({
       }
     }
 
+    const getCategoryTitle = (order: any) => {
+      if (!order) return 'Вывоз мусора'
+      const formatted = props.formatOrderType(order)
+      if (typeof formatted === 'string' && formatted.includes('(')) {
+        return formatted.split('(')[0].trim()
+      }
+      return 'Вывоз мусора'
+    }
+
+    const getVariantTitle = (order: any) => {
+      if (!order) return 'Услуга'
+      const formatted = props.formatOrderType(order)
+      if (typeof formatted === 'string' && formatted.includes('(')) {
+        const match = formatted.match(/\(([^)]+)\)/)
+        if (match && match[1]) return match[1].trim()
+      }
+      return formatted
+    }
+
     onMounted(() => {
-      // Phosphor icons are loaded globally in index.html
+      // Phosphor icons loaded globally
     })
 
     return {
@@ -235,35 +247,36 @@ export default defineComponent({
       confirmCancelOrder,
       confirmRejectOrder,
       getStatusBadgeClass,
+      getCategoryTitle,
+      getVariantTitle,
     }
   },
 })
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
 
 .modal-overlay {
-  --bg-base: #f8f9fa;
-  --surface-card: rgba(255, 255, 255, 0.85);
-  --surface-input: rgba(255, 255, 255, 0.6);
+  --bg-body: #e2e8f0;
+  --surface-card: #ffffff;
   
-  --text-title: #0f172a;
-  --text-body: #334155;
-  --text-muted: #8b98a5;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
   
-  --accent-main: #6366f1;
-  --accent-glow: rgba(99, 102, 241, 0.4);
+  --brand-primary: #5c60f5;
+  --brand-light: #eef2ff;
   
-  --rad-sm: 12px;
-  --rad-md: 20px;
-  --rad-lg: 32px;
+  --success-main: #10b981;
+  --success-bg: #ecfdf5;
   
-  --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
-                  0 1px 3px rgba(15, 23, 42, 0.05),
-                  inset 0 1px 0 rgba(255,255,255,1);
+  --info-main: #0ea5e9;
+  --info-bg: #e0f2fe;
   
-  --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  --rad-md: 16px;
+  --rad-lg: 24px;
+  
+  --transition: all 0.2s ease-in-out;
 
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -273,270 +286,234 @@ export default defineComponent({
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px;
   z-index: 1050;
   font-family: 'Outfit', sans-serif;
-  color: var(--text-body);
+  color: var(--text-main);
 }
 
 .modal-card {
   background: var(--surface-card);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: var(--rad-lg);
   width: 100%;
-  max-width: 520px;
-  box-shadow: var(--shadow-float);
-  padding: 32px;
+  max-width: 400px;
+  padding: 24px 20px;
+  box-shadow: 0 20px 40px -10px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   position: relative;
-  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   max-height: 90vh;
   overflow-y: auto;
+  animation: slideUp 0.3s ease-out;
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* Header */
-.modal-header {
-  margin-bottom: 24px;
-  position: relative;
-}
-
+/* Кнопка закрытия */
 .btn-close {
   position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.8);
-  background: rgba(255,255,255,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  color: var(--text-muted);
-  cursor: pointer;
+  top: 16px; right: 16px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #f8fafc; border: 1px solid rgba(0,0,0,0.05);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; color: var(--text-muted); cursor: pointer;
   transition: var(--transition);
+  z-index: 10;
 }
 
 .btn-close:hover {
-  background: #ffffff;
+  background: #f1f5f9;
   color: #ef4444;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  transform: rotate(90deg);
 }
 
-.overline {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent-main);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
-}
-
-.order-title-row {
+.modal-body-content {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.order-id {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-title);
-  word-break: break-all;
-  line-height: 1.3;
-  font-family: monospace;
-  background: rgba(15, 23, 42, 0.04);
-  padding: 4px 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.05);
+/* --- 1. Шапка (Название, Статус, Цена) --- */
+.order-header {
+  display: flex; flex-direction: column; gap: 8px;
+  padding-right: 32px; /* Место под крестик */
 }
 
-.status-badge {
-  padding: 6px 12px;
-  border-radius: 99px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+.title-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+
+.main-title {
+  font-size: 20px; font-weight: 700; color: var(--text-main); line-height: 1.2; letter-spacing: -0.5px;
+}
+
+.status-pill {
+  padding: 4px 10px; border-radius: 99px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
 }
 
 .status-searching {
-  background: rgba(245, 158, 11, 0.1);
-  color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.2);
-}
-
-.status-searching::before {
-  content: '';
-  display: block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 1.5s infinite;
+  background: #fef3c7; color: #d97706;
 }
 
 .status-assigned {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4f46e5;
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: #e0e7ff; color: #4f46e5;
 }
 
 .status-executed {
-  background: rgba(14, 165, 233, 0.1);
-  color: #0284c7;
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: var(--info-bg); color: var(--info-main);
 }
 
 .status-completed {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: var(--success-bg); color: var(--success-main);
 }
 
 .status-canceled {
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: #fef2f2; color: #ef4444;
 }
 
 .status-default {
-  background: rgba(148, 163, 184, 0.1);
-  color: #475569;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #f1f5f9; color: #64748b;
 }
 
-@keyframes pulse {
-  0% { opacity: 1; }
-  50% { opacity: 0.4; }
-  100% { opacity: 1; }
+.meta-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 4px;
 }
 
-/* Details Grid */
-.details-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-bottom: 28px;
+.order-type {
+  font-size: 14px; font-weight: 500; color: var(--text-muted);
+  display: flex; align-items: center; gap: 6px;
 }
 
-.detail-item.full-width {
-  grid-column: 1 / -1;
+.order-price {
+  font-size: 20px; font-weight: 700; color: var(--brand-primary);
+  font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px;
 }
 
-.detail-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+/* --- Разделитель --- */
+.divider {
+  height: 1px; background: rgba(0,0,0,0.06); width: 100%;
 }
 
-.detail-value {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-title);
-  line-height: 1.4;
+/* --- 2. Даты (В одну строку) --- */
+.dates-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
 }
 
-.price-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--accent-main);
+.date-block { display: flex; flex-direction: column; gap: 4px; }
+.label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.value { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-main); }
+
+/* --- 3. Адрес --- */
+.address-block { display: flex; flex-direction: column; gap: 6px; }
+.address-content {
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.address-icon {
+  color: var(--brand-primary); font-size: 18px; margin-top: 2px;
+}
+.address-text {
+  font-size: 14px; font-weight: 500; color: var(--text-main); line-height: 1.4;
 }
 
-/* Executor Box */
-.executor-box {
-  background: rgba(15, 23, 42, 0.02);
-  border: 1px dashed rgba(15, 23, 42, 0.15);
+/* --- 4. Информация об исполнителе (Компактная) --- */
+.executor-card {
+  background: #f8fafc; border: 1px solid rgba(0,0,0,0.06);
+  border-radius: var(--rad-md); padding: 12px 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+
+.exec-left { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+
+.exec-avatar {
+  width: 40px; height: 40px; border-radius: 12px;
+  background: #e2e8f0; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+}
+
+.exec-info { display: flex; flex-direction: column; overflow: hidden; }
+.exec-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;}
+.exec-name { font-size: 15px; font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Review Display Box */
+.review-display-box {
+  background: #f8fafc;
+  border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: var(--rad-md);
-  padding: 20px;
-  margin-bottom: 32px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  padding: 12px 16px;
 }
 
-.executor-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: rgba(15, 23, 42, 0.05);
-  color: #94a3b8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-}
-
-.executor-info {
-  flex: 1;
-}
-
-.executor-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-title);
-  margin-bottom: 2px;
-}
-
-.executor-status {
-  font-size: 14px;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.executor-details {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-title);
-}
-
-.executor-phone {
-  color: var(--accent-main);
-}
-
-.executor-id {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-/* Footer */
-.modal-footer {
+.review-display-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  border-top: 1px solid rgba(0,0,0,0.06);
-  padding-top: 24px;
+  margin-bottom: 6px;
+}
+
+.review-stars {
+  display: flex;
+  gap: 4px;
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.review-stars .ph-star.active {
+  color: #f59e0b;
+}
+
+.review-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.review-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.review-tag-badge {
+  background: #ffffff;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: #4f46e5;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+.review-comment-text {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-main);
+  line-height: 1.4;
+}
+
+/* Действия */
+.modal-actions-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .btn-danger-action {
-  padding: 14px 20px;
-  border-radius: 14px;
-  background: rgba(239, 68, 68, 0.1);
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #fef2f2;
   color: #ef4444;
   border: 1px solid rgba(239, 68, 68, 0.2);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   transition: var(--transition);
 }
@@ -544,28 +521,27 @@ export default defineComponent({
 .btn-danger-action:hover {
   background: #ef4444;
   color: #ffffff;
-  box-shadow: 0 8px 20px -4px rgba(239, 68, 68, 0.4);
 }
 
 .btn-review-action {
-  padding: 14px 20px;
-  border-radius: 14px;
-  background: #eef2ff;
-  color: #4f46e5;
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  font-size: 15px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--brand-light);
+  color: var(--brand-primary);
+  border: 1px solid rgba(92, 96, 245, 0.2);
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   transition: var(--transition);
 }
 
 .btn-review-action:hover:not(.disabled) {
-  background: #6366f1;
+  background: var(--brand-primary);
   color: #ffffff;
-  box-shadow: 0 8px 20px -4px rgba(99, 102, 241, 0.4);
 }
 
 .btn-review-action.disabled {
@@ -574,102 +550,5 @@ export default defineComponent({
   border-color: #e2e8f0;
   cursor: not-allowed;
   opacity: 0.8;
-}
-
-/* Review Display Box */
-.review-display-box {
-  background: linear-gradient(135deg, rgba(238, 242, 255, 0.6), rgba(243, 244, 246, 0.8));
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 20px;
-  padding: 16px 20px;
-  margin-bottom: 20px;
-}
-
-.review-display-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.review-stars {
-  display: flex;
-  gap: 4px;
-  color: #cbd5e1;
-  font-size: 16px;
-}
-
-.review-stars .ph-star.active {
-  color: #f59e0b;
-}
-
-.review-date {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.review-tags-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.review-tag-badge {
-  background: #ffffff;
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  color: #4f46e5;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 99px;
-}
-
-.review-comment-text {
-  font-size: 14px;
-  font-style: italic;
-  color: var(--text-title);
-  line-height: 1.4;
-}
-
-.btn-cancel {
-  padding: 14px 28px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.05);
-  color: var(--text-body);
-  border: none;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.btn-cancel:hover {
-  background: rgba(15, 23, 42, 0.1);
-  color: var(--text-title);
-}
-
-@media (max-width: 480px) {
-  .modal-card {
-    padding: 24px;
-    border-radius: 28px;
-  }
-  .order-title-row {
-    flex-direction: column;
-    gap: 12px;
-  }
-  .details-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-  .modal-footer {
-    justify-content: stretch;
-  }
-  .btn-cancel {
-    width: 100%;
-  }
-  .order-id {
-    font-size: 14px;
-  }
 }
 </style>
