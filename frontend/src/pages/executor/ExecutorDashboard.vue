@@ -251,8 +251,8 @@
             :key="order.id"
             :class="['order-row', { 'chat-open': selectedChatOrder && selectedChatOrder.id === order.id }]"
           >
-            <div class="order-summary list-item-compact review cursor-pointer" @click="toggleChat(order)">
-              <div class="item-left-group">
+            <div class="order-summary list-item-compact review">
+              <div class="item-left-group cursor-pointer" @click="openOrderDetails(order)">
                 <div class="item-icon"><i class="ph-fill ph-hourglass-high"></i></div>
                 <div class="item-text-stack">
                   <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
