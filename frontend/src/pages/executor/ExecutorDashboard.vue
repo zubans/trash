@@ -17,16 +17,35 @@
         </div>
       </header>
 
-      <!-- Уведомления -->
-      <div v-if="successMsg" class="toast-alert success">
-        <i class="ph-fill ph-check-circle"></i>
-        <span>{{ successMsg }}</span>
-        <button class="btn-toast-close" @click="successMsg = ''">&times;</button>
-      </div>
-      <div v-if="errorMsg" class="toast-alert danger">
-        <i class="ph-fill ph-warning-circle"></i>
-        <span>{{ errorMsg }}</span>
-        <button class="btn-toast-close" @click="errorMsg = ''">&times;</button>
+      <!-- Toast Notifications Container -->
+      <div class="toast-container">
+        <!-- Success Toast -->
+        <div v-if="successMsg" class="toast success">
+          <div class="toast-icon">
+            <i class="ph-bold ph-check"></i>
+          </div>
+          <div class="toast-content">
+            <div class="toast-title">Успешно</div>
+            <div class="toast-message">{{ successMsg }}</div>
+          </div>
+          <button type="button" class="toast-close" @click="successMsg = ''">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <!-- Error Toast -->
+        <div v-if="errorMsg" class="toast error">
+          <div class="toast-icon">
+            <i class="ph-bold ph-warning"></i>
+          </div>
+          <div class="toast-content">
+            <div class="toast-title">Ошибка</div>
+            <div class="toast-message">{{ errorMsg }}</div>
+          </div>
+          <button type="button" class="toast-close" @click="errorMsg = ''">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
       </div>
 
       <!-- Сетка Профиль и Кошелек -->
@@ -1412,6 +1431,111 @@ export default defineComponent({
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+/* Toast Notifications Styles */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  padding: 16px 20px;
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.15),
+              inset 0 1px 0 rgba(255, 255, 255, 1);
+  position: relative;
+  overflow: hidden;
+  animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.toast.success::before { background: var(--success-main, #10b981); }
+.toast.success .toast-icon { 
+  color: var(--success-main, #10b981); 
+  background: rgba(16, 185, 129, 0.1); 
+}
+
+.toast.error::before { background: #ef4444; }
+.toast.error .toast-icon { 
+  color: #ef4444; 
+  background: rgba(239, 68, 68, 0.1); 
+}
+
+.toast-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.toast-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-title, #0f172a);
+  margin-bottom: 2px;
+}
+
+.toast-message {
+  font-size: 13px;
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: var(--text-muted, #94a3b8);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.toast-close:hover {
+  color: var(--text-title, #0f172a);
 }
 
 .logo-text {
