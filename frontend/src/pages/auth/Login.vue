@@ -617,6 +617,9 @@ export default defineComponent({
       onPhoneKeydown,
       email,
       password,
+      lastName,
+      firstName,
+      patronymic,
       role,
       address,
       flatNumber,
@@ -637,7 +640,7 @@ export default defineComponent({
       resetLoading,
       openForgotModal,
       requestResetCode,
-      submitNewPassword,
+      resetPasswordWithCode,
     }
   },
 })
