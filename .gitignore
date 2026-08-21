@@ -1,3 +1,7 @@
+# Node & Dependencies
+node_modules/
+strapi-backend/
+
 # Self-signed certificates for local HTTPS development
 /certs/
 
