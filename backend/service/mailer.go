@@ -66,6 +66,8 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 	}
 
 	addr := fmt.Sprintf("%s:%s", m.host, m.port)
+	log.Printf("[SmtpMailSender] Attempting to send email via SMTP addr=%s, from=%s, to=%s", addr, m.from, to)
+
 	msg := []byte(fmt.Sprintf("From: %s\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
@@ -81,37 +83,47 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 
 	// Standard dial & send attempt
 	err := smtp.SendMail(addr, auth, m.from, []string{to}, msg)
-	if err != nil && (strings.Contains(err.Error(), "unencrypted connection") || strings.Contains(err.Error(), "short response") || strings.Contains(err.Error(), "535")) {
-		// Fallback for unencrypted internal Docker SMTP / relay without strict auth requirements
-		c, dialErr := smtp.Dial(addr)
-		if dialErr != nil {
-			return dialErr
-		}
-		defer c.Close()
+	if err != nil {
+		log.Printf("[SmtpMailSender] smtp.SendMail failed: %v. Attempting fallback dial...", err)
+		if strings.Contains(err.Error(), "unencrypted connection") || strings.Contains(err.Error(), "short response") || strings.Contains(err.Error(), "535") || strings.Contains(err.Error(), "103") {
+			c, dialErr := smtp.Dial(addr)
+			if dialErr != nil {
+				log.Printf("[SmtpMailSender] Fallback smtp.Dial failed: %v", dialErr)
+				return dialErr
+			}
+			defer c.Close()
 
-		if auth != nil {
-			// Try unencrypted PLAIN auth if server accepts it, otherwise continue as unauthenticated relay
-			_ = c.Auth(unencryptedAuth{auth})
+			if auth != nil {
+				_ = c.Auth(unencryptedAuth{auth})
+			}
+			if err := c.Mail(m.from); err != nil {
+				log.Printf("[SmtpMailSender] Fallback c.Mail failed: %v", err)
+				return err
+			}
+			if err := c.Rcpt(to); err != nil {
+				log.Printf("[SmtpMailSender] Fallback c.Rcpt failed: %v", err)
+				return err
+			}
+			w, err := c.Data()
+			if err != nil {
+				log.Printf("[SmtpMailSender] Fallback c.Data failed: %v", err)
+				return err
+			}
+			_, err = w.Write(msg)
+			if err != nil {
+				log.Printf("[SmtpMailSender] Fallback w.Write failed: %v", err)
+				return err
+			}
+			err = w.Close()
+			if err != nil {
+				log.Printf("[SmtpMailSender] Fallback w.Close failed: %v", err)
+				return err
+			}
+			log.Printf("[SmtpMailSender] Email sent successfully via fallback to %s", to)
+			return c.Quit()
 		}
-		if err := c.Mail(m.from); err != nil {
-			return err
-		}
-		if err := c.Rcpt(to); err != nil {
-			return err
-		}
-		w, err := c.Data()
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(msg)
-		if err != nil {
-			return err
-		}
-		err = w.Close()
-		if err != nil {
-			return err
-		}
-		return c.Quit()
+	} else {
+		log.Printf("[SmtpMailSender] Email sent successfully via SendMail to %s", to)
 	}
 
 	return err

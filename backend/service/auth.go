@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -336,7 +337,11 @@ func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repos
 	}
 
 	if s.mailer != nil {
-		_ = s.mailer.SendEmailVerification(newEmail, verificationToken)
+		if err := s.mailer.SendEmailVerification(newEmail, verificationToken); err != nil {
+			log.Printf("[AuthService] Failed to send email verification to %s: %v", newEmail, err)
+		} else {
+			log.Printf("[AuthService] Successfully triggered email verification to %s", newEmail)
+		}
 	}
 
 	return user, nil
