@@ -1206,14 +1206,6 @@ export default defineComponent({
 
     const getOrderTitles = (order: any) => {
       const variantName = formatOrderType(order)
-      const variant = order?.service_variant
-      if (variant && variant.parent_id && categoriesMap.value[variant.parent_id]) {
-        const parent = categoriesMap.value[variant.parent_id]
-        const catName = parent.name && typeof parent.name === 'object' ? (parent.name['ru'] || parent.name['en'] || '') : ''
-        if (catName) {
-          return { category: catName, variant: variantName }
-        }
-      }
       return { category: 'Вывоз мусора', variant: variantName }
     }
 
