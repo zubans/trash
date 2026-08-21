@@ -10,7 +10,7 @@
           {{ $t('app.updateRequired') }}
         </h5>
         <p class="version mb-2">
-          {{ $t('app.updateAvailable', { version: versionName }) }}
+          {{ $t('app.updateAvailable') }}
         </p>
         <p
           v-if="releaseNotes"
@@ -50,7 +50,7 @@
         </div>
         <div class="banner-text-box">
           <div class="banner-title">
-            {{ $t('app.updateAvailable', { version: versionName }) }}
+            {{ $t('app.updateAvailable') }}
           </div>
           <div v-if="releaseNotes" class="banner-notes">
             {{ releaseNotes }}

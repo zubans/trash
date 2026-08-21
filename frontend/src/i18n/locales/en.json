@@ -35,7 +35,7 @@
     "activeOrders": "Active Orders",
     "completedOrders": "Completed Orders",
     "serviceCatalog": "Service Catalog",
-    "updateAvailable": "Update {version} available",
+    "updateAvailable": "Update available",
     "installUpdate": "Install",
     "updateRequired": "Update required"
   },

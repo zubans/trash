@@ -2,16 +2,17 @@
   <div class="premium-dashboard-page">
     <div class="container">
       <!-- Шапка -->
-      <header class="glass-header">
-        <div class="logo-text">
-          <i class="ph-fill ph-planet" style="color: var(--accent-main);"></i> Кабинет
+      <header class="header">
+        <div class="logo">
+          <img src="../../assets/app_logo.png" alt="Logo" class="app-logo-icon" />
+          <span>Моя услуга</span>
         </div>
-        <div class="top-actions">
+        <div class="header-controls">
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
-          <button type="button" class="btn-glass" title="Выход" @click="handleLogout">
-            <i class="ph ph-sign-out"></i>
+          <button type="button" class="control-icon" title="Выход" @click="handleLogout">
+            <i class="ph-bold ph-sign-out"></i>
           </button>
         </div>
       </header>
@@ -1256,54 +1257,23 @@ export default defineComponent({
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 24px;
 }
 
-/* --- Header: Glassmorphism --- */
-.glass-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+/* --- Header --- */
+.header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
 }
-
-.logo-text {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-title);
-  letter-spacing: -1px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.logo { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); line-height: 1.1; }
+.app-logo-icon { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; }
+.logo i { color: #5c60f5; font-size: 24px; }
+.header-controls { display: flex; gap: 8px; align-items: center; }
+.control-icon {
+  width: 36px; height: 36px; background: #ffffff; border: 1px solid rgba(0,0,0,0.05); border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--text-muted, #64748b);
+  cursor: pointer; transition: all 0.2s ease;
 }
-
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.btn-glass {
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.8);
-  width: 48px;
-  height: 48px;
-  border-radius: var(--rad-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  color: var(--text-title);
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-  transition: var(--transition);
-}
-
-.btn-glass:hover {
-  background: rgba(255, 255, 255, 0.9);
-  transform: translateY(-2px);
-}
+.control-icon:hover { color: var(--text-title, #0f172a); border-color: rgba(0,0,0,0.1); }
 
 /* --- Grid --- */
 .premium-grid {

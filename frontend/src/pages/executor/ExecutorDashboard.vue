@@ -4,11 +4,8 @@
       <!-- Шапка -->
       <header class="header">
         <div class="logo">
-          <i class="ph-fill ph-planet"></i>
-          <div style="display: flex; flex-direction: column;">
-            <span>Кабинет</span>
-            <span style="font-weight: 500; color: var(--text-muted); font-size: 14px; line-height: 1;">исполнителя</span>
-          </div>
+          <img src="../../assets/app_logo.png" alt="Logo" class="app-logo-icon" />
+          <span>Моя услуга</span>
         </div>
         <div class="header-controls">
           <div class="lang-switch-wrapper">
@@ -1409,6 +1406,7 @@ export default defineComponent({
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
 }
 .logo { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); line-height: 1.1; }
+.app-logo-icon { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; }
 .logo i { color: #5c60f5; font-size: 24px; }
 .header-controls { display: flex; gap: 8px; align-items: center; }
 .control-icon {

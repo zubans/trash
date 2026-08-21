@@ -35,7 +35,7 @@
     "activeOrders": "Активные заказы",
     "completedOrders": "Выполненные заказы",
     "serviceCatalog": "Каталог услуг",
-    "updateAvailable": "Доступно обновление {version}",
+    "updateAvailable": "Доступно обновление",
     "installUpdate": "Установить",
     "updateRequired": "Требуется обновление"
   },
