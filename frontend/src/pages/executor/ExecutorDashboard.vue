@@ -2436,4 +2436,155 @@ export default defineComponent({
     padding: 10px 14px;
   }
 }
+
+/* Top-up & Withdrawal Modal Styles */
+.topup-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 2000;
+  animation: fadeIn 0.3s ease-out;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-title, #0f172a);
+}
+
+.topup-modal-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--rad-lg, 24px);
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 20px 40px -10px rgba(0,0,0,0.1);
+  padding: 32px;
+  position: relative;
+  animation: slideUp 0.3s ease-out;
+}
+
+.topup-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.topup-modal-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-title, #0f172a);
+  letter-spacing: -0.5px;
+}
+
+.btn-close-topup {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.05);
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  transition: var(--transition, all 0.2s ease);
+}
+
+.btn-close-topup:hover {
+  background: #ffffff;
+  color: #ef4444;
+}
+
+.topup-modal-card .input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.topup-modal-card .input-icon {
+  position: absolute;
+  left: 20px;
+  font-size: 20px;
+  color: var(--text-muted, #64748b);
+  pointer-events: none;
+}
+
+.topup-modal-card .form-input {
+  width: 100%;
+  padding: 18px 20px 18px 52px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1.5px solid rgba(0, 0, 0, 0.08);
+  font-family: inherit;
+  font-size: 20px;
+  color: var(--text-title, #0f172a);
+  font-weight: 600;
+  transition: var(--transition, all 0.2s ease);
+}
+
+.topup-modal-card .form-input:focus {
+  outline: none;
+  border-color: var(--accent-main, #5c60f5);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(92, 96, 245, 0.1);
+}
+
+.quick-amounts {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.amount-pill {
+  padding: 8px 16px;
+  border-radius: 99px;
+  background: #f1f5f9;
+  border: 1px solid rgba(0,0,0,0.05);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-title, #0f172a);
+  cursor: pointer;
+  transition: var(--transition, all 0.2s ease);
+}
+
+.amount-pill:hover {
+  background: #e2e8f0;
+}
+
+.btn-submit-topup {
+  width: 100%;
+  padding: 18px;
+  border-radius: 16px;
+  background: var(--brand-primary, #5c60f5);
+  color: #ffffff;
+  border: none;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 24px;
+  transition: var(--transition, all 0.2s ease);
+}
+
+.btn-submit-topup:hover:not(:disabled) {
+  background: #4f46e5;
+  box-shadow: 0 10px 25px -5px rgba(92, 96, 245, 0.4);
+}
+
+.btn-submit-topup:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 </style>
