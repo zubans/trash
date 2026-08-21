@@ -230,10 +230,7 @@ export default defineComponent({
 
     watch(show, (val) => {
       if (val) {
-        document.body.style.overflow = 'hidden'
         initMap()
-      } else {
-        document.body.style.overflow = ''
       }
     }, { immediate: true })
 
