@@ -112,18 +112,17 @@ jobs:
             
             # Write production .env file from GitHub Actions secrets & variables
             echo "Writing production .env file from GitHub Secrets..."
-            cat << EOF > .env
-DOCKER_USERNAME=${DOCKER_USERNAME}
-DB_USER=${DB_USER:-healthlogin}
-DB_PASSWORD=${DB_PASSWORD}
-DB_NAME=${DB_NAME:-healthlogin}
-JWT_SECRET=${JWT_SECRET}
-SMTP_PASSWORD=${SMTP_PASSWORD}
-SMTP_USER=${SMTP_USER:-system@moya-usluga.ru}
-SMTP_HOST=${SMTP_HOST:-mailserver}
-CORS_ORIGIN=${CORS_ORIGIN:-https://moya-usluga.ru}
-APP_BASE_URL=${APP_BASE_URL:-https://moya-usluga.ru}
-EOF
+            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\n" \
+              "${DOCKER_USERNAME}" \
+              "${DB_USER:-healthlogin}" \
+              "${DB_PASSWORD}" \
+              "${DB_NAME:-healthlogin}" \
+              "${JWT_SECRET}" \
+              "${SMTP_PASSWORD}" \
+              "${SMTP_USER:-system@moya-usluga.ru}" \
+              "${SMTP_HOST:-mailserver}" \
+              "${CORS_ORIGIN:-https://moya-usluga.ru}" \
+              "${APP_BASE_URL:-https://moya-usluga.ru}" > .env
             chmod 600 .env
 
             echo "Restarting services via make restart..."
