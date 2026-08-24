@@ -156,10 +156,10 @@ func main() {
 			r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
 		})
 
-		// Authenticated shared routes (customer + executor)
+		// Authenticated shared routes (customer + executor + admin)
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
-			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR"))
+			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
 			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/user/profile", ah.GetProfileHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
