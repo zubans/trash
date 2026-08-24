@@ -71,20 +71,20 @@ export default defineComponent({
 <style scoped>
 .server-status {
   position: fixed;
-  top: 16px;
-  left: 16px;
+  top: 6px;
+  left: 6px;
   z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .status-dot {
-  width: 12px;
-  height: 12px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   display: inline-block;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
 }
 
 .status-dot.online {
@@ -96,8 +96,8 @@ export default defineComponent({
 }
 
 .update-badge {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: none;
   background-color: #f59e0b;
@@ -106,7 +106,7 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
   animation: pulse 1.5s infinite;
 }
 
@@ -115,7 +115,7 @@ export default defineComponent({
 }
 
 .update-icon {
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
 }
 

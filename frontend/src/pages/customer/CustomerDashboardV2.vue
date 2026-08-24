@@ -94,6 +94,7 @@
       <div>
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h2 class="section-title m-0">Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span></h2>
+          <button type="button" class="btn btn-sm btn-icon" @click="fetchOrders" title="Refresh">
             <i class="ph ph-arrows-clockwise"></i>
           </button>
         </div>
