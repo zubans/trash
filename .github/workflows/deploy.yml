@@ -103,13 +103,31 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL
           script: |
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
             echo "Fetching latest repository files..."
             git pull origin main
+            
+            # Write production .env file from GitHub Actions secrets & variables
+            echo "Writing production .env file from GitHub Secrets..."
+            cat << EOF > .env
+DOCKER_USERNAME=${DOCKER_USERNAME}
+DB_USER=${DB_USER:-healthlogin}
+DB_PASSWORD=${DB_PASSWORD}
+DB_NAME=${DB_NAME:-healthlogin}
+JWT_SECRET=${JWT_SECRET}
+SMTP_PASSWORD=${SMTP_PASSWORD}
+SMTP_USER=${SMTP_USER:-system@moya-usluga.ru}
+SMTP_HOST=${SMTP_HOST:-mailserver}
+CORS_ORIGIN=${CORS_ORIGIN:-https://moya-usluga.ru}
+APP_BASE_URL=${APP_BASE_URL:-https://moya-usluga.ru}
+EOF
+            chmod 600 .env
+
             echo "Restarting services via make restart..."
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} make restart
+            make restart
             
             echo "Building and releasing new Android APK on server..."
             VERSION_NAME=$(git describe --tags --always 2>/dev/null || echo "1.0.0")
@@ -120,3 +138,14 @@ jobs:
             docker image prune -af --filter "until=168h"
             
             echo "Deployment finished successfully."
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DB_USER: ${{ vars.DB_USER || secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ vars.DB_NAME || secrets.DB_NAME }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_USER: ${{ vars.SMTP_USER || secrets.SMTP_USER }}
+          SMTP_HOST: ${{ vars.SMTP_HOST || secrets.SMTP_HOST }}
+          CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL || secrets.APP_BASE_URL }}
