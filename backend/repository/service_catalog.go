@@ -50,18 +50,20 @@ func (lt *LocalizedText) Scan(value interface{}) error {
 
 // ServiceNode represents a node in the service catalog tree.
 type ServiceNode struct {
-	ID          uuid.UUID       `json:"id"`
-	ParentID    *uuid.UUID      `json:"parent_id,omitempty"`
-	Code        string          `json:"code"`
-	Name        LocalizedText   `json:"name"`
-	Description LocalizedText   `json:"description,omitempty"`
-	NodeType    ServiceNodeType `json:"node_type"`
-	BasePrice   *float64        `json:"base_price,omitempty"`
-	IsAuction   bool            `json:"is_auction"`
-	IsActive    bool            `json:"is_active"`
-	SortOrder   int             `json:"sort_order"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID                   uuid.UUID       `json:"id"`
+	ParentID             *uuid.UUID      `json:"parent_id,omitempty"`
+	Code                 string          `json:"code"`
+	Name                 LocalizedText   `json:"name"`
+	Description          LocalizedText   `json:"description,omitempty"`
+	NodeType             ServiceNodeType `json:"node_type"`
+	BasePrice            *float64        `json:"base_price,omitempty"`
+	IsAuction            bool            `json:"is_auction"`
+	IsActive             bool            `json:"is_active"`
+	SortOrder            int             `json:"sort_order"`
+	RequiresVerification bool            `json:"requires_verification"`
+	MinAge               int             `json:"min_age"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
 // IsCategory returns true if the node is a category.
@@ -106,19 +108,21 @@ type serviceCatalogRepo struct {
 
 // NewServiceCatalogRepository creates a new service catalog repository.
 func NewServiceCatalogRepository(db *sql.DB) ServiceCatalogRepository {
+	_, _ = db.Exec(`ALTER TABLE service_nodes ADD COLUMN IF NOT EXISTS requires_verification BOOLEAN NOT NULL DEFAULT FALSE;`)
+	_, _ = db.Exec(`ALTER TABLE service_nodes ADD COLUMN IF NOT EXISTS min_age INT NOT NULL DEFAULT 0;`)
 	return &serviceCatalogRepo{db: db}
 }
 
 const serviceNodeColumns = `
     id, parent_id, code, name, description, node_type, base_price,
-    is_auction, is_active, sort_order, created_at, updated_at
+    is_auction, is_active, sort_order, COALESCE(requires_verification, false), COALESCE(min_age, 0), created_at, updated_at
 `
 
 func scanServiceNode(row *sql.Row) (*ServiceNode, error) {
 	var n ServiceNode
 	err := row.Scan(
 		&n.ID, &n.ParentID, &n.Code, &n.Name, &n.Description, &n.NodeType,
-		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.CreatedAt, &n.UpdatedAt,
+		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.RequiresVerification, &n.MinAge, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -130,7 +134,7 @@ func scanServiceNodeRows(rows *sql.Rows) (*ServiceNode, error) {
 	var n ServiceNode
 	err := rows.Scan(
 		&n.ID, &n.ParentID, &n.Code, &n.Name, &n.Description, &n.NodeType,
-		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.CreatedAt, &n.UpdatedAt,
+		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.RequiresVerification, &n.MinAge, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -153,12 +157,13 @@ func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
 	defer tx.Rollback()
 
 	query := `
-        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     `
 	_, err = tx.Exec(query,
 		node.ID, node.ParentID, node.Code, node.Name, node.Description,
-		node.NodeType, node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder, node.CreatedAt, node.UpdatedAt,
+		node.NodeType, node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
+		node.RequiresVerification, node.MinAge, node.CreatedAt, node.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -211,12 +216,13 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
 	query := `
         UPDATE service_nodes
         SET parent_id = $2, name = $3, description = $4, base_price = $5,
-            is_auction = $6, is_active = $7, sort_order = $8, updated_at = $9
+            is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, updated_at = $11
         WHERE id = $1
     `
 	_, err = tx.Exec(query,
 		node.ID, node.ParentID, node.Name, node.Description,
-		node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder, node.UpdatedAt,
+		node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
+		node.RequiresVerification, node.MinAge, node.UpdatedAt,
 	)
 	if err != nil {
 		return err

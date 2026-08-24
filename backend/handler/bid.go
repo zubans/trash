@@ -143,13 +143,13 @@ func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetAvailableConstructionOrdersHandler lists open construction orders for executors.
 func (h *BidHandler) GetAvailableConstructionOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	_, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	orders, err := h.orderService.GetAvailableConstructionOrders()
+	orders, err := h.orderService.GetAvailableConstructionOrdersForExecutor(user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

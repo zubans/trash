@@ -17,6 +17,7 @@ type User struct {
 	LastName               string     `json:"last_name"`
 	FirstName              string     `json:"first_name"`
 	Patronymic             string     `json:"patronymic"`
+	BirthDate              *time.Time `json:"birth_date,omitempty"`
 	PendingEmail           string     `json:"pending_email,omitempty"`
 	EmailVerified          bool       `json:"email_verified"`
 	EmailVerificationToken string     `json:"-"`
@@ -28,6 +29,22 @@ type User struct {
 	Status                 string     `json:"status"`
 	CreatedAt              time.Time  `json:"created_at"`
 	Address                string     `json:"address,omitempty"`
+}
+
+func (u *User) GetAge() int {
+	if u.BirthDate == nil {
+		return 0
+	}
+	now := time.Now()
+	age := now.Year() - u.BirthDate.Year()
+	if now.YearDay() < u.BirthDate.YearDay() {
+		age--
+	}
+	return age
+}
+
+func (u *User) IsVerified() bool {
+	return u.Status == "VERIFIED" || u.EmailVerified
 }
 
 // CustomerProfile holds customer-specific profile data.
@@ -57,6 +74,7 @@ type UserRepository interface {
 	ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
 	UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
 	UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error
+	UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -75,6 +93,7 @@ func New(db *sql.DB) UserRepository {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100) NOT NULL DEFAULT '';
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100) NOT NULL DEFAULT '';
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS patronymic VARCHAR(100) NOT NULL DEFAULT '';
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE NULL;
 	`)
 	return &repo{db: db}
 }
@@ -82,11 +101,11 @@ func New(db *sql.DB) UserRepository {
 func (r *repo) FindByPhone(phone string) (*User, error) {
 	var u User
 	var email, token, resetCode sql.NullString
-	var resetExp sql.NullTime
+	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE phone = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE phone = $1`,
 		phone,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -96,17 +115,20 @@ func (r *repo) FindByPhone(phone string) (*User, error) {
 	if resetExp.Valid {
 		u.PasswordResetExpiresAt = &resetExp.Time
 	}
+	if birthDate.Valid {
+		u.BirthDate = &birthDate.Time
+	}
 	return &u, nil
 }
 
 func (r *repo) FindByEmail(email string) (*User, error) {
 	var u User
 	var em, token, resetCode sql.NullString
-	var resetExp sql.NullTime
+	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
 		email,
-	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -116,17 +138,20 @@ func (r *repo) FindByEmail(email string) (*User, error) {
 	if resetExp.Valid {
 		u.PasswordResetExpiresAt = &resetExp.Time
 	}
+	if birthDate.Valid {
+		u.BirthDate = &birthDate.Time
+	}
 	return &u, nil
 }
 
 func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
 	var u User
 	var email, tok, resetCode sql.NullString
-	var resetExp sql.NullTime
+	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
 		token,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &u.EmailVerified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -136,17 +161,20 @@ func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
 	if resetExp.Valid {
 		u.PasswordResetExpiresAt = &resetExp.Time
 	}
+	if birthDate.Valid {
+		u.BirthDate = &birthDate.Time
+	}
 	return &u, nil
 }
 
 func (r *repo) FindByID(id uuid.UUID) (*User, error) {
 	var u User
 	var email, pendingEmail, token, resetCode sql.NullString
-	var resetExp sql.NullTime
+	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), COALESCE(pending_email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &pendingEmail, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +184,9 @@ func (r *repo) FindByID(id uuid.UUID) (*User, error) {
 	u.PasswordResetCode = resetCode.String
 	if resetExp.Valid {
 		u.PasswordResetExpiresAt = &resetExp.Time
+	}
+	if birthDate.Valid {
+		u.BirthDate = &birthDate.Time
 	}
 	return &u, nil
 }
@@ -313,6 +344,14 @@ func (r *repo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic 
 	_, err := r.db.Exec(
 		`UPDATE users SET last_name = $1, first_name = $2, patronymic = $3 WHERE id = $4`,
 		lastName, firstName, patronymic, userID,
+	)
+	return err
+}
+
+func (r *repo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error {
+	_, err := r.db.Exec(
+		`UPDATE users SET birth_date = $1 WHERE id = $2`,
+		birthDate, userID,
 	)
 	return err
 }

@@ -11,6 +11,8 @@ export interface ServiceNode {
   is_auction: boolean
   is_active: boolean
   sort_order: number
+  requires_verification?: boolean
+  min_age?: number
 }
 
 function normalizeArray<T>(data: unknown): T[] {

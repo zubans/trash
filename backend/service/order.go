@@ -517,6 +517,50 @@ func (s *OrderService) GetAvailableConstructionOrders() ([]*repository.Order, er
 	return orders, nil
 }
 
+// GetAvailableConstructionOrdersForExecutor returns open construction waste orders filtered for an executor.
+func (s *OrderService) GetAvailableConstructionOrdersForExecutor(executorID uuid.UUID) ([]*repository.Order, error) {
+	executor, _ := s.userRepo.FindByID(executorID)
+	executorAge := 0
+	executorVerified := false
+	if executor != nil {
+		executorAge = executor.GetAge()
+		executorVerified = executor.IsVerified()
+	}
+
+	orders, err := s.orderRepo.GetAvailableAuctionOrders()
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := []*repository.Order{}
+	for _, o := range orders {
+		s.hydrateServiceVariant(o)
+
+		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей")
+		customer, err := s.userRepo.FindByID(o.CustomerID)
+		if err == nil && customer != nil {
+			if !customer.IsVerified() {
+				continue
+			}
+		}
+
+		// 2. Filter: If service variant requires verification, executor must be verified
+		if o.ServiceVariant != nil {
+			if o.ServiceVariant.RequiresVerification && !executorVerified {
+				continue
+			}
+			// 3. Filter: If service variant has age restriction (min_age > 0), executor age must be >= min_age
+			if o.ServiceVariant.MinAge > 0 && executorAge < o.ServiceVariant.MinAge {
+				continue
+			}
+		}
+
+		filtered = append(filtered, o)
+	}
+
+	return filtered, nil
+}
+
 // FindNearbyOrders returns searching standard/large orders near the given coordinates within radiusMeters.
 func (s *OrderService) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
 	orders, err := s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
@@ -527,6 +571,50 @@ func (s *OrderService) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*
 		s.hydrateServiceVariant(o)
 	}
 	return orders, nil
+}
+
+// FindNearbyOrdersForExecutor returns searching standard/large orders near the given coordinates filtered for an executor.
+func (s *OrderService) FindNearbyOrdersForExecutor(executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+	executor, _ := s.userRepo.FindByID(executorID)
+	executorAge := 0
+	executorVerified := false
+	if executor != nil {
+		executorAge = executor.GetAge()
+		executorVerified = executor.IsVerified()
+	}
+
+	orders, err := s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := []*repository.Order{}
+	for _, o := range orders {
+		s.hydrateServiceVariant(o)
+
+		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей")
+		customer, err := s.userRepo.FindByID(o.CustomerID)
+		if err == nil && customer != nil {
+			if !customer.IsVerified() {
+				continue
+			}
+		}
+
+		// 2. Filter: If service variant requires verification, executor must be verified
+		if o.ServiceVariant != nil {
+			if o.ServiceVariant.RequiresVerification && !executorVerified {
+				continue
+			}
+			// 3. Filter: If service variant has age restriction (min_age > 0), executor age must be >= min_age
+			if o.ServiceVariant.MinAge > 0 && executorAge < o.ServiceVariant.MinAge {
+				continue
+			}
+		}
+
+		filtered = append(filtered, o)
+	}
+
+	return filtered, nil
 }
 
 // ListAssigned returns orders assigned to an executor.

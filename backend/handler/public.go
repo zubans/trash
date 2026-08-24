@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"healthlogin/backend/middleware"
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -131,23 +129,30 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // MeHandler returns the current authenticated user details.
 func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
+	user := userFromContext(r)
+	if user == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	var birthDateStr string
+	if user.BirthDate != nil {
+		birthDateStr = user.BirthDate.Format("2006-01-02")
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":         user.ID,
-		"phone":      user.Phone,
-		"email":      user.Email,
-		"role":       user.Role,
-		"balance":    user.Balance,
-		"status":     user.Status,
-		"first_name": user.FirstName,
-		"last_name":  user.LastName,
-		"patronymic": user.Patronymic,
+		"id":          user.ID,
+		"phone":       user.Phone,
+		"email":       user.Email,
+		"role":        user.Role,
+		"balance":     user.Balance,
+		"status":      user.Status,
+		"first_name":  user.FirstName,
+		"last_name":   user.LastName,
+		"patronymic":  user.Patronymic,
+		"birth_date":  birthDateStr,
+		"age":         user.GetAge(),
+		"is_verified": user.IsVerified(),
 	})
 }
 
@@ -200,16 +205,18 @@ func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	code, err := h.authService.RequestPasswordReset(req.Email)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := h.authService.RequestPasswordReset(req.Email); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": err.Error(),
+		})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Password reset code sent to email",
-		"code":    code, // Returned for dev testing/verification
+		"message": "Код восстановления отправлен на ваш Email",
 	})
 }
 
@@ -262,5 +269,40 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
 		"email":  updatedUser.Email,
+	})
+}
+
+// UpdateBirthDateHandler updates user's birth date.
+func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		BirthDate string `json:"birth_date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	updatedUser, err := h.authService.UpdateUserBirthDate(user.ID, req.BirthDate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var birthDateStr string
+	if updatedUser.BirthDate != nil {
+		birthDateStr = updatedUser.BirthDate.Format("2006-01-02")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "ok",
+		"birth_date": birthDateStr,
+		"age":        updatedUser.GetAge(),
 	})
 }

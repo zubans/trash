@@ -36,6 +36,14 @@
                 <i class="ph-bold ph-prohibit me-1"></i> Отключен
               </span>
 
+              <span v-if="item.node.requires_verification" class="badge-meta verified-badge">
+                <i class="ph-bold ph-shield-check me-1"></i> Только верифицированные
+              </span>
+
+              <span v-if="item.node.min_age && item.node.min_age > 0" class="badge-meta age-badge">
+                <i class="ph-bold ph-user-check me-1"></i> {{ item.node.min_age }}+
+              </span>
+
               <span class="sort-order-text">Сортировка: {{ item.node.sort_order || 1 }}</span>
             </div>
           </div>
@@ -239,6 +247,16 @@ export default defineComponent({
 .sort-order-text {
   font-size: 11px;
   color: #94a3b8;
+}
+
+.verified-badge {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.age-badge {
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 /* Actions */

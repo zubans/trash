@@ -22,35 +22,38 @@
           <div class="banner-info">
             <div class="banner-phone-row">
               <span class="banner-phone">{{ phone || '7 999 745 46 56' }}</span>
+              <span v-if="userAge > 0" class="age-badge ms-2">{{ userAge }} {{ getAgeWord(userAge) }}</span>
             </div>
             <div v-if="fullName" class="banner-fullname">{{ fullName }}</div>
           </div>
         </div>
 
-        <!-- Email Management -->
+        <!-- Date of Birth Section -->
         <div class="section-header">
           <div class="section-title">
-            <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
-            Электронная почта
+            <i class="ph-fill ph-cake" style="color: #ec4899;"></i>
+            Дата рождения и возраст
           </div>
-          <div class="section-subtitle">При изменении потребуется подтверждение</div>
+          <div class="section-subtitle">Определяет доступ к услугам с возрастным цензом</div>
         </div>
 
         <div class="email-box mb-4">
           <div class="input-wrapper">
             <input
-              v-model="emailInput"
-              type="email"
+              v-model="birthDateInput"
+              type="date"
               class="form-input"
-              placeholder="example@domain.com"
             />
-            <button type="button" class="btn-save-email" :disabled="savingEmail || !emailInput || emailInput === currentEmail" @click="saveEmail">
-              <span v-if="savingEmail" class="spinner-sm"></span>
+            <button type="button" class="btn-save-email" :disabled="savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate" @click="saveBirthDate">
+              <span v-if="savingBirthDate" class="spinner-sm"></span>
               <template v-else>Сохранить</template>
             </button>
           </div>
-          <div v-if="emailMsg" class="email-msg-text" :class="{ error: emailMsgIsError }">
-            {{ emailMsg }}
+          <div v-if="userAge > 0" class="mt-2 text-sm text-secondary">
+            Ваш возраст: <strong>{{ userAge }} {{ getAgeWord(userAge) }}</strong>
+          </div>
+          <div v-if="birthDateMsg" class="email-msg-text" :class="{ error: birthDateMsgIsError }">
+            {{ birthDateMsg }}
           </div>
         </div>
 
@@ -126,6 +129,21 @@ export default defineComponent({
     const pwdMsgIsError = ref(false)
 
     const fullName = ref('')
+    const birthDateInput = ref('')
+    const currentBirthDate = ref('')
+    const userAge = ref(0)
+    const savingBirthDate = ref(false)
+    const birthDateMsg = ref('')
+    const birthDateMsgIsError = ref(false)
+
+    const getAgeWord = (age: number) => {
+      const last = age % 10
+      const lastTwo = age % 100
+      if (lastTwo >= 11 && lastTwo <= 19) return 'лет'
+      if (last === 1) return 'год'
+      if (last >= 2 && last <= 4) return 'года'
+      return 'лет'
+    }
 
     const currentEmail = computed(() => userEmail.value)
 
@@ -135,6 +153,13 @@ export default defineComponent({
         if (meRes?.data) {
           const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
           fullName.value = parts.join(' ')
+          if (meRes.data.birth_date) {
+            birthDateInput.value = meRes.data.birth_date
+            currentBirthDate.value = meRes.data.birth_date
+          }
+          if (meRes.data.age !== undefined) {
+            userAge.value = meRes.data.age
+          }
         }
         const res = await api.get('/user/profile')
         phone.value = res.data.phone || authStore.userPhone || ''
@@ -159,6 +184,26 @@ export default defineComponent({
         emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
       } finally {
         savingEmail.value = false
+      }
+    }
+
+    const saveBirthDate = async () => {
+      if (!birthDateInput.value || birthDateInput.value === currentBirthDate.value || savingBirthDate.value) return
+      savingBirthDate.value = true
+      birthDateMsg.value = ''
+      birthDateMsgIsError.value = false
+      try {
+        const res = await api.post('/user/birth-date', { birth_date: birthDateInput.value })
+        currentBirthDate.value = birthDateInput.value
+        if (res.data?.age !== undefined) {
+          userAge.value = res.data.age
+        }
+        birthDateMsg.value = 'Дата рождения успешно сохранена!'
+      } catch (err: any) {
+        birthDateMsgIsError.value = true
+        birthDateMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка сохранения даты рождения'
+      } finally {
+        savingBirthDate.value = false
       }
     }
 
@@ -209,6 +254,14 @@ export default defineComponent({
     return {
       phone,
       fullName,
+      birthDateInput,
+      currentBirthDate,
+      userAge,
+      savingBirthDate,
+      birthDateMsg,
+      birthDateMsgIsError,
+      getAgeWord,
+      saveBirthDate,
       status,
       userEmail,
       emailInput,
@@ -332,7 +385,21 @@ export default defineComponent({
 }
 
 .banner-phone { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
-.banner-fullname { font-size: 14px; font-weight: 600; color: #64748b; margin-top: 2px; }
+.banner-fullname {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.age-badge {
+  background: #fef3c7;
+  color: #d97706;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
 
 /* Section Header */
 .section-header {

@@ -163,6 +163,7 @@ func main() {
 			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/user/profile", ah.GetProfileHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
+			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
 			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)

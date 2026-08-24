@@ -220,7 +220,7 @@ func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	orders, err := h.orderService.FindNearbyOrders(lat, lon, radius)
+	orders, err := h.orderService.FindNearbyOrdersForExecutor(user.ID, lat, lon, radius)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -242,10 +242,14 @@
         </form>
 
         <!-- Step 2: Enter Code & New Password -->
-        <form v-else @submit.prevent="submitNewPassword">
-          <p class="forgot-desc">Код отправлен на {{ resetEmail }}. Введите код и новый пароль.</p>
+        <form v-else @submit.prevent="resetPasswordWithCode">
+          <p class="forgot-desc">Код восстановления отправлен на <strong>{{ resetEmail }}</strong>.</p>
+          <div v-if="resetSuccessMsg" class="custom-alert success-alert mb-3">
+            <i class="ph-fill ph-check-circle me-1"></i>
+            <span class="alert-text">{{ resetSuccessMsg }}</span>
+          </div>
           <div class="form-group mb-3">
-            <label class="form-label">Код из Email</label>
+            <label class="form-label">6-значный код из Email</label>
             <div class="input-wrapper">
               <input v-model="resetCode" type="text" class="form-input" placeholder="123456" maxlength="6" required />
               <i class="ph ph-key input-icon"></i>
@@ -261,10 +265,21 @@
           <div v-if="resetError" class="custom-alert error-alert mb-3">
             <span class="alert-text">{{ resetError }}</span>
           </div>
-          <button type="submit" class="submit-btn" :disabled="resetLoading">
+          <button type="submit" class="submit-btn mb-2" :disabled="resetLoading">
             <span v-if="resetLoading" class="spinner"></span>
             <template v-else>Сохранить новый пароль <i class="ph-bold ph-check"></i></template>
           </button>
+          <div class="resend-row text-center">
+            <button
+              type="button"
+              class="btn-link-resend"
+              :disabled="resendTimer > 0 || resetLoading"
+              @click="requestResetCode"
+            >
+              <template v-if="resendTimer > 0">Отправить повторно через {{ resendTimer }}с</template>
+              <template v-else>Отправить код повторно</template>
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -380,14 +395,28 @@ export default defineComponent({
     const loading = ref(false)
     let autocompleteTimeout: any = null
 
-    // Forgot Password Modal State
     const showForgotModal = ref(false)
-    const resetStep = ref<1 | 2>(1)
+    const resetStep = ref(1)
     const resetEmail = ref('')
     const resetCode = ref('')
     const newPassword = ref('')
     const resetError = ref('')
+    const resetSuccessMsg = ref('')
     const resetLoading = ref(false)
+    const resendTimer = ref(0)
+    let resendInterval: any = null
+
+    const startResendTimer = () => {
+      resendTimer.value = 60
+      if (resendInterval) clearInterval(resendInterval)
+      resendInterval = setInterval(() => {
+        if (resendTimer.value > 0) {
+          resendTimer.value--
+        } else {
+          clearInterval(resendInterval)
+        }
+      }, 1000)
+    }
 
     const openForgotModal = () => {
       showForgotModal.value = true
@@ -396,19 +425,20 @@ export default defineComponent({
       resetCode.value = ''
       newPassword.value = ''
       resetError.value = ''
+      resetSuccessMsg.value = ''
+      resendTimer.value = 0
     }
 
     const requestResetCode = async () => {
       resetError.value = ''
+      resetSuccessMsg.value = ''
       if (!resetEmail.value) return
       resetLoading.value = true
       try {
-        const res = await api.post('/auth/forgot-password', { email: resetEmail.value })
+        await api.post('/auth/forgot-password', { email: resetEmail.value })
         resetStep.value = 2
-        // Show reset code if returned in dev
-        if (res.data.code) {
-          resetError.value = `[Тестовый режим] Код сброса: ${res.data.code}`
-        }
+        resetSuccessMsg.value = `Код восстановления отправлен на ${resetEmail.value}. Проверьте почту!`
+        startResendTimer()
       } catch (err: any) {
         resetError.value = formatApiError(err, 'Не удалось отправить код')
       } finally {
@@ -640,6 +670,8 @@ export default defineComponent({
       resetCode,
       newPassword,
       resetError,
+      resetSuccessMsg,
+      resendTimer,
       resetLoading,
       openForgotModal,
       requestResetCode,
@@ -692,7 +724,6 @@ export default defineComponent({
   overflow: hidden;
 }
 
-/* Background floating animated orbs */
 @keyframes orbDrift1 {
   0%, 100% { transform: translate(0, 0) scale(1) rotate(0deg); }
   50% { transform: translate(40px, -40px) scale(1.1) rotate(20deg); }
@@ -719,7 +750,6 @@ export default defineComponent({
   animation: orbDrift2 18s ease-in-out infinite;
 }
 
-/* Auth Card */
 .auth-card {
   width: 100%;
   max-width: 440px;
@@ -734,7 +764,6 @@ export default defineComponent({
   z-index: 1;
 }
 
-/* Card Header */
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -774,7 +803,6 @@ export default defineComponent({
   align-items: center;
 }
 
-/* Title */
 h1 {
   font-size: 32px;
   font-weight: 700;
@@ -784,7 +812,6 @@ h1 {
   text-align: center;
 }
 
-/* Custom Alerts */
 .custom-alert {
   padding: 12px 16px;
   border-radius: 12px;
@@ -799,15 +826,20 @@ h1 {
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 .success-alert {
-  background: rgba(16, 185, 129, 0.1);
+  background: #ecfdf5;
   color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
 }
 .alert-icon {
   font-size: 20px;
 }
 
-/* Form Controls */
 .form-group {
   margin-bottom: 20px;
 }
@@ -956,7 +988,6 @@ h1 {
   to { transform: rotate(360deg); }
 }
 
-/* Forgot Password Modal Styles */
 .forgot-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -1022,13 +1053,27 @@ h1 {
 }
 
 .btn-close-forgot:hover {
-  background: #ffffff;
-  color: #ef4444;
+  background: #f1f5f9;
+  color: #0f172a;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
   transform: rotate(90deg);
 }
 
-/* Responsive */
+.btn-link-resend {
+  background: none;
+  border: none;
+  color: #6366f1;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.btn-link-resend:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 @media (max-width: 480px) {
   .auth-card {
     padding: 32px 24px;

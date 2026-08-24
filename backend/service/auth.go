@@ -1,10 +1,12 @@
 package service
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"regexp"
 	"strings"
@@ -276,32 +278,40 @@ func (s *AuthService) VerifyEmail(token string) (*repository.User, error) {
 	return s.repo.VerifyEmailToken(token)
 }
 
-// RequestPasswordReset generates a 6-digit code for password reset.
-func (s *AuthService) RequestPasswordReset(email string) (string, error) {
+// RequestPasswordReset generates a 6-digit code for password reset and sends it via email.
+func (s *AuthService) RequestPasswordReset(email string) error {
 	email = strings.TrimSpace(email)
 	if email == "" {
-		return "", errors.New("email is required")
+		return errors.New("укажите Email")
 	}
 	user, err := s.repo.FindByEmail(email)
 	if err != nil || user == nil {
-		return "", errors.New("user with this email not found")
+		return errors.New("пользователь с таким Email не найден")
 	}
 
-	// Generate 6-digit numeric reset code
-	code := fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	// Generate cryptographically secure 6-digit numeric reset code
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	var code string
+	if err != nil {
+		code = fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	} else {
+		code = fmt.Sprintf("%06d", n.Int64())
+	}
 	expiresAt := time.Now().Add(30 * time.Minute)
 
 	if err := s.repo.SetPasswordResetCode(user.ID, code, expiresAt); err != nil {
-		return "", err
+		return err
 	}
 
 	if s.mailer != nil {
-		_ = s.mailer.SendPasswordResetCode(email, code)
+		if err := s.mailer.SendPasswordResetCode(email, code); err != nil {
+			log.Printf("[PASSWORD RESET] Failed to send email to %s: %v", email, err)
+			return errors.New("не удалось отправить письмо с кодом. Попробуйте позже.")
+		}
 	}
 
-	// Development/production logging of code
-	fmt.Printf("[PASSWORD RESET] Code for %s: %s (Expires: %s)\n", email, code, expiresAt.Format(time.RFC3339))
-	return code, nil
+	log.Printf("[PASSWORD RESET] Code generated and sent to %s (Expires: %s)", email, expiresAt.Format(time.RFC3339))
+	return nil
 }
 
 // ResetPassword verifies the code and updates password.
@@ -356,4 +366,16 @@ func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repos
 	}
 
 	return user, nil
+}
+
+// UpdateUserBirthDate updates user's date of birth.
+func (s *AuthService) UpdateUserBirthDate(userID uuid.UUID, birthDateStr string) (*repository.User, error) {
+	t, err := time.Parse("2006-01-02", birthDateStr)
+	if err != nil {
+		return nil, errors.New("invalid birth date format, expected YYYY-MM-DD")
+	}
+	if err := s.repo.UpdateUserBirthDate(userID, t); err != nil {
+		return nil, err
+	}
+	return s.repo.FindByID(userID)
 }

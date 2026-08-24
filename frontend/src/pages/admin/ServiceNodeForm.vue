@@ -121,9 +121,9 @@
         </div>
       </div>
 
-      <!-- Row 5: Sort Order, Base Price & Toggles -->
-      <div class="form-grid grid-bottom">
-        <div class="form-group flex-1">
+      <!-- Row 5: Sort Order, Base Price & Min Age -->
+      <div class="form-grid grid-3 mb-4">
+        <div class="form-group">
           <label class="form-label">ПОРЯДОК (СОРТИРОВКА)</label>
           <input
             v-model.number="form.sort_order"
@@ -133,7 +133,7 @@
           />
         </div>
 
-        <div v-if="form.node_type === 'VARIANT'" class="form-group flex-1">
+        <div v-if="form.node_type === 'VARIANT'" class="form-group">
           <label class="form-label">БАЗОВАЯ ЦЕНА (РУБ)</label>
           <input
             v-model.number="form.base_price"
@@ -143,20 +143,37 @@
           />
         </div>
 
-        <!-- Toggles Container -->
-        <div class="toggles-card flex-2">
-          <label class="toggle-item">
-            <input v-model="form.is_active" type="checkbox" class="toggle-checkbox" />
-            <span class="toggle-switch"></span>
-            <span class="toggle-label">Активно в приложении</span>
-          </label>
-
-          <label class="toggle-item">
-            <input v-model="form.is_auction" type="checkbox" class="toggle-checkbox" />
-            <span class="toggle-switch"></span>
-            <span class="toggle-label">Режим аукциона</span>
-          </label>
+        <div class="form-group">
+          <label class="form-label">ВОЗРАСТНОЙ ЦЕНЗ (ЛЕТ)</label>
+          <input
+            v-model.number="form.min_age"
+            type="number"
+            class="form-input"
+            placeholder="0 (без ограничений)"
+            min="0"
+          />
         </div>
+      </div>
+
+      <!-- Row 6: Toggles Container -->
+      <div class="toggles-card">
+        <label class="toggle-item">
+          <input v-model="form.is_active" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Активно в приложении</span>
+        </label>
+
+        <label class="toggle-item">
+          <input v-model="form.is_auction" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Режим аукциона</span>
+        </label>
+
+        <label class="toggle-item">
+          <input v-model="form.requires_verification" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Только верифицированные</span>
+        </label>
       </div>
     </div>
 
@@ -210,6 +227,8 @@ export default defineComponent({
           is_auction: props.node.is_auction || false,
           is_active: props.node.is_active ?? true,
           sort_order: props.node.sort_order || 1,
+          requires_verification: props.node.requires_verification || false,
+          min_age: props.node.min_age || 0,
         }
       }
       return {
@@ -224,6 +243,8 @@ export default defineComponent({
         is_auction: false,
         is_active: true,
         sort_order: 1,
+        requires_verification: false,
+        min_age: 0,
       }
     }
 
@@ -252,6 +273,8 @@ export default defineComponent({
         is_auction: form.value.is_auction,
         is_active: form.value.is_active,
         sort_order: form.value.sort_order,
+        requires_verification: form.value.requires_verification,
+        min_age: form.value.min_age || 0,
       }
 
       if (!isEditing.value) {
@@ -362,6 +385,10 @@ export default defineComponent({
 
 .grid-2 {
   grid-template-columns: 1fr 1fr;
+}
+
+.grid-3 {
+  grid-template-columns: 1fr 1fr 1fr;
 }
 
 .grid-bottom {
