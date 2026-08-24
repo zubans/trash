@@ -531,7 +531,13 @@ export default defineComponent({
     })
 
     const historyOrders = computed(() => {
-      return orders.value.filter((o) => ['COMPLETED', 'CANCELED'].includes(o.status))
+      return orders.value
+        .filter((o) => ['COMPLETED', 'CANCELED'].includes(o.status))
+        .sort((a, b) => {
+          const dateA = new Date(a.completed_at || a.canceled_at || a.created_at).getTime()
+          const dateB = new Date(b.completed_at || b.canceled_at || b.created_at).getTime()
+          return dateB - dateA
+        })
     })
 
     const selectedVariant = computed(() =>

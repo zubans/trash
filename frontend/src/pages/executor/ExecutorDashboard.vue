@@ -1002,7 +1002,12 @@ export default defineComponent({
     const fetchHistoryOrders = async () => {
       try {
         const res = await api.get('/executor/history')
-        executorHistoryOrders.value = res.data?.orders || res.data || []
+        const rawOrders = res.data?.orders || res.data || []
+        executorHistoryOrders.value = rawOrders.slice().sort((a: any, b: any) => {
+          const dateA = new Date(a.completed_at || a.canceled_at || a.created_at).getTime()
+          const dateB = new Date(b.completed_at || b.canceled_at || b.created_at).getTime()
+          return dateB - dateA
+        })
         fetchReviewsForExecutorHistory()
       } catch (err) {
         console.error(err)

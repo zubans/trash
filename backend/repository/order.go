@@ -180,7 +180,7 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 
 func (r *orderRepo) FindAllByExecutor(executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 ORDER BY o.created_at DESC`,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC`,
 		executorID,
 	)
 	if err != nil {
@@ -201,7 +201,7 @@ func (r *orderRepo) FindAllByExecutor(executorID uuid.UUID) ([]Order, error) {
 
 func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.Query(
-		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1`,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC`,
 		customerID,
 	)
 	if err != nil {
