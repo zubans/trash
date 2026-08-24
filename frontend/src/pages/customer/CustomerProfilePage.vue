@@ -23,7 +23,8 @@
             <div class="banner-phone-row">
               <span class="banner-phone">{{ userPhone || '7 920 705 07 07' }}</span>
             </div>
-            <span class="banner-subtitle">Личный кабинет заказчика</span>
+            <div v-if="userFullName" class="banner-fullname">{{ userFullName }}</div>
+            <span v-else class="banner-subtitle">Личный кабинет заказчика</span>
           </div>
         </div>
 
@@ -150,13 +151,17 @@ export default defineComponent({
 
     const emailInput = ref('')
     const savingEmail = ref(false)
-    const emailMsg = ref('')
-    const emailMsgIsError = ref(false)
+    const userFullName = ref('')
 
     const currentEmail = computed(() => userEmail.value)
 
     const fetchUserProfile = async () => {
       try {
+        const meRes = await api.get('/auth/me').catch(() => null)
+        if (meRes?.data) {
+          const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
+          userFullName.value = parts.join(' ')
+        }
         const res = await api.get('/user/profile')
         userPhone.value = res.data.phone || authStore.userPhone || ''
         userEmail.value = res.data.email || ''
@@ -239,6 +244,7 @@ export default defineComponent({
 
     return {
       userEmail,
+      userFullName,
       userPhone,
       customerAddresses,
       defaultAddress,
@@ -360,16 +366,9 @@ export default defineComponent({
   gap: 8px;
 }
 
-.banner-phone {
-  font-size: 20px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.banner-subtitle {
-  font-size: 13px;
-  color: #64748b;
-}
+.banner-phone { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+.banner-fullname { font-size: 14px; font-weight: 600; color: #0f172a; margin-top: 2px; }
+.banner-subtitle { font-size: 13px; color: #64748b; display: block; margin-top: 2px; }
 
 /* Section Header */
 .section-header {

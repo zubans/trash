@@ -305,7 +305,7 @@ func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error
 
 func (r *chatRepo) GetSupportMessages(chatID uuid.UUID) ([]*Message, error) {
 	query := `
-		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
+		SELECT id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
 		FROM support_messages
 		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
 		ORDER BY created_at ASC`
@@ -332,7 +332,7 @@ func (r *chatRepo) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (
 	err := r.db.QueryRow(`
 		INSERT INTO support_messages (chat_id, sender_id, text, status, created_at)
 		VALUES ($1, $2, $3, 'sent', now())
-		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
+		RETURNING id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, created_at`,
 		chatID, senderID, text).Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -346,7 +346,7 @@ func (r *chatRepo) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, 
 	err := r.db.QueryRow(`
 		INSERT INTO support_messages (chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at)
 		VALUES ($1, $2, $3, 'sent', $4, $5, $6, $7, now())
-		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
+		RETURNING id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, created_at`,
 		chatID, senderID, text, fileURL, fileName, fileType, fileSize).Scan(
 		&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.CreatedAt)
 	if err != nil {
@@ -366,8 +366,8 @@ func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
 			COALESCE(u.last_name, ''),
 			COALESCE(u.patronymic, ''),
 			u.role,
-			COUNT(sm.id) FILTER (WHERE sm.sender_id != u.id AND sm.read_at IS NULL) as unread_count,
-			(SELECT text FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_message,
+			COUNT(sm.id) FILTER (WHERE sm.sender_id = u.id AND sm.read_at IS NULL) as unread_count,
+			(SELECT COALESCE(NULLIF(text, ''), file_name, 'Вложение') FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_message,
 			(SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_time
 		FROM support_chats sc
 		JOIN users u ON u.id = sc.user_id

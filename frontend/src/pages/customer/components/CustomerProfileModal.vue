@@ -13,6 +13,19 @@
       </div>
 
 
+      <!-- User Phone & Full Name Banner -->
+      <div class="user-phone-banner mb-4">
+        <div class="banner-avatar">
+          <i class="ph ph-user"></i>
+        </div>
+        <div class="banner-info">
+          <div class="banner-phone-row">
+            <span class="banner-phone">{{ userPhone || '7 920 705 07 07' }}</span>
+          </div>
+          <div v-if="userFullName" class="banner-fullname">{{ userFullName }}</div>
+        </div>
+      </div>
+
       <!-- Email Management -->
       <div class="section-header">
         <div class="section-title">
@@ -148,6 +161,23 @@ export default defineComponent({
     const savingEmail = ref(false)
     const emailMsg = ref('')
     const emailMsgIsError = ref(false)
+    const userPhone = ref('')
+    const userFullName = ref('')
+
+    const fetchMe = async () => {
+      try {
+        const res = await api.get('/auth/me')
+        if (res.data) {
+          userPhone.value = res.data.phone || ''
+          const parts = [res.data.last_name, res.data.first_name, res.data.patronymic].filter((p: string) => p && p.trim())
+          userFullName.value = parts.join(' ')
+        }
+      } catch (err) {}
+    }
+
+    onMounted(() => {
+      fetchMe()
+    })
 
     watch(() => props.userEmail, (val) => {
       emailInput.value = val
@@ -184,11 +214,13 @@ export default defineComponent({
 
     return { 
       show,
-      currentEmail,
+      userEmail: currentEmail,
       emailInput,
       savingEmail,
       emailMsg,
       emailMsgIsError,
+      userPhone,
+      userFullName,
       saveEmail
     }
   },

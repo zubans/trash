@@ -81,6 +81,7 @@
               <div class="profile-phone">{{ phone || '79997454656' }}</div>
               <div v-if="isVerified" class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
             </div>
+            <div v-if="fullName" class="profile-fullname">{{ fullName }}</div>
             <div class="badge-brand">
               <i class="ph-fill ph-user font-bold"></i> Мой профиль
             </div>
@@ -578,6 +579,7 @@
     <ExecutorProfileModal
       v-model="showProfileModal"
       :phone="phone"
+      :full-name="fullName"
       :user-email="userEmail"
       :status="status"
       :base-address="baseAddress"
@@ -1406,6 +1408,7 @@ export default defineComponent({
       userEmail,
       baseAddress,
       phone,
+      fullName,
       balance,
       status,
       currencySymbol,
@@ -2915,6 +2918,13 @@ export default defineComponent({
   background: var(--brand-primary, #5c60f5);
   color: #ffffff;
   border-color: var(--brand-primary, #5c60f5);
+}
+
+.profile-fullname {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-title, #0f172a);
+  margin-top: 2px;
 }
 
 .read-receipt { color: var(--accent-main, #6366f1); font-size: 14px; }

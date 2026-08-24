@@ -37,6 +37,7 @@
                 <i class="ph-fill ph-check-circle"></i>
               </div>
             </div>
+            <div v-if="fullName" class="profile-fullname">{{ fullName }}</div>
             <div class="badge-brand" @click.stop="$router.push('/customer/profile')">
               <i class="ph-fill ph-map-pin"></i> Мои адреса
             </div>
@@ -575,12 +576,15 @@ export default defineComponent({
     }
 
     const userEmail = ref('')
+    const fullName = ref('')
 
     const fetchProfile = async () => {
       try {
         const meRes = await api.get('/auth/me')
-        if (meRes.data && meRes.data.email) {
-          userEmail.value = meRes.data.email
+        if (meRes.data) {
+          if (meRes.data.email) userEmail.value = meRes.data.email
+          const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
+          fullName.value = parts.join(' ')
         }
         const response = await api.get('/customer/profile')
         if (response.data) {
@@ -1241,6 +1245,7 @@ export default defineComponent({
 
     return {
       userEmail,
+      fullName,
       phone,
       formattedPhone,
       balance,
@@ -2559,5 +2564,12 @@ export default defineComponent({
   background: var(--brand-primary, #5c60f5);
   color: #ffffff;
   border-color: var(--brand-primary, #5c60f5);
+}
+
+.profile-fullname {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-title, #0f172a);
+  margin-top: 2px;
 }
 </style>

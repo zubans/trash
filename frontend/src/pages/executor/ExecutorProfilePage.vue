@@ -23,7 +23,7 @@
             <div class="banner-phone-row">
               <span class="banner-phone">{{ phone || '7 999 745 46 56' }}</span>
             </div>
-            <span class="banner-subtitle"><i class="ph-fill ph-check-circle" style="color: #10b981;"></i> Статус: {{ status || 'Активный' }}</span>
+            <div v-if="fullName" class="banner-fullname">{{ fullName }}</div>
           </div>
         </div>
 
@@ -125,10 +125,17 @@ export default defineComponent({
     const pwdMsg = ref('')
     const pwdMsgIsError = ref(false)
 
+    const fullName = ref('')
+
     const currentEmail = computed(() => userEmail.value)
 
     const fetchUserProfile = async () => {
       try {
+        const meRes = await api.get('/auth/me').catch(() => null)
+        if (meRes?.data) {
+          const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
+          fullName.value = parts.join(' ')
+        }
         const res = await api.get('/user/profile')
         phone.value = res.data.phone || authStore.userPhone || ''
         status.value = res.data.status || 'ACTIVE'
@@ -201,6 +208,7 @@ export default defineComponent({
 
     return {
       phone,
+      fullName,
       status,
       userEmail,
       emailInput,
@@ -323,19 +331,8 @@ export default defineComponent({
   gap: 8px;
 }
 
-.banner-phone {
-  font-size: 20px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.banner-subtitle {
-  font-size: 13px;
-  color: #64748b;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+.banner-phone { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+.banner-fullname { font-size: 14px; font-weight: 600; color: #64748b; margin-top: 2px; }
 
 /* Section Header */
 .section-header {

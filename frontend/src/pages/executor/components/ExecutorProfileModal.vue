@@ -12,13 +12,12 @@
         </button>
       </div>
 
-      <!-- Verification Status Box -->
+      <!-- Verification / Profile Box -->
       <div class="verification-box mb-4">
-        <i class="ph-fill ph-shield-check v-icon"></i>
+        <i class="ph-fill ph-user-circle v-icon"></i>
         <div class="v-content">
           <div class="v-header">
-            <div class="v-title">Статус аккаунта</div>
-            <div class="v-badge">{{ status }}</div>
+            <div class="v-title">{{ fullName || 'Исполнитель' }}</div>
           </div>
           <div class="v-desc">Телефон: {{ phone || '-' }}</div>
         </div>
@@ -103,6 +102,7 @@ export default defineComponent({
   props: {
     modelValue: { type: Boolean, required: true },
     phone: { type: String, default: '' },
+    fullName: { type: String, default: '' },
     userEmail: { type: String, default: '' },
     status: { type: String, default: 'ACTIVE' },
     baseAddress: { type: String, default: '' },

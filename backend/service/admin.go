@@ -304,6 +304,9 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 		"balance":    user.Balance,
 		"status":     user.Status,
 		"created_at": user.CreatedAt,
+		"first_name": user.FirstName,
+		"last_name":  user.LastName,
+		"patronymic": user.Patronymic,
 		"address":    "",
 	}
 

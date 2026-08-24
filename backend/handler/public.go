@@ -139,12 +139,15 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":       user.ID,
-		"phone":    user.Phone,
-		"email":    user.Email,
-		"role":     user.Role,
-		"balance":  user.Balance,
-		"status":   user.Status,
+		"id":         user.ID,
+		"phone":      user.Phone,
+		"email":      user.Email,
+		"role":       user.Role,
+		"balance":    user.Balance,
+		"status":     user.Status,
+		"first_name": user.FirstName,
+		"last_name":  user.LastName,
+		"patronymic": user.Patronymic,
 	})
 }
 
