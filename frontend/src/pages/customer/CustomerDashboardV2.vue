@@ -94,9 +94,6 @@
       <div>
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h2 class="section-title m-0">Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span></h2>
-          <button type="button" class="btn btn-sm btn-icon" @click="fetchOrders" title="Refresh">
-            <i class="ph ph-arrows-clockwise"></i>
-          </button>
         </div>
 
         <div v-if="activeOrders.length === 0" class="empty-orders-state">
@@ -1059,9 +1056,9 @@ export default defineComponent({
     }
 
     const getOrderTitles = (order: any) => {
-      const variant = order.service_variant
+      const variant = order?.service_variant
       if (!variant) {
-        return { category: 'Вывоз мусора', variant: 'Стандартный вывоз' }
+        return { category: '', variant: 'Заказ' }
       }
       const variantName = localizedName(variant)
       // Find parent category from serviceCategories if parent_id exists
@@ -1071,12 +1068,12 @@ export default defineComponent({
           return { category: localizedName(parent), variant: variantName }
         }
       }
-      return { category: 'Вывоз мусора', variant: variantName }
+      return { category: '', variant: variantName }
     }
 
     const formatOrderType = (order: any) => {
       const { category, variant } = getOrderTitles(order)
-      return `${category} (${variant})`
+      return category && category !== variant ? `${category} (${variant})` : variant
     }
 
     const getStatusColor = (status: string) => {
@@ -1131,6 +1128,7 @@ export default defineComponent({
     let intervalId: any = null
 
     onMounted(async () => {
+      getServiceCategories().then(cats => { serviceCategories.value = cats }).catch(() => {})
       await Promise.all([fetchProfile(), fetchOrders()])
       intervalId = setInterval(() => {
         fetchProfile()

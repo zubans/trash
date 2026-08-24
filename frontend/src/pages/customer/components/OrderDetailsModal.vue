@@ -212,12 +212,12 @@ export default defineComponent({
     }
 
     const getCategoryTitle = (order: any) => {
-      if (!order) return 'Вывоз мусора'
+      if (!order) return 'Услуга'
       const formatted = props.formatOrderType(order)
       if (typeof formatted === 'string' && formatted.includes('(')) {
         return formatted.split('(')[0].trim()
       }
-      return 'Вывоз мусора'
+      return 'Услуга'
     }
 
     const getVariantTitle = (order: any) => {

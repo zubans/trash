@@ -1246,7 +1246,7 @@ export default defineComponent({
 
     const getOrderTitles = (order: any) => {
       const variantName = formatOrderType(order)
-      return { category: 'Вывоз мусора', variant: variantName }
+      return { category: '', variant: variantName }
     }
 
     const formatOrderType = (order: any) => {
@@ -1262,7 +1262,7 @@ export default defineComponent({
           return node.name['ru'] || node.name['en'] || node.code || ''
         }
       }
-      return 'Заказ вывоза мусора'
+      return 'Заказ'
     }
 
     const getStatusColor = (statusStr: string) => {
