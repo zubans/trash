@@ -56,6 +56,22 @@
 
       <!-- Toast Notifications Container -->
       <div class="toast-container">
+        <!-- Chat Toast Notification -->
+        <div
+          v-if="chatToast"
+          class="chat-top-toast cursor-pointer"
+          @click="openChatByToast"
+        >
+          <div class="toast-chat-icon">💬</div>
+          <div class="toast-chat-content">
+            <div class="toast-chat-title">{{ chatToast.title }}</div>
+            <div class="toast-chat-text">{{ chatToast.text }}</div>
+          </div>
+          <button type="button" class="toast-close" @click.stop="chatToast = null">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
         <!-- Success Toast -->
         <div v-if="successMsg" class="toast success">
           <div class="toast-icon">
@@ -125,11 +141,12 @@
                 <button
                   v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
                   type="button"
-                  :class="['btn-action primary chat-btn', { active: openChatOrderId === order.id }]"
+                  :class="['btn-action primary chat-btn position-relative', { active: openChatOrderId === order.id }]"
                   title="Чат"
                   @click="toggleChat(order)"
                 >
                   <i class="ph-fill ph-chat-circle-dots"></i>
+                  <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
                 </button>
                 <button
                   v-if="order.status === 'EXECUTED'"
@@ -191,7 +208,11 @@
                     <div class="msg-meta">
                       <span>{{ formatMessageTime(msg.created_at) }}</span>
                       <span v-if="msg.updated_at" class="msg-edited">(изменено)</span>
-                      <i v-if="msg.sender_id === currentUserId" :class="['ph-bold', msg.status === 'read' ? 'ph-checks read-receipt' : 'ph-check']"></i>
+                      <span v-if="msg.sender_id === currentUserId" class="msg-status-icon" :title="getMessageStatusTitle(msg.status)">
+                        <i v-if="msg.status === 'read'" class="ph-bold ph-checks read-receipt"></i>
+                        <i v-else-if="msg.status === 'delivered'" class="ph-bold ph-checks delivered-receipt"></i>
+                        <i v-else class="ph-bold ph-check sent-receipt"></i>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -603,6 +624,7 @@ export default defineComponent({
     const fetchOrders = async () => {
       try {
         const response = await api.get('/customer/orders')
+        fetchUnreadSummary()
         const newOrders = response.data || []
         // Update items in place or update orders if structure changed to prevent re-rendering active chat accordion
         orders.value = newOrders
@@ -730,6 +752,54 @@ export default defineComponent({
     const previewImageUrl = ref('')
     const ws = ref<WebSocket | null>(null)
     let chatPollTimer: any = null
+    const unreadOrderIDs = ref(new Set<string>())
+    const chatToast = ref<{ id: string; title: string; text: string; order: any } | null>(null)
+
+    const fetchUnreadSummary = async () => {
+      try {
+        const response = await api.get('/chats/unread-summary')
+        const ids = response.data?.unread_order_ids || []
+        unreadOrderIDs.value = new Set(ids)
+      } catch (err) {
+        console.warn('[CustomerDashboardV2] failed to fetch unread summary:', err)
+      }
+    }
+
+    const markChatAsRead = async (orderID: string) => {
+      unreadOrderIDs.value.delete(orderID)
+      try {
+        await api.post(`/chats/${orderID}/read`)
+      } catch (err) {
+        console.warn('[CustomerDashboardV2] mark read failed:', err)
+      }
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        try {
+          ws.value.send(JSON.stringify({ type: 'read_ack' }))
+        } catch (e) {}
+      }
+    }
+
+    const sendDeliveryAck = () => {
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        try {
+          ws.value.send(JSON.stringify({ type: 'delivery_ack' }))
+        } catch (e) {}
+      }
+    }
+
+    const getMessageStatusTitle = (status?: string) => {
+      if (status === 'read') return 'Прочитано'
+      if (status === 'delivered') return 'Доставлено, но не прочитано'
+      return 'Отправлено'
+    }
+
+    const openChatByToast = () => {
+      if (chatToast.value?.order) {
+        const order = chatToast.value.order
+        chatToast.value = null
+        toggleChat(order)
+      }
+    }
 
     const currentUserId = computed(() => authStore.userID)
 
@@ -936,6 +1006,7 @@ export default defineComponent({
 
       closeInlineChat()
       openChatOrderId.value = order.id
+      markChatAsRead(order.id)
 
       // 1. Fetch message history
       try {
@@ -985,6 +1056,20 @@ export default defineComponent({
               if (!exists) {
                 chatMessages.value.push(data)
                 scrollToChatBottom()
+              }
+              if (data.sender_id !== currentUserId.value) {
+                sendDeliveryAck()
+                if (openChatOrderId.value === order.id) {
+                  markChatAsRead(order.id)
+                } else {
+                  unreadOrderIDs.value.add(order.id)
+                  chatToast.value = {
+                    id: order.id,
+                    title: 'Новое сообщение',
+                    text: data.text || 'Получено новое сообщение',
+                    order,
+                  }
+                }
               }
             }
           } catch (e) {
@@ -1187,6 +1272,13 @@ export default defineComponent({
       chatMessages,
       chatInputText,
       editingMessageId,
+      unreadOrderIDs,
+      chatToast,
+      fetchUnreadSummary,
+      markChatAsRead,
+      sendDeliveryAck,
+      getMessageStatusTitle,
+      openChatByToast,
       isSystemMessage,
       startEditMessage,
       cancelEditMessage,
@@ -2304,7 +2396,66 @@ export default defineComponent({
   padding: 0 4px;
 }
 .msg-edited { font-style: italic; opacity: 0.8; }
-.read-receipt { color: var(--accent-main, #6366f1); font-size: 13px; }
+.read-receipt { color: var(--accent-main, #6366f1); font-size: 14px; }
+.delivered-receipt { color: #64748b; font-size: 14px; }
+.sent-receipt { color: #94a3b8; font-size: 13px; }
+
+.yellow-unread-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  background-color: #f59e0b;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.8);
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.chat-top-toast {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4);
+  z-index: 10000;
+  margin-bottom: 12px;
+  animation: slide-down 0.3s ease-out;
+}
+
+.toast-chat-icon {
+  font-size: 20px;
+}
+
+.toast-chat-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-chat-title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.toast-chat-text {
+  font-size: 12px;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* --- Ultra-compact Order Item Styles --- */
 .list-item-compact {
