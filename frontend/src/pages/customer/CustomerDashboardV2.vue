@@ -8,6 +8,10 @@
           <span>Моя услуга</span>
         </div>
         <div class="header-controls">
+          <button type="button" class="btn-support-header" title="Поддержка" @click="showSupportChatModal = true">
+            <i class="ph-bold ph-headset"></i>
+            <span>Поддержка</span>
+          </button>
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
@@ -398,6 +402,8 @@
           <img :src="previewImageUrl" alt="Предпросмотр" class="img-preview-full" />
         </div>
       </div>
+      <!-- Modal Поддержка -->
+      <SupportChatModal v-model:show="showSupportChatModal" />
     </div>
   </div>
 </template>
@@ -414,6 +420,7 @@ import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
+import SupportChatModal from '../../components/SupportChatModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
@@ -428,6 +435,7 @@ export default defineComponent({
     CreateOrderModal,
     CustomerProfileModal,
     ReviewModal,
+    SupportChatModal,
   },
   setup() {
     const router = useRouter()
@@ -486,6 +494,7 @@ export default defineComponent({
     const showOrderDetailsModal = ref(false)
     const showTopUpModal = ref(false)
     const showProfileModal = ref(false)
+    const showSupportChatModal = ref(false)
 
     watch([showCreateOrderModal, showOrderDetailsModal, showTopUpModal], (modalStates) => {
       const isAnyModalOpen = modalStates.some(state => state === true)
@@ -1249,6 +1258,7 @@ export default defineComponent({
       showOrderDetailsModal,
       showTopUpModal,
       showProfileModal,
+      showSupportChatModal,
       selectedOrderDetails,
       topUpAmount,
       submitting,
@@ -2527,4 +2537,27 @@ export default defineComponent({
   .msg-image { max-width: 200px; }
   .list-item-compact { flex-wrap: nowrap; padding: 10px 14px; }
   .order-summary { flex-wrap: nowrap; }
-}</style>
+}
+
+.btn-support-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(92, 96, 245, 0.1);
+  color: var(--brand-primary, #5c60f5);
+  border: 1px solid rgba(92, 96, 245, 0.2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-support-header:hover {
+  background: var(--brand-primary, #5c60f5);
+  color: #ffffff;
+  border-color: var(--brand-primary, #5c60f5);
+}
+</style>

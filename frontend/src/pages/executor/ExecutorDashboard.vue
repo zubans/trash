@@ -8,6 +8,10 @@
           <span>Моя услуга</span>
         </div>
         <div class="header-controls">
+          <button type="button" class="btn-support-header" title="Поддержка" @click="showSupportChatModal = true">
+            <i class="ph-bold ph-headset"></i>
+            <span>Поддержка</span>
+          </button>
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
@@ -590,6 +594,8 @@
         <img :src="previewImageUrl" class="img-preview-full" alt="Full Preview" />
       </div>
     </div>
+    <!-- Modal Поддержка -->
+    <SupportChatModal v-model:show="showSupportChatModal" />
   </div>
 </template>
 
@@ -606,6 +612,7 @@ import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
+import SupportChatModal from '../../components/SupportChatModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
@@ -620,6 +627,7 @@ export default defineComponent({
     ExecutorProfileModal,
     OrderDetailsModal,
     ReviewModal,
+    SupportChatModal,
   },
   setup() {
     const router = useRouter()
@@ -803,6 +811,7 @@ export default defineComponent({
 
     // Map modal state
     const showExecutorMapModal = ref(false)
+    const showSupportChatModal = ref(false)
 
     watch([showOrderDetailsModal, showReviewModal, showWithdrawalModal, showExecutorMapModal, showImagePreviewModal], (modalStates) => {
       const isAnyModalOpen = modalStates.some(state => state === true)
@@ -1418,6 +1427,7 @@ export default defineComponent({
       currentLat,
       currentLon,
       showExecutorMapModal,
+      showSupportChatModal,
       showOrderDetailsModal,
       selectedOrderDetails,
       openOrderDetails,
@@ -2883,6 +2893,28 @@ export default defineComponent({
 .btn-submit-topup:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.btn-support-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(92, 96, 245, 0.1);
+  color: var(--brand-primary, #5c60f5);
+  border: 1px solid rgba(92, 96, 245, 0.2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-support-header:hover {
+  background: var(--brand-primary, #5c60f5);
+  color: #ffffff;
+  border-color: var(--brand-primary, #5c60f5);
 }
 
 .read-receipt { color: var(--accent-main, #6366f1); font-size: 14px; }
