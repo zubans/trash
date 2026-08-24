@@ -637,6 +637,7 @@ export default defineComponent({
 
     const phone = ref('')
     const userEmail = ref('')
+    const fullName = ref('')
     const baseAddress = ref('')
     const balance = ref(0)
     const status = ref('ACTIVE')
@@ -839,6 +840,8 @@ export default defineComponent({
           userEmail.value = res.data.email || ''
           balance.value = res.data.balance ?? balance.value
           status.value = res.data.status || status.value
+          const parts = [res.data.last_name, res.data.first_name, res.data.patronymic].filter((p: string) => p && p.trim())
+          fullName.value = parts.join(' ')
         }
         const userProfRes = await api.get('/user/profile')
         if (userProfRes.data) {
