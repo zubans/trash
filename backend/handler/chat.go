@@ -550,3 +550,21 @@ func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": false})
 }
+
+// GetAdminSupportUnreadSummaryHandler returns total unread count for admin sidebar.
+func (h *ChatHandler) GetAdminSupportUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil || user.Role != "ADMIN" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	total, err := h.chatService.GetAdminSupportUnreadCount()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"unread_count": total})
+}

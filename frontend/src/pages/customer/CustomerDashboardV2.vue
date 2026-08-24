@@ -8,9 +8,10 @@
           <span>Моя услуга</span>
         </div>
         <div class="header-controls">
-          <button type="button" class="btn-support-header" title="Поддержка" @click="showSupportChatModal = true">
+          <button type="button" class="btn-support-header position-relative" title="Поддержка" @click="openSupportChat">
             <i class="ph-bold ph-headset"></i>
             <span>Поддержка</span>
+            <span v-if="hasUnreadSupport" class="support-unread-dot"></span>
           </button>
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
@@ -638,6 +639,7 @@ export default defineComponent({
       try {
         const response = await api.get('/customer/orders')
         fetchUnreadSummary()
+        checkSupportNotification()
         const newOrders = response.data || []
         // Update items in place or update orders if structure changed to prevent re-rendering active chat accordion
         orders.value = newOrders
@@ -806,7 +808,45 @@ export default defineComponent({
       return 'Отправлено'
     }
 
+    const hasUnreadSupport = ref(false)
+    const lastSupportMsgText = ref('')
+
+    watch(showSupportChatModal, (val) => {
+      if (val) hasUnreadSupport.value = false
+    })
+
+    const openSupportChat = () => {
+      hasUnreadSupport.value = false
+      showSupportChatModal.value = true
+    }
+
+    const checkSupportNotification = async () => {
+      try {
+        const res = await api.get('/support/chat')
+        if (res.data) {
+          const unreadCount = res.data.unread_count || 0
+          const lastMsg = res.data.last_message || ''
+          if (unreadCount > 0) {
+            hasUnreadSupport.value = true
+            if (!showSupportChatModal.value && lastMsg && lastMsg !== lastSupportMsgText.value) {
+              lastSupportMsgText.value = lastMsg
+              chatToast.value = {
+                title: 'Служба поддержки',
+                text: lastMsg,
+                isSupport: true,
+              }
+            }
+          }
+        }
+      } catch (err) {}
+    }
+
     const openChatByToast = () => {
+      if (chatToast.value?.isSupport) {
+        openSupportChat()
+        chatToast.value = null
+        return
+      }
       if (chatToast.value?.order) {
         const order = chatToast.value.order
         chatToast.value = null
@@ -1264,6 +1304,8 @@ export default defineComponent({
       showTopUpModal,
       showProfileModal,
       showSupportChatModal,
+      hasUnreadSupport,
+      openSupportChat,
       selectedOrderDetails,
       topUpAmount,
       submitting,
@@ -2564,6 +2606,17 @@ export default defineComponent({
   background: var(--brand-primary, #5c60f5);
   color: #ffffff;
   border-color: var(--brand-primary, #5c60f5);
+}
+
+.support-unread-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #ffffff;
 }
 
 .profile-fullname {

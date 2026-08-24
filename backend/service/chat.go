@@ -534,3 +534,8 @@ func (s *ChatService) UnbanSupportChat(chatID uuid.UUID) error {
 func (s *ChatService) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
 	return s.chatRepo.IsSupportChatBanned(chatID)
 }
+
+// GetAdminSupportUnreadCount returns total unread messages count for admin.
+func (s *ChatService) GetAdminSupportUnreadCount() (int, error) {
+	return s.chatRepo.GetAdminSupportUnreadCount()
+}

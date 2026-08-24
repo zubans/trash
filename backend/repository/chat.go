@@ -38,6 +38,8 @@ type SupportChat struct {
 	UserID      uuid.UUID  `json:"user_id"`
 	IsBanned    bool       `json:"is_banned"`
 	BannedUntil *time.Time `json:"banned_until,omitempty"`
+	UnreadCount int        `json:"unread_count"`
+	LastMessage *string    `json:"last_message,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
@@ -82,6 +84,7 @@ type ChatRepository interface {
 	BanSupportChat(chatID uuid.UUID, duration string) error
 	UnbanSupportChat(chatID uuid.UUID) error
 	IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error)
+	GetAdminSupportUnreadCount() (int, error)
 }
 
 type chatRepo struct {
@@ -304,11 +307,22 @@ func (r *chatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) 
 func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error) {
 	var sc SupportChat
 	var bannedUntil sql.NullTime
+	var lastMsg sql.NullString
 	err := r.db.QueryRow(`
-		INSERT INTO support_chats (user_id, updated_at)
-		VALUES ($1, now())
-		ON CONFLICT (user_id) DO UPDATE SET updated_at = support_chats.updated_at
-		RETURNING id, user_id, COALESCE(is_banned, false), banned_until, created_at, updated_at`, userID).Scan(&sc.ID, &sc.UserID, &sc.IsBanned, &bannedUntil, &sc.CreatedAt, &sc.UpdatedAt)
+		WITH sc_row AS (
+			INSERT INTO support_chats (user_id, updated_at)
+			VALUES ($1, now())
+			ON CONFLICT (user_id) DO UPDATE SET updated_at = support_chats.updated_at
+			RETURNING id, user_id, COALESCE(is_banned, false) as is_banned, banned_until, created_at, updated_at
+		)
+		SELECT 
+			id, user_id, is_banned, banned_until, created_at, updated_at,
+			(SELECT COUNT(*) FROM support_messages sm WHERE sm.chat_id = sc_row.id AND sm.sender_id != sc_row.user_id AND sm.read_at IS NULL) as unread_count,
+			(SELECT COALESCE(NULLIF(text, ''), file_name, 'Вложение') FROM support_messages WHERE chat_id = sc_row.id ORDER BY created_at DESC LIMIT 1) as last_message
+		FROM sc_row`, userID).Scan(
+		&sc.ID, &sc.UserID, &sc.IsBanned, &bannedUntil, &sc.CreatedAt, &sc.UpdatedAt,
+		&sc.UnreadCount, &lastMsg,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -319,6 +333,9 @@ func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error
 		} else {
 			sc.BannedUntil = &bannedUntil.Time
 		}
+	}
+	if lastMsg.Valid {
+		sc.LastMessage = &lastMsg.String
 	}
 	return &sc, nil
 }
@@ -485,4 +502,15 @@ func (r *chatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, erro
 		return true, &bannedUntil.Time, nil
 	}
 	return isBanned, nil, nil
+}
+
+func (r *chatRepo) GetAdminSupportUnreadCount() (int, error) {
+	var total int
+	err := r.db.QueryRow(`
+		SELECT COUNT(sm.id)
+		FROM support_messages sm
+		JOIN support_chats sc ON sc.id = sm.chat_id
+		WHERE sm.sender_id = sc.user_id AND sm.read_at IS NULL
+	`).Scan(&total)
+	return total, err
 }

@@ -20,6 +20,7 @@
         <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
           <i class="ph ph-chats-teardrop"></i>
           <span v-if="!sidebarMinimized">{{ $t('app.supportChats') }}</span>
+          <span v-if="unreadSupportCount > 0" class="nav-badge">{{ unreadSupportCount }}</span>
         </router-link>
 
         <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
@@ -121,6 +122,17 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const sidebarMinimized = ref(window.innerWidth < 768)
+    const unreadSupportCount = ref(0)
+    let unreadTimer: any = null
+
+    const fetchUnreadSupport = async () => {
+      try {
+        const res = await api.get('/admin/support/unread-summary')
+        if (res.data && res.data.unread_count !== undefined) {
+          unreadSupportCount.value = res.data.unread_count
+        }
+      } catch (err) {}
+    }
 
     onMounted(() => {
       window.addEventListener('resize', () => {
@@ -128,6 +140,8 @@ export default defineComponent({
           sidebarMinimized.value = true
         }
       })
+      fetchUnreadSupport()
+      unreadTimer = setInterval(fetchUnreadSupport, 5000)
     })
 
     const closeSidebarOnMobile = () => {
@@ -168,6 +182,7 @@ export default defineComponent({
 
     return {
       phone,
+      unreadSupportCount,
       currentRouteName,
       sidebarMinimized,
       pageTitle,
@@ -286,9 +301,18 @@ export default defineComponent({
 }
 
 .nav-item.active {
-  background: #eef2ff;
-  color: #5c60f5;
-  font-weight: 600;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.nav-badge {
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-left: auto;
 }
 
 .nav-item i {
