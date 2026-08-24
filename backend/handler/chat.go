@@ -381,6 +381,18 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if user.Role != "ADMIN" {
+		banned, until, err := h.chatService.IsSupportChatBanned(chatID)
+		if err == nil && banned {
+			msg := "Чат поддержки заблокирован администратором"
+			if until != nil {
+				msg = fmt.Sprintf("Чат заблокирован до %s", until.Format("15:04 02.01.2006"))
+			}
+			http.Error(w, msg, http.StatusForbidden)
+			return
+		}
+	}
+
 	var req struct {
 		Text string `json:"text"`
 	}
@@ -412,6 +424,18 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	if err != nil {
 		http.Error(w, "invalid chat ID", http.StatusBadRequest)
 		return
+	}
+
+	if user.Role != "ADMIN" {
+		banned, until, err := h.chatService.IsSupportChatBanned(chatID)
+		if err == nil && banned {
+			msg := "Чат поддержки заблокирован администратором"
+			if until != nil {
+				msg = fmt.Sprintf("Чат заблокирован до %s", until.Format("15:04 02.01.2006"))
+			}
+			http.Error(w, msg, http.StatusForbidden)
+			return
+		}
 	}
 
 	r.ParseMultipartForm(10 << 20) // 10 MB limit
@@ -479,4 +503,50 @@ func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *h
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)
+}
+
+// BanSupportChatHandler bans a support chat for specified duration ("10m", "1h", "forever").
+func (h *ChatHandler) BanSupportChatHandler(w http.ResponseWriter, r *http.Request) {
+	chatIDStr := chi.URLParam(r, "chat_id")
+	chatID, err := uuid.Parse(chatIDStr)
+	if err != nil {
+		http.Error(w, "invalid chat ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Duration string `json:"duration"` // "10m", "1h", "forever"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Duration = "10m"
+	}
+	if req.Duration == "" {
+		req.Duration = "10m"
+	}
+
+	if err := h.chatService.BanSupportChat(chatID, req.Duration); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": true, "duration": req.Duration})
+}
+
+// UnbanSupportChatHandler unbans a support chat.
+func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Request) {
+	chatIDStr := chi.URLParam(r, "chat_id")
+	chatID, err := uuid.Parse(chatIDStr)
+	if err != nil {
+		http.Error(w, "invalid chat ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.chatService.UnbanSupportChat(chatID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": false})
 }

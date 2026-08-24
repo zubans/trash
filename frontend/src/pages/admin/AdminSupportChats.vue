@@ -63,8 +63,33 @@
                 <div class="header-details">
                   <span><i class="ph-fill ph-phone me-1"></i>{{ selectedChat.phone }}</span>
                   <span class="role-badge ms-2" :class="selectedChat.role.toLowerCase()">{{ selectedChat.role }}</span>
+                  <span v-if="selectedChat.is_banned" class="ban-badge ms-2">
+                    <i class="ph-bold ph-prohibit me-1"></i>
+                    {{ formatBanText(selectedChat.banned_until) }}
+                  </span>
                 </div>
               </div>
+            </div>
+
+            <!-- Ban Controls -->
+            <div class="header-ban-actions">
+              <template v-if="selectedChat.is_banned">
+                <button type="button" class="btn-ban-action btn-unban" title="Снять блокировку" @click="unbanChat(selectedChat)">
+                  <i class="ph-bold ph-lock-key-open me-1"></i> Разбанить
+                </button>
+              </template>
+              <template v-else>
+                <span class="ban-label me-1">Бан:</span>
+                <button type="button" class="btn-ban-action" title="Заблокировать на 10 минут" @click="banChat(selectedChat, '10m')">
+                  10 мин
+                </button>
+                <button type="button" class="btn-ban-action" title="Заблокировать на 1 час" @click="banChat(selectedChat, '1h')">
+                  1 час
+                </button>
+                <button type="button" class="btn-ban-action btn-ban-forever" title="Заблокировать навсегда" @click="banChat(selectedChat, 'forever')">
+                  Навсегда
+                </button>
+              </template>
             </div>
           </div>
 
@@ -298,6 +323,44 @@ export default defineComponent({
       showImageModal.value = true
     }
 
+    const banChat = async (chat: any, duration: string) => {
+      if (!chat) return
+      try {
+        await api.post(`/admin/support/chats/${chat.chat_id}/ban`, { duration })
+        chat.is_banned = true
+        if (duration === '10m') {
+          chat.banned_until = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        } else if (duration === '1h') {
+          chat.banned_until = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+        } else {
+          chat.banned_until = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000).toISOString()
+        }
+        await fetchChats()
+      } catch (err) {
+        console.error('Failed to ban chat:', err)
+      }
+    }
+
+    const unbanChat = async (chat: any) => {
+      if (!chat) return
+      try {
+        await api.post(`/admin/support/chats/${chat.chat_id}/unban`)
+        chat.is_banned = false
+        chat.banned_until = null
+        await fetchChats()
+      } catch (err) {
+        console.error('Failed to unban chat:', err)
+      }
+    }
+
+    const formatBanText = (untilISO?: string) => {
+      if (!untilISO) return 'Заблокирован'
+      const d = new Date(untilISO)
+      const now = new Date()
+      if (d.getFullYear() - now.getFullYear() > 10) return 'Заблокирован навсегда'
+      return `Забанен до ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    }
+
     onMounted(() => {
       fetchChats()
       pollInterval = setInterval(() => {
@@ -340,6 +403,9 @@ export default defineComponent({
       formatTime,
       resolveUrl,
       previewImage,
+      banChat,
+      unbanChat,
+      formatBanText,
     }
   }
 })
@@ -493,7 +559,7 @@ export default defineComponent({
 }
 
 .role-badge.customer { background: #dbeafe; color: #1e40af; }
-.role-badge.executor { background: #d1fae5; color: #065f46; }
+.role-badge.executor { background: #fef3c7; color: #d97706; }
 
 .chat-bottom-row {
   display: flex;

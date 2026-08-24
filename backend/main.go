@@ -222,6 +222,8 @@ func main() {
 			r.Get("/admin/settings", ah.GetSettingsHandler)
 			r.Post("/admin/settings", ah.UpdateSettingsHandler)
 			r.Get("/admin/support/chats", ch.GetAdminSupportChatListHandler)
+			r.Post("/admin/support/chats/{chat_id}/ban", ch.BanSupportChatHandler)
+			r.Post("/admin/support/chats/{chat_id}/unban", ch.UnbanSupportChatHandler)
 			r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
 			r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
 			r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)

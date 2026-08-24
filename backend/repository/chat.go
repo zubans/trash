@@ -34,10 +34,12 @@ type Message struct {
 
 // SupportChat represents a support conversation between a user and admins.
 type SupportChat struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID          uuid.UUID  `json:"id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	IsBanned    bool       `json:"is_banned"`
+	BannedUntil *time.Time `json:"banned_until,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // SupportChatListItem represents a user chat item in the admin Telegram-style list.
@@ -51,6 +53,8 @@ type SupportChatListItem struct {
 	FullName    string     `json:"full_name"`
 	Role        string     `json:"role"`
 	UnreadCount int        `json:"unread_count"`
+	IsBanned    bool       `json:"is_banned"`
+	BannedUntil *time.Time `json:"banned_until,omitempty"`
 	LastMessage *string    `json:"last_message,omitempty"`
 	LastTime    *time.Time `json:"last_time,omitempty"`
 }
@@ -75,6 +79,9 @@ type ChatRepository interface {
 	SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
 	GetAdminSupportChatList() ([]*SupportChatListItem, error)
 	MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error
+	BanSupportChat(chatID uuid.UUID, duration string) error
+	UnbanSupportChat(chatID uuid.UUID) error
+	IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error)
 }
 
 type chatRepo struct {
@@ -88,9 +95,13 @@ func NewChatRepository(db *sql.DB) ChatRepository {
 		CREATE TABLE IF NOT EXISTS support_chats (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			is_banned BOOLEAN NOT NULL DEFAULT FALSE,
+			banned_until TIMESTAMPTZ NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
+		ALTER TABLE support_chats ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE;
+		ALTER TABLE support_chats ADD COLUMN IF NOT EXISTS banned_until TIMESTAMPTZ NULL;
 		CREATE TABLE IF NOT EXISTS support_messages (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			chat_id UUID NOT NULL REFERENCES support_chats(id) ON DELETE CASCADE,
@@ -292,13 +303,22 @@ func (r *chatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) 
 
 func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error) {
 	var sc SupportChat
+	var bannedUntil sql.NullTime
 	err := r.db.QueryRow(`
 		INSERT INTO support_chats (user_id, updated_at)
 		VALUES ($1, now())
 		ON CONFLICT (user_id) DO UPDATE SET updated_at = support_chats.updated_at
-		RETURNING id, user_id, created_at, updated_at`, userID).Scan(&sc.ID, &sc.UserID, &sc.CreatedAt, &sc.UpdatedAt)
+		RETURNING id, user_id, COALESCE(is_banned, false), banned_until, created_at, updated_at`, userID).Scan(&sc.ID, &sc.UserID, &sc.IsBanned, &bannedUntil, &sc.CreatedAt, &sc.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if bannedUntil.Valid {
+		if time.Now().After(bannedUntil.Time) {
+			sc.IsBanned = false
+			_, _ = r.db.Exec(`UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, sc.ID)
+		} else {
+			sc.BannedUntil = &bannedUntil.Time
+		}
 	}
 	return &sc, nil
 }
@@ -367,12 +387,14 @@ func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
 			COALESCE(u.patronymic, ''),
 			u.role,
 			COUNT(sm.id) FILTER (WHERE sm.sender_id = u.id AND sm.read_at IS NULL) as unread_count,
+			COALESCE(sc.is_banned, false) as is_banned,
+			sc.banned_until,
 			(SELECT COALESCE(NULLIF(text, ''), file_name, 'Вложение') FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_message,
 			(SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_time
 		FROM support_chats sc
 		JOIN users u ON u.id = sc.user_id
 		LEFT JOIN support_messages sm ON sm.chat_id = sc.id AND sm.sender_id = u.id AND sm.read_at IS NULL
-		GROUP BY sc.id, sc.user_id, u.phone, u.first_name, u.last_name, u.patronymic, u.role
+		GROUP BY sc.id, sc.user_id, u.phone, u.first_name, u.last_name, u.patronymic, u.role, sc.is_banned, sc.banned_until
 		ORDER BY COALESCE((SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1), sc.created_at) DESC
 	`
 	rows, err := r.db.Query(query)
@@ -386,13 +408,21 @@ func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
 		var item SupportChatListItem
 		var lastMsg sql.NullString
 		var lastTime sql.NullTime
+		var bannedUntil sql.NullTime
 		err := rows.Scan(
 			&item.ChatID, &item.UserID, &item.Phone,
 			&item.FirstName, &item.LastName, &item.Patronymic,
-			&item.Role, &item.UnreadCount, &lastMsg, &lastTime,
+			&item.Role, &item.UnreadCount, &item.IsBanned, &bannedUntil, &lastMsg, &lastTime,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if bannedUntil.Valid {
+			if time.Now().After(bannedUntil.Time) {
+				item.IsBanned = false
+			} else {
+				item.BannedUntil = &bannedUntil.Time
+			}
 		}
 		fullName := strings.TrimSpace(item.LastName + " " + item.FirstName + " " + item.Patronymic)
 		if fullName == "" {
@@ -413,4 +443,46 @@ func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
 func (r *chatRepo) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
 	_, err := r.db.Exec(`UPDATE support_messages SET read_at = now(), status = 'read' WHERE chat_id = $1 AND sender_id != $2 AND read_at IS NULL`, chatID, readerID)
 	return err
+}
+
+func (r *chatRepo) BanSupportChat(chatID uuid.UUID, duration string) error {
+	var until time.Time
+	now := time.Now()
+	switch duration {
+	case "10m":
+		until = now.Add(10 * time.Minute)
+	case "1h":
+		until = now.Add(1 * time.Hour)
+	case "forever":
+		until = now.AddDate(100, 0, 0)
+	default:
+		until = now.Add(10 * time.Minute)
+	}
+	_, err := r.db.Exec(`UPDATE support_chats SET is_banned = true, banned_until = $2, updated_at = now() WHERE id = $1`, chatID, until)
+	return err
+}
+
+func (r *chatRepo) UnbanSupportChat(chatID uuid.UUID) error {
+	_, err := r.db.Exec(`UPDATE support_chats SET is_banned = false, banned_until = NULL, updated_at = now() WHERE id = $1`, chatID)
+	return err
+}
+
+func (r *chatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
+	var isBanned bool
+	var bannedUntil sql.NullTime
+	err := r.db.QueryRow(`SELECT COALESCE(is_banned, false), banned_until FROM support_chats WHERE id = $1`, chatID).Scan(&isBanned, &bannedUntil)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil, nil
+		}
+		return false, nil, err
+	}
+	if isBanned && bannedUntil.Valid {
+		if time.Now().After(bannedUntil.Time) {
+			_, _ = r.db.Exec(`UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, chatID)
+			return false, nil, nil
+		}
+		return true, &bannedUntil.Time, nil
+	}
+	return isBanned, nil, nil
 }

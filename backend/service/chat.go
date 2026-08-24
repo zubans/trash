@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -517,4 +518,19 @@ func (s *ChatService) GetAdminSupportChatList() ([]*repository.SupportChatListIt
 // MarkSupportMessagesAsRead marks unread messages in a support chat as read.
 func (s *ChatService) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
 	return s.chatRepo.MarkSupportMessagesAsRead(chatID, readerID)
+}
+
+// BanSupportChat bans a support chat for specified duration ("10m", "1h", "forever").
+func (s *ChatService) BanSupportChat(chatID uuid.UUID, duration string) error {
+	return s.chatRepo.BanSupportChat(chatID, duration)
+}
+
+// UnbanSupportChat unbans a support chat.
+func (s *ChatService) UnbanSupportChat(chatID uuid.UUID) error {
+	return s.chatRepo.UnbanSupportChat(chatID)
+}
+
+// IsSupportChatBanned checks if support chat is banned.
+func (s *ChatService) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
+	return s.chatRepo.IsSupportChatBanned(chatID)
 }

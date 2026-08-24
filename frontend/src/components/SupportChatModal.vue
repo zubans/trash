@@ -85,8 +85,14 @@
         @change="onFileSelected"
       />
 
+      <!-- Banned Notice Banner -->
+      <div v-if="isBanned" class="support-banned-banner">
+        <i class="ph-bold ph-prohibit icon-ban"></i>
+        <span>{{ banNoticeText }}</span>
+      </div>
+
       <!-- Input Bar -->
-      <div class="support-input-bar">
+      <div v-else class="support-input-bar">
         <button
           type="button"
           class="btn-attach"
@@ -152,6 +158,17 @@ export default defineComponent({
     const inputText = ref('')
     const messagesContainerRef = ref<any>(null)
     const fileInputRef = ref<HTMLInputElement | null>(null)
+    const isBanned = ref(false)
+    const bannedUntil = ref<string | null>(null)
+
+    const banNoticeText = computed(() => {
+      if (!isBanned.value) return ''
+      if (!bannedUntil.value) return 'Чат заблокирован администратором'
+      const d = new Date(bannedUntil.value)
+      const now = new Date()
+      if (d.getFullYear() - now.getFullYear() > 10) return 'Чат заблокирован администратором навсегда'
+      return `Чат заблокирован администратором до ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ${d.toLocaleDateString()}`
+    })
 
     const showImageModal = ref(false)
     const previewUrl = ref('')
@@ -225,6 +242,8 @@ export default defineComponent({
         const res = await api.get('/support/chat')
         if (res.data?.id) {
           chatId.value = res.data.id
+          isBanned.value = !!res.data.is_banned
+          bannedUntil.value = res.data.banned_until || null
           await fetchMessages()
           startPolling()
         }
@@ -371,6 +390,8 @@ export default defineComponent({
       fileInputRef,
       showImageModal,
       previewUrl,
+      isBanned,
+      banNoticeText,
       closeModal,
       isMyMessage,
       isImageAttachment,
@@ -732,5 +753,23 @@ export default defineComponent({
   max-height: 90vh;
   border-radius: 12px;
   object-fit: contain;
+}
+
+.support-banned-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 18px;
+  background: #fef2f2;
+  border-top: 1px solid #fee2e2;
+  color: #ef4444;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 0 0 20px 20px;
+}
+
+.icon-ban {
+  font-size: 18px;
 }
 </style>
