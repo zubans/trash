@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -96,6 +97,7 @@ func New(db *sql.DB) UserRepository {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS patronymic VARCHAR(100) NOT NULL DEFAULT '';
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE NULL;
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_attempts INT NOT NULL DEFAULT 0;
+		UPDATE users SET phone = '+7' || SUBSTRING(REGEXP_REPLACE(phone, '[^0-9]', '', 'g') FROM 2) WHERE phone NOT LIKE '+7%' AND LENGTH(REGEXP_REPLACE(phone, '[^0-9]', '', 'g')) = 11;
 	`)
 	return &repo{db: db}
 }
@@ -104,9 +106,15 @@ func (r *repo) FindByPhone(phone string) (*User, error) {
 	var u User
 	var email, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
+	cleanDigits := regexp.MustCompile(`[^0-9]`).ReplaceAllString(phone, "")
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE phone = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
+		 FROM users
+		 WHERE phone = $1
+		    OR ($2 != '' AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $2)
+		 ORDER BY created_at ASC LIMIT 1`,
 		phone,
+		cleanDigits,
 	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err

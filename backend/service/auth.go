@@ -241,13 +241,25 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	return created, nil
 }
 
-// Authenticate verifies phone/password and returns the matching user.
-func (s *AuthService) Authenticate(phone, password string) (*repository.User, error) {
-	if phone == "" || password == "" {
+// Authenticate verifies phone/password or email/password and returns the matching user.
+func (s *AuthService) Authenticate(phoneOrEmail, password string) (*repository.User, error) {
+	if phoneOrEmail == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
 
-	user, err := s.repo.FindByPhone(normalizePhone(phone))
+	input := strings.TrimSpace(phoneOrEmail)
+	var user *repository.User
+	var err error
+
+	if strings.Contains(input, "@") {
+		user, err = s.repo.FindByEmail(input)
+	} else {
+		user, err = s.repo.FindByPhone(normalizePhone(input))
+		if (err != nil || user == nil) && input != "" {
+			user, err = s.repo.FindByPhone(input)
+		}
+	}
+
 	if err != nil || user == nil {
 		// Hash anyway so a missing account is not distinguishable by timing.
 		_, _ = bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
