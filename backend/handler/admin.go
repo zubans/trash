@@ -59,6 +59,12 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		Status string `json:"status"`
 	}
@@ -67,7 +73,7 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.adminService.UpdateUserStatus(userID, req.Status); err != nil {
+	if err := h.adminService.UpdateUserStatus(userID, admin.ID, req.Status); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -85,6 +91,12 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		Role string `json:"role"`
 	}
@@ -93,7 +105,7 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.adminService.UpdateUserRole(userID, req.Role); err != nil {
+	if err := h.adminService.UpdateUserRole(userID, admin.ID, req.Role); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

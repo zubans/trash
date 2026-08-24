@@ -70,8 +70,8 @@ func main() {
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret, mailer)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
-	matchingService := service.NewMatchingService(orderRepo, shiftRepo, db)
-	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, transactionRepo)
+	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
+	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, transactionRepo, userRepo, catalogRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo, geocoder)
@@ -112,26 +112,40 @@ func main() {
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 
+	// Rate limiters for the endpoints that are worth brute forcing.
+	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
+	passwordResetLimiter := middleware.NewRateLimiter(5, 15*time.Minute)
+	registerLimiter := middleware.NewRateLimiter(5, time.Hour)
+	geoLimiter := middleware.NewRateLimiter(30, time.Minute)
+
 	r := chi.NewRouter()
+	// StripQueryToken runs before the logger so credentials passed as a query
+	// parameter never reach the access log.
+	r.Use(middleware.StripQueryToken)
 	r.Use(corsMiddleware)
+	r.Use(middleware.SecurityHeaders)
 	r.Use(chiMiddleware.Recoverer)
 	r.Use(chiMiddleware.Logger)
+	r.Use(middleware.MaxBodyBytes(1 << 20))
 
 	// registerAPIRoutes wires every handler onto the given chi.Router. It is
 	// mounted twice below so that BOTH /api/* (used by the web build via nginx
 	// and by the rebuilt mobile app) and the legacy root paths /* (used by
 	// already-installed mobile APKs that talk directly to port 8089) keep
-	// working. The web nginx config only proxies /api/ to the backend, so root
-	// paths are never exposed to browsers.
+	// working. Both mounts carry the same authentication and authorization
+	// middleware; the legacy mount should be removed once installed clients
+	// have been rebuilt.
 	registerAPIRoutes := func(r chi.Router) {
 		r.Get("/health", ph.HealthHandler)
-		r.Post("/register", ph.RegisterHandler)
-		r.Post("/login", ph.LoginHandler)
+		r.With(registerLimiter.Middleware).Post("/register", ph.RegisterHandler)
+		r.With(loginLimiter.Middleware).Post("/login", ph.LoginHandler)
 		r.Get("/auth/verify-email", ph.VerifyEmailHandler)
-		r.Post("/auth/forgot-password", ph.ForgotPasswordHandler)
-		r.Post("/auth/reset-password", ph.ResetPasswordHandler)
-		r.Get("/geo/geocode", gh.Geocode)
-		r.Get("/geo/autocomplete", gh.Autocomplete)
+		r.With(passwordResetLimiter.Middleware).Post("/auth/forgot-password", ph.ForgotPasswordHandler)
+		r.With(passwordResetLimiter.Middleware).Post("/auth/reset-password", ph.ResetPasswordHandler)
+		// The geocoder is a shared, rate limited upstream: unbounded anonymous
+		// access to it stalls order creation for everyone.
+		r.With(geoLimiter.Middleware).Get("/geo/geocode", gh.Geocode)
+		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
 		r.Get("/settings", ah.GetPublicSettingsHandler)
 		r.Get("/service-categories", sch.ListRootCategories)
 		r.Get("/service-categories/{id}/children", sch.ListChildren)
@@ -142,11 +156,11 @@ func main() {
 		r.Get("/users/{id}/reviews", rh.GetUserReviews)
 		r.Get("/users/{id}/rating", rh.GetUserRating)
 
-		// Authenticated customer routes
+		// Authenticated customer routes. ADMIN is included so support staff can
+		// act on behalf of a customer from the admin panel.
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
-			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
-			r.Get("/customer/profile", ah.GetProfileHandler)
+			r.Use(middleware.RequireRole("CUSTOMER", "ADMIN"))
 			r.Post("/customer/orders", oh.CreateOrderHandler)
 			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
 			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
@@ -162,6 +176,12 @@ func main() {
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
 			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/user/profile", ah.GetProfileHandler)
+			// Both paths return the caller's own profile. /customer/profile is
+			// kept here rather than in the customer group because the executor
+			// app also calls it.
+			r.Get("/customer/profile", ah.GetProfileHandler)
+			// Executors need top-ups too: fines can take a balance negative.
+			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
@@ -185,6 +205,7 @@ func main() {
 		// Authenticated executor routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
+			r.Use(middleware.RequireRole("EXECUTOR", "ADMIN"))
 			r.Post("/executor/shifts", sh.StartShiftHandler)
 			r.Post("/executor/shifts/end", sh.EndShiftHandler)
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
@@ -245,11 +266,15 @@ func main() {
 	// 8089). Kept until all clients are rebuilt with the /api interceptor.
 	registerAPIRoutes(r)
 
-	// Serve uploaded files and release APKs
-	uploadsDir := getEnv("UPLOADS_DIR", "uploads")
+	// Release APKs are public by design. Uploaded chat attachments are not:
+	// they are served by an authenticated handler that verifies the caller
+	// participates in the conversation the file belongs to.
 	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir(getEnv("RELEASES_DIR", "releases")))).ServeHTTP)
-	r.Get("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir))).ServeHTTP)
-	r.Get("/api/uploads/*", http.StripPrefix("/api/uploads/", http.FileServer(http.Dir(uploadsDir))).ServeHTTP)
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware.RequireAuth)
+		r.Get("/uploads/*", ch.ServeAttachmentHandler)
+		r.Get("/api/uploads/*", ch.ServeAttachmentHandler)
+	})
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {
@@ -262,15 +287,16 @@ func main() {
 
 	errChan := make(chan error, 2)
 
+	srv := newServer(addr, r)
 	if certFile != "" && keyFile != "" {
 		go func() {
 			log.Printf("Starting HTTPS server on %s", addr)
-			errChan <- http.ListenAndServeTLS(addr, certFile, keyFile, r)
+			errChan <- srv.ListenAndServeTLS(certFile, keyFile)
 		}()
 	} else {
 		go func() {
 			log.Printf("Starting HTTP server on %s", addr)
-			errChan <- http.ListenAndServe(addr, r)
+			errChan <- srv.ListenAndServe()
 		}()
 	}
 
@@ -279,11 +305,25 @@ func main() {
 	if mobileAddr := getEnv("MOBILE_HTTP_ADDR", ""); mobileAddr != "" {
 		go func() {
 			log.Printf("Starting mobile HTTP server on %s", mobileAddr)
-			errChan <- http.ListenAndServe(mobileAddr, r)
+			errChan <- newServer(mobileAddr, r).ListenAndServe()
 		}()
 	}
 
 	log.Fatalf("Server error: %v", <-errChan)
+}
+
+// newServer builds an http.Server with explicit timeouts. The zero-value
+// server has none, which leaves the process open to slow-client exhaustion.
+// WriteTimeout is deliberately absent: the chat WebSocket lives on the same
+// router and a write deadline would tear long-lived sockets down.
+func newServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 }
 
 // waitForDB retries db.Ping with a short backoff until the database is ready.
@@ -300,23 +340,9 @@ func waitForDB(db *sql.DB) error {
 	return err
 }
 
-func buildAllowedOrigins() map[string]bool {
-	origins := map[string]bool{
-		"https://localhost":      true,
-		"https://localhost:443":  true,
-		"https://localhost:8443": true,
-		"http://localhost":       true,
-		"capacitor://localhost":  true,
-		"ionic://localhost":      true,
-	}
-	if corsOrigin := getEnv("CORS_ORIGIN", ""); corsOrigin != "" {
-		origins[corsOrigin] = true
-	}
-	return origins
-}
-
 func corsMiddleware(next http.Handler) http.Handler {
-	allowedOrigins := buildAllowedOrigins()
+	// Shared with the WebSocket origin check so both stay in sync.
+	allowedOrigins := service.AllowedOrigins()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if allowedOrigins[origin] {

@@ -98,19 +98,49 @@ func (s *AdminService) GetUsers(page, limit int, role, status, search string) ([
 }
 
 // UpdateUserStatus updates user status (e.g., ACTIVE or BANNED).
-func (s *AdminService) UpdateUserStatus(userID uuid.UUID, status string) error {
+func (s *AdminService) UpdateUserStatus(userID, adminID uuid.UUID, status string) error {
 	if status != "ACTIVE" && status != "BANNED" {
 		return errors.New("invalid status")
 	}
-	return s.userRepo.UpdateStatus(userID, status)
+	if status == "BANNED" && userID == adminID {
+		return errors.New("нельзя заблокировать самого себя")
+	}
+	if err := s.userRepo.UpdateStatus(userID, status); err != nil {
+		return err
+	}
+	log.Printf("[AUDIT] admin %s set status of user %s to %s", adminID, userID, status)
+	return nil
 }
 
-// UpdateUserRole updates a user's role.
-func (s *AdminService) UpdateUserRole(userID uuid.UUID, role string) error {
+// UpdateUserRole updates a user's role. Role changes take effect on the next
+// request because authorization reads the role from the database.
+func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) error {
 	if role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
 		return errors.New("invalid role")
 	}
-	return s.userRepo.UpdateRole(userID, role)
+
+	current, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return errors.New("user not found")
+	}
+	if current.Role == "ADMIN" && role != "ADMIN" {
+		if userID == adminID {
+			return errors.New("нельзя снять роль администратора с самого себя")
+		}
+		admins, err := s.adminRepo.CountAdmins()
+		if err != nil {
+			return err
+		}
+		if admins <= 1 {
+			return errors.New("нельзя снять роль с последнего администратора")
+		}
+	}
+
+	if err := s.userRepo.UpdateRole(userID, role); err != nil {
+		return err
+	}
+	log.Printf("[AUDIT] admin %s changed role of user %s: %s -> %s", adminID, userID, current.Role, role)
+	return nil
 }
 
 // UpdateUserAddress updates a customer's pickup address (admin-only).
@@ -239,6 +269,14 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64)
 		return nil, errors.New("insufficient balance for withdrawal")
 	}
 
+	pending, err := s.adminRepo.HasPendingWithdrawal(userID)
+	if err != nil {
+		return nil, err
+	}
+	if pending {
+		return nil, errors.New("у вас уже есть заявка на вывод в обработке")
+	}
+
 	return s.adminRepo.CreateWithdrawalRequest(userID, amount)
 }
 
@@ -337,8 +375,12 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 		"geofence_fine_amount":   true,
 		"min_balance_limit":      true,
 	}
+	numericKeys["shift_early_exit_penalty"] = true
+	numericKeys["reject_penalty_share"] = true
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,
+		"max_active_orders":                       true,
+		"max_executed_unconfirmed_orders":         true,
 	}
 	for key, value := range settings {
 		if numericKeys[key] {
@@ -348,6 +390,9 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 			}
 			if v < 0 {
 				return errors.New("setting " + key + " value cannot be negative")
+			}
+			if key == "reject_penalty_share" && v > 1 {
+				return errors.New("setting reject_penalty_share must be between 0 and 1")
 			}
 		}
 		if positiveIntKeys[key] {
@@ -365,16 +410,16 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 
 // BroadcastEmailRequest defines payload for email broadcast.
 type BroadcastEmailRequest struct {
-	TargetGroup string   `json:"target_group"` // CUSTOMERS, EXECUTORS, CUSTOM_EMAILS
+	TargetGroup  string   `json:"target_group"` // CUSTOMERS, EXECUTORS, CUSTOM_EMAILS
 	CustomEmails []string `json:"custom_emails,omitempty"`
-	Subject     string   `json:"subject"`
-	BodyHTML    string   `json:"body_html"`
+	Subject      string   `json:"subject"`
+	BodyHTML     string   `json:"body_html"`
 }
 
 // BroadcastEmailResult contains summary of sent emails.
 type BroadcastEmailResult struct {
-	Total     int      `json:"total"`
-	Successful int     `json:"successful"`
+	Total      int      `json:"total"`
+	Successful int      `json:"successful"`
 	Failed     int      `json:"failed"`
 	Failures   []string `json:"failures,omitempty"`
 }
@@ -412,9 +457,15 @@ func (s *AdminService) SendBroadcastEmail(req BroadcastEmailRequest) (*Broadcast
 	case "CUSTOM_EMAILS":
 		for _, email := range req.CustomEmails {
 			trimmed := strings.TrimSpace(email)
-			if trimmed != "" {
-				recipientEmails = append(recipientEmails, trimmed)
+			if trimmed == "" {
+				continue
 			}
+			// Reject anything that is not a plain address: the message headers
+			// are built by concatenation, so a CR/LF here is header injection.
+			if !validRecipient.MatchString(trimmed) {
+				return nil, fmt.Errorf("invalid recipient address: %s", trimmed)
+			}
+			recipientEmails = append(recipientEmails, trimmed)
 		}
 	default:
 		return nil, errors.New("invalid target_group: must be CUSTOMERS, EXECUTORS, or CUSTOM_EMAILS")
@@ -429,11 +480,12 @@ func (s *AdminService) SendBroadcastEmail(req BroadcastEmailRequest) (*Broadcast
 	}
 
 	smtpSender, ok := s.mailer.(*SmtpMailSender)
+	if !ok {
+		// Without a real transport nothing is sent; reporting success would be a lie.
+		return nil, errors.New("email transport is not available")
+	}
 	for _, email := range recipientEmails {
-		var err error
-		if ok {
-			err = smtpSender.SendEmail(email, req.Subject, req.BodyHTML)
-		}
+		err := smtpSender.SendEmail(email, req.Subject, req.BodyHTML)
 		if err != nil {
 			result.Failed++
 			result.Failures = append(result.Failures, fmt.Sprintf("%s: %v", email, err))

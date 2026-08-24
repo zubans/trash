@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"time"
@@ -94,6 +95,7 @@ func New(db *sql.DB) UserRepository {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100) NOT NULL DEFAULT '';
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS patronymic VARCHAR(100) NOT NULL DEFAULT '';
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE NULL;
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_attempts INT NOT NULL DEFAULT 0;
 	`)
 	return &repo{db: db}
 }
@@ -234,26 +236,86 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 }
 
 func (r *repo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+	// A fresh code resets the attempt counter.
 	_, err := r.db.Exec(
-		`UPDATE users SET password_reset_code = $1, password_reset_expires_at = $2 WHERE id = $3`,
+		`UPDATE users SET password_reset_code = $1, password_reset_expires_at = $2, password_reset_attempts = 0 WHERE id = $3`,
 		code, expiresAt, userID,
 	)
 	return err
 }
 
+// maxResetAttempts limits how many codes may be tried for one reset request.
+// Without it a numeric code can simply be enumerated inside its validity window.
+const maxResetAttempts = 5
+
+// ResetPasswordWithCode verifies the code under a row lock and counts failed
+// attempts, invalidating the code once the limit is reached.
 func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error) {
-	var userID uuid.UUID
-	err := r.db.QueryRow(
-		`UPDATE users 
-		 SET password = $1, password_reset_code = NULL, password_reset_expires_at = NULL 
-		 WHERE LOWER(email) = LOWER($2) AND password_reset_code = $3 AND password_reset_expires_at > now()
-		 RETURNING id`,
-		newHashedPassword, email, code,
-	).Scan(&userID)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var (
+		userID     uuid.UUID
+		storedCode sql.NullString
+		expiresAt  sql.NullTime
+		attempts   int
+	)
+	err = tx.QueryRow(
+		`SELECT id, password_reset_code, password_reset_expires_at, COALESCE(password_reset_attempts, 0)
+		 FROM users WHERE LOWER(email) = LOWER($1) FOR UPDATE`,
+		email,
+	).Scan(&userID, &storedCode, &expiresAt, &attempts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("invalid or expired reset code")
 		}
+		return nil, err
+	}
+
+	invalidate := func() error {
+		_, err := tx.Exec(
+			`UPDATE users SET password_reset_code = NULL, password_reset_expires_at = NULL, password_reset_attempts = 0 WHERE id = $1`,
+			userID,
+		)
+		return err
+	}
+
+	if !storedCode.Valid || storedCode.String == "" || !expiresAt.Valid || expiresAt.Time.Before(time.Now()) {
+		return nil, errors.New("invalid or expired reset code")
+	}
+
+	if attempts >= maxResetAttempts {
+		if err := invalidate(); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("превышено число попыток, запросите новый код")
+	}
+
+	if subtle.ConstantTimeCompare([]byte(storedCode.String), []byte(code)) != 1 {
+		if _, err := tx.Exec(`UPDATE users SET password_reset_attempts = COALESCE(password_reset_attempts, 0) + 1 WHERE id = $1`, userID); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("invalid or expired reset code")
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE users
+		 SET password = $1, password_reset_code = NULL, password_reset_expires_at = NULL, password_reset_attempts = 0
+		 WHERE id = $2`,
+		newHashedPassword, userID,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return r.FindByID(userID)

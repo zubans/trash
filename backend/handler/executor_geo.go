@@ -51,20 +51,11 @@ func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	latStr := r.URL.Query().Get("lat")
-	lonStr := r.URL.Query().Get("lon")
-
-	lat, err1 := strconv.ParseFloat(latStr, 64)
-	lon, err2 := strconv.ParseFloat(lonStr, 64)
-	if err1 != nil || err2 != nil {
-		// Fallback to default location
-		lat = 55.7558
-		lon = 37.6173
-	}
-
-	orders, err := h.geoService.GetMapOrders(user.ID, lat, lon)
+	// Coordinates are read from the executor's stored location, not from the
+	// query string, so the endpoint cannot be used to scan arbitrary areas.
+	orders, err := h.geoService.GetMapOrders(user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

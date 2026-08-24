@@ -74,6 +74,46 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geo
 	return &AuthService{repo: repo, geocoder: geocoder, mailer: mailer, secret: []byte(secret)}
 }
 
+// minPasswordLength is the shortest password accepted at registration and at
+// password reset.
+const minPasswordLength = 8
+
+// weakPasswords are the values seen most often in credential stuffing lists.
+var weakPasswords = map[string]bool{
+	"12345678": true, "123456789": true, "1234567890": true, "password": true,
+	"qwerty123": true, "qwertyui": true, "11111111": true, "iloveyou": true,
+	"admin123": true, "parol123": true, "password1": true,
+}
+
+// validatePassword enforces a minimum strength. Without it a single character
+// password was accepted, which made the (unthrottled) login endpoint trivial.
+func validatePassword(password string) error {
+	if len([]rune(password)) < minPasswordLength {
+		return fmt.Errorf("пароль должен быть не короче %d символов", minPasswordLength)
+	}
+	if weakPasswords[strings.ToLower(password)] {
+		return errors.New("этот пароль слишком простой, выберите другой")
+	}
+	return nil
+}
+
+var phoneCleanup = regexp.MustCompile(`[^0-9+]`)
+
+// normalizePhone reduces a Russian phone number to a single canonical form, so
+// that "+7 999 …", "8999…" and "7999…" cannot become three separate accounts
+// for the same person.
+func normalizePhone(phone string) string {
+	digits := phoneCleanup.ReplaceAllString(strings.TrimSpace(phone), "")
+	digits = strings.TrimPrefix(digits, "+")
+	switch {
+	case len(digits) == 11 && strings.HasPrefix(digits, "8"):
+		digits = "7" + digits[1:]
+	case len(digits) == 10:
+		digits = "7" + digits
+	}
+	return "+" + digits
+}
+
 // validRegistrationRole reports whether a role may be chosen during registration.
 // ADMIN is explicitly forbidden; only CUSTOMER and EXECUTOR are allowed.
 func validRegistrationRole(role string) bool {
@@ -92,6 +132,10 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
+	if err := validatePassword(password); err != nil {
+		return nil, err
+	}
+	phone = normalizePhone(phone)
 	lastName = strings.TrimSpace(lastName)
 	firstName = strings.TrimSpace(firstName)
 	patronymic = strings.TrimSpace(patronymic)
@@ -166,13 +210,12 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	}
 
 	// Save profile and base address location for both CUSTOMER and EXECUTOR
+	// Note: client supplied coordinates are stored for this user only. They are
+	// deliberately NOT written into the shared geocoding cache — anyone could
+	// otherwise register with someone else's address and repoint it.
 	var lastGeo string
 	if lat != nil && lon != nil {
-		lastGeo = fmt.Sprintf("%f,%f", *lat, *lon)
-		// Cache the coordinates for the normalized address so the geocoder knows this point.
-		if gc, ok := s.geocoder.(*Geocoder); ok && gc != nil {
-			_ = gc.saveCache(normalizedAddress, *lat, *lon)
-		}
+		lastGeo = formatGeo(*lat, *lon)
 	} else if s.geocoder != nil {
 		geo, err := s.geocoder.Geocode(normalizedAddress)
 		if err == nil && geo != nil {
@@ -185,14 +228,10 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	}
 
 	// Set initial executor location
-	if role == "EXECUTOR" && (lat != nil && lon != nil || lastGeo != "") {
-		var eLat, eLon float64
-		if lat != nil && lon != nil {
-			eLat, eLon = *lat, *lon
-		} else {
-			fmt.Sscanf(lastGeo, "%f,%f", &eLat, &eLon)
+	if role == "EXECUTOR" && lastGeo != "" {
+		if err := s.repo.UpdateLastGeo(created.ID, lastGeo); err != nil {
+			log.Printf("[AuthService] failed to store initial geo for %s: %v", created.ID, err)
 		}
-		_ = s.repo.UpdateLastGeo(created.ID, lastGeo)
 	}
 
 	if s.mailer != nil {
@@ -208,8 +247,10 @@ func (s *AuthService) Authenticate(phone, password string) (*repository.User, er
 		return nil, errors.New("phone and password are required")
 	}
 
-	user, err := s.repo.FindByPhone(phone)
-	if err != nil {
+	user, err := s.repo.FindByPhone(normalizePhone(phone))
+	if err != nil || user == nil {
+		// Hash anyway so a missing account is not distinguishable by timing.
+		_, _ = bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		return nil, errors.New("invalid credentials")
 	}
 
@@ -286,17 +327,19 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 	}
 	user, err := s.repo.FindByEmail(email)
 	if err != nil || user == nil {
-		return errors.New("пользователь с таким Email не найден")
+		// Report success regardless: a different answer here tells an attacker
+		// which email addresses have an account.
+		log.Printf("[PASSWORD RESET] requested for unknown email")
+		return nil
 	}
 
-	// Generate cryptographically secure 6-digit numeric reset code
-	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
-	var code string
+	// Cryptographically secure 8-digit reset code. There is no time-based
+	// fallback: a predictable code is worse than a failed request.
+	n, err := rand.Int(rand.Reader, big.NewInt(100000000))
 	if err != nil {
-		code = fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
-	} else {
-		code = fmt.Sprintf("%06d", n.Int64())
+		return errors.New("не удалось сгенерировать код, попробуйте позже")
 	}
+	code := fmt.Sprintf("%08d", n.Int64())
 	expiresAt := time.Now().Add(30 * time.Minute)
 
 	if err := s.repo.SetPasswordResetCode(user.ID, code, expiresAt); err != nil {
@@ -305,12 +348,13 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 
 	if s.mailer != nil {
 		if err := s.mailer.SendPasswordResetCode(email, code); err != nil {
-			log.Printf("[PASSWORD RESET] Failed to send email to %s: %v", email, err)
+			log.Printf("[PASSWORD RESET] Failed to send email to user %s: %v", user.ID, err)
 			return errors.New("не удалось отправить письмо с кодом. Попробуйте позже.")
 		}
 	}
 
-	log.Printf("[PASSWORD RESET] Code generated and sent to %s (Expires: %s)", email, expiresAt.Format(time.RFC3339))
+	// The code itself is never logged.
+	log.Printf("[PASSWORD RESET] Code sent to user %s (expires %s)", user.ID, expiresAt.Format(time.RFC3339))
 	return nil
 }
 
@@ -320,6 +364,9 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) error {
 	code = strings.TrimSpace(code)
 	if email == "" || code == "" || newPassword == "" {
 		return errors.New("email, code and new password are required")
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return err
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)

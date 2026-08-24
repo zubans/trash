@@ -125,6 +125,10 @@ func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) e
 	return nil
 }
 
+func (m *mockUserRepo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error {
+	return nil
+}
+
 func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
 	return nil
 }

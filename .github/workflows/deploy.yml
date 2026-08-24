@@ -22,10 +22,20 @@ jobs:
         with:
           go-version: '1.26'
 
+      - name: Verify Backend Builds
+        run: |
+          cd backend
+          go build ./...
+
+      - name: Vet Backend
+        run: |
+          cd backend
+          go vet ./...
+
       - name: Run Backend Tests
         run: |
           cd backend
-          go test -v ./...
+          go test -race ./...
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

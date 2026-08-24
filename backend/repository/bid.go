@@ -57,10 +57,14 @@ func (r *bidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice float64)
 		return nil, errors.New("order is not open for bidding")
 	}
 
-	// 2. Insert bid
+	// 2. Insert the bid. One executor holds at most one bid per order, so a
+	//    repeated submission updates the offer instead of stacking duplicates
+	//    (the unique index is created in migration 024).
 	query := `
 		INSERT INTO bids (order_id, executor_id, offered_price, status, created_at)
 		VALUES ($1, $2, $3, 'PENDING', now())
+		ON CONFLICT (order_id, executor_id)
+		DO UPDATE SET offered_price = EXCLUDED.offered_price, status = 'PENDING', created_at = now()
 		RETURNING id, order_id, executor_id, offered_price, status, created_at`
 
 	var b Bid

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -60,8 +62,20 @@ func (h *AppReleaseHandler) GetVersionHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// allowedPlatforms limits the directory component of the stored path.
+var allowedPlatforms = map[string]bool{"android": true}
+
+// versionNamePattern keeps the version out of the file name's control: without
+// it, "../../.." in platform or version_name wrote the uploaded file anywhere
+// on the file system.
+var versionNamePattern = regexp.MustCompile(`^[0-9A-Za-z._\-]{1,64}$`)
+
+// maxReleaseBytes caps an uploaded APK.
+const maxReleaseBytes = 300 << 20
+
 // UploadReleaseHandler handles POST /admin/app-releases.
 func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxReleaseBytes)
 	platform := r.FormValue("platform")
 	versionName := r.FormValue("version_name")
 	versionCode, err := strconv.Atoi(r.FormValue("version_code"))
@@ -72,8 +86,16 @@ func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.
 	releaseNotes := r.FormValue("release_notes")
 	forceUpdate := r.FormValue("force_update") == "true"
 
-	if platform == "" || versionName == "" {
-		http.Error(w, "platform and version_name are required", http.StatusBadRequest)
+	if !allowedPlatforms[platform] {
+		http.Error(w, "unsupported platform", http.StatusBadRequest)
+		return
+	}
+	if !versionNamePattern.MatchString(versionName) {
+		http.Error(w, "invalid version_name", http.StatusBadRequest)
+		return
+	}
+	if versionCode <= 0 {
+		http.Error(w, "invalid version_code", http.StatusBadRequest)
 		return
 	}
 
@@ -87,6 +109,22 @@ func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.
 	fileName := fmt.Sprintf("app-release-%s-%d.apk", versionName, versionCode)
 	filePath := filepath.Join("releases", platform, fileName)
 	fullPath := filepath.Join(h.releasesDir, filePath)
+
+	// Defence in depth: the resolved path must stay under the releases root.
+	base, err := filepath.Abs(h.releasesDir)
+	if err != nil {
+		http.Error(w, "invalid releases directory", http.StatusInternalServerError)
+		return
+	}
+	abs, err := filepath.Abs(fullPath)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if rel, err := filepath.Rel(base, abs); err != nil || strings.HasPrefix(rel, "..") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

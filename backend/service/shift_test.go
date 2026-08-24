@@ -208,10 +208,17 @@ func (m *mockGeozoneRepo) FindByExecutor(userID uuid.UUID) (*repository.Geozone,
 	return m.geozone, nil
 }
 
-type mockShiftTransactionRepo struct{}
+type mockShiftTransactionRepo struct {
+	// txs records the ledger entries written by the service under test.
+	txs []*repository.Transaction
+}
 
 func (m *mockShiftTransactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
 	return 0, nil
+}
+
+func (m *mockShiftTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error {
+	return m.UpdateBalance(tx, userID, -amount)
 }
 
 func (m *mockShiftTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error {
@@ -219,6 +226,7 @@ func (m *mockShiftTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, d
 }
 
 func (m *mockShiftTransactionRepo) CreateTransaction(tx *sql.Tx, t *repository.Transaction) error {
+	m.txs = append(m.txs, t)
 	return nil
 }
 

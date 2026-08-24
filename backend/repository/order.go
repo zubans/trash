@@ -48,7 +48,7 @@ type Order struct {
 
 // OrderRepository defines storage operations for orders.
 type OrderRepository interface {
-	Create(order *Order) error
+	Create(q Querier, order *Order) error
 	FindByID(id uuid.UUID) (*Order, error)
 	GetOrderByID(id uuid.UUID) (*Order, error)
 	FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error)
@@ -56,12 +56,17 @@ type OrderRepository interface {
 	FindByCustomer(customerID uuid.UUID) ([]Order, error)
 	GetPendingOrders() ([]*Order, error)
 	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
-	Assign(orderID, executorID uuid.UUID) error
+	// Mutating operations take a Querier so the caller can run them inside its
+	// own transaction; pass nil to run on the connection pool. They return
+	// ErrConflict when the entity was not in the expected state.
+	Assign(q Querier, orderID, executorID uuid.UUID) error
 	AssignOrder(orderID, executorID uuid.UUID) error
-	Execute(orderID uuid.UUID) error
-	Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
-	Cancel(orderID uuid.UUID) error
-	Unassign(orderID uuid.UUID) error
+	Execute(q Querier, orderID uuid.UUID) error
+	Confirm(q Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
+	Cancel(q Querier, orderID uuid.UUID) error
+	Unassign(q Querier, orderID uuid.UUID) error
+	LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error)
+	SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount float64) error
 	CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error)
 	CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error)
 
@@ -132,8 +137,8 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 	return o, err
 }
 
-func (r *orderRepo) Create(order *Order) error {
-	_, err := r.db.Exec(
+func (r *orderRepo) Create(q Querier, order *Order) error {
+	_, err := r.exec(q).Exec(
 		`INSERT INTO orders (`+orderInsertColumns+`)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		order.ID, order.CustomerID, order.ExecutorID, order.ServiceVariantID, order.IsUrgent, order.IsAsap,
@@ -281,28 +286,37 @@ func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Ord
 	return result, rows.Err()
 }
 
-func (r *orderRepo) Assign(orderID, executorID uuid.UUID) error {
-	_, err := r.db.Exec(
+// exec resolves the Querier to use: the caller's open transaction when one is
+// supplied, the pool otherwise. Every state transition below is guarded in SQL
+// and reports ErrConflict when the guard does not match, so a no-op update can
+// never be mistaken for success.
+func (r *orderRepo) exec(q Querier) Querier {
+	if q == nil {
+		return r.db
+	}
+	return q
+}
+
+func (r *orderRepo) Assign(q Querier, orderID, executorID uuid.UUID) error {
+	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now() WHERE id = $3 AND status = $4 AND executor_id IS NULL`,
 		executorID, OrderStatusAssigned, orderID, OrderStatusSearching,
 	)
-	return err
 }
 
 func (r *orderRepo) AssignOrder(orderID, executorID uuid.UUID) error {
-	return r.Assign(orderID, executorID)
+	return r.Assign(nil, orderID, executorID)
 }
 
-func (r *orderRepo) Execute(orderID uuid.UUID) error {
-	_, err := r.db.Exec(
+func (r *orderRepo) Execute(q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
 		OrderStatusExecuted, orderID, OrderStatusAssigned,
 	)
-	return err
 }
 
-func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
-	_, err := r.db.Exec(
+func (r *orderRepo) Confirm(q Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
+	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
@@ -310,23 +324,45 @@ func (r *orderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded
 		 WHERE id = $4 AND status = $5`,
 		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted,
 	)
-	return err
 }
 
-func (r *orderRepo) Cancel(orderID uuid.UUID) error {
-	_, err := r.db.Exec(
-		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status = $3`,
-		OrderStatusCanceled, orderID, OrderStatusSearching,
+// Cancel voids an order that has not been executed yet. Both SEARCHING and
+// ASSIGNED are accepted because the service layer refunds the hold for both;
+// the guard keeps a second concurrent cancel from refunding twice.
+func (r *orderRepo) Cancel(q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(r.exec(q),
+		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
+		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned,
 	)
-	return err
 }
 
-func (r *orderRepo) Unassign(orderID uuid.UUID) error {
-	_, err := r.db.Exec(
+func (r *orderRepo) Unassign(q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET status = $1, executor_id = NULL, assigned_at = NULL WHERE id = $2 AND status = $3`,
 		OrderStatusSearching, orderID, OrderStatusAssigned,
 	)
-	return err
+}
+
+// LockForUpdate reads an order inside a transaction taking a row lock, so that
+// concurrent confirm/cancel requests serialise instead of both seeing the same
+// pre-transition state.
+func (r *orderRepo) LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error) {
+	row := r.exec(q).QueryRow(`SELECT `+orderColumns+` FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID)
+	o, err := scanOrderRow(row)
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+// SetHoldAmount adjusts the amount currently held from the customer. It must be
+// kept in step with every refund, otherwise the payout at confirmation time is
+// computed from a stale hold.
+func (r *orderRepo) SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount float64) error {
+	return execExpectingOne(r.exec(q),
+		`UPDATE orders SET hold_amount = $1 WHERE id = $2`,
+		holdAmount, orderID,
+	)
 }
 
 // CreateOrderWithHold creates a standard order and blocks customer balance.
@@ -342,7 +378,7 @@ func (r *orderRepo) CreateOrderWithHold(customerID uuid.UUID, serviceVariantID u
 		FinalAmount:      holdAmount,
 		CreatedAt:        time.Now(),
 	}
-	if err := r.Create(order); err != nil {
+	if err := r.Create(nil, order); err != nil {
 		return nil, err
 	}
 	return order, nil
@@ -350,12 +386,12 @@ func (r *orderRepo) CreateOrderWithHold(customerID uuid.UUID, serviceVariantID u
 
 // ConfirmOrderExecution marks an order as completed.
 func (r *orderRepo) ConfirmOrderExecution(orderID uuid.UUID) error {
-	return r.Confirm(orderID, 0, false)
+	return r.Confirm(nil, orderID, 0, false)
 }
 
 // CancelOrder cancels an order.
 func (r *orderRepo) CancelOrder(orderID uuid.UUID) error {
-	return r.Cancel(orderID)
+	return r.Cancel(nil, orderID)
 }
 
 // GetExecutorAssignedOrders returns orders assigned to a specific executor.
@@ -399,7 +435,7 @@ func (r *orderRepo) CreateConstructionOrder(customerID uuid.UUID, serviceVariant
 		PhotoURL:         photo,
 		CreatedAt:        time.Now(),
 	}
-	if err := r.Create(order); err != nil {
+	if err := r.Create(nil, order); err != nil {
 		return nil, err
 	}
 	return order, nil

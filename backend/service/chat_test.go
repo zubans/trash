@@ -11,8 +11,9 @@ import (
 )
 
 type mockChatRepo struct {
-	chats    []*repository.Chat
-	messages []*repository.Message
+	chats         []*repository.Chat
+	messages      []*repository.Message
+	supportOwners map[uuid.UUID]uuid.UUID
 }
 
 func (m *mockChatRepo) GetChatByOrderID(orderID uuid.UUID) (*repository.Chat, error) {
@@ -193,5 +194,56 @@ func TestChatService_EditAndDeleteMessage(t *testing.T) {
 	err = srv.DeleteMessage(msg.ID, customerID, orderID)
 	if err != nil {
 		t.Fatalf("unexpected error deleting message: %v", err)
+	}
+}
+
+// --- support chat methods required by repository.ChatRepository ---
+
+func (m *mockChatRepo) SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error) {
+	if m.supportOwners == nil {
+		return uuid.Nil, errors.New("support chat not found")
+	}
+	owner, ok := m.supportOwners[chatID]
+	if !ok {
+		return uuid.Nil, errors.New("support chat not found")
+	}
+	return owner, nil
+}
+
+func (m *mockChatRepo) CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockChatRepo) BanSupportChat(chatID uuid.UUID, duration string) error { return nil }
+
+func (m *mockChatRepo) UnbanSupportChat(chatID uuid.UUID) error { return nil }
+
+func (m *mockChatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
+	return false, nil, nil
+}
+
+func (m *mockChatRepo) GetAdminSupportUnreadCount() (int, error) { return 0, nil }
+
+// TestChatService_SupportChatOwnership verifies that a support conversation is
+// only readable and writable by the user it belongs to (and by admins).
+func TestChatService_SupportChatOwnership(t *testing.T) {
+	owner := uuid.New()
+	stranger := uuid.New()
+	chatID := uuid.New()
+
+	chatRepo := &mockChatRepo{supportOwners: map[uuid.UUID]uuid.UUID{chatID: owner}}
+	svc := NewChatService(chatRepo, &mockOrderRepo{})
+
+	if _, err := svc.GetSupportMessages(chatID, stranger, "CUSTOMER"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("stranger must not read the chat, got %v", err)
+	}
+	if _, err := svc.SaveSupportMessage(chatID, stranger, "CUSTOMER", "hi"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("stranger must not write to the chat, got %v", err)
+	}
+	if _, err := svc.GetSupportMessages(chatID, owner, "CUSTOMER"); err != nil {
+		t.Errorf("owner must be able to read the chat: %v", err)
+	}
+	if _, err := svc.GetSupportMessages(chatID, stranger, "ADMIN"); err != nil {
+		t.Errorf("admin must be able to read any chat: %v", err)
 	}
 }

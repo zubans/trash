@@ -126,24 +126,38 @@ func (s *ShiftService) GetCurrent(executorID uuid.UUID) (*repository.Shift, erro
 	return s.shiftRepo.GetLastShiftByExecutor(executorID)
 }
 
-// End terminates the active shift for an executor.
+// End terminates the active shift for an executor. Ending a shift before its
+// planned end is a penalised event regardless of which endpoint the client
+// calls, so this delegates to the same routine as EarlyEnd — previously the
+// fine could be skipped simply by calling /shifts/end instead of /early-end.
 func (s *ShiftService) End(executorID uuid.UUID) error {
-	shift, err := s.shiftRepo.GetActiveShift(executorID)
-	if err != nil {
-		return errors.New("no active shift")
-	}
-	return s.shiftRepo.UpdateShiftStatus(shift.ID, string(repository.ShiftStatusCompleted))
+	_, err := s.finishShift(executorID)
+	return err
 }
 
-// EarlyEnd terminates the active shift before its planned end time and charges
-// a penalty configured in system_settings (default 50). If the executor has
-// assigned orders at the moment of early termination, each order is canceled,
-// the customer is refunded the held amount, and the executor is charged double
-// the penalty plus the total cost of those orders.
+// EarlyEnd terminates the active shift and charges the penalty configured in
+// system_settings (default 50). If the executor has assigned orders at the
+// moment of termination, those orders are returned to the search pool and the
+// executor is charged double the penalty plus the total value of those orders.
 func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error) {
+	return s.finishShift(executorID)
+}
+
+// finishShift is the single exit path for an active shift. The fine, the
+// unassignment of open orders and the shift status change are applied together,
+// so an executor is never charged for orders that stayed assigned to them.
+func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, error) {
 	shift, err := s.shiftRepo.GetActiveShift(executorID)
 	if err != nil {
 		return nil, errors.New("no active shift")
+	}
+
+	// A shift that already reached its planned end carries no penalty.
+	if !time.Now().Before(shift.PlannedEndAt) {
+		if err := s.shiftRepo.End(shift.ID); err != nil {
+			return nil, err
+		}
+		return s.shiftRepo.GetShiftByID(shift.ID)
 	}
 
 	basePenalty := s.earlyExitPenaltyAmount()
@@ -157,28 +171,33 @@ func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error)
 	}
 
 	orderCost := 0.0
+	openOrders := make([]repository.Order, 0, len(assignedOrders))
 	for _, o := range assignedOrders {
+		// Orders already marked EXECUTED are awaiting customer confirmation and
+		// must not be pulled back from the executor.
+		if o.Status != repository.OrderStatusAssigned {
+			continue
+		}
+		openOrders = append(openOrders, o)
 		orderCost += o.HoldAmount
 	}
 
-	// With assigned orders the fine is doubled and includes the order cost.
-	var totalFine float64
-	if len(assignedOrders) > 0 {
+	// With open orders the fine is doubled and includes the order cost.
+	totalFine := basePenalty
+	if len(openOrders) > 0 {
 		totalFine = basePenalty*2 + orderCost
-	} else {
-		totalFine = basePenalty
 	}
 
 	if s.transactionRepo != nil {
 		if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-			// Unassign orders so they return to SEARCHING pool for other executors.
-			for _, o := range assignedOrders {
-				if err := s.orderRepo.Unassign(o.ID); err != nil {
+			for _, o := range openOrders {
+				if err := s.orderRepo.Unassign(tx, o.ID); err != nil {
 					return err
 				}
 			}
-
-			// Charge the executor.
+			if totalFine <= 0 {
+				return nil
+			}
 			if err := s.transactionRepo.UpdateBalance(tx, executorID, -totalFine); err != nil {
 				return err
 			}
@@ -196,7 +215,6 @@ func (s *ShiftService) EarlyEnd(executorID uuid.UUID) (*repository.Shift, error)
 		return nil, err
 	}
 
-	// Return the updated shift for the response.
 	updated, err := s.shiftRepo.GetShiftByID(shift.ID)
 	if err != nil {
 		// Fallback to the original shift with the changes applied in memory.
@@ -324,9 +342,10 @@ func (s *ShiftService) IsWithinGeozone(geozone *repository.Geozone, lat, lon flo
 		return false, errors.New("unknown geozone type")
 	}
 }
+
 // ExecutorHistoryResult contains orders and transaction history for an executor.
 type ExecutorHistoryResult struct {
-	Orders       []repository.Order       `json:"orders"`
+	Orders       []repository.Order        `json:"orders"`
 	Transactions []*repository.Transaction `json:"transactions"`
 }
 

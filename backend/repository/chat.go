@@ -76,6 +76,12 @@ type ChatRepository interface {
 	UpdateMessage(messageID, senderID uuid.UUID, newText string) (*Message, error)
 
 	GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error)
+	// SupportChatOwner returns the user a support chat belongs to, so callers
+	// can verify ownership before reading or writing messages.
+	SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error)
+	// CanAccessAttachment reports whether a user is a participant of the chat
+	// that a stored file belongs to.
+	CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, error)
 	GetSupportMessages(chatID uuid.UUID) ([]*Message, error)
 	SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*Message, error)
 	SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
@@ -338,6 +344,40 @@ func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error
 		sc.LastMessage = &lastMsg.String
 	}
 	return &sc, nil
+}
+
+func (r *chatRepo) SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := r.db.QueryRow(`SELECT user_id FROM support_chats WHERE id = $1`, chatID).Scan(&userID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return userID, nil
+}
+
+// CanAccessAttachment checks both attachment sources: order chats (customer and
+// assigned executor) and support chats (the owning user). Admin access is
+// handled by the caller.
+func (r *chatRepo) CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, error) {
+	var allowed bool
+	err := r.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM messages m
+			JOIN chats c ON c.id = m.chat_id
+			JOIN orders o ON o.id = c.order_id
+			WHERE m.file_url = $2
+			  AND (o.customer_id = $1 OR o.executor_id = $1)
+		) OR EXISTS(
+			SELECT 1
+			FROM support_messages sm
+			JOIN support_chats sc ON sc.id = sm.chat_id
+			WHERE sm.file_url = $2 AND sc.user_id = $1
+		)`, userID, fileURL).Scan(&allowed)
+	if err != nil {
+		return false, err
+	}
+	return allowed, nil
 }
 
 func (r *chatRepo) GetSupportMessages(chatID uuid.UUID) ([]*Message, error) {

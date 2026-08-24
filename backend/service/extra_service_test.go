@@ -147,7 +147,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo, nil)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, nil, newMockUserRepo(), newMockCatalogRepo())
 
 	custID := uuid.New()
 	execID := uuid.New()
@@ -174,9 +174,14 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 		t.Fatalf("unexpected error creating bid: %v", err)
 	}
 
-	bids, err := srv.GetBidsForOrder(orderID)
+	// Only the order's own customer may list its bids.
+	bids, err := srv.GetBidsForOrder(orderID, custID)
 	if err != nil || len(bids) != 1 {
-		t.Fatalf("expected 1 bid for order, got %d", len(bids))
+		t.Fatalf("expected 1 bid for order, got %d (err %v)", len(bids), err)
+	}
+
+	if _, err := srv.GetBidsForOrder(orderID, uuid.New()); err == nil {
+		t.Error("expected error when a stranger lists bids for someone else's order")
 	}
 
 	// Invalid bid price (0 or negative)
@@ -296,7 +301,8 @@ func TestExecutorGeoService(t *testing.T) {
 		PickupLon: &plon,
 	})
 
-	orders, err := srv.GetMapOrders(execID, 55.7558, 37.6173)
+	// Coordinates now come from the executor's stored location, not the caller.
+	orders, err := srv.GetMapOrders(execID)
 	if err != nil || len(orders) != 1 {
 		t.Errorf("expected 1 map order, got %d", len(orders))
 	}
@@ -319,8 +325,8 @@ func TestAdminService_Extended(t *testing.T) {
 	userRepo.users[u.Phone] = u
 
 	adminID := uuid.New()
-	_ = srv.UpdateUserRole(u.ID, "EXECUTOR")
-	_ = srv.UpdateUserRole(u.ID, "INVALID_ROLE")
+	_ = srv.UpdateUserRole(u.ID, adminID, "EXECUTOR")
+	_ = srv.UpdateUserRole(u.ID, adminID, "INVALID_ROLE")
 	_ = srv.UpdateUserAddress(u.ID, "New Address")
 	_ = srv.UpdateUserAddress(u.ID, "")
 	_ = srv.TopUpUserBalance(adminID, u.ID, 500.0)
@@ -467,7 +473,7 @@ func TestOrderService_Aliases(t *testing.T) {
 
 	// Confirm alias
 	_ = orderRepo.AssignOrder(order.ID, execID)
-	_ = orderRepo.Execute(order.ID)
+	_ = orderRepo.Execute(nil, order.ID)
 	err = srv.Confirm(custID, order.ID)
 	if err != nil {
 		t.Errorf("unexpected error in Confirm alias: %v", err)
@@ -513,7 +519,7 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 func TestMatchingService_MatchOrders(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewMatchingService(orderRepo, shiftRepo, nil)
+	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo(), nil)
 
 	// When no pending orders exist
 	err := srv.MatchOrders()

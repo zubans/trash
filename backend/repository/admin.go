@@ -70,6 +70,8 @@ type AdminRepository interface {
 	GetWithdrawalRequests() ([]*WithdrawalRequest, error)
 	GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, error)
 	CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*WithdrawalRequest, error)
+	HasPendingWithdrawal(userID uuid.UUID) (bool, error)
+	CountAdmins() (int, error)
 	ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error
 	RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error
 	TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error
@@ -145,7 +147,7 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 
 	// Get paginated list with customer address
 	listQuery := fmt.Sprintf(
-		`SELECT u.id, u.role, u.phone, u.password, u.balance, u.status, u.created_at, COALESCE(cp.address, '') as address
+		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.created_at, COALESCE(cp.address, '') as address
 		 FROM users u
 		 LEFT JOIN customer_profiles cp ON cp.user_id = u.id
 		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
@@ -162,7 +164,9 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 	var users []*User
 	for rows.Next() {
 		var u User
-		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Password, &u.Balance, &u.Status, &u.CreatedAt, &u.Address)
+		// The password hash is deliberately not selected: it has no use in an
+		// admin listing and must not travel through the application at all.
+		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.CreatedAt, &u.Address)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -367,6 +371,25 @@ func (r *adminRepo) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*
 		return nil, err
 	}
 	return &req, nil
+}
+
+// HasPendingWithdrawal reports whether the user already has an open request.
+// Requests do not reserve funds, so several open ones for the same balance
+// would leave the admin approving payouts that cannot all be honoured.
+func (r *adminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM balance_withdrawal_requests WHERE user_id = $1 AND status = 'PENDING')`,
+		userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+// CountAdmins is used to keep the last administrator from being demoted.
+func (r *adminRepo) CountAdmins() (int, error) {
+	var count int
+	err := r.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
+	return count, err
 }
 
 func (r *adminRepo) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -33,11 +34,11 @@ type SetLocationRequest struct {
 }
 
 type SetLocationResponse struct {
-	Success                 bool     `json:"success"`
-	Message                 string   `json:"message,omitempty"`
-	CooldownRemainingSeconds int      `json:"cooldown_remaining_seconds,omitempty"`
-	Lat                     float64  `json:"lat"`
-	Lon                     float64  `json:"lon"`
+	Success                  bool    `json:"success"`
+	Message                  string  `json:"message,omitempty"`
+	CooldownRemainingSeconds int     `json:"cooldown_remaining_seconds,omitempty"`
+	Lat                      float64 `json:"lat"`
+	Lon                      float64 `json:"lon"`
 }
 
 func getAcceptRadiusKM() float64 {
@@ -71,7 +72,12 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 		shiftDist = HaversineDistanceKM(*oldLat, *oldLon, req.Lat, req.Lon)
 	}
 
-	if req.IsManual && oldLat != nil && oldLon != nil {
+	// Whether a move counts as "manual" is decided here, from the distance
+	// travelled, and not by a flag the client sends: an executor could
+	// otherwise bypass the cooldown by flipping is_manual to false.
+	isManual := req.IsManual || shiftDist > acceptRadiusKM
+
+	if isManual && oldLat != nil && oldLon != nil {
 		// Reject manual moves within inner circle
 		if shiftDist <= acceptRadiusKM {
 			return &SetLocationResponse{
@@ -133,11 +139,11 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 		}(executorID, *oldLat, *oldLon, req.Lat, req.Lon, now)
 	}
 
-	if err := s.geoRepo.UpdateExecutorLocation(executorID, req.Lat, req.Lon, req.IsManual); err != nil {
+	if err := s.geoRepo.UpdateExecutorLocation(executorID, req.Lat, req.Lon, isManual); err != nil {
 		return nil, err
 	}
 
-	if req.IsManual && shiftDist > acceptRadiusKM {
+	if isManual && shiftDist > acceptRadiusKM {
 		s.cooldownMap.Store(executorID, now)
 	}
 
@@ -149,7 +155,22 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 	}, nil
 }
 
-func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
+// GetMapOrders returns searching orders around the executor's own stored
+// position. The position deliberately comes from the database rather than from
+// request parameters: with client supplied coordinates any account could sweep
+// the map and harvest customer addresses country-wide.
+func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID) ([]repository.MapOrder, error) {
+	lat, lon, _, err := s.geoRepo.GetExecutorLocation(executorID)
+	if err != nil {
+		return nil, err
+	}
+	if lat == nil || lon == nil {
+		return nil, errors.New("местоположение исполнителя не задано")
+	}
+	return s.mapOrdersAround(executorID, *lat, *lon)
+}
+
+func (s *ExecutorGeoService) mapOrdersAround(executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
 	// Find pending orders within 10km
 	const overviewRadiusKM = 10.0
 	acceptRadiusKM := getAcceptRadiusKM()
@@ -163,21 +184,13 @@ func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID, lat, lon float64
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
-		var oLat, oLon float64
-		if o.PickupLat != nil && o.PickupLon != nil {
-			oLat = *o.PickupLat
-			oLon = *o.PickupLon
-		} else if s.geocoder != nil && o.Address != nil && *o.Address != "" {
-			geo, err := s.geocoder.Geocode(*o.Address)
-			if err == nil {
-				oLat = geo.Lat
-				oLon = geo.Lon
-			} else {
-				continue
-			}
-		} else {
+		// Only orders that already carry coordinates are considered. Geocoding
+		// here used to run inside the loop against a globally rate limited
+		// upstream, so one map request could stall the geocoder for everyone.
+		if o.PickupLat == nil || o.PickupLon == nil {
 			continue
 		}
+		oLat, oLon := *o.PickupLat, *o.PickupLon
 
 		dist := HaversineDistanceKM(lat, lon, oLat, oLon)
 		if dist <= overviewRadiusKM {

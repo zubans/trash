@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -21,6 +22,20 @@ type OrderHandler struct {
 // NewOrderHandler creates an OrderHandler.
 func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
 	return &OrderHandler{orderService: orderService}
+}
+
+// writeOrderError maps domain errors to status codes. A conflict means the
+// order was not in the state the caller expected — typically a duplicate or
+// concurrent request — and must not be reported as success.
+func writeOrderError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, repository.ErrConflict):
+		http.Error(w, "заказ уже изменился, обновите страницу", http.StatusConflict)
+	case errors.Is(err, repository.ErrInsufficientFunds):
+		http.Error(w, "недостаточно средств", http.StatusUnprocessableEntity)
+	default:
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	}
 }
 
 func userFromContext(r *http.Request) *repository.User {
@@ -51,7 +66,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.orderService.Create(user.ID, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeOrderError(w, err)
 		return
 	}
 
@@ -75,7 +90,7 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Cancel(user.ID, orderID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeOrderError(w, err)
 		return
 	}
 
@@ -97,7 +112,7 @@ func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Confirm(user.ID, orderID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeOrderError(w, err)
 		return
 	}
 
@@ -119,7 +134,7 @@ func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Accept(orderID, user.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeOrderError(w, err)
 		return
 	}
 
@@ -141,7 +156,7 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.RejectAssignedOrder(orderID, user.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeOrderError(w, err)
 		return
 	}
 
@@ -163,7 +178,7 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.ExecuteOrder(orderID, user.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeOrderError(w, err)
 		return
 	}
 
@@ -249,8 +264,18 @@ func parseCoords(r *http.Request) (float64, float64, int, error) {
 }
 
 // Alias method names expected by main.go.
-func (h *OrderHandler) CreateOrderHandler(w http.ResponseWriter, r *http.Request)     { h.CreateOrder(w, r) }
-func (h *OrderHandler) ConfirmOrderHandler(w http.ResponseWriter, r *http.Request)    { h.ConfirmOrder(w, r) }
-func (h *OrderHandler) CancelOrderHandler(w http.ResponseWriter, r *http.Request)     { h.CancelOrder(w, r) }
-func (h *OrderHandler) RejectOrderHandler(w http.ResponseWriter, r *http.Request)     { h.RejectOrder(w, r) }
-func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r *http.Request) { h.ListAssignedOrders(w, r) }
+func (h *OrderHandler) CreateOrderHandler(w http.ResponseWriter, r *http.Request) {
+	h.CreateOrder(w, r)
+}
+func (h *OrderHandler) ConfirmOrderHandler(w http.ResponseWriter, r *http.Request) {
+	h.ConfirmOrder(w, r)
+}
+func (h *OrderHandler) CancelOrderHandler(w http.ResponseWriter, r *http.Request) {
+	h.CancelOrder(w, r)
+}
+func (h *OrderHandler) RejectOrderHandler(w http.ResponseWriter, r *http.Request) {
+	h.RejectOrder(w, r)
+}
+func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r *http.Request) {
+	h.ListAssignedOrders(w, r)
+}

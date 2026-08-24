@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,10 +12,10 @@ import (
 type TransactionType string
 
 const (
-	TransactionTypeHold    TransactionType = "HOLD"
-	TransactionTypePayment TransactionType = "PAYMENT"
-	TransactionTypeReward  TransactionType = "REWARD"
-	TransactionTypeRefund  TransactionType = "REFUND"
+	TransactionTypeHold       TransactionType = "HOLD"
+	TransactionTypePayment    TransactionType = "PAYMENT"
+	TransactionTypeReward     TransactionType = "REWARD"
+	TransactionTypeRefund     TransactionType = "REFUND"
 	TransactionTypeFine       TransactionType = "FINE"
 	TransactionTypeTopUp      TransactionType = "TOP_UP"
 	TransactionTypeWithdrawal TransactionType = "WITHDRAWAL"
@@ -23,7 +24,12 @@ const (
 // TransactionRepository defines storage operations for financial transactions and balance.
 type TransactionRepository interface {
 	GetBalance(userID uuid.UUID) (float64, error)
+	// UpdateBalance applies an unconditional delta. Use Debit instead whenever
+	// the balance must stay non-negative.
 	UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error
+	// Debit subtracts amount only if the balance covers it, atomically.
+	// Returns ErrInsufficientFunds when it does not.
+	Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error
 	CreateTransaction(tx *sql.Tx, t *Transaction) error
 	GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error)
 	RunInTx(fn func(*sql.Tx) error) error
@@ -49,13 +55,29 @@ func (r *transactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
 }
 
 func (r *transactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error {
-	query := `UPDATE users SET balance = balance + $1 WHERE id = $2`
-	if tx != nil {
-		_, err := tx.Exec(query, delta, userID)
-		return err
+	return execExpectingOne(r.querier(tx),
+		`UPDATE users SET balance = balance + $1 WHERE id = $2`, delta, userID)
+}
+
+// Debit subtracts amount in a single guarded statement, so a check-then-write
+// race cannot push the balance below zero.
+func (r *transactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error {
+	if amount < 0 {
+		return errors.New("debit amount must not be negative")
 	}
-	_, err := r.db.Exec(query, delta, userID)
+	err := execExpectingOne(r.querier(tx),
+		`UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1`, amount, userID)
+	if errors.Is(err, ErrConflict) {
+		return ErrInsufficientFunds
+	}
 	return err
+}
+
+func (r *transactionRepo) querier(tx *sql.Tx) Querier {
+	if tx != nil {
+		return tx
+	}
+	return r.db
 }
 
 func (r *transactionRepo) RunInTx(fn func(*sql.Tx) error) error {

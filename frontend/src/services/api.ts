@@ -68,18 +68,24 @@ export function buildChatWebSocketUrl(orderId: string, token: string): string {
 }
 
 // Convert a relative file path (e.g. /uploads/chat/...) into a full accessible URL.
-// On web apps, relative paths (/uploads/...) are returned as relative URLs so browser/nginx
-// serves them over current origin (HTTPS 8443).
-// On Android native apps, files are served from HTTP port 8089 backend server.
+// Attachments are no longer public: the backend checks that the caller takes
+// part in the conversation the file belongs to. An <img> tag cannot send an
+// Authorization header, so the token travels as a query parameter, which the
+// backend moves into the header and strips before anything is logged.
 export function resolveFileUrl(path?: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://')) return path
   const cleanPath = path.startsWith('/') ? path : '/' + path
+
+  const token = getAuthToken()
+  const withAuth = (url: string) =>
+    token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
+
   if (!Capacitor.isNativePlatform()) {
-    return cleanPath
+    return withAuth(cleanPath)
   }
   const base = apiUrl.replace(/\/$/, '')
-  return `${base}${cleanPath}`
+  return withAuth(`${base}${cleanPath}`)
 }
 
 // Helper to retrieve cookie by name

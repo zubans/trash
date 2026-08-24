@@ -50,10 +50,22 @@ func (m *mockBidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
 func TestBidService_CreateBid(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewBidService(bidRepo, nil, shiftRepo, nil)
+	orderRepo := &mockOrderRepo{}
+	catalogRepo := newMockCatalogRepo()
+	userRepo := newMockUserRepo()
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, nil, userRepo, catalogRepo)
 
-	orderID := uuid.New()
 	executorID := uuid.New()
+
+	// The order has to exist: bidding now re-checks the order and the executor.
+	order := &repository.Order{
+		ID:               uuid.New(),
+		CustomerID:       uuid.New(),
+		ServiceVariantID: constructionVariantID,
+		Status:           repository.OrderStatusSearching,
+	}
+	orderRepo.orders = append(orderRepo.orders, order)
+	orderID := order.ID
 
 	// Case 1: No active shift (should fail)
 	_, err := srv.CreateBid(orderID, executorID, 350.00)
@@ -76,5 +88,11 @@ func TestBidService_CreateBid(t *testing.T) {
 	_, err = srv.CreateBid(orderID, executorID, -10.0)
 	if err == nil {
 		t.Error("expected error placing bid with negative price")
+	}
+
+	// Case 4: bidding on your own order is refused.
+	_, err = srv.CreateBid(orderID, order.CustomerID, 350.00)
+	if err == nil {
+		t.Error("expected error placing bid on own order")
 	}
 }

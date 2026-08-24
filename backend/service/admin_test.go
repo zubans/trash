@@ -188,8 +188,10 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	}
 	userRepo.users[user.Phone] = user
 
+	adminID := uuid.New()
+
 	// Test ban
-	err := svc.UpdateUserStatus(user.ID, "BANNED")
+	err := svc.UpdateUserStatus(user.ID, adminID, "BANNED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,7 +205,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	}
 
 	// Test invalid status
-	err = svc.UpdateUserStatus(user.ID, "INVALID")
+	err = svc.UpdateUserStatus(user.ID, adminID, "INVALID")
 	if err == nil {
 		t.Error("expected error for invalid status")
 	}
@@ -282,4 +284,14 @@ func TestAdminService_Settings(t *testing.T) {
 	if current["standard_tariff_coeff"] != "1.5" || current["geofence_fine_amount"] != "200.0" || current["currency"] != "RUB" {
 		t.Errorf("settings mismatch: got %+v", current)
 	}
+}
+
+// CountAdmins reports how many administrators exist (used to protect the last one).
+func (m *mockAdminRepo) CountAdmins() (int, error) {
+	return 2, nil
+}
+
+// HasPendingWithdrawal reports an existing open withdrawal request.
+func (m *mockAdminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
+	return false, nil
 }

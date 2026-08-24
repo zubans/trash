@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,6 +28,100 @@ type ChatHandler struct {
 // NewChatHandler creates a new ChatHandler.
 func NewChatHandler(chatService *service.ChatService) *ChatHandler {
 	return &ChatHandler{chatService: chatService}
+}
+
+// maxAttachmentBytes is the hard limit for a single uploaded file.
+const maxAttachmentBytes = 25 << 20
+
+// allowedAttachmentExtensions is a whitelist: anything that a browser could
+// execute in the application's origin (html, svg, js, ...) must never be stored
+// and served back, otherwise an attachment becomes stored XSS.
+var allowedAttachmentExtensions = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true, ".heic": true,
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true, ".txt": true, ".csv": true,
+}
+
+// uploadsBaseDir resolves the upload root consistently for every upload path.
+func uploadsBaseDir() string {
+	if dir := os.Getenv("UPLOADS_DIR"); dir != "" {
+		return dir
+	}
+	return "uploads"
+}
+
+// safeExtension validates the client supplied file name and returns the
+// normalised extension to store the file under.
+func safeExtension(fileName string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	if ext == "" {
+		return "", errors.New("файл без расширения не поддерживается")
+	}
+	if !allowedAttachmentExtensions[ext] {
+		return "", errors.New("недопустимый тип файла")
+	}
+	return ext, nil
+}
+
+// writeChatError maps service errors to HTTP status codes.
+func writeChatError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrForbidden):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	default:
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+}
+
+// ServeAttachmentHandler serves an uploaded file only to a participant of the
+// conversation it belongs to. Attachments used to be exposed by a bare file
+// server with directory listing enabled.
+func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	name := chi.URLParam(r, "*")
+	// Reject anything that is not a plain relative path inside the upload root.
+	if name == "" || strings.Contains(name, "..") || strings.HasPrefix(name, "/") {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	fileURL := "/uploads/" + name
+	allowed, err := h.chatService.CanAccessAttachment(user.ID, user.Role, fileURL)
+	if err != nil {
+		http.Error(w, "failed to check access", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		// 404 rather than 403: existence of a file is itself information.
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	base, err := filepath.Abs(uploadsBaseDir())
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	full := filepath.Join(base, filepath.FromSlash(name))
+	if rel, err := filepath.Rel(base, full); err != nil || strings.HasPrefix(rel, "..") {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	// Never let the browser render a stored file in the app origin.
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(full)+"\"")
+	http.ServeFile(w, r, full)
 }
 
 // GetMessagesHandler retrieves history of messages.
@@ -183,8 +278,10 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Limit upload size to 25MB
-	if err := r.ParseMultipartForm(25 << 20); err != nil {
+	// MaxBytesReader bounds what actually reaches the disk; ParseMultipartForm's
+	// argument only sizes the in-memory buffer and spills the rest to temp files.
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		http.Error(w, "file too large (max 25MB)", http.StatusBadRequest)
 		return
 	}
@@ -196,19 +293,20 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 	}
 	defer file.Close()
 
+	ext, err := safeExtension(header.Filename)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	text := strings.TrimSpace(r.FormValue("text"))
 
-	uploadsBaseDir := os.Getenv("UPLOADS_DIR")
-	if uploadsBaseDir == "" {
-		uploadsBaseDir = "uploads"
-	}
-	uploadDir := filepath.Join(uploadsBaseDir, "chat")
+	uploadDir := filepath.Join(uploadsBaseDir(), "chat")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
 		return
 	}
 
-	ext := filepath.Ext(header.Filename)
 	uniqueFileName := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
 	dstPath := filepath.Join(uploadDir, uniqueFileName)
 
@@ -355,12 +453,12 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	_ = h.chatService.MarkSupportMessagesAsRead(chatID, user.ID)
-	messages, err := h.chatService.GetSupportMessages(chatID)
+	messages, err := h.chatService.GetSupportMessages(chatID, user.ID, user.Role)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeChatError(w, err)
 		return
 	}
+	_ = h.chatService.MarkSupportMessagesAsRead(chatID, user.ID, user.Role)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(messages)
@@ -401,9 +499,9 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	msg, err := h.chatService.SaveSupportMessage(chatID, user.ID, req.Text)
+	msg, err := h.chatService.SaveSupportMessage(chatID, user.ID, user.Role, req.Text)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeChatError(w, err)
 		return
 	}
 
@@ -438,7 +536,11 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 		}
 	}
 
-	r.ParseMultipartForm(10 << 20) // 10 MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		http.Error(w, "file too large (max 25MB)", http.StatusBadRequest)
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "invalid file", http.StatusBadRequest)
@@ -446,12 +548,13 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	}
 	defer file.Close()
 
-	ext := filepath.Ext(header.Filename)
-	fileName := fmt.Sprintf("support_%s_%d%s", chatID.String()[:8], time.Now().UnixNano(), ext)
-	uploadsDir := os.Getenv("UPLOADS_DIR")
-	if uploadsDir == "" {
-		uploadsDir = "/app/uploads"
+	ext, err := safeExtension(header.Filename)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+	fileName := fmt.Sprintf("support_%s_%d%s", chatID.String()[:8], time.Now().UnixNano(), ext)
+	uploadsDir := uploadsBaseDir()
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
 		return
@@ -477,9 +580,9 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	}
 
 	text := r.FormValue("text")
-	msg, err := h.chatService.SaveSupportMessageWithAttachment(chatID, user.ID, text, fileURL, header.Filename, fileType, header.Size)
+	msg, err := h.chatService.SaveSupportMessageWithAttachment(chatID, user.ID, user.Role, text, fileURL, header.Filename, fileType, header.Size)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeChatError(w, err)
 		return
 	}
 

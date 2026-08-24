@@ -56,11 +56,31 @@ func extractBearerToken(r *http.Request) string {
 		return cookie.Value
 	}
 
-	if token := r.URL.Query().Get("token"); token != "" {
-		return token
-	}
-
 	return ""
+}
+
+// StripQueryToken moves a ?token= parameter into the Authorization header and
+// removes it from the URL. Browsers cannot set headers on a WebSocket handshake,
+// so the parameter has to be accepted, but it must never reach the request
+// logger, the access log or a Referer header.
+func StripQueryToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		token := query.Get("token")
+		if token == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if r.Header.Get("Authorization") == "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		query.Del("token")
+		r.URL.RawQuery = query.Encode()
+		r.RequestURI = r.URL.RequestURI()
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // RequireAuth ensures the request contains a valid non-revoked JWT.
@@ -124,7 +144,10 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		role, _ := claims["role"].(string)
+		// Authorization always follows the role stored in the database, never the
+		// role captured in the token: a demotion or a ban must take effect
+		// immediately instead of at token expiry.
+		role := user.Role
 
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, UserKey, user)
@@ -136,14 +159,13 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 // RequireAdmin restricts access to users with the ADMIN role.
 func (m *AuthMiddleware) RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		role, ok := r.Context().Value(RoleKey).(string)
-		if !ok || role != "ADMIN" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return RequireRole("ADMIN")(next)
+}
+
+// UserFrom returns the authenticated user stored by RequireAuth.
+func UserFrom(r *http.Request) *repository.User {
+	user, _ := r.Context().Value(UserKey).(*repository.User)
+	return user
 }
 
 // RequireRole restricts access to users with one of the allowed roles.
@@ -155,6 +177,8 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The role in the context comes from the database record loaded by
+			// RequireAuth, not from the token claims.
 			role, ok := r.Context().Value(RoleKey).(string)
 			if !ok {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)

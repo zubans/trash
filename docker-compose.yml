@@ -3,14 +3,16 @@ services:
     image: postgres:16-alpine
     container_name: healthlogin_db
     environment:
-      POSTGRES_USER: healthlogin
-      POSTGRES_PASSWORD: healthlogin
-      POSTGRES_DB: healthlogin
+      POSTGRES_USER: ${DB_USER:-healthlogin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_NAME:-healthlogin}
     volumes:
       - ./backend/migrations:/docker-entrypoint-initdb.d:ro
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # The database is reachable only from the compose network. Publish 5432 to
+    # 127.0.0.1 locally if you need psql from the host, never to 0.0.0.0.
+    expose:
+      - "5432"
 
   mailserver:
     image: foxcpp/maddy:0.7.0
@@ -35,11 +37,11 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: 5432
-      DB_USER: healthlogin
-      DB_PASSWORD: healthlogin
-      DB_NAME: healthlogin
+      DB_USER: ${DB_USER:-healthlogin}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_NAME: ${DB_NAME:-healthlogin}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://moya-usluga.ru}
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TLS_CERT_FILE: /app/certs/localhost-cert.pem
       TLS_KEY_FILE: /app/certs/localhost-key.pem
       MOBILE_HTTP_ADDR: :8081
@@ -49,7 +51,7 @@ services:
       SMTP_HOST: ${SMTP_HOST:-mailserver}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-system@moya-usluga.ru}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-systempass123}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
       SMTP_FROM: ${SMTP_FROM:-system@moya-usluga.ru}
       APP_BASE_URL: ${APP_BASE_URL:-https://moya-usluga.ru}
     depends_on:
@@ -59,9 +61,12 @@ services:
       - ./releases:/app/releases
       - uploads_data:/app/uploads
       - ./certs:/app/certs:ro
+    # 8080 is the TLS listener used by the host; 8081 stays inside the compose
+    # network for nginx (it is plain HTTP and must not be published).
+    expose:
+      - "8081"
     ports:
-      - "8088:8080"
-      - "8089:8081"
+      - "127.0.0.1:8088:8080"
 
   frontend:
     build:
