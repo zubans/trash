@@ -14,17 +14,21 @@ import (
 
 // MatchingService matches searching orders with active executors.
 type MatchingService struct {
-	orderRepo repository.OrderRepository
-	shiftRepo repository.ShiftRepository
-	db        *sql.DB
+	orderRepo   repository.OrderRepository
+	shiftRepo   repository.ShiftRepository
+	userRepo    repository.UserRepository
+	catalogRepo repository.ServiceCatalogRepository
+	db          *sql.DB
 }
 
 // NewMatchingService creates a new MatchingService.
-func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo repository.ShiftRepository, db *sql.DB) *MatchingService {
+func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo repository.ShiftRepository, userRepo repository.UserRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *MatchingService {
 	return &MatchingService{
-		orderRepo: orderRepo,
-		shiftRepo: shiftRepo,
-		db:        db,
+		orderRepo:   orderRepo,
+		shiftRepo:   shiftRepo,
+		userRepo:    userRepo,
+		catalogRepo: catalogRepo,
+		db:          db,
 	}
 }
 
@@ -39,6 +43,23 @@ func (s *MatchingService) StartMatchingWorker(interval time.Duration) {
 		}
 	}()
 	log.Printf("[MatchingWorker] Started background matching every %v", interval)
+}
+
+// executorEligible re-uses the shared executor/variant rules so automatic
+// matching cannot hand out an order that the executor is not allowed to take.
+func (s *MatchingService) executorEligible(executorID, variantID uuid.UUID) bool {
+	if s.userRepo == nil || s.catalogRepo == nil {
+		return true
+	}
+	executor, err := s.userRepo.FindByID(executorID)
+	if err != nil {
+		return false
+	}
+	variant, err := s.catalogRepo.GetNodeByID(variantID)
+	if err != nil {
+		return false
+	}
+	return canExecutorTakeOrder(executor, variant) == nil
 }
 
 // MatchOrders executes the matching cycle.
@@ -140,9 +161,17 @@ func (s *MatchingService) MatchOrders() error {
 			}
 		}
 
-		// Find executor in the same geozone who is active and does not have an assigned order
+		// Find executor in the same geozone who is active, eligible for this
+		// service variant and does not have an assigned order.
 		var matchedExecutorID uuid.UUID
 		for execID := range activeExecutors {
+			// Age / verification restrictions apply to automatic assignment too.
+			if !s.executorEligible(execID, order.ServiceVariantID) {
+				continue
+			}
+			if execID == order.CustomerID {
+				continue
+			}
 			// Check executor work area geozone
 			var execWorkAreaID int
 			err = s.db.QueryRow(`SELECT work_area_id FROM executor_profiles WHERE user_id = $1`, execID).Scan(&execWorkAreaID)
@@ -167,7 +196,7 @@ func (s *MatchingService) MatchOrders() error {
 		}
 
 		if matchedExecutorID != uuid.Nil {
-			err = s.orderRepo.AssignOrder(order.ID, matchedExecutorID)
+			err = s.orderRepo.Assign(nil, order.ID, matchedExecutorID)
 			if err != nil {
 				log.Printf("[MatchingWorker] Error assigning order %s to executor %s: %v", order.ID, matchedExecutorID, err)
 			} else {

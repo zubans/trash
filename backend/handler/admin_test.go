@@ -112,6 +112,14 @@ func (m *mockUserRepository) UpdateCustomerAddress(userID uuid.UUID, address str
 	return nil
 }
 
+func (m *mockUserRepository) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error {
+	if u, ok := m.users[userID]; ok {
+		bd := birthDate
+		u.BirthDate = &bd
+	}
+	return nil
+}
+
 func (m *mockUserRepository) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
 	if u, ok := m.users[userID]; ok {
 		u.LastName = lastName
@@ -298,7 +306,12 @@ func TestUpdateUserStatusHandler(t *testing.T) {
 	// Inject URL param using Chi context
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", u.ID.String())
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	// The acting administrator is taken from the request context so the change
+	// can be attributed and self-demotion refused.
+	admin := &repository.User{ID: uuid.New(), Role: "ADMIN", Status: "ACTIVE"}
+	ctx = context.WithValue(ctx, middleware.UserKey, admin)
+	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
 
@@ -345,4 +358,14 @@ func TestApproveTopUpRequestsHandler(t *testing.T) {
 	if savedReq.Status != "APPROVED" {
 		t.Errorf("expected request status APPROVED, got %s", savedReq.Status)
 	}
+}
+
+// CountAdmins reports how many administrators exist (used to protect the last one).
+func (m *mockAdminRepository) CountAdmins() (int, error) {
+	return 2, nil
+}
+
+// HasPendingWithdrawal reports an existing open withdrawal request.
+func (m *mockAdminRepository) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
+	return false, nil
 }

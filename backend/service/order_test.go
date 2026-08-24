@@ -58,7 +58,7 @@ func (m *mockOrderRepo) CancelOrder(orderID uuid.UUID) error {
 	return errors.New("not found")
 }
 
-func (m *mockOrderRepo) Unassign(orderID uuid.UUID) error {
+func (m *mockOrderRepo) Unassign(q repository.Querier, orderID uuid.UUID) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
 			o.Status = "SEARCHING"
@@ -166,7 +166,7 @@ func (m *mockOrderRepo) GetAvailableAuctionOrders() ([]*repository.Order, error)
 }
 
 // Methods required by the OrderRepository interface.
-func (m *mockOrderRepo) Create(order *repository.Order) error {
+func (m *mockOrderRepo) Create(q repository.Querier, order *repository.Order) error {
 	m.orders = append(m.orders, order)
 	return nil
 }
@@ -199,15 +199,30 @@ func (m *mockOrderRepo) FindByCustomer(customerID uuid.UUID) ([]repository.Order
 	return result, nil
 }
 
-func (m *mockOrderRepo) Assign(orderID, executorID uuid.UUID) error {
+func (m *mockOrderRepo) Assign(q repository.Querier, orderID, executorID uuid.UUID) error {
 	return m.AssignOrder(orderID, executorID)
 }
 
-func (m *mockOrderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
+// LockForUpdate mirrors the real repository's row lock read.
+func (m *mockOrderRepo) LockForUpdate(q repository.Querier, orderID uuid.UUID) (*repository.Order, error) {
+	return m.GetOrderByID(orderID)
+}
+
+func (m *mockOrderRepo) SetHoldAmount(q repository.Querier, orderID uuid.UUID, holdAmount float64) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
-			if o.Status == "COMPLETED" {
-				return errors.New("already completed")
+			o.HoldAmount = holdAmount
+			return nil
+		}
+	}
+	return repository.ErrConflict
+}
+
+func (m *mockOrderRepo) Confirm(q repository.Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			if o.Status != repository.OrderStatusExecuted {
+				return repository.ErrConflict
 			}
 			o.Status = "COMPLETED"
 			o.FinalAmount = finalAmount
@@ -218,15 +233,26 @@ func (m *mockOrderRepo) Confirm(orderID uuid.UUID, finalAmount float64, isDowngr
 	return errors.New("not found")
 }
 
-func (m *mockOrderRepo) Cancel(orderID uuid.UUID) error {
-	return m.CancelOrder(orderID)
+func (m *mockOrderRepo) Cancel(q repository.Querier, orderID uuid.UUID) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			// Mirrors the guarded UPDATE: only a live order can be canceled,
+			// and a second cancel reports a conflict instead of succeeding.
+			if o.Status != repository.OrderStatusSearching && o.Status != repository.OrderStatusAssigned {
+				return repository.ErrConflict
+			}
+			o.Status = repository.OrderStatusCanceled
+			return nil
+		}
+	}
+	return repository.ErrConflict
 }
 
 func (m *mockOrderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
 	return nil, nil
 }
 
-func (m *mockOrderRepo) Execute(orderID uuid.UUID) error {
+func (m *mockOrderRepo) Execute(q repository.Querier, orderID uuid.UUID) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
 			o.Status = repository.OrderStatusExecuted
@@ -237,8 +263,8 @@ func (m *mockOrderRepo) Execute(orderID uuid.UUID) error {
 }
 
 var (
-	standardVariantID    = uuid.MustParse("33333333-3333-3333-3333-333333333333")
-	largeVariantID       = uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	standardVariantID     = uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	largeVariantID        = uuid.MustParse("66666666-6666-6666-6666-666666666666")
 	constructionVariantID = uuid.MustParse("77777777-7777-7777-7777-777777777777")
 )
 
@@ -282,7 +308,7 @@ func newMockCatalogRepo() *mockCatalogRepo {
 
 func (m *mockCatalogRepo) CreateNode(node *repository.ServiceNode) error { return nil }
 func (m *mockCatalogRepo) UpdateNode(node *repository.ServiceNode) error { return nil }
-func (m *mockCatalogRepo) DeleteNode(id uuid.UUID) error                { return nil }
+func (m *mockCatalogRepo) DeleteNode(id uuid.UUID) error                 { return nil }
 func (m *mockCatalogRepo) GetNodeByID(id uuid.UUID) (*repository.ServiceNode, error) {
 	n, ok := m.nodes[id]
 	if !ok {
@@ -298,14 +324,18 @@ func (m *mockCatalogRepo) GetNodeByCode(code string) (*repository.ServiceNode, e
 	}
 	return nil, nil
 }
-func (m *mockCatalogRepo) GetRootCategories(activeOnly bool) ([]*repository.ServiceNode, error) { return nil, nil }
+func (m *mockCatalogRepo) GetRootCategories(activeOnly bool) ([]*repository.ServiceNode, error) {
+	return nil, nil
+}
 func (m *mockCatalogRepo) GetChildren(parentID uuid.UUID, activeOnly bool) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
 func (m *mockCatalogRepo) GetDescendants(ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
-func (m *mockCatalogRepo) GetAncestors(descendantID uuid.UUID) ([]*repository.ServiceNode, error) { return nil, nil }
+func (m *mockCatalogRepo) GetAncestors(descendantID uuid.UUID) ([]*repository.ServiceNode, error) {
+	return nil, nil
+}
 func (m *mockCatalogRepo) GetVariantPath(variantID uuid.UUID) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
@@ -313,8 +343,8 @@ func (m *mockCatalogRepo) GetActiveVariants() ([]*repository.ServiceNode, error)
 func (m *mockCatalogRepo) GetVariantWithCategory(id uuid.UUID) (*repository.ServiceNode, []*repository.ServiceNode, error) {
 	return nil, nil, nil
 }
-func (m *mockCatalogRepo) HasChildren(id uuid.UUID) (bool, error)         { return false, nil }
-func (m *mockCatalogRepo) HasOrders(id uuid.UUID) (bool, error)           { return false, nil }
+func (m *mockCatalogRepo) HasChildren(id uuid.UUID) (bool, error)      { return false, nil }
+func (m *mockCatalogRepo) HasOrders(id uuid.UUID) (bool, error)        { return false, nil }
 func (m *mockCatalogRepo) IsDescendantOf(a, b uuid.UUID) (bool, error) { return false, nil }
 
 type orderMockSettingsRepo struct {
@@ -339,7 +369,9 @@ func (m *orderMockShiftRepo) StartShift(executorID uuid.UUID, durationHours int)
 	return nil, nil
 }
 
-func (m *orderMockShiftRepo) EndShift(executorID uuid.UUID) (*repository.Shift, error) { return nil, nil }
+func (m *orderMockShiftRepo) EndShift(executorID uuid.UUID) (*repository.Shift, error) {
+	return nil, nil
+}
 
 func (m *orderMockShiftRepo) GetShiftByID(id uuid.UUID) (*repository.Shift, error) { return nil, nil }
 
@@ -379,9 +411,13 @@ func (m *orderMockShiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*repo
 
 func (m *orderMockShiftRepo) UpdateShiftStatus(shiftID uuid.UUID, status string) error { return nil }
 
-func (m *orderMockShiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error { return nil }
+func (m *orderMockShiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error {
+	return nil
+}
 
-func (m *orderMockShiftRepo) GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error) { return nil, nil }
+func (m *orderMockShiftRepo) GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error) {
+	return nil, nil
+}
 
 func (m *orderMockShiftRepo) GetGeozoneByID(id int) (*repository.Geozone, error) { return nil, nil }
 
@@ -395,10 +431,14 @@ func newMockUserRepo() *mockUserRepo {
 
 func (m *mockUserRepo) FindByPhone(phone string) (*repository.User, error) { return nil, nil }
 func (m *mockUserRepo) Create(user *repository.User) error                 { return nil }
-func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error)    { return nil, nil }
-func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error     { return nil }
-func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error         { return nil }
-func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance float64) error  { return nil }
+func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error) {
+	// A verified adult user: eligibility rules are exercised separately.
+	birth := time.Now().AddDate(-30, 0, 0)
+	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", EmailVerified: true, BirthDate: &birth}, nil
+}
+func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error    { return nil }
+func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error        { return nil }
+func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance float64) error { return nil }
 func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	m.lastGeo[id] = lastGeo
 	return nil
@@ -410,27 +450,61 @@ func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.Custome
 	return &repository.CustomerProfile{UserID: userID}, nil
 }
 func (m *mockUserRepo) FindByEmail(email string) (*repository.User, error) { return nil, nil }
-func (m *mockUserRepo) FindByEmailVerificationToken(token string) (*repository.User, error) { return nil, nil }
+func (m *mockUserRepo) FindByEmailVerificationToken(token string) (*repository.User, error) {
+	return nil, nil
+}
 func (m *mockUserRepo) VerifyEmailToken(token string) (*repository.User, error) { return nil, nil }
-func (m *mockUserRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error { return nil }
-func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) { return nil, nil }
-func (m *mockUserRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) { return nil, nil }
+func (m *mockUserRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+	return nil
+}
+func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) {
+	return nil, nil
+}
+func (m *mockUserRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
+	return nil, nil
+}
 func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error { return nil }
-func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error { return nil }
+func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+	return nil
+}
+func (m *mockUserRepo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error { return nil }
 
 func (m *mockOrderRepo) FindAllByExecutor(executorID uuid.UUID) ([]repository.Order, error) {
 	return nil, nil
 }
 
 type mockTransactionRepo struct {
-	txs []*repository.Transaction
+	txs      []*repository.Transaction
+	balances map[uuid.UUID]float64
+}
+
+const mockDefaultBalance = 10000.0
+
+func (m *mockTransactionRepo) balance(userID uuid.UUID) float64 {
+	if m.balances == nil {
+		m.balances = make(map[uuid.UUID]float64)
+	}
+	if _, ok := m.balances[userID]; !ok {
+		m.balances[userID] = mockDefaultBalance
+	}
+	return m.balances[userID]
 }
 
 func (m *mockTransactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
-	return 10000.0, nil
+	return m.balance(userID), nil
 }
 
 func (m *mockTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error {
+	m.balances[userID] = m.balance(userID) + delta
+	return nil
+}
+
+// Debit refuses to go below zero, like the guarded UPDATE in the real repository.
+func (m *mockTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error {
+	if m.balance(userID) < amount {
+		return repository.ErrInsufficientFunds
+	}
+	m.balances[userID] = m.balance(userID) - amount
 	return nil
 }
 
@@ -488,9 +562,12 @@ func TestOrderService_CreateOrder(t *testing.T) {
 	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, userRepo, &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	order, err := srv.CreateOrder(customerID, standardVariantID, false, false, "55.7558,37.6173", nil, nil)
-	if userRepo.lastGeo[customerID] != "55.7558,37.6173" {
-		t.Errorf("expected last_geo to be saved")
+	lat, lon := 55.7558, 37.6173
+	order, err := srv.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	// last_geo is parsed as "lat,lon" by the matching worker, so only
+	// coordinates may be written into it — never the address string.
+	if userRepo.lastGeo[customerID] != formatGeo(lat, lon) {
+		t.Errorf("expected last_geo to hold coordinates, got %q", userRepo.lastGeo[customerID])
 	}
 	if err != nil {
 		t.Fatalf("unexpected error creating order: %v", err)
@@ -525,7 +602,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	order, _ := srv.CreateOrder(customerID, standardVariantID, false, false, "", nil, nil)
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(order.ID, executorID)
-	_ = orderRepo.Execute(order.ID)
+	_ = orderRepo.Execute(nil, order.ID)
 
 	err := srv.ConfirmOrder(order.ID)
 	if err != nil {
@@ -550,12 +627,12 @@ func TestOrderService_CreateConstructionOrder(t *testing.T) {
 	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	_, err := srv.CreateConstructionOrder(customerID, "", "", nil, nil)
+	_, err := srv.CreateConstructionOrder(customerID, "", "", "", nil, nil)
 	if err == nil {
 		t.Error("expected error creating construction order without photo URL")
 	}
 
-	order, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61", nil, nil)
+	order, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating construction order: %v", err)
 	}

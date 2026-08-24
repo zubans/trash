@@ -119,8 +119,8 @@ func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetBidsHandler lists all bids on a specific construction order.
 func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
-	_, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok || user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -132,9 +132,9 @@ func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bids, err := h.bidService.GetBidsForOrder(orderID)
+	bids, err := h.bidService.GetBidsForOrder(orderID, user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 

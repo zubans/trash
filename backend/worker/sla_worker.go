@@ -96,19 +96,35 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	if err != nil {
 		return err
 	}
+	if basePrice > o.HoldAmount {
+		// Never raise the hold retroactively; the customer only authorised the
+		// amount that was taken at order time.
+		basePrice = o.HoldAmount
+	}
 
 	refund := o.HoldAmount - basePrice
 	if refund < 0 {
 		refund = 0
 	}
 
-	// 2. Update order columns
-	_, err = tx.Exec(`
-		UPDATE orders 
-		SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, is_downgraded = TRUE 
-		WHERE id = $2`, basePrice, o.ID)
+	// 2. Update order columns. hold_amount must follow the refund: the payout at
+	// confirmation time is derived from the hold, so leaving the original urgent
+	// hold in place would pay the executor the full urgent price after the
+	// customer has already been refunded the difference.
+	res, err := tx.Exec(`
+		UPDATE orders
+		SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, hold_amount = $1, is_downgraded = TRUE
+		WHERE id = $2 AND status = 'ASSIGNED' AND is_downgraded = FALSE`, basePrice, o.ID)
 	if err != nil {
 		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		// Another worker or a confirmation already moved this order on.
+		return nil
 	}
 
 	// 3. Issue refund if applicable

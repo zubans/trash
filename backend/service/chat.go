@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,11 +18,16 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for simplicity in local docker/dev env
-		return true
-	},
+	// Only origins the API itself trusts may open a socket. Without this check
+	// any web page could open an authenticated socket with the visitor's cookie
+	// and read or write their chat (cross-site WebSocket hijacking) — the CORS
+	// policy does not apply to WebSocket handshakes.
+	CheckOrigin: IsAllowedOrigin,
 }
+
+// maxMessageRunes caps a single chat message so a client cannot push unbounded
+// text into the database.
+const maxMessageRunes = 4000
 
 // ChatClient represents an active WebSocket client session.
 type ChatClient struct {
@@ -164,9 +170,9 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 
 		// Check if message is a status acknowledgment (delivery_ack / read_ack)
 		var eventReq struct {
-			Type    string   `json:"type"`
-			Text    string   `json:"text"`
-			MsgIDs  []string `json:"message_ids"`
+			Type   string   `json:"type"`
+			Text   string   `json:"text"`
+			MsgIDs []string `json:"message_ids"`
 		}
 		if err := json.Unmarshal(messageBytes, &eventReq); err == nil && eventReq.Type != "" {
 			if eventReq.Type == "delivery_ack" {
@@ -199,6 +205,9 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 			Text string `json:"text"`
 		}
 		if err := json.Unmarshal(messageBytes, &msgReq); err != nil || msgReq.Text == "" {
+			continue
+		}
+		if len([]rune(msgReq.Text)) > maxMessageRunes {
 			continue
 		}
 
@@ -294,6 +303,10 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 	}
 	if chat == nil || !chat.IsActive {
 		return nil, errors.New("chat is locked (read-only)")
+	}
+
+	if len([]rune(text)) > maxMessageRunes {
+		return nil, errors.New("сообщение слишком длинное")
 	}
 
 	savedMsg, err := s.chatRepo.SaveMessage(chat.ID, userID, text)
@@ -423,8 +436,18 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 
 // EditMessage updates message text if owned by sender and broadcasts message_edited event.
 func (s *ChatService) EditMessage(messageID, senderID, orderID uuid.UUID, newText string) (*repository.Message, error) {
+	if len([]rune(newText)) > maxMessageRunes {
+		return nil, errors.New("сообщение слишком длинное")
+	}
+
 	msg, err := s.chatRepo.UpdateMessage(messageID, senderID, newText)
 	if err != nil {
+		return nil, err
+	}
+	// The room to notify is derived from the message itself: taking the order id
+	// from the request would let a sender push an edit event into a chat they
+	// are not part of.
+	if err := s.assertMessageInOrder(msg, orderID); err != nil {
 		return nil, err
 	}
 
@@ -477,16 +500,35 @@ func (s *ChatService) DeleteMessage(messageID, senderID, orderID uuid.UUID) erro
 	return nil
 }
 
-// BroadcastSystemMessage sends a custom message payload to all active connections of an order.
+// assertMessageInOrder checks that a message really belongs to the chat of the
+// given order.
+func (s *ChatService) assertMessageInOrder(msg *repository.Message, orderID uuid.UUID) error {
+	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	if err != nil || chat == nil || chat.ID != msg.ChatID {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// BroadcastSystemMessage sends a custom message payload to all active
+// connections of an order. The send never blocks: a room whose last client just
+// disconnected has no reader left, and a blocking send would leak the caller's
+// goroutine forever.
 func (s *ChatService) BroadcastSystemMessage(orderID uuid.UUID, msg interface{}) {
 	s.mu.RLock()
 	room, exists := s.rooms[orderID]
 	s.mu.RUnlock()
-	if exists {
-		bytes, err := json.Marshal(msg)
-		if err == nil {
-			room.Broadcast <- bytes
-		}
+	if !exists {
+		return
+	}
+	bytes, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	select {
+	case room.Broadcast <- bytes:
+	case <-time.After(time.Second):
+		log.Printf("[ChatService] dropped system message for order %s: room is not reading", orderID)
 	}
 }
 
@@ -495,19 +537,63 @@ func (s *ChatService) GetOrCreateSupportChat(userID uuid.UUID) (*repository.Supp
 	return s.chatRepo.GetOrCreateSupportChat(userID)
 }
 
-// GetSupportMessages returns all messages for a support chat.
-func (s *ChatService) GetSupportMessages(chatID uuid.UUID) ([]*repository.Message, error) {
+// ErrForbidden reports that the caller is not a participant of the conversation.
+var ErrForbidden = errors.New("forbidden: this chat does not belong to you")
+
+// authorizeSupportChat allows the owner of the chat and any admin. Support
+// conversations are addressed by chat id, so without this check any
+// authenticated user could read or post into somebody else's chat.
+func (s *ChatService) authorizeSupportChat(chatID, userID uuid.UUID, role string) error {
+	if role == "ADMIN" {
+		return nil
+	}
+	owner, err := s.chatRepo.SupportChatOwner(chatID)
+	if err != nil {
+		return ErrForbidden
+	}
+	if owner != userID {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// GetSupportMessages returns all messages for a support chat the caller owns.
+func (s *ChatService) GetSupportMessages(chatID, userID uuid.UUID, role string) ([]*repository.Message, error) {
+	if err := s.authorizeSupportChat(chatID, userID, role); err != nil {
+		return nil, err
+	}
 	return s.chatRepo.GetSupportMessages(chatID)
 }
 
 // SaveSupportMessage saves a new support text message.
-func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
+func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, role, text string) (*repository.Message, error) {
+	if err := s.authorizeSupportChat(chatID, senderID, role); err != nil {
+		return nil, err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, errors.New("text is required")
+	}
+	if len([]rune(text)) > maxMessageRunes {
+		return nil, errors.New("сообщение слишком длинное")
+	}
 	return s.chatRepo.SaveSupportMessage(chatID, senderID, text)
 }
 
 // SaveSupportMessageWithAttachment saves a new support message with file attachment.
-func (s *ChatService) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+func (s *ChatService) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, role, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	if err := s.authorizeSupportChat(chatID, senderID, role); err != nil {
+		return nil, err
+	}
 	return s.chatRepo.SaveSupportMessageWithAttachment(chatID, senderID, text, fileURL, fileName, fileType, fileSize)
+}
+
+// CanAccessAttachment reports whether the user may download a stored file.
+func (s *ChatService) CanAccessAttachment(userID uuid.UUID, role, fileURL string) (bool, error) {
+	if role == "ADMIN" {
+		return true, nil
+	}
+	return s.chatRepo.CanAccessAttachment(userID, fileURL)
 }
 
 // GetAdminSupportChatList returns all user support chats for Telegram-style admin UI.
@@ -516,7 +602,10 @@ func (s *ChatService) GetAdminSupportChatList() ([]*repository.SupportChatListIt
 }
 
 // MarkSupportMessagesAsRead marks unread messages in a support chat as read.
-func (s *ChatService) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
+func (s *ChatService) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID, role string) error {
+	if err := s.authorizeSupportChat(chatID, readerID, role); err != nil {
+		return err
+	}
 	return s.chatRepo.MarkSupportMessagesAsRead(chatID, readerID)
 }
 

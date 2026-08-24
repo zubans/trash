@@ -12,3 +12,9 @@ healthlogin-app.apk
 *.jks
 *.keystore
 *.apk
+
+# Local environment files: these hold JWT_SECRET, SMTP and registry credentials
+# and must never be committed. Use .env.deploy.example as the template.
+.env
+.env.*
+!.env.deploy.example

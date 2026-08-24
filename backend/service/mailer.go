@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/smtp"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -50,20 +51,25 @@ func NewSmtpMailSender() *SmtpMailSender {
 	}
 }
 
-type unencryptedAuth struct {
-	smtp.Auth
-}
-
-func (a unencryptedAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
-	s := *server
-	s.TLS = true
-	return a.Auth.Start(&s)
-}
+// validRecipient rejects addresses that could inject extra SMTP headers.
+// The message is assembled by string concatenation, so a CR/LF in the address
+// would let the caller add arbitrary headers such as Bcc.
+var validRecipient = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
 func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
+	to = strings.TrimSpace(to)
+	if !validRecipient.MatchString(to) {
+		return fmt.Errorf("invalid recipient address")
+	}
+	if strings.ContainsAny(subject, "\r\n") {
+		return fmt.Errorf("invalid subject")
+	}
+
 	if m.host == "" {
-		log.Printf("[SmtpMailSender] SMTP_HOST not set. Logging email to stdout instead of sending:\nTo: %s\nSubject: %s\nBody: %s\n", to, subject, bodyHTML)
-		return nil
+		// The body may contain a verification token or a reset code, so it is
+		// never written to the log.
+		log.Printf("[SmtpMailSender] SMTP_HOST not set; refusing to send mail to %s (subject: %s)", to, subject)
+		return fmt.Errorf("mail transport is not configured")
 	}
 
 	addr := fmt.Sprintf("%s:%s", m.host, m.port)
@@ -84,52 +90,17 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 		auth = smtp.PlainAuth("", m.user, m.password, m.host)
 	}
 
-	// Standard dial & send attempt
-	err := smtp.SendMail(addr, auth, m.from, []string{to}, msg)
-	if err != nil {
-		log.Printf("[SmtpMailSender] smtp.SendMail failed: %v. Attempting fallback dial...", err)
-		if strings.Contains(err.Error(), "unencrypted connection") || strings.Contains(err.Error(), "short response") || strings.Contains(err.Error(), "535") || strings.Contains(err.Error(), "103") {
-			c, dialErr := smtp.Dial(addr)
-			if dialErr != nil {
-				log.Printf("[SmtpMailSender] Fallback smtp.Dial failed: %v", dialErr)
-				return dialErr
-			}
-			defer c.Close()
-
-			if auth != nil {
-				_ = c.Auth(unencryptedAuth{auth})
-			}
-			if err := c.Mail(m.from); err != nil {
-				log.Printf("[SmtpMailSender] Fallback c.Mail failed: %v", err)
-				return err
-			}
-			if err := c.Rcpt(to); err != nil {
-				log.Printf("[SmtpMailSender] Fallback c.Rcpt failed: %v", err)
-				return err
-			}
-			w, err := c.Data()
-			if err != nil {
-				log.Printf("[SmtpMailSender] Fallback c.Data failed: %v", err)
-				return err
-			}
-			_, err = w.Write(msg)
-			if err != nil {
-				log.Printf("[SmtpMailSender] Fallback w.Write failed: %v", err)
-				return err
-			}
-			err = w.Close()
-			if err != nil {
-				log.Printf("[SmtpMailSender] Fallback w.Close failed: %v", err)
-				return err
-			}
-			log.Printf("[SmtpMailSender] Email sent successfully via fallback to %s", to)
-			return c.Quit()
-		}
-	} else {
-		log.Printf("[SmtpMailSender] Email sent successfully via SendMail to %s", to)
+	// A single attempt over an authenticated, encrypted connection. The previous
+	// fallback path re-sent the message over a plain connection while telling the
+	// standard library that TLS was on, which leaked the SMTP password in clear
+	// text whenever the first attempt failed.
+	if err := smtp.SendMail(addr, auth, m.from, []string{to}, msg); err != nil {
+		log.Printf("[SmtpMailSender] failed to send email to %s: %v", to, err)
+		return err
 	}
 
-	return err
+	log.Printf("[SmtpMailSender] Email sent successfully to %s", to)
+	return nil
 }
 
 func (m *SmtpMailSender) SendEmailVerification(toEmail, token string) error {

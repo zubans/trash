@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -131,23 +133,36 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.U
 	return s.CreateOrderWithComment(customerID, serviceVariantID, isUrgent, isAsap, address, "", lat, lon)
 }
 
-// CreateOrderWithComment creates a standard order with optional comment and holds customer balance.
+// CreateOrderWithComment creates a standard order with optional comment and
+// holds the customer balance. Order creation, the balance hold and the ledger
+// entry all happen in one transaction: the debit is guarded by the balance so
+// concurrent requests cannot spend the same money twice, and a failure at any
+// step leaves neither an order nor a hold behind.
 func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, comment string, lat, lon *float64) (*repository.Order, error) {
 	if isUrgent && isAsap {
 		return nil, errors.New("cannot set both urgent and asap flags")
+	}
+
+	variant, err := s.catalogRepo.GetNodeByID(serviceVariantID)
+	if err != nil {
+		return nil, err
+	}
+	if variant == nil || !variant.IsVariant() {
+		return nil, errors.New("invalid service variant")
+	}
+	if !variant.IsActive {
+		return nil, errors.New("service variant is not available")
+	}
+	if variant.IsAuction {
+		return nil, errors.New("auction variants are ordered through the construction order endpoint")
 	}
 
 	holdAmount, err := s.CalculatePrice(serviceVariantID, isUrgent, isAsap, false)
 	if err != nil {
 		return nil, err
 	}
-
-	balance, err := s.transactionRepo.GetBalance(customerID)
-	if err != nil {
-		return nil, err
-	}
-	if balance < holdAmount {
-		return nil, errors.New("insufficient balance")
+	if holdAmount <= 0 {
+		return nil, errors.New("invalid order price")
 	}
 
 	var deadline *time.Time
@@ -193,21 +208,13 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 		}
 	}
 
-	// Persist the order first; financial operations are wrapped in a transaction.
-	if err := s.orderRepo.Create(order); err != nil {
-		return nil, err
-	}
-
-	// Create the chat room for the new order. Non-fatal if it fails.
-	if s.chatRepo != nil {
-		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
-			// Log and continue; order is already created.
-			_ = err
-		}
-	}
-
 	if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-		if err := s.transactionRepo.UpdateBalance(tx, customerID, -holdAmount); err != nil {
+		// Debit is a single conditional UPDATE: it subtracts only if the balance
+		// covers the hold, so parallel requests cannot spend the same money.
+		if err := s.transactionRepo.Debit(tx, customerID, holdAmount); err != nil {
+			return err
+		}
+		if err := s.orderRepo.Create(tx, order); err != nil {
 			return err
 		}
 		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
@@ -217,13 +224,21 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 			Amount:  holdAmount,
 		})
 	}); err != nil {
+		if errors.Is(err, repository.ErrInsufficientFunds) {
+			return nil, errors.New("insufficient balance")
+		}
 		return nil, err
 	}
 
-	if s.userRepo != nil && address != "" {
-		if err := s.userRepo.UpdateLastGeo(customerID, address); err != nil {
-			// Non-fatal: order is already created, log and continue.
-			_ = err
+	// Everything below is best-effort: the order and its hold are already committed.
+	if s.chatRepo != nil {
+		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
+			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
+		}
+	}
+	if s.userRepo != nil && order.PickupLat != nil && order.PickupLon != nil {
+		if err := s.userRepo.UpdateLastGeo(customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
+			log.Printf("[OrderService] failed to update last_geo for %s: %v", customerID, err)
 		}
 	}
 
@@ -236,7 +251,10 @@ func (s *OrderService) Create(customerID uuid.UUID, req CreateOrderRequest) (*re
 	return s.CreateOrderWithComment(customerID, req.ServiceVariantID, req.IsUrgent, false, req.Address, req.Comment, req.Lat, req.Lon)
 }
 
-// Accept allows an executor to take an order from the queue.
+// Accept allows an executor to take an order from the queue. Every restriction
+// that the order list applies when showing an order is re-checked here, because
+// the list is only a convenience — this method is the actual authorisation
+// point.
 func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 	shift, err := s.shiftRepo.GetActiveShift(executorID)
 	if err != nil || shift == nil {
@@ -246,59 +264,101 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 		return errors.New("executor is penalized")
 	}
 
-	balance, err := s.transactionRepo.GetBalance(executorID)
-	if err != nil {
-		return err
-	}
-	minBalanceLimit := 0.0
-	if s.settingsRepo != nil {
-		st, _ := s.settingsRepo.GetSettings()
-		if valStr, ok := st["min_balance_limit"]; ok {
-			if parsed, pErr := strconv.ParseFloat(valStr, 64); pErr == nil {
-				minBalanceLimit = parsed
-			}
-		}
-	}
-	// Limit is specified as negative threshold (e.g. -500.0 or 0.0)
-	if minBalanceLimit > 0 {
-		minBalanceLimit = -minBalanceLimit
-	}
-	if balance < minBalanceLimit {
-		return errors.New(fmt.Sprintf("нельзя брать новые заказы: баланс %.2f ниже допустимого лимита (%.2f)", balance, minBalanceLimit))
-	}
-
-	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(executorID)
-	if err != nil {
-		return err
-	}
-	if activeCount >= 3 {
-		return errors.New("превышен лимит активных заказов (не более 3)")
-	}
-
-	executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(executorID)
-	if err != nil {
-		return err
-	}
-	if executedCount >= 6 {
-		return errors.New("превышен лимит непотвержденных заказчиком исполненных заказов (не более 6)")
-	}
-
-	return s.orderRepo.Assign(orderID, executorID)
-}
-
-// RejectAssignedOrder allows an executor to reject an assigned order with a 50% penalty fine.
-func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error {
 	order, err := s.orderRepo.GetOrderByID(orderID)
 	if err != nil {
 		return errors.New("order not found")
 	}
-	if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
-		return errors.New("order is not assigned to this executor")
+	if order.CustomerID == executorID {
+		return errors.New("нельзя брать собственный заказ")
+	}
+	if err := s.checkExecutorEligibility(executorID, order.ServiceVariantID); err != nil {
+		return err
 	}
 
-	penalty := order.HoldAmount * 0.5
+	balance, err := s.transactionRepo.GetBalance(executorID)
+	if err != nil {
+		return err
+	}
+	// The limit is configured as a magnitude and applied as a negative floor,
+	// e.g. min_balance_limit=500 means "no new orders below -500".
+	minBalanceLimit := -math.Abs(s.settingsFloat("min_balance_limit", defaultMinBalanceLimit))
+	if balance < minBalanceLimit {
+		return fmt.Errorf("нельзя брать новые заказы: баланс %.2f ниже допустимого лимита (%.2f)", balance, minBalanceLimit)
+	}
+
+	maxActive := settingInt(s.settingsRepo, "max_active_orders", defaultMaxActiveOrders)
+	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(executorID)
+	if err != nil {
+		return err
+	}
+	if activeCount >= maxActive {
+		return fmt.Errorf("превышен лимит активных заказов (не более %d)", maxActive)
+	}
+
+	maxExecuted := settingInt(s.settingsRepo, "max_executed_unconfirmed_orders", defaultMaxExecutedUnconfirmed)
+	executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(executorID)
+	if err != nil {
+		return err
+	}
+	if executedCount >= maxExecuted {
+		return fmt.Errorf("превышен лимит непотвержденных заказчиком исполненных заказов (не более %d)", maxExecuted)
+	}
+
+	if err := s.orderRepo.Assign(nil, orderID, executorID); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return errors.New("заказ уже взят другим исполнителем")
+		}
+		return err
+	}
+	return nil
+}
+
+// checkExecutorEligibility loads the executor and the service variant and
+// applies the shared age/verification rules.
+func (s *OrderService) checkExecutorEligibility(executorID, variantID uuid.UUID) error {
+	if s.userRepo == nil {
+		return nil
+	}
+	executor, err := s.userRepo.FindByID(executorID)
+	if err != nil {
+		return errors.New("executor not found")
+	}
+	variant, err := s.catalogRepo.GetNodeByID(variantID)
+	if err != nil {
+		return err
+	}
+	return canExecutorTakeOrder(executor, variant)
+}
+
+// settingsFloat reads a numeric system setting with a fallback default.
+func (s *OrderService) settingsFloat(key string, defaultValue float64) float64 {
+	return settingFloat(s.settingsRepo, key, defaultValue)
+}
+
+// RejectAssignedOrder allows an executor to drop an assigned order. The
+// executor is fined a share of the order value (see reject_penalty_share) and
+// the order returns to the search pool. Fine and unassignment share one
+// transaction, so the executor is never charged for an order that stayed
+// assigned to them.
+func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error {
+	share := s.settingsFloat("reject_penalty_share", defaultRejectPenaltyShare)
+	if share < 0 {
+		share = 0
+	}
+	if share > 1 {
+		share = 1
+	}
 
 	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
+			return errors.New("order is not assigned to this executor")
+		}
+
+		penalty := order.HoldAmount * share
 		if penalty > 0 {
 			if err := s.transactionRepo.UpdateBalance(tx, executorID, -penalty); err != nil {
 				return err
@@ -306,13 +366,13 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 			if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
 				UserID:  executorID,
 				OrderID: &order.ID,
-				Type:    "FINE",
+				Type:    string(repository.TransactionTypeFine),
 				Amount:  penalty,
 			}); err != nil {
 				return err
 			}
 		}
-		return s.orderRepo.Unassign(orderID)
+		return s.orderRepo.Unassign(tx, orderID)
 	})
 }
 
@@ -326,7 +386,7 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 		return errors.New("order is not assigned to this executor")
 	}
 
-	if err := s.orderRepo.Execute(orderID); err != nil {
+	if err := s.orderRepo.Execute(nil, orderID); err != nil {
 		return err
 	}
 
@@ -341,27 +401,37 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 	return nil
 }
 
-// ConfirmOrder completes an order and processes payments.
+// ConfirmOrder completes an order and processes payments. The order row is
+// locked and re-read inside the transaction, so two concurrent confirmations
+// cannot both pay out the executor, and the payout is derived from the hold
+// that is actually still held (see the SLA downgrade path).
 func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(orderID)
-	if err != nil {
-		return errors.New("order not found")
-	}
-	if order.Status != repository.OrderStatusExecuted {
-		return errors.New("order must be marked as executed by the executor before confirmation")
-	}
-	if order.ExecutorID == nil {
-		return errors.New("order has no executor")
-	}
-
-	finalAmount := order.HoldAmount
-	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
-		order.IsDowngraded = true
-		finalAmount, _ = s.CalculatePrice(order.ServiceVariantID, false, false, true)
-	}
-
 	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-		// Refund overpayment to customer.
+		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.Status != repository.OrderStatusExecuted {
+			return errors.New("order must be marked as executed by the executor before confirmation")
+		}
+		if order.ExecutorID == nil {
+			return errors.New("order has no executor")
+		}
+
+		finalAmount := order.HoldAmount
+		isDowngraded := order.IsDowngraded
+		if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
+			downgraded, err := s.CalculatePrice(order.ServiceVariantID, false, false, true)
+			if err != nil {
+				return err
+			}
+			if downgraded < finalAmount {
+				isDowngraded = true
+				finalAmount = downgraded
+			}
+		}
+
+		// Refund the part of the hold that is not being spent.
 		refund := order.HoldAmount - finalAmount
 		if refund > 0 {
 			if err := s.transactionRepo.UpdateBalance(tx, order.CustomerID, refund); err != nil {
@@ -377,7 +447,8 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 			}
 		}
 
-		// Charge customer final amount.
+		// The customer's money left the balance at hold time; this entry records
+		// the hold being spent rather than a second debit.
 		if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
 			UserID:  order.CustomerID,
 			OrderID: &order.ID,
@@ -400,7 +471,10 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 			return err
 		}
 
-		return s.orderRepo.Confirm(orderID, finalAmount, order.IsDowngraded)
+		if err := s.orderRepo.SetHoldAmount(tx, order.ID, 0); err != nil {
+			return err
+		}
+		return s.orderRepo.Confirm(tx, orderID, finalAmount, isDowngraded)
 	})
 }
 
@@ -416,33 +490,37 @@ func (s *OrderService) Confirm(customerID, orderID uuid.UUID) error {
 	return s.ConfirmOrder(orderID)
 }
 
-// CancelOrder cancels an active order and refunds the hold.
+// CancelOrder cancels an active order and refunds the hold exactly once. The
+// refund and the status change share one transaction and one row lock, and the
+// hold is zeroed, so a repeated or concurrent cancel cannot pay out again.
 func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(orderID)
-	if err != nil {
-		return errors.New("order not found")
-	}
-	if order.Status != repository.OrderStatusSearching && order.Status != repository.OrderStatusAssigned {
-		return errors.New("order cannot be canceled")
-	}
+	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.Status != repository.OrderStatusSearching && order.Status != repository.OrderStatusAssigned {
+			return errors.New("order cannot be canceled")
+		}
 
-	if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-		if err := s.transactionRepo.UpdateBalance(tx, order.CustomerID, order.HoldAmount); err != nil {
-			return err
+		if order.HoldAmount > 0 {
+			if err := s.transactionRepo.UpdateBalance(tx, order.CustomerID, order.HoldAmount); err != nil {
+				return err
+			}
+			if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+				UserID:  order.CustomerID,
+				OrderID: &order.ID,
+				Type:    string(repository.TransactionTypeRefund),
+				Amount:  order.HoldAmount,
+			}); err != nil {
+				return err
+			}
+			if err := s.orderRepo.SetHoldAmount(tx, order.ID, 0); err != nil {
+				return err
+			}
 		}
-		if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID:  order.CustomerID,
-			OrderID: &order.ID,
-			Type:    string(repository.TransactionTypeRefund),
-			Amount:  order.HoldAmount,
-		}); err != nil {
-			return err
-		}
-		return s.orderRepo.Cancel(orderID)
-	}); err != nil {
-		return err
-	}
-	return nil
+		return s.orderRepo.Cancel(tx, orderID)
+	})
 }
 
 // Cancel cancels an order for a specific customer (alias compatible with handler).
@@ -503,21 +581,20 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 		}
 	}
 
-	if s.userRepo != nil && address != "" {
-		if err := s.userRepo.UpdateLastGeo(customerID, address); err != nil {
-			// Non-fatal: order is already created, log and continue.
-			_ = err
-		}
-	}
-	if err := s.orderRepo.Create(order); err != nil {
+	if err := s.orderRepo.Create(nil, order); err != nil {
 		return nil, err
+	}
+
+	if s.userRepo != nil && order.PickupLat != nil && order.PickupLon != nil {
+		if err := s.userRepo.UpdateLastGeo(customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
+			log.Printf("[OrderService] failed to update last_geo for %s: %v", customerID, err)
+		}
 	}
 
 	// Create the chat room for the new order. Non-fatal if it fails.
 	if s.chatRepo != nil {
 		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
-			// Log and continue; order is already created.
-			_ = err
+			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
 		}
 	}
 
