@@ -35,6 +35,7 @@ type CreateOrderRequest struct {
 	ServiceVariantID uuid.UUID `json:"service_variant_id"`
 	IsUrgent         bool      `json:"is_urgent"`
 	IsAsap           bool      `json:"is_asap"`
+	Comment          string    `json:"comment,omitempty"`
 	PhotoURL         *string   `json:"photo_url,omitempty"`
 	Address          string    `json:"address"`
 	Lat              *float64  `json:"lat,omitempty"`
@@ -127,6 +128,11 @@ func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAs
 
 // CreateOrder creates a standard order and holds customer balance.
 func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, lat, lon *float64) (*repository.Order, error) {
+	return s.CreateOrderWithComment(customerID, serviceVariantID, isUrgent, isAsap, address, "", lat, lon)
+}
+
+// CreateOrderWithComment creates a standard order with optional comment and holds customer balance.
+func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, comment string, lat, lon *float64) (*repository.Order, error) {
 	if isUrgent && isAsap {
 		return nil, errors.New("cannot set both urgent and asap flags")
 	}
@@ -154,12 +160,19 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.U
 		deadline = &d
 	}
 
+	var commentPtr *string
+	if strings.TrimSpace(comment) != "" {
+		c := strings.TrimSpace(comment)
+		commentPtr = &c
+	}
+
 	order := &repository.Order{
 		ID:               uuid.New(),
 		CustomerID:       customerID,
 		ServiceVariantID: serviceVariantID,
 		IsUrgent:         isUrgent,
 		IsAsap:           isAsap,
+		Comment:          commentPtr,
 		Status:           repository.OrderStatusSearching,
 		HoldAmount:       holdAmount,
 		FinalAmount:      holdAmount,
@@ -220,7 +233,7 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.U
 
 // Create creates a new order for a customer (alias compatible with handler).
 func (s *OrderService) Create(customerID uuid.UUID, req CreateOrderRequest) (*repository.Order, error) {
-	return s.CreateOrder(customerID, req.ServiceVariantID, req.IsUrgent, req.IsAsap, req.Address, req.Lat, req.Lon)
+	return s.CreateOrderWithComment(customerID, req.ServiceVariantID, req.IsUrgent, false, req.Address, req.Comment, req.Lat, req.Lon)
 }
 
 // Accept allows an executor to take an order from the queue.
@@ -445,7 +458,7 @@ func (s *OrderService) Cancel(customerID, orderID uuid.UUID) error {
 }
 
 // CreateConstructionOrder creates a construction waste auction order.
-func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, address string, lat, lon *float64) (*repository.Order, error) {
+func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, address, comment string, lat, lon *float64) (*repository.Order, error) {
 	if photoURL == "" {
 		return nil, errors.New("photo URL is required")
 	}
@@ -458,12 +471,19 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 		return nil, errors.New("construction variant not found")
 	}
 
+	var commentPtr *string
+	if strings.TrimSpace(comment) != "" {
+		c := strings.TrimSpace(comment)
+		commentPtr = &c
+	}
+
 	order := &repository.Order{
 		ID:               uuid.New(),
 		CustomerID:       customerID,
 		ServiceVariantID: variant.ID,
 		IsUrgent:         false,
 		IsAsap:           false,
+		Comment:          commentPtr,
 		Status:           repository.OrderStatusSearching,
 		HoldAmount:       0,
 		FinalAmount:      0,

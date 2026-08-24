@@ -58,6 +58,15 @@
           </div>
         </div>
 
+        <!-- Комментарий к заказу -->
+        <div v-if="selectedOrderDetails.comment" class="comment-block">
+          <span class="label">Комментарий к заказу</span>
+          <div class="comment-content">
+            <i class="ph-fill ph-chat-teardrop-text comment-icon"></i>
+            <span class="comment-text">{{ selectedOrderDetails.comment }}</span>
+          </div>
+        </div>
+
         <!-- Блок отзыва (если уже проставлен) -->
         <div v-if="existingReview" class="review-display-box mt-3">
           <div class="review-display-header">
@@ -544,5 +553,32 @@ export default defineComponent({
   border-color: #e2e8f0;
   cursor: not-allowed;
   opacity: 0.8;
+}
+.comment-block {
+  margin-top: 12px;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px dashed #cbd5e1;
+}
+
+.comment-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.comment-icon {
+  color: #6366f1;
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.comment-text {
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.4;
+  white-space: pre-wrap;
 }
 </style>

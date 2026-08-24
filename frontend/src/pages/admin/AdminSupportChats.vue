@@ -233,6 +233,7 @@ export default defineComponent({
         const res = await api.get(`/support/chats/${chat.chat_id}/messages`)
         messages.value = res.data || []
         chat.unread_count = 0
+        window.dispatchEvent(new Event('support-unread-updated'))
         scrollToBottom()
       } catch (err) {
         console.error('Failed to load support messages:', err)

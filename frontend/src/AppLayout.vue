@@ -18,9 +18,12 @@
         </router-link>
 
         <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-chats-teardrop"></i>
+          <div class="nav-icon-wrap">
+            <i class="ph ph-chats-teardrop"></i>
+            <span v-if="unreadSupportCount > 0 && sidebarMinimized" class="nav-dot-badge"></span>
+          </div>
           <span v-if="!sidebarMinimized">{{ $t('app.supportChats') }}</span>
-          <span v-if="unreadSupportCount > 0" class="nav-badge">{{ unreadSupportCount }}</span>
+          <span v-if="unreadSupportCount > 0 && !sidebarMinimized" class="nav-badge">{{ unreadSupportCount }}</span>
         </router-link>
 
         <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
@@ -107,7 +110,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, ref, onMounted } from 'vue'
+import { defineComponent, computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
@@ -140,8 +143,14 @@ export default defineComponent({
           sidebarMinimized.value = true
         }
       })
+      window.addEventListener('support-unread-updated', fetchUnreadSupport)
       fetchUnreadSupport()
-      unreadTimer = setInterval(fetchUnreadSupport, 5000)
+      unreadTimer = setInterval(fetchUnreadSupport, 3000)
+    })
+
+    onUnmounted(() => {
+      window.removeEventListener('support-unread-updated', fetchUnreadSupport)
+      if (unreadTimer) clearInterval(unreadTimer)
     })
 
     const closeSidebarOnMobile = () => {
@@ -305,14 +314,39 @@ export default defineComponent({
   color: #818cf8;
 }
 
+.nav-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .nav-badge {
   background: #ef4444;
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 10px;
+  padding: 2px 8px;
+  border-radius: 12px;
   margin-left: auto;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+  animation: pulseBadge 2s infinite;
+}
+
+@keyframes pulseBadge {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.nav-dot-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 9px;
+  height: 9px;
+  background-color: #ef4444;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
 }
 
 .nav-item i {

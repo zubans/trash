@@ -35,7 +35,7 @@
             <div class="toast-chat-title">{{ chatToast.title }}</div>
             <div class="toast-chat-text">{{ chatToast.text }}</div>
           </div>
-          <button type="button" class="toast-close" @click.stop="chatToast = null">
+          <button type="button" class="toast-close" @click.stop.prevent="closeToast">
             <i class="ph ph-x"></i>
           </button>
         </div>
@@ -169,6 +169,7 @@
                     <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
                   </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
+                  <div v-if="order.comment" class="item-comment-line"><i class="ph-fill ph-chat-teardrop-text me-1 text-primary"></i>«{{ order.comment }}»</div>
                 </div>
               </div>
               <div class="o-actions item-actions" @click.stop>
@@ -746,7 +747,21 @@ export default defineComponent({
     const ws = ref<WebSocket | null>(null)
     let chatPollTimer: any = null
     const unreadOrderIDs = ref(new Set<string>())
-    const chatToast = ref<{ id: string; title: string; text: string; order: any } | null>(null)
+    const chatToast = ref<any>(null)
+    let chatToastTimer: any = null
+
+    const closeToast = () => {
+      chatToast.value = null
+      if (chatToastTimer) clearTimeout(chatToastTimer)
+    }
+
+    const setChatToast = (data: any) => {
+      chatToast.value = data
+      if (chatToastTimer) clearTimeout(chatToastTimer)
+      chatToastTimer = setTimeout(() => {
+        chatToast.value = null
+      }, 5000)
+    }
 
     const fetchUnreadSummary = async () => {
       try {
@@ -759,17 +774,17 @@ export default defineComponent({
     }
 
     const openChatByToast = () => {
-      if (chatToast.value?.isSupport) {
+      if (!chatToast.value) return
+      const isSupp = chatToast.value.isSupport
+      const orderID = chatToast.value.orderID
+      closeToast()
+      if (isSupp) {
         openSupportChat()
-        chatToast.value = null
-        return
-      }
-      if (chatToast.value?.orderID) {
-        const order = assignedOrders.value.find((o: any) => o.id === chatToast.value?.orderID) ||
-                      executorHistoryOrders.value.find((o: any) => o.id === chatToast.value?.orderID)
+      } else if (orderID) {
+        const order = assignedOrders.value.find((o: any) => o.id === orderID) ||
+                      executorHistoryOrders.value.find((o: any) => o.id === orderID)
         if (order) toggleChat(order)
       }
-      chatToast.value = null
     }
 
     const markChatAsRead = async (orderID: string) => {
@@ -843,12 +858,12 @@ export default defineComponent({
             hasUnreadSupport.value = true
             if (!showSupportChatModal.value && lastMsg && lastMsg !== lastSupportMsgText.value) {
               lastSupportMsgText.value = lastMsg
-              chatToast.value = {
+              setChatToast({
                 id: 'support',
                 title: 'Служба поддержки',
                 text: lastMsg,
                 isSupport: true,
-              }
+              })
             }
           }
         }
@@ -1499,6 +1514,7 @@ export default defineComponent({
       submitWithdrawal,
       unreadOrderIDs,
       chatToast,
+      closeToast,
       fetchUnreadSummary,
       markChatAsRead,
       sendDeliveryAck,
@@ -1603,12 +1619,12 @@ export default defineComponent({
 /* Toast Notifications Styles */
 .toast-container {
   position: fixed;
-  top: 24px;
+  top: 84px;
   right: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  z-index: 9999;
+  z-index: 100000;
   pointer-events: none;
 }
 

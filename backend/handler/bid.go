@@ -37,6 +37,7 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 	var req struct {
 		PhotoURL string   `json:"photo_url"`
 		Address  string   `json:"address"`
+		Comment  string   `json:"comment,omitempty"`
 		Lat      *float64 `json:"lat,omitempty"`
 		Lon      *float64 `json:"lon,omitempty"`
 	}
@@ -45,7 +46,7 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	order, err := h.orderService.CreateConstructionOrder(user.ID, req.PhotoURL, req.Address, req.Lat, req.Lon)
+	order, err := h.orderService.CreateConstructionOrder(user.ID, req.PhotoURL, req.Address, req.Comment, req.Lat, req.Lon)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

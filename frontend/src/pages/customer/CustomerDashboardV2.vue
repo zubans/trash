@@ -73,7 +73,7 @@
             <div class="toast-chat-title">{{ chatToast.title }}</div>
             <div class="toast-chat-text">{{ chatToast.text }}</div>
           </div>
-          <button type="button" class="toast-close" @click.stop="chatToast = null">
+          <button type="button" class="toast-close" @click.stop.prevent="closeToast">
             <i class="ph ph-x"></i>
           </button>
         </div>
@@ -326,7 +326,7 @@
         v-model:selected-sub-category-id="selectedSubCategoryId"
         v-model:selected-variant-id="selectedVariantId"
         v-model:is-urgent="isUrgent"
-        v-model:is-asap="isAsap"
+        v-model:order-comment="orderComment"
         :order-address="orderAddress"
         :order-lat="orderLat"
         :order-lon="orderLon"
@@ -520,6 +520,7 @@ export default defineComponent({
     const selectedVariantId = ref<string | null>(null)
     const isUrgent = ref(false)
     const isAsap = ref(false)
+    const orderComment = ref('')
     const orderAddress = ref(defaultAddress.value)
     const orderLat = ref<number | null>(null)
     const orderLon = ref<number | null>(null)
@@ -667,6 +668,7 @@ export default defineComponent({
       serviceVariants.value = []
       isUrgent.value = false
       isAsap.value = false
+      orderComment.value = ''
       showCreateOrderModal.value = true
       try {
         serviceCategories.value = await getServiceCategories()
@@ -687,7 +689,7 @@ export default defineComponent({
         const payload: any = {
           service_variant_id: selectedVariantId.value,
           is_urgent: !isAuctionSelected.value && isUrgent.value,
-          is_asap: !isAuctionSelected.value && isAsap.value,
+          comment: orderComment.value,
           address: orderAddress.value,
         }
         if (orderLat.value !== null && orderLon.value !== null) {
@@ -774,7 +776,21 @@ export default defineComponent({
     const ws = ref<WebSocket | null>(null)
     let chatPollTimer: any = null
     const unreadOrderIDs = ref(new Set<string>())
-    const chatToast = ref<{ id: string; title: string; text: string; order: any } | null>(null)
+    const chatToast = ref<any>(null)
+    let chatToastTimer: any = null
+
+    const closeToast = () => {
+      chatToast.value = null
+      if (chatToastTimer) clearTimeout(chatToastTimer)
+    }
+
+    const setChatToast = (data: any) => {
+      chatToast.value = data
+      if (chatToastTimer) clearTimeout(chatToastTimer)
+      chatToastTimer = setTimeout(() => {
+        chatToast.value = null
+      }, 5000)
+    }
 
     const fetchUnreadSummary = async () => {
       try {
@@ -836,11 +852,11 @@ export default defineComponent({
             hasUnreadSupport.value = true
             if (!showSupportChatModal.value && lastMsg && lastMsg !== lastSupportMsgText.value) {
               lastSupportMsgText.value = lastMsg
-              chatToast.value = {
+              setChatToast({
                 title: 'Служба поддержки',
                 text: lastMsg,
                 isSupport: true,
-              }
+              })
             }
           }
         }
@@ -848,15 +864,14 @@ export default defineComponent({
     }
 
     const openChatByToast = () => {
-      if (chatToast.value?.isSupport) {
+      if (!chatToast.value) return
+      const isSupp = chatToast.value.isSupport
+      const orderObj = chatToast.value.order
+      closeToast()
+      if (isSupp) {
         openSupportChat()
-        chatToast.value = null
-        return
-      }
-      if (chatToast.value?.order) {
-        const order = chatToast.value.order
-        chatToast.value = null
-        toggleChat(order)
+      } else if (orderObj) {
+        toggleChat(orderObj)
       }
     }
 
@@ -1122,12 +1137,12 @@ export default defineComponent({
                   markChatAsRead(order.id)
                 } else {
                   unreadOrderIDs.value.add(order.id)
-                  chatToast.value = {
+                  setChatToast({
                     id: order.id,
                     title: 'Новое сообщение',
                     text: data.text || 'Получено новое сообщение',
                     order,
-                  }
+                  })
                 }
               }
             }
@@ -1321,6 +1336,7 @@ export default defineComponent({
       selectedVariantId,
       isUrgent,
       isAsap,
+      orderComment,
       orderAddress,
       orderLat,
       orderLon,
@@ -1337,6 +1353,7 @@ export default defineComponent({
       editingMessageId,
       unreadOrderIDs,
       chatToast,
+      closeToast,
       fetchUnreadSummary,
       markChatAsRead,
       sendDeliveryAck,
@@ -2065,12 +2082,12 @@ export default defineComponent({
 /* Toast Notifications Styles */
 .toast-container {
   position: fixed;
-  top: 24px;
+  top: 84px;
   right: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  z-index: 9999;
+  z-index: 100000;
   pointer-events: none;
 }
 

@@ -36,6 +36,7 @@ type Order struct {
 	IsDowngraded     bool         `json:"is_downgraded"`
 	PhotoURL         *string      `json:"photo_url,omitempty"`
 	Address          *string      `json:"address,omitempty"`
+	Comment          *string      `json:"comment,omitempty"`
 	PickupLat        *float64     `json:"pickup_lat,omitempty"`
 	PickupLon        *float64     `json:"pickup_lon,omitempty"`
 	CreatedAt        time.Time    `json:"created_at"`
@@ -81,6 +82,7 @@ type orderRepo struct {
 
 // NewOrderRepository creates a new OrderRepository.
 func NewOrderRepository(db *sql.DB) OrderRepository {
+	_, _ = db.Exec(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT NULL;`)
 	return &orderRepo{db: db}
 }
 
@@ -99,13 +101,13 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 const orderColumns = `
     o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
     o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-    o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at
+    o.comment, o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at
 `
 
 const orderInsertColumns = `
     id, customer_id, executor_id, service_variant_id, is_urgent, is_asap, status,
     hold_amount, final_amount, is_downgraded, photo_url, address, pickup_lat, pickup_lon,
-    created_at, assigned_at, deadline_at, completed_at, canceled_at
+    comment, created_at, assigned_at, deadline_at, completed_at, canceled_at
 `
 
 func scanOrderRow(row *sql.Row) (Order, error) {
@@ -113,7 +115,7 @@ func scanOrderRow(row *sql.Row) (Order, error) {
 	err := row.Scan(
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
-		&o.PickupLat, &o.PickupLon, &o.CreatedAt,
+		&o.PickupLat, &o.PickupLon, &o.Comment, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
 	)
 	return o, err
@@ -124,7 +126,7 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 	err := rows.Scan(
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
-		&o.PickupLat, &o.PickupLon, &o.CreatedAt,
+		&o.PickupLat, &o.PickupLon, &o.Comment, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
 	)
 	return o, err
@@ -133,10 +135,10 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 func (r *orderRepo) Create(order *Order) error {
 	_, err := r.db.Exec(
 		`INSERT INTO orders (`+orderInsertColumns+`)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		order.ID, order.CustomerID, order.ExecutorID, order.ServiceVariantID, order.IsUrgent, order.IsAsap,
 		order.Status, order.HoldAmount, order.FinalAmount, order.IsDowngraded, order.PhotoURL,
-		order.Address, order.PickupLat, order.PickupLon,
+		order.Address, order.PickupLat, order.PickupLon, order.Comment,
 		order.CreatedAt, order.AssignedAt, order.DeadlineAt, order.CompletedAt, order.CanceledAt,
 	)
 	return err

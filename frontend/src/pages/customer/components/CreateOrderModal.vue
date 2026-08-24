@@ -80,7 +80,7 @@
           </div>
         </div>
 
-        <!-- Дополнительные параметры: Срочность / ASAP -->
+        <!-- Дополнительные параметры: Срочность -->
         <div v-if="selectedVariantId && !isAuctionSelected" class="form-section mt-2">
           <div class="section-label">Скорость исполнения</div>
           <div class="speed-options-group">
@@ -95,19 +95,19 @@
                 <i class="ph ph-clock-countdown"></i> {{ $t('customer.urgent') }}
               </div>
             </label>
-
-            <label class="speed-option-label">
-              <input
-                type="checkbox"
-                class="custom-radio-input"
-                :checked="isAsap"
-                @change="$emit('update:isAsap', ($event.target as HTMLInputElement).checked)"
-              />
-              <div class="style-rect-btn speed-btn">
-                <i class="ph ph-lightning"></i> ASAP
-              </div>
-            </label>
           </div>
+        </div>
+
+        <!-- Поле Комментарий к заказу -->
+        <div class="form-section mt-3">
+          <div class="section-label">Комментарий к заказу (необязательно)</div>
+          <textarea
+            :value="orderComment"
+            class="form-input comment-textarea"
+            rows="3"
+            placeholder="Укажите детали (подъезд, этаж, домофон, особые пожелания)..."
+            @input="$emit('update:orderComment', ($event.target as HTMLInputElement).value)"
+          ></textarea>
         </div>
 
         <!-- Футер (Цена внутри кнопки) -->
@@ -150,7 +150,7 @@ export default defineComponent({
     variantOptions: { type: Array as () => any[], default: () => [] },
     isAuctionSelected: { type: Boolean, default: false },
     isUrgent: { type: Boolean, default: false },
-    isAsap: { type: Boolean, default: false },
+    orderComment: { type: String, default: '' },
     selectedPrice: { type: Number, default: 0 },
     currencySymbol: { type: String, default: '₽' },
     creatingOrder: { type: Boolean, default: false },
@@ -161,7 +161,7 @@ export default defineComponent({
     'update:selectedSubCategoryId',
     'update:selectedVariantId',
     'update:isUrgent',
-    'update:isAsap',
+    'update:orderComment',
     'submitOrder',
   ],
   setup(props, { emit }) {
@@ -605,6 +605,24 @@ export default defineComponent({
     padding: 16px;
     border-radius: 20px;
   }
+}
+.comment-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  outline: none;
+  transition: all 0.2s ease;
+  background: #f8fafc;
+}
+
+.comment-textarea:focus {
+  border-color: #6366f1;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
 </style>
 
