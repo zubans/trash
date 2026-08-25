@@ -17,19 +17,19 @@ import (
 
 // OrderService handles order lifecycle: creation, assignment, confirmation, cancellation.
 type OrderService struct {
-	orderRepo       repository.OrderRepository
-	transactionRepo repository.TransactionRepository
-	settingsRepo    repository.SettingsRepository
-	userRepo        repository.UserRepository
-	shiftRepo       repository.ShiftRepository
-	chatRepo        repository.ChatRepository
-	catalogRepo     repository.ServiceCatalogRepository
-	geocoder        *Geocoder
+	orderRepo    repository.OrderRepository
+	ledger       *Ledger
+	settingsRepo repository.SettingsRepository
+	userRepo     repository.UserRepository
+	shiftRepo    repository.ShiftRepository
+	chatRepo     repository.ChatRepository
+	catalogRepo  repository.ServiceCatalogRepository
+	geocoder     *Geocoder
 }
 
 // NewOrderService creates an OrderService.
-func NewOrderService(orderRepo repository.OrderRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, geocoder *Geocoder) *OrderService {
-	return &OrderService{orderRepo: orderRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, geocoder: geocoder}
+func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, geocoder *Geocoder) *OrderService {
+	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, geocoder: geocoder}
 }
 
 // CreateOrderRequest contains the data needed to create an order.
@@ -208,21 +208,14 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 		}
 	}
 
-	if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-		// Debit is a single conditional UPDATE: it subtracts only if the balance
-		// covers the hold, so parallel requests cannot spend the same money.
-		if err := s.transactionRepo.Debit(tx, customerID, holdAmount); err != nil {
+	if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+		// Reserve is a single conditional debit paired with a credit to escrow:
+		// the money is not destroyed, it moves to the account that holds it for
+		// the duration of the order.
+		if err := s.ledger.Reserve(tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID); err != nil {
 			return err
 		}
-		if err := s.orderRepo.Create(tx, order); err != nil {
-			return err
-		}
-		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID:  customerID,
-			OrderID: &order.ID,
-			Type:    string(repository.TransactionTypeHold),
-			Amount:  holdAmount,
-		})
+		return s.orderRepo.Create(tx, order)
 	}); err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {
 			return nil, errors.New("insufficient balance")
@@ -275,7 +268,7 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 		return err
 	}
 
-	balance, err := s.transactionRepo.GetBalance(executorID)
+	balance, err := s.ledger.GetBalance(executorID)
 	if err != nil {
 		return err
 	}
@@ -349,7 +342,7 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 		share = 1
 	}
 
-	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	return s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
@@ -358,19 +351,10 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 			return errors.New("order is not assigned to this executor")
 		}
 
+		// The penalty is collected, not destroyed: it lands on the fines account.
 		penalty := order.HoldAmount * share
-		if penalty > 0 {
-			if err := s.transactionRepo.UpdateBalance(tx, executorID, -penalty); err != nil {
-				return err
-			}
-			if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-				UserID:  executorID,
-				OrderID: &order.ID,
-				Type:    string(repository.TransactionTypeFine),
-				Amount:  penalty,
-			}); err != nil {
-				return err
-			}
+		if err := s.ledger.Charge(tx, executorID, repository.AccountFines, penalty, repository.TransactionTypeFine, &order.ID); err != nil {
+			return err
 		}
 		return s.orderRepo.Unassign(tx, orderID)
 	})
@@ -406,7 +390,7 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 // cannot both pay out the executor, and the payout is derived from the hold
 // that is actually still held (see the SLA downgrade path).
 func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
-	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	return s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
@@ -431,43 +415,21 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 			}
 		}
 
-		// Refund the part of the hold that is not being spent.
+		// Escrow holds exactly order.HoldAmount for this order, and it drains
+		// completely here: the unspent part back to the customer, the rest to
+		// the executor.
 		refund := order.HoldAmount - finalAmount
-		if refund > 0 {
-			if err := s.transactionRepo.UpdateBalance(tx, order.CustomerID, refund); err != nil {
-				return err
-			}
-			if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-				UserID:  order.CustomerID,
-				OrderID: &order.ID,
-				Type:    string(repository.TransactionTypeRefund),
-				Amount:  refund,
-			}); err != nil {
-				return err
-			}
+		if err := s.ledger.Release(tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
+			return err
 		}
 
 		// The customer's money left the balance at hold time; this entry records
 		// the hold being spent rather than a second debit.
-		if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID:  order.CustomerID,
-			OrderID: &order.ID,
-			Type:    string(repository.TransactionTypePayment),
-			Amount:  finalAmount,
-		}); err != nil {
+		if err := s.ledger.Note(tx, order.CustomerID, repository.AccountEscrow, finalAmount, repository.TransactionTypePayment, &order.ID); err != nil {
 			return err
 		}
 
-		// Reward executor.
-		if err := s.transactionRepo.UpdateBalance(tx, *order.ExecutorID, finalAmount); err != nil {
-			return err
-		}
-		if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID:  *order.ExecutorID,
-			OrderID: &order.ID,
-			Type:    string(repository.TransactionTypeReward),
-			Amount:  finalAmount,
-		}); err != nil {
+		if err := s.ledger.Release(tx, repository.AccountEscrow, *order.ExecutorID, finalAmount, repository.TransactionTypeReward, &order.ID, nil); err != nil {
 			return err
 		}
 
@@ -494,7 +456,7 @@ func (s *OrderService) Confirm(customerID, orderID uuid.UUID) error {
 // refund and the status change share one transaction and one row lock, and the
 // hold is zeroed, so a repeated or concurrent cancel cannot pay out again.
 func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
-	return s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	return s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
@@ -504,15 +466,7 @@ func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
 		}
 
 		if order.HoldAmount > 0 {
-			if err := s.transactionRepo.UpdateBalance(tx, order.CustomerID, order.HoldAmount); err != nil {
-				return err
-			}
-			if err := s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-				UserID:  order.CustomerID,
-				OrderID: &order.ID,
-				Type:    string(repository.TransactionTypeRefund),
-				Amount:  order.HoldAmount,
-			}); err != nil {
+			if err := s.ledger.Release(tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
 				return err
 			}
 			if err := s.orderRepo.SetHoldAmount(tx, order.ID, 0); err != nil {

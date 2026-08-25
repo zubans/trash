@@ -72,8 +72,13 @@ func main() {
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	executorGeoRepo := repository.NewExecutorGeoRepository(db)
 	reconcileRepo := repository.NewReconciliationRepository(db)
+	systemAccountRepo := repository.NewSystemAccountRepository(db)
 
 	// Services
+	// Every movement of money goes through the ledger, which always touches both
+	// a user balance and a system account.
+	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
+
 	geocoder := service.NewGeocoder(db)
 	mailer := service.NewSmtpMailSender()
 	// AuthService owns everything session related: issuing access tokens,
@@ -82,12 +87,12 @@ func main() {
 		WithSessionStorage(refreshRepo, tokenRepo)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
 		WithSessions(authService).
-		WithLedger(transactionRepo).
+		WithLedger(ledger).
 		WithReconciliation(reconcileRepo)
-	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
-	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
+	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
+	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
-	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, transactionRepo, userRepo, catalogRepo, chatRepo)
+	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo, geocoder)
@@ -295,12 +300,13 @@ func main() {
 	// Primary mount: /api/* (web via nginx + rebuilt mobile app).
 	r.Route("/api", registerAPIRoutes)
 
-	// Legacy mount: the same API at the root, for installed APKs that predate
-	// the /api prefix. It doubles the exposed surface, so it is a temporary
-	// compatibility measure: set LEGACY_ROOT_ROUTES=0 once telemetry shows no
-	// client hits the root paths any more.
-	if getEnv("LEGACY_ROOT_ROUTES", "1") != "0" {
-		log.Println("LEGACY_ROOT_ROUTES enabled: the API is also served without the /api prefix. Disable it once all mobile clients are rebuilt.")
+	// Legacy mount: the same API at the root, for installed APKs that predate the
+	// /api prefix. Off by default — nothing outside can reach these paths anyway:
+	// nginx proxies only /api/, /health, /releases/ and /uploads/, and the plain
+	// HTTP port they used to talk to is no longer published. Set
+	// LEGACY_ROOT_ROUTES=1 only if an old client is put back on the network.
+	if getEnv("LEGACY_ROOT_ROUTES", "0") == "1" {
+		log.Println("LEGACY_ROOT_ROUTES enabled: the API is also served without the /api prefix, doubling the exposed surface.")
 		registerAPIRoutes(r)
 	}
 

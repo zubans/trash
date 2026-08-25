@@ -25,14 +25,14 @@ type SessionRevoker interface {
 
 // AdminService manages administrative business logic.
 type AdminService struct {
-	userRepo        repository.UserRepository
-	adminRepo       repository.AdminRepository
-	settingsRepo    repository.SettingsRepository
-	transactionRepo repository.TransactionRepository
-	reconcileRepo   repository.ReconciliationRepository
-	sessions        SessionRevoker
-	mailer          MailSender
-	jwtSecret       []byte
+	userRepo      repository.UserRepository
+	adminRepo     repository.AdminRepository
+	settingsRepo  repository.SettingsRepository
+	ledger        *Ledger
+	reconcileRepo repository.ReconciliationRepository
+	sessions      SessionRevoker
+	mailer        MailSender
+	jwtSecret     []byte
 }
 
 // NewAdminService creates a new AdminService.
@@ -59,10 +59,10 @@ func NewAdminService(
 	}
 }
 
-// WithLedger attaches the balance store. Withdrawals move money, so the service
-// needs it to reserve funds when a request is created.
-func (s *AdminService) WithLedger(transactionRepo repository.TransactionRepository) *AdminService {
-	s.transactionRepo = transactionRepo
+// WithLedger attaches the ledger. Top-ups and withdrawals move money, and the
+// ledger is the only thing that can move it.
+func (s *AdminService) WithLedger(ledger *Ledger) *AdminService {
+	s.ledger = ledger
 	return s
 }
 
@@ -249,36 +249,51 @@ func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount float64) (*re
 		return nil, errors.New("cannot request top-up for a banned user")
 	}
 
-	return s.adminRepo.CreateTopUpRequest(userID, amount)
+	return s.adminRepo.CreateTopUpRequest(nil, userID, amount)
 }
 
-// ApproveTopUpRequest approves a top-up request.
+// ApproveTopUpRequest credits the requested amount to the user.
+//
+// The money comes in from the DEPOSITS account, which represents the outside
+// world: a top-up used to make a balance grow with nothing on the other side.
 func (s *AdminService) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	// Verify request is pending
-	req, err := s.adminRepo.GetTopUpRequestByID(requestID)
-	if err != nil {
-		return err
-	}
-	if req.Status != "PENDING" {
-		return errors.New("request is not in PENDING status")
-	}
-
-	// Approve
-	return s.adminRepo.ApproveTopUpRequest(requestID, adminID)
+	return s.decideTopUp(requestID, adminID, "APPROVED")
 }
 
-// RejectTopUpRequest rejects a top-up request.
+// RejectTopUpRequest closes a request without moving money.
 func (s *AdminService) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	// Verify request is pending
-	req, err := s.adminRepo.GetTopUpRequestByID(requestID)
-	if err != nil {
-		return err
-	}
-	if req.Status != "PENDING" {
-		return errors.New("request is not in PENDING status")
+	return s.decideTopUp(requestID, adminID, "REJECTED")
+}
+
+func (s *AdminService) decideTopUp(requestID, adminID uuid.UUID, status string) error {
+	if s.ledger == nil {
+		return errors.New("ledger is not configured")
 	}
 
-	return s.adminRepo.RejectTopUpRequest(requestID, adminID)
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+		req, err := s.adminRepo.LockTopUpRequest(tx, requestID)
+		if err != nil {
+			return errors.New("request not found")
+		}
+		if req.Status != "PENDING" {
+			return errors.New("request is not in PENDING status")
+		}
+		if err := s.adminRepo.SetTopUpStatus(tx, requestID, adminID, status); err != nil {
+			return err
+		}
+		if status != "APPROVED" {
+			return nil
+		}
+		return s.ledger.Deposit(tx, req.UserID, req.Amount, &adminID)
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return errors.New("request is not in PENDING status")
+		}
+		return err
+	}
+	log.Printf("[AUDIT] admin %s set top-up request %s to %s", adminID, requestID, status)
+	return nil
 }
 
 // GetWithdrawalRequests lists all balance withdrawal requests.
@@ -298,7 +313,7 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64)
 	if amount <= 0 {
 		return nil, errors.New("amount must be greater than zero")
 	}
-	if s.transactionRepo == nil {
+	if s.ledger == nil {
 		return nil, errors.New("ledger is not configured")
 	}
 
@@ -319,10 +334,12 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64)
 	}
 
 	var created *repository.WithdrawalRequest
-	err = s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	err = s.ledger.RunInTx(func(tx *sql.Tx) error {
 		// Guarded debit: the balance has to cover the request at this moment,
 		// not at some earlier read.
-		if err := s.transactionRepo.Debit(tx, userID, amount); err != nil {
+		// The money moves out of the balance and onto the payouts account, where
+		// it waits for an admin decision.
+		if err := s.ledger.Reserve(tx, userID, repository.AccountPayouts, amount, repository.TransactionTypeWithdrawalHold, nil); err != nil {
 			return err
 		}
 		req, err := s.adminRepo.CreateWithdrawalRequest(tx, userID, amount)
@@ -330,11 +347,7 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64)
 			return err
 		}
 		created = req
-		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID: userID,
-			Type:   string(repository.TransactionTypeWithdrawalHold),
-			Amount: amount,
-		})
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {
@@ -358,11 +371,11 @@ func (s *AdminService) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid
 }
 
 func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status string) error {
-	if s.transactionRepo == nil {
+	if s.ledger == nil {
 		return errors.New("ledger is not configured")
 	}
 
-	err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 		req, err := s.adminRepo.LockWithdrawalRequest(tx, requestID)
 		if err != nil {
 			return errors.New("request not found")
@@ -377,23 +390,12 @@ func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status str
 
 		if status == "REJECTED" {
 			// Give the reserved money back.
-			if err := s.transactionRepo.UpdateBalance(tx, req.UserID, req.Amount); err != nil {
-				return err
-			}
-			return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-				UserID:  req.UserID,
-				Type:    string(repository.TransactionTypeRefund),
-				Amount:  req.Amount,
-				AdminID: &adminID,
-			})
+			return s.ledger.Release(tx, repository.AccountPayouts, req.UserID, req.Amount, repository.TransactionTypeRefund, nil, &adminID)
 		}
 
-		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID:  req.UserID,
-			Type:    string(repository.TransactionTypeWithdrawalPaid),
-			Amount:  req.Amount,
-			AdminID: &adminID,
-		})
+		// Paid out: the reservation leaves the system through the account that
+		// represents the outside world.
+		return s.ledger.Settle(tx, repository.AccountPayouts, repository.AccountDeposits, req.UserID, req.Amount, repository.TransactionTypeWithdrawalPaid, &adminID)
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {

@@ -549,7 +549,7 @@ func TestOrderService_CalculatePrice(t *testing.T) {
 		},
 	}
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
+	srv := NewOrderService(&mockOrderRepo{}, testLedger(), setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	p, err := srv.CalculatePrice(standardVariantID, false, false, false)
 	if err != nil || p != 100.0 {
@@ -577,7 +577,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	userRepo := newMockUserRepo()
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, userRepo, &orderMockShiftRepo{}, nil, catalog, nil)
+	srv := NewOrderService(orderRepo, testLedger(), setRepo, userRepo, &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
 	lat, lon := 55.7558, 37.6173
@@ -603,7 +603,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 
 func TestOrderService_CreateOrder_BothUrgencyFlagsRejected(t *testing.T) {
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(&mockOrderRepo{}, &mockTransactionRepo{}, &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
+	srv := NewOrderService(&mockOrderRepo{}, testLedger(), &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 	_, err := srv.CreateOrder(uuid.New(), standardVariantID, true, true, "addr", nil, nil)
 	if err == nil {
 		t.Error("expected error when both urgency flags are set")
@@ -614,7 +614,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	setRepo := &orderMockSettingsRepo{settings: map[string]string{}}
 	orderRepo := &mockOrderRepo{}
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
+	srv := NewOrderService(orderRepo, testLedger(), setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
 	order, _ := srv.CreateOrder(customerID, standardVariantID, false, false, "", nil, nil)
@@ -642,7 +642,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 func TestOrderService_CreateConstructionOrder(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
+	srv := NewOrderService(orderRepo, testLedger(), nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
 	_, err := srv.CreateConstructionOrder(customerID, "", "", "", nil, nil)
@@ -674,7 +674,7 @@ func TestOrderService_CreateConstructionOrder(t *testing.T) {
 func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
+	srv := NewOrderService(orderRepo, testLedger(), &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
 	order, _ := srv.CreateOrder(customerID, standardVariantID, false, true, "", nil, nil)
@@ -711,7 +711,7 @@ func TestOrderService_AcceptLimits(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &orderMockShiftRepo{}
 	catalog := newMockCatalogRepo()
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), shiftRepo, nil, catalog, nil)
+	srv := NewOrderService(orderRepo, testLedger(), nil, newMockUserRepo(), shiftRepo, nil, catalog, nil)
 
 	executorID := uuid.New()
 
@@ -757,4 +757,63 @@ func TestOrderService_AcceptLimits(t *testing.T) {
 	if err2 == nil || err2.Error() != "превышен лимит непотвержденных заказчиком исполненных заказов (не более 6)" {
 		t.Errorf("expected executed unconfirmed orders limit error, got: %v", err2)
 	}
+}
+
+// mockAccounts is an in-memory SystemAccountRepository. It mirrors the real one
+// closely enough that a test can assert where money went, not just that it left.
+type mockAccounts struct {
+	balances map[string]float64
+}
+
+func newMockAccounts() *mockAccounts {
+	return &mockAccounts{balances: map[string]float64{
+		repository.AccountEscrow:   0,
+		repository.AccountFines:    0,
+		repository.AccountDeposits: 0,
+		repository.AccountPayouts:  0,
+	}}
+}
+
+func (m *mockAccounts) Credit(q repository.Querier, code string, amount float64) error {
+	if _, ok := m.balances[code]; !ok {
+		return repository.ErrUnknownSystemAccount
+	}
+	m.balances[code] += amount
+	return nil
+}
+
+func (m *mockAccounts) Debit(q repository.Querier, code string, amount float64) error {
+	if _, ok := m.balances[code]; !ok {
+		return repository.ErrUnknownSystemAccount
+	}
+	m.balances[code] -= amount
+	return nil
+}
+
+func (m *mockAccounts) Get(code string) (*repository.SystemAccount, error) {
+	balance, ok := m.balances[code]
+	if !ok {
+		return nil, repository.ErrUnknownSystemAccount
+	}
+	return &repository.SystemAccount{Code: code, Balance: balance}, nil
+}
+
+func (m *mockAccounts) List() ([]repository.SystemAccount, error) {
+	var list []repository.SystemAccount
+	for code, balance := range m.balances {
+		list = append(list, repository.SystemAccount{Code: code, Balance: balance})
+	}
+	return list, nil
+}
+
+// newTestLedger wires a ledger over in-memory balances and accounts.
+func newTestLedger(txRepo *mockTransactionRepo) (*Ledger, *mockAccounts) {
+	accounts := newMockAccounts()
+	return NewLedger(txRepo, accounts), accounts
+}
+
+// testLedger is the common case: a fresh ledger whose sides are not inspected.
+func testLedger() *Ledger {
+	l, _ := newTestLedger(&mockTransactionRepo{})
+	return l
 }

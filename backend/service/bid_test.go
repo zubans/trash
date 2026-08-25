@@ -75,7 +75,7 @@ func TestBidService_CreateBid(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	catalogRepo := newMockCatalogRepo()
 	userRepo := newMockUserRepo()
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo, &mockTransactionRepo{}, userRepo, catalogRepo, nil)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, testLedger(), userRepo, catalogRepo, nil)
 
 	executorID := uuid.New()
 

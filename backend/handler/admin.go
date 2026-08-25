@@ -374,6 +374,9 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 		"discrepancies":             report.Discrepancies,
 		"hold_anomalies":            report.HoldAnomalies,
 		"unknown_transaction_types": report.UnknownTypes,
+		"books":                     report.Books,
+		"books_open":                report.BooksOpen,
+		"escrow_mismatch":           report.EscrowMismatch,
 	})
 }
 

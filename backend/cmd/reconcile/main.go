@@ -71,6 +71,16 @@ func main() {
 func printReport(report *repository.ReconciliationReport) {
 	fmt.Println(report.Summary())
 
+	fmt.Printf("  users hold %.2f, platform accounts hold %.2f, difference %+.2f\n",
+		report.Books.UserTotal, report.Books.AccountTotal, report.Books.Difference)
+	for _, a := range report.Books.Accounts {
+		fmt.Printf("    %-10s %12.2f  %s\n", a.Code, a.Balance, a.Name)
+	}
+	if report.EscrowMismatch {
+		fmt.Printf("  escrow holds %.2f but live orders account for %.2f (%+.2f)\n",
+			report.Books.EscrowHeld, report.Books.LiveOrderSum, report.Books.EscrowDrift)
+	}
+
 	for _, t := range report.UnknownTypes {
 		fmt.Printf("  unknown transaction type %q: the sign convention in repository.ledgerSigns needs updating\n", t)
 	}

@@ -147,7 +147,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo, &mockTransactionRepo{}, newMockUserRepo(), newMockCatalogRepo(), nil)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, testLedger(), newMockUserRepo(), newMockCatalogRepo(), nil)
 
 	custID := uuid.New()
 	execID := uuid.New()
@@ -203,7 +203,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 func TestOrderService_AcceptExecuteReject(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	txRepo := &mockTransactionRepo{}
-	srv := NewOrderService(orderRepo, txRepo, nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+	srv := NewOrderService(orderRepo, NewLedger(txRepo, newMockAccounts()), nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
 
 	custID := uuid.New()
 	execID := uuid.New()
@@ -318,7 +318,8 @@ func TestAdminService_Extended(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "test-secret", nil)
+	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "test-secret", nil).
+		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	u := &repository.User{ID: uuid.New(), Phone: "70000000000", Role: "CUSTOMER"}
 	userRepo.users[u.Phone] = u
@@ -386,7 +387,7 @@ func TestChatService_Extended(t *testing.T) {
 
 func TestShiftService_Extended(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
-	srv := NewShiftService(shiftRepo, nil, &mockTransactionRepo{}, &orderMockSettingsRepo{}, &mockOrderRepo{}, nil, nil)
+	srv := NewShiftService(shiftRepo, nil, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil, nil)
 
 	execID := uuid.New()
 	shift, err := srv.StartShift(execID, 3)
@@ -444,7 +445,7 @@ func TestAuthService_ParseJWT(t *testing.T) {
 
 func TestOrderService_Aliases(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
-	srv := NewOrderService(orderRepo, &mockTransactionRepo{}, nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+	srv := NewOrderService(orderRepo, testLedger(), nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
 
 	custID := uuid.New()
 	execID := uuid.New()
@@ -484,7 +485,8 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
+	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	u := &repository.User{ID: uuid.New(), Phone: "79998887766"}
 	userRepo.users[u.Phone] = u
