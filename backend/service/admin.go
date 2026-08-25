@@ -574,6 +574,12 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 		"min_balance_limit":      true,
 	}
 	numericKeys["shift_early_exit_penalty"] = true
+	// Enabling this makes executor apps report their position, which is what
+	// arms the geofence fine. Only "1" or "0" are accepted so it cannot be
+	// switched on by a typo.
+	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
+		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
+	}
 	numericKeys["reject_penalty_share"] = true
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,

@@ -62,13 +62,6 @@ function getStoredItem(name: string): string {
   }
 }
 
-function removeStoredItem(name: string) {
-  try {
-    localStorage.removeItem(name)
-  } catch {
-    // ignore
-  }
-}
 
 export const useAuthStore = defineStore('auth', {
   state: () => {

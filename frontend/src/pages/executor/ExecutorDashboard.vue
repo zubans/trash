@@ -651,6 +651,9 @@ export default defineComponent({
     // means "not loaded yet" and renders as a placeholder rather than 0.
     const balance = computed(() => authStore.balance)
     const balanceLoaded = computed(() => authStore.balance !== null)
+    // The template has always rendered a "verified" badge on this value, and it
+    // was never defined anywhere: the badge could not appear for anyone.
+    const isVerified = computed(() => authStore.user?.is_verified ?? false)
     const status = ref('ACTIVE')
     const showProfileModal = ref(false)
 
@@ -1061,6 +1064,50 @@ export default defineComponent({
       }
     }
 
+    // Geofence reporting. POST /executor/shifts/location is what runs the
+    // geozone check and, after three consecutive points outside, charges the
+    // fine — and nothing in the app ever called it, so the whole mechanism and
+    // its geofence_fine_amount setting were inert.
+    //
+    // It stays off until an administrator sets geofence_tracking_enabled: this
+    // takes real money from executors, and turning it on is their decision, not
+    // a side effect of shipping the plumbing.
+    const geofenceTrackingEnabled = ref(false)
+    const geofenceIntervalSec = ref(60)
+    let geofenceTimer: any = null
+
+    const reportShiftLocation = async () => {
+      if (!geofenceTrackingEnabled.value) return
+      if (!activeShift.value || activeShift.value.status !== 'ACTIVE') return
+
+      await updateCurrentPosition()
+      if (currentLat.value === null || currentLon.value === null) return
+
+      try {
+        await api.post('/executor/shifts/location', {
+          latitude: currentLat.value,
+          longitude: currentLon.value,
+        })
+      } catch (err) {
+        // A missed point is not worth interrupting the shift over; the next
+        // tick tries again.
+        console.warn('[geofence] failed to report location', err)
+      }
+    }
+
+    const startGeofenceReporting = () => {
+      stopGeofenceReporting()
+      if (!geofenceTrackingEnabled.value) return
+      geofenceTimer = setInterval(reportShiftLocation, geofenceIntervalSec.value * 1000)
+    }
+
+    const stopGeofenceReporting = () => {
+      if (geofenceTimer) {
+        clearInterval(geofenceTimer)
+        geofenceTimer = null
+      }
+    }
+
     const updateCurrentPosition = async (force = false) => {
       try {
         if (Capacitor.isNativePlatform()) {
@@ -1455,8 +1502,24 @@ export default defineComponent({
       fetchUnreadSummary()
     }
 
+    const loadGeofenceSettings = async () => {
+      try {
+        const res = await api.get('/settings')
+        geofenceTrackingEnabled.value = res.data?.geofence_tracking_enabled === '1'
+        const interval = Number(res.data?.executor_location_send_interval_seconds)
+        if (Number.isFinite(interval) && interval >= 1) {
+          geofenceIntervalSec.value = interval
+        }
+      } catch (err) {
+        // Defaults keep reporting off, which is the safe direction.
+        console.warn('[geofence] failed to read settings', err)
+      }
+    }
+
     onMounted(async () => {
       fetchServiceVariants()
+      await loadGeofenceSettings()
+      startGeofenceReporting()
       await fetchProfile()
       fetchActiveShift()
       fetchAssignedOrders()
@@ -1485,6 +1548,7 @@ export default defineComponent({
     })
 
     onUnmounted(() => {
+      stopGeofenceReporting()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       closeInlineChat()
       if (intervalId) clearInterval(intervalId)
@@ -1495,6 +1559,7 @@ export default defineComponent({
 
     return {
       balanceLoaded,
+      isVerified,
       showProfileModal,
       userEmail,
       baseAddress,
@@ -2714,9 +2779,15 @@ export default defineComponent({
 .map-widget {
     position: relative; width: 100%; height: 130px; border-radius: 20px;
     overflow: hidden; box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04)); cursor: pointer; transition: all 0.2s ease-in-out;
+    /* A stock photo of a map used to be fetched from images.unsplash.com on
+       every render of this widget. It is decoration behind an overlay that
+       covers most of it, so it is drawn locally: no third-party request, and
+       nothing to allow through the content security policy. */
     background-color: #e2e8f0;
-    background-image: url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=600');
-    background-size: cover; background-position: center;
+    background-image:
+        linear-gradient(135deg, rgba(99, 102, 241, 0.10), rgba(16, 185, 129, 0.10)),
+        repeating-linear-gradient(0deg, rgba(148, 163, 184, 0.25) 0 1px, transparent 1px 34px),
+        repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.25) 0 1px, transparent 1px 34px);
 }
 .map-widget:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
 

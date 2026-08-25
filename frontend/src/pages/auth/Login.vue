@@ -465,15 +465,6 @@ export default defineComponent({
       }
     }
 
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
-
     const focusSubmitButton = () => {
       nextTick(() => {
         submitBtnRef.value?.focus()
@@ -481,7 +472,6 @@ export default defineComponent({
     }
 
     onMounted(async () => {
-      loadPhosphorIcons()
       focusSubmitButton()
 
       const modeParam = route.query.mode as string

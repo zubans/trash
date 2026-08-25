@@ -415,6 +415,10 @@ func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.R
 		"currency":                 settings["currency"],
 		"shift_early_exit_penalty": settings["shift_early_exit_penalty"],
 		"executor_location_send_interval_seconds": settings["executor_location_send_interval_seconds"],
+		// Whether executor apps should report their position during a shift.
+		// The geofence check and its fine hang off those reports, so this stays
+		// off until an administrator turns it on deliberately.
+		"geofence_tracking_enabled": settings["geofence_tracking_enabled"],
 	})
 }
 

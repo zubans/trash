@@ -50,7 +50,6 @@ export async function compressImage(
         // Perform binary search / iterative compression for quality (0.3 to 0.92)
         let minQuality = 0.3
         let maxQuality = 0.92
-        let bestBlob: Blob | null = null
 
         const compressIteration = (quality: number, attemptsLeft: number) => {
           canvas.toBlob(
@@ -61,7 +60,6 @@ export async function compressImage(
               }
 
               const currentSizeKB = blob.size / 1024
-              bestBlob = blob
 
               if (attemptsLeft <= 0 || (currentSizeKB >= targetMinKB && currentSizeKB <= targetMaxKB)) {
                 const compressedFile = new File(

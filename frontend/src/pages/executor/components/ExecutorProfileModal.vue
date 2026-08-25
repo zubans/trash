@@ -94,7 +94,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, ref, watch, onMounted } from 'vue'
+import {defineComponent, computed, ref, watch} from 'vue'
 import api from '../../../services/api'
 
 export default defineComponent({
@@ -183,15 +183,6 @@ export default defineComponent({
         savingAddress.value = false
       }
     }
-
-    onMounted(() => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    })
 
     return {
       show,

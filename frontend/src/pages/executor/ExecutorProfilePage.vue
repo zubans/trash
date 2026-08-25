@@ -162,7 +162,7 @@ export default defineComponent({
           }
         }
         const res = await api.get('/user/profile')
-        phone.value = res.data.phone || authStore.userPhone || ''
+        phone.value = res.data.phone || authStore.phone || ''
         status.value = res.data.status || 'ACTIVE'
         userEmail.value = res.data.email || ''
         emailInput.value = userEmail.value
@@ -243,17 +243,7 @@ export default defineComponent({
       router.push('/executor')
     }
 
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
-
     onMounted(() => {
-      loadPhosphorIcons()
       fetchUserProfile()
     })
 

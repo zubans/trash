@@ -63,7 +63,7 @@ export default defineComponent({
   setup() {
     const { t } = useI18n()
     const authStore = useAuthStore()
-    const requests = ref([])
+    const requests = ref<any[]>([])
     const loading = ref(false)
 
     const currencySymbol = computed(() => {
