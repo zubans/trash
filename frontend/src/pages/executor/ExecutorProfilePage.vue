@@ -103,7 +103,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '../../services/api'
+import api, { storeSession } from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
 
 export default defineComponent({
@@ -217,11 +217,17 @@ export default defineComponent({
       pwdMsg.value = ''
       pwdMsgIsError.value = false
       try {
-        await api.post('/user/change-password', {
+        const res = await api.post('/user/change-password', {
           old_password: oldPassword.value,
           new_password: newPassword.value
         })
-        pwdMsg.value = 'Пароль успешно изменен'
+        // Changing the password ends every session; the response carries a fresh
+        // pair so this device stays signed in. Without storing it the next
+        // request would 401 and drop the user on the login screen.
+        if (res.data?.token) {
+          storeSession(res.data.token, res.data.refresh_token)
+        }
+        pwdMsg.value = 'Пароль изменён. На других устройствах потребуется войти заново.'
         oldPassword.value = ''
         newPassword.value = ''
         confirmPassword.value = ''

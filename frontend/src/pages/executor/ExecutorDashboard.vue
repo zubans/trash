@@ -1183,7 +1183,7 @@ export default defineComponent({
       // Setup WebSocket connection if not already connected
       if (!ws.value && selectedChatOrder.value) {
         try {
-          const wsUrl = buildChatWebSocketUrl(orderId, authStore.token)
+          const wsUrl = buildChatWebSocketUrl(orderId)
           ws.value = new WebSocket(wsUrl)
           ws.value.onmessage = (event) => {
             try {

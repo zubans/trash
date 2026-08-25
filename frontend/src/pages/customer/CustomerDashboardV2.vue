@@ -1102,7 +1102,7 @@ export default defineComponent({
 
       // 2. Open WebSocket connection
       try {
-        const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
+        const wsUrl = buildChatWebSocketUrl(order.id)
         ws.value = new WebSocket(wsUrl)
         ws.value.onmessage = (event) => {
           try {

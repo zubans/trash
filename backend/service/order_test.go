@@ -818,3 +818,5 @@ func testLedger() *Ledger {
 	l, _ := newTestLedger(&mockTransactionRepo{})
 	return l
 }
+
+func (m *mockUserRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error { return nil }

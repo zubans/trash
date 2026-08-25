@@ -55,7 +55,13 @@ api.interceptors.request.use((config) => {
 // Native apps use plain ws:// against the mobile HTTP port, while the web uses
 // wss:// against the HTTPS port. The /api prefix matches the backend route
 // mounting so SPA and API paths never collide.
-export function buildChatWebSocketUrl(orderId: string, token: string): string {
+export function buildChatWebSocketUrl(orderId: string): string {
+  // The token is read here rather than passed in. Callers used to hand over
+  // authStore.token, which is written at login and never again: after the first
+  // silent refresh it holds an expired access token, and the socket could no
+  // longer authenticate. getAuthToken always returns the current one.
+  const token = getAuthToken()
+
   // For web builds apiUrl may be empty (relative-URL mode). Derive the WS
   // origin from window.location so the protocol/host/port always match the
   // page the user actually opened.

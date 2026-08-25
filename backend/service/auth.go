@@ -402,6 +402,46 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) error {
 	return err
 }
 
+// ChangePassword replaces a signed-in user's password after checking the
+// current one, and ends every other session.
+//
+// The profile page has always offered this form; there was no endpoint behind
+// it, so the only way to change a password was the forgot-password flow.
+func (s *AuthService) ChangePassword(userID uuid.UUID, oldPassword, newPassword string) (*TokenPair, error) {
+	if oldPassword == "" || newPassword == "" {
+		return nil, errors.New("укажите текущий и новый пароль")
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return nil, err
+	}
+	if oldPassword == newPassword {
+		return nil, errors.New("новый пароль совпадает с текущим")
+	}
+
+	user, err := s.repo.FindByID(userID)
+	if err != nil {
+		return nil, errors.New("user not found")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
+		return nil, errors.New("текущий пароль неверен")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdatePassword(userID, string(hash)); err != nil {
+		return nil, err
+	}
+
+	// Whoever else was signed in with the old password is signed out. The caller
+	// gets a fresh pair so the device that made the change stays usable.
+	if err := s.RevokeAllSessions(userID); err != nil {
+		log.Printf("[AuthService] failed to end sessions after password change for %s: %v", userID, err)
+	}
+	return s.IssueTokenPair(user)
+}
+
 // UpdateUserEmail updates the email for a user and triggers verification.
 func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repository.User, error) {
 	newEmail = strings.TrimSpace(newEmail)

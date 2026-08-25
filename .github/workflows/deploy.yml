@@ -129,9 +129,8 @@ jobs:
             make restart
             
             echo "Building and releasing new Android APK on server..."
-            VERSION_NAME=$(git describe --tags --always 2>/dev/null || echo "1.0.0")
             COMMIT_MSG=$(git log -1 --pretty=%B)
-            make release VERSION="${VERSION_NAME}" RELEASE_NOTES="${COMMIT_MSG}" || echo "Release build skipped or failed."
+            make release-android RELEASE_NOTES="${COMMIT_MSG}" || echo "Notice: Android release build skipped or failed on server."
             
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=168h"
