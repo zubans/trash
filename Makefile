@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate bump-android-version
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -222,6 +222,13 @@ migrate:
 	@echo "Running database migrations..."
 	$(call compose,exec backend ./migrate)
 	@echo "Migrations applied."
+
+# Check that stored balances still equal the sum of the transaction log.
+# Exits non-zero when they do not, so it can be used as a deployment gate.
+# The backend also runs this nightly and logs the result.
+reconcile:
+	@echo "Reconciling balances against the ledger..."
+	$(call compose,exec backend ./reconcile)
 
 clean:
 	rm -f healthlogin-app.apk

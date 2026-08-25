@@ -347,6 +347,36 @@ func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r 
 	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request rejected successfully"})
 }
 
+// GetReconciliationHandler reports whether stored balances still agree with the
+// transaction log.
+func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.Request) {
+	tolerance := 0.01
+	if raw := r.URL.Query().Get("tolerance"); raw != "" {
+		parsed, err := strconv.ParseFloat(raw, 64)
+		if err != nil || parsed < 0 {
+			http.Error(w, "invalid tolerance", http.StatusBadRequest)
+			return
+		}
+		tolerance = parsed
+	}
+
+	report, err := h.adminService.Reconcile(tolerance)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":                        report.OK(),
+		"summary":                   report.Summary(),
+		"users_checked":             report.UsersChecked,
+		"discrepancies":             report.Discrepancies,
+		"hold_anomalies":            report.HoldAnomalies,
+		"unknown_transaction_types": report.UnknownTypes,
+	})
+}
+
 // GetTransactionsHandler retrieves audit logs of transactions.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	txs, err := h.adminService.GetTransactions()

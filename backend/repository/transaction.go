@@ -21,6 +21,42 @@ const (
 	TransactionTypeWithdrawal TransactionType = "WITHDRAWAL"
 )
 
+// ledgerSigns declares how each transaction type moves a user's balance. This is
+// the ledger's sign convention, and it is deliberately written down once:
+// amounts in the table are all positive and the direction lives in the type, so
+// without a single declaration the rule has to be re-derived from the service
+// code every time somebody wants to add up the log.
+//
+// PAYMENT is 0 on purpose. The customer's money left their balance when the hold
+// was taken; PAYMENT records that hold being spent and moves nothing.
+var ledgerSigns = map[TransactionType]int{
+	TransactionTypeTopUp:      +1,
+	TransactionTypeReward:     +1,
+	TransactionTypeRefund:     +1,
+	TransactionTypeHold:       -1,
+	TransactionTypeFine:       -1,
+	TransactionTypeWithdrawal: -1,
+	TransactionTypePayment:    0,
+}
+
+// LedgerSign reports how a transaction type moves the balance, and whether the
+// type is known at all. An unknown type means the convention above was not
+// updated alongside a new kind of transaction, which makes every reconciliation
+// result meaningless — callers must treat it as an error, not skip it.
+func LedgerSign(t TransactionType) (int, bool) {
+	sign, ok := ledgerSigns[t]
+	return sign, ok
+}
+
+// KnownTransactionTypes lists the types covered by the sign convention.
+func KnownTransactionTypes() []TransactionType {
+	types := make([]TransactionType, 0, len(ledgerSigns))
+	for t := range ledgerSigns {
+		types = append(types, t)
+	}
+	return types
+}
+
 // TransactionRepository defines storage operations for financial transactions and balance.
 type TransactionRepository interface {
 	GetBalance(userID uuid.UUID) (float64, error)

@@ -20,12 +20,13 @@ type SessionRevoker interface {
 
 // AdminService manages administrative business logic.
 type AdminService struct {
-	userRepo     repository.UserRepository
-	adminRepo    repository.AdminRepository
-	settingsRepo repository.SettingsRepository
-	sessions     SessionRevoker
-	mailer       MailSender
-	jwtSecret    []byte
+	userRepo      repository.UserRepository
+	adminRepo     repository.AdminRepository
+	settingsRepo  repository.SettingsRepository
+	reconcileRepo repository.ReconciliationRepository
+	sessions      SessionRevoker
+	mailer        MailSender
+	jwtSecret     []byte
 }
 
 // NewAdminService creates a new AdminService.
@@ -50,6 +51,24 @@ func NewAdminService(
 		mailer:       mailer,
 		jwtSecret:    []byte(secret),
 	}
+}
+
+// WithReconciliation enables the balance/ledger consistency report.
+func (s *AdminService) WithReconciliation(repo repository.ReconciliationRepository) *AdminService {
+	s.reconcileRepo = repo
+	return s
+}
+
+// Reconcile compares every stored balance with the sum of that user's ledger
+// entries. Read-only: a mismatch is reported, never silently corrected.
+func (s *AdminService) Reconcile(tolerance float64) (*repository.ReconciliationReport, error) {
+	if s.reconcileRepo == nil {
+		return nil, errors.New("reconciliation is not configured")
+	}
+	if tolerance < 0 {
+		tolerance = 0
+	}
+	return s.reconcileRepo.Reconcile(tolerance)
 }
 
 // WithSessions lets the service end a user's sessions when their access is
