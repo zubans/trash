@@ -1,77 +1,84 @@
 <template>
   <div class="admin-app">
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div
+      v-if="!sidebarMinimized && isMobile"
+      class="sidebar-backdrop"
+      @click="sidebarMinimized = true"
+    ></div>
+
     <!-- Premium Sidebar -->
     <aside :class="['sidebar', { 'minimized': sidebarMinimized }]">
       <div class="logo">
         <i class="ph-fill ph-planet"></i>
-        <div v-if="!sidebarMinimized" class="logo-text">
+        <div v-if="!sidebarMinimized || isMobile" class="logo-text">
           <div class="brand">TRASH</div>
           <div class="sub">ADMIN PANEL</div>
         </div>
       </div>
 
-      <div v-if="!sidebarMinimized" class="nav-section">Управление</div>
+      <div v-if="!sidebarMinimized || isMobile" class="nav-section">Управление</div>
       <div class="nav-list">
         <router-link to="/admin/users" class="nav-item" :class="{ active: currentRouteName === 'admin-users' }" @click="closeSidebarOnMobile">
           <i class="ph ph-users"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.users') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.users') }}</span>
         </router-link>
 
         <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
           <div class="nav-icon-wrap">
             <i class="ph ph-chats-teardrop"></i>
-            <span v-if="unreadSupportCount > 0 && sidebarMinimized" class="nav-dot-badge"></span>
+            <span v-if="unreadSupportCount > 0 && sidebarMinimized && !isMobile" class="nav-dot-badge"></span>
           </div>
-          <span v-if="!sidebarMinimized">{{ $t('app.supportChats') }}</span>
-          <span v-if="unreadSupportCount > 0 && !sidebarMinimized" class="nav-badge">{{ unreadSupportCount }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.supportChats') }}</span>
+          <span v-if="unreadSupportCount > 0 && (!sidebarMinimized || isMobile)" class="nav-badge">{{ unreadSupportCount }}</span>
         </router-link>
 
         <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
           <i class="ph-fill ph-wallet"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.topups') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.topups') }}</span>
         </router-link>
 
         <router-link to="/admin/withdrawals" class="nav-item" :class="{ active: currentRouteName === 'admin-withdrawals' }" @click="closeSidebarOnMobile">
           <i class="ph ph-bank"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.withdrawals') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.withdrawals') }}</span>
         </router-link>
 
         <router-link to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
           <i class="ph ph-arrows-left-right"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.transactions') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.transactions') }}</span>
         </router-link>
 
         <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
           <i class="ph ph-megaphone"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.broadcasts') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>
         </router-link>
       </div>
 
-      <div v-if="!sidebarMinimized" class="nav-section">Система</div>
+      <div v-if="!sidebarMinimized || isMobile" class="nav-section">Система</div>
       <div class="nav-list">
         <router-link to="/admin/shifts" class="nav-item" :class="{ active: currentRouteName === 'admin-shifts' }" @click="closeSidebarOnMobile">
           <i class="ph ph-clock-user"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.activeShifts') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeShifts') }}</span>
         </router-link>
 
         <router-link to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
           <i class="ph ph-package"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.activeOrders') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeOrders') }}</span>
         </router-link>
 
         <router-link to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
           <i class="ph ph-check-circle"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.completedOrders') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.completedOrders') }}</span>
         </router-link>
 
         <router-link to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
           <i class="ph ph-list-dashes"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.serviceCatalog') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.serviceCatalog') }}</span>
         </router-link>
 
         <router-link to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
           <i class="ph ph-gear"></i>
-          <span v-if="!sidebarMinimized">{{ $t('app.settings') }}</span>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
         </router-link>
       </div>
     </aside>
@@ -92,7 +99,7 @@
 
           <div class="control-pill user-pill">
             <i class="ph-fill ph-user-circle"></i>
-            <span>{{ phone || '7 999 999 99 99' }}</span>
+            <span class="user-phone-text">{{ phone || '7 999 999 99 99' }}</span>
           </div>
 
           <button class="btn-logout" :title="$t('app.logout')" @click="doLogout">
@@ -124,6 +131,8 @@ export default defineComponent({
     const route = useRoute()
     const authStore = useAuthStore()
 
+    const windowWidth = ref(window.innerWidth)
+    const isMobile = computed(() => windowWidth.value < 768)
     const sidebarMinimized = ref(window.innerWidth < 768)
     const unreadSupportCount = ref(0)
     let unreadTimer: any = null
@@ -137,18 +146,22 @@ export default defineComponent({
       } catch (err) {}
     }
 
+    const handleResize = () => {
+      windowWidth.value = window.innerWidth
+      if (window.innerWidth < 768) {
+        sidebarMinimized.value = true
+      }
+    }
+
     onMounted(() => {
-      window.addEventListener('resize', () => {
-        if (window.innerWidth < 768) {
-          sidebarMinimized.value = true
-        }
-      })
+      window.addEventListener('resize', handleResize)
       window.addEventListener('support-unread-updated', fetchUnreadSupport)
       fetchUnreadSupport()
       unreadTimer = setInterval(fetchUnreadSupport, 3000)
     })
 
     onUnmounted(() => {
+      window.removeEventListener('resize', handleResize)
       window.removeEventListener('support-unread-updated', fetchUnreadSupport)
       if (unreadTimer) clearInterval(unreadTimer)
     })
@@ -191,6 +204,7 @@ export default defineComponent({
 
     return {
       phone,
+      isMobile,
       unreadSupportCount,
       currentRouteName,
       sidebarMinimized,
@@ -449,19 +463,102 @@ export default defineComponent({
 }
 
 @media (max-width: 767px) {
-  .main-wrapper {
-    padding: 16px;
+  .admin-app {
+    position: relative;
+    overflow-x: hidden;
   }
-  .page-card {
-    padding: 16px;
-    border-radius: 16px;
-  }
+
   .sidebar {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
-    height: 100%;
+    bottom: 0;
+    height: 100vh;
+    z-index: 1000;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    transform: translateX(0);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    width: 260px !important;
+    padding: 24px 16px;
   }
+
+  .sidebar.minimized {
+    transform: translateX(-100%);
+    width: 260px !important;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 999;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .main-wrapper {
+    padding: 12px;
+    gap: 16px;
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .top-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .page-title {
+    font-size: 20px;
+    letter-spacing: -0.3px;
+  }
+
+  .header-controls {
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .user-pill {
+    padding: 0 10px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .user-phone-text {
+    max-width: 105px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .btn-toggle-sidebar {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+
+  .btn-logout {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .page-card {
+    padding: 14px 12px;
+    border-radius: 16px;
+    min-height: calc(100vh - 110px);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 </style>
 

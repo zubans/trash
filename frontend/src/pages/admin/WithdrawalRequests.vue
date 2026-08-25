@@ -153,4 +153,11 @@ export default defineComponent({
   display: flex;
   gap: 4px;
 }
+
+@media (max-width: 768px) {
+  .withdrawal-requests {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
 </style>

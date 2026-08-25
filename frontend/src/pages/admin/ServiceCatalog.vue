@@ -321,4 +321,20 @@ export default defineComponent({
   padding: 20px;
   overflow-y: auto;
 }
+
+@media (max-width: 768px) {
+  .catalog-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .btn-create-root {
+    width: 100%;
+    justify-content: center;
+  }
+  .service-catalog {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
 </style>

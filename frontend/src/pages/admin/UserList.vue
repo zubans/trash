@@ -924,4 +924,30 @@ export default defineComponent({
   background: rgba(0,0,0,0.06);
   margin: 4px 0;
 }
+
+@media (max-width: 768px) {
+  .table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .search-box {
+    width: 100%;
+  }
+  .filters {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .filter-select-wrapper, .btn-filter-select {
+    flex: 1;
+    min-width: 120px;
+  }
+  .grid-table {
+    min-width: 780px;
+  }
+  .user-list {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
 </style>
