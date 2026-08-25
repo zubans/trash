@@ -57,24 +57,22 @@ build-android:
 	@echo "APK built successfully! You can find it at: ./healthlogin-app.apk"
 
 # Fetch the next version code from the database and update build.gradle.
+# Fetch the next version code and version name from the database and update build.gradle.
 bump-android-version:
-	@echo "Fetching next version code from database..."
+	@echo "Fetching next version code and name from database..."
 	$(eval NEXT_VERSION_CODE := $(shell cd backend && $(DB_ENV) go run ./cmd/next-version-code))
+	$(eval TARGET_VERSION := $(if $(VERSION),$(VERSION),$(shell cd backend && $(DB_ENV) go run ./cmd/next-version-name 2>/dev/null || echo "1.0.0")))
 	@if [ -z "$(NEXT_VERSION_CODE)" ]; then \
 		echo "ERROR: Could not determine next version code from database"; \
 		exit 1; \
 	fi
-	@echo "Next version code: $(NEXT_VERSION_CODE), version name: $(VERSION)"
-	@if [ -z "$(VERSION)" ]; then \
-		echo "ERROR: VERSION is not set. Use: make release-android VERSION=1.0.1"; \
-		exit 1; \
-	fi
+	@echo "Next version code: $(NEXT_VERSION_CODE), version name: $(TARGET_VERSION)"
 	cp frontend/android/app/build.gradle frontend/android/app/build.gradle.bak
 	node -e "const fs = require('fs'); \
 		const file = 'frontend/android/app/build.gradle'; \
 		let content = fs.readFileSync(file, 'utf8'); \
 		content = content.replace(/versionCode\s+\d+/, 'versionCode $(NEXT_VERSION_CODE)'); \
-		content = content.replace(/versionName\s+\"[^\"]+\"/, 'versionName \"$(VERSION)\"'); \
+		content = content.replace(/versionName\s+\"[^\"]+\"/, 'versionName \"$(TARGET_VERSION)\"'); \
 		fs.writeFileSync(file, content);"
 	@echo "build.gradle updated"
 
@@ -145,16 +143,17 @@ release: release-android
 release-android: build-android-release
 	@echo "Registering APK release in database..."
 	@BUILT_VERSION_CODE=$$(node -e "const fs=require('fs'); const c=fs.readFileSync('frontend/android/app/build.gradle','utf8'); const m=c.match(/versionCode\\s+(\\d+)/); console.log(m ? m[1] : '');"); \
+	BUILT_VERSION_NAME=$$(node -e "const fs=require('fs'); const c=fs.readFileSync('frontend/android/app/build.gradle','utf8'); const m=c.match(/versionName\\s+\"([^\"]+)\"/); console.log(m ? m[1] : '');"); \
 	if [ -z "$$BUILT_VERSION_CODE" ]; then \
 		echo "ERROR: Could not extract versionCode from build.gradle"; \
 		mv frontend/android/app/build.gradle.bak frontend/android/app/build.gradle || true; \
 		exit 1; \
 	fi; \
-	echo "Built version code: $$BUILT_VERSION_CODE"; \
+	echo "Built version code: $$BUILT_VERSION_CODE, version name: $$BUILT_VERSION_NAME"; \
 	cd backend && $(DB_ENV) go run ./cmd/release \
 		-apk ../healthlogin-app.apk \
 		-platform android \
-		-version-name $(VERSION) \
+		-version-name "$$BUILT_VERSION_NAME" \
 		-version-code "$$BUILT_VERSION_CODE" \
 		-releases-dir ../releases \
 		-release-notes "$(RELEASE_NOTES)" \
