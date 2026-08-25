@@ -76,3 +76,11 @@ CREATE TABLE IF NOT EXISTS support_messages (
     read_at TIMESTAMPTZ NULL,
     updated_at TIMESTAMPTZ NULL
 );
+
+-- Lookups used by the attachment authorization check (ChatRepository
+-- .CanAccessAttachment). They belong here because support_messages is created
+-- just above.
+CREATE INDEX IF NOT EXISTS idx_messages_file_url
+    ON messages (file_url) WHERE file_url IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_support_messages_file_url
+    ON support_messages (file_url) WHERE file_url IS NOT NULL;
