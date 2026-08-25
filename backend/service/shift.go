@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -170,7 +171,7 @@ func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, err
 		}
 	}
 
-	orderCost := 0.0
+	orderCost := money.Zero
 	openOrders := make([]repository.Order, 0, len(assignedOrders))
 	for _, o := range assignedOrders {
 		// Orders already marked EXECUTED are awaiting customer confirmation and
@@ -179,13 +180,13 @@ func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, err
 			continue
 		}
 		openOrders = append(openOrders, o)
-		orderCost += o.HoldAmount
+		orderCost = orderCost.Add(o.HoldAmount)
 	}
 
 	// With open orders the fine is doubled and includes the order cost.
 	totalFine := basePenalty
 	if len(openOrders) > 0 {
-		totalFine = basePenalty*2 + orderCost
+		totalFine = basePenalty.Scale(2).Add(orderCost)
 	}
 
 	if s.ledger != nil {
@@ -213,20 +214,20 @@ func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, err
 		now := time.Now()
 		shift.Status = repository.ShiftStatusPenalized
 		shift.ActualEndAt = &now
-		shift.FineAmount += totalFine
+		shift.FineAmount = shift.FineAmount.Add(totalFine)
 		return shift, nil
 	}
 	return updated, nil
 }
 
-func (s *ShiftService) geofenceFineAmount() float64 {
-	return s.settingsFloat("geofence_fine_amount", 500.0)
+func (s *ShiftService) geofenceFineAmount() money.Amount {
+	return money.FromRubles(s.settingsFloat("geofence_fine_amount", 500.0))
 }
 
 // earlyExitPenaltyAmount returns the fine charged when an executor ends a
 // shift before its planned end time.
-func (s *ShiftService) earlyExitPenaltyAmount() float64 {
-	return s.settingsFloat("shift_early_exit_penalty", 50.0)
+func (s *ShiftService) earlyExitPenaltyAmount() money.Amount {
+	return money.FromRubles(s.settingsFloat("shift_early_exit_penalty", 50.0))
 }
 
 func (s *ShiftService) settingsFloat(key string, defaultValue float64) float64 {

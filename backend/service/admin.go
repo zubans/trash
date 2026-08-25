@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -74,12 +75,12 @@ func (s *AdminService) WithReconciliation(repo repository.ReconciliationReposito
 
 // Reconcile compares every stored balance with the sum of that user's ledger
 // entries. Read-only: a mismatch is reported, never silently corrected.
-func (s *AdminService) Reconcile(tolerance float64) (*repository.ReconciliationReport, error) {
+func (s *AdminService) Reconcile(tolerance money.Amount) (*repository.ReconciliationReport, error) {
 	if s.reconcileRepo == nil {
 		return nil, errors.New("reconciliation is not configured")
 	}
-	if tolerance < 0 {
-		tolerance = 0
+	if tolerance.IsNegative() {
+		tolerance = money.Zero
 	}
 	return s.reconcileRepo.Reconcile(tolerance)
 }
@@ -208,8 +209,8 @@ func (s *AdminService) UpdateUserName(userID uuid.UUID, lastName, firstName, pat
 
 // TopUpUserBalance adds funds directly to a user's balance.
 // Only non-admin users may be topped up, and an admin cannot credit themselves.
-func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
-	if amount <= 0 {
+func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
+	if !amount.IsPositive() {
 		return errors.New("amount must be greater than zero")
 	}
 
@@ -235,8 +236,8 @@ func (s *AdminService) GetTopUpRequests() ([]*repository.TopUpRequest, error) {
 }
 
 // CreateTopUpRequest creates a pending balance top-up request.
-func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
-	if amount <= 0 {
+func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
+	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
 
@@ -309,8 +310,8 @@ func (s *AdminService) GetWithdrawalRequests() ([]*repository.WithdrawalRequest,
 // a user could queue several requests against the same money and spend it while
 // they waited — the payout queue then contained amounts that could not all be
 // honoured.
-func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
-	if amount <= 0 {
+func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
+	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
 	if s.ledger == nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/middleware"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
@@ -184,7 +185,7 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		Amount float64 `json:"amount"`
+		Amount money.Amount `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -269,7 +270,7 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 	}
 
 	var req struct {
-		Amount float64 `json:"amount"`
+		Amount money.Amount `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -350,10 +351,10 @@ func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r 
 // GetReconciliationHandler reports whether stored balances still agree with the
 // transaction log.
 func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.Request) {
-	tolerance := 0.01
+	tolerance := money.FromRubles(0.01)
 	if raw := r.URL.Query().Get("tolerance"); raw != "" {
-		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || parsed < 0 {
+		parsed, err := money.ParseRubles(raw)
+		if err != nil || parsed.IsNegative() {
 			http.Error(w, "invalid tolerance", http.StatusBadRequest)
 			return
 		}
@@ -446,7 +447,7 @@ func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req struct {
-		Amount float64 `json:"amount"`
+		Amount money.Amount `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)

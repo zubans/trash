@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+
+	"healthlogin/backend/money"
 )
 
 // allTransactionTypes is the complete set of values the transaction_type enum
@@ -137,14 +139,14 @@ func TestReconcileAgainstDatabase(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM users WHERE id = ANY($1)`, "{"+matching.String()+","+drifted.String()+"}")
 	})
 
-	seed := func(id uuid.UUID, phone string, balance float64) {
+	seed := func(id uuid.UUID, phone string, balance money.Amount) {
 		if _, err := db.Exec(
 			`INSERT INTO users (id, role, phone, password, balance, status) VALUES ($1, 'CUSTOMER', $2, 'x', $3, 'ACTIVE')`,
 			id, phone, balance); err != nil {
 			t.Fatalf("seed user: %v", err)
 		}
 	}
-	entry := func(id uuid.UUID, kind TransactionType, amount float64) {
+	entry := func(id uuid.UUID, kind TransactionType, amount money.Amount) {
 		if _, err := db.Exec(
 			`INSERT INTO transactions (user_id, type, amount) VALUES ($1, $2, $3)`, id, kind, amount); err != nil {
 			t.Fatalf("seed transaction: %v", err)
@@ -153,18 +155,18 @@ func TestReconcileAgainstDatabase(t *testing.T) {
 
 	// 1000 in, 300 held, 300 of that hold spent: balance 700, and PAYMENT must
 	// not be counted a second time.
-	seed(matching, "+7999"+matching.String()[:7], 700)
-	entry(matching, TransactionTypeTopUp, 1000)
-	entry(matching, TransactionTypeHold, 300)
-	entry(matching, TransactionTypePayment, 300)
+	seed(matching, "+7999"+matching.String()[:7], money.FromRubles(700))
+	entry(matching, TransactionTypeTopUp, money.FromRubles(1000))
+	entry(matching, TransactionTypeHold, money.FromRubles(300))
+	entry(matching, TransactionTypePayment, money.FromRubles(300))
 
 	// Same ledger, but the balance says 1000 — a refund that ran twice.
-	seed(drifted, "+7998"+drifted.String()[:7], 1000)
-	entry(drifted, TransactionTypeTopUp, 1000)
-	entry(drifted, TransactionTypeHold, 300)
-	entry(drifted, TransactionTypePayment, 300)
+	seed(drifted, "+7998"+drifted.String()[:7], money.FromRubles(1000))
+	entry(drifted, TransactionTypeTopUp, money.FromRubles(1000))
+	entry(drifted, TransactionTypeHold, money.FromRubles(300))
+	entry(drifted, TransactionTypePayment, money.FromRubles(300))
 
-	report, err := NewReconciliationRepository(db).Reconcile(0.01)
+	report, err := NewReconciliationRepository(db).Reconcile(money.FromRubles(0.01))
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -181,10 +183,10 @@ func TestReconcileAgainstDatabase(t *testing.T) {
 	if found == nil {
 		t.Fatal("the drifted balance was not reported")
 	}
-	if found.Difference != 300 {
-		t.Errorf("expected a difference of +300.00, got %+.2f", found.Difference)
+	if found.Difference != money.FromRubles(300) {
+		t.Errorf("expected a difference of +300.00, got %s", found.Difference)
 	}
-	if found.Ledger != 700 {
-		t.Errorf("expected a ledger of 700.00 (PAYMENT excluded), got %.2f", found.Ledger)
+	if found.Ledger != money.FromRubles(700) {
+		t.Errorf("expected a ledger of 700.00 (PAYMENT excluded), got %s", found.Ledger)
 	}
 }

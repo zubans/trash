@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -14,7 +15,7 @@ type mockBidRepo struct {
 	bids []*repository.Bid
 }
 
-func (m *mockBidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice float64) (*repository.Bid, error) {
+func (m *mockBidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
 	b := &repository.Bid{
 		ID:           uuid.New(),
 		OrderID:      orderID,
@@ -90,24 +91,24 @@ func TestBidService_CreateBid(t *testing.T) {
 	orderID := order.ID
 
 	// Case 1: No active shift (should fail)
-	_, err := srv.CreateBid(orderID, executorID, 350.00)
+	_, err := srv.CreateBid(orderID, executorID, money.FromRubles(350.00))
 	if err == nil {
 		t.Error("expected error placing bid without active shift")
 	}
 
 	// Case 2: Active shift (should succeed)
 	_, _ = shiftRepo.StartShift(executorID, 1) // Start active shift in mock
-	bid, err := srv.CreateBid(orderID, executorID, 350.00)
+	bid, err := srv.CreateBid(orderID, executorID, money.FromRubles(350.00))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if bid.OfferedPrice != 350.00 {
-		t.Errorf("expected price 350.00, got %f", bid.OfferedPrice)
+	if bid.OfferedPrice != money.FromRubles(350) {
+		t.Errorf("expected price 350.00, got %s", bid.OfferedPrice)
 	}
 
 	// Case 3: Invalid price (should fail)
-	_, err = srv.CreateBid(orderID, executorID, -10.0)
+	_, err = srv.CreateBid(orderID, executorID, money.FromRubles(-10.0))
 	if err == nil {
 		t.Error("expected error placing bid with negative price")
 	}

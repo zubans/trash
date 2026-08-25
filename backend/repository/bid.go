@@ -6,24 +6,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // Bid represents an executor price offer for construction waste orders.
 type Bid struct {
-	ID            uuid.UUID `json:"id"`
-	OrderID       uuid.UUID `json:"order_id"`
-	ExecutorID    uuid.UUID `json:"executor_id"`
-	OfferedPrice  float64   `json:"offered_price"`
-	Status        string    `json:"status"` // PENDING, ACCEPTED, REJECTED
-	CreatedAt     time.Time `json:"created_at"`
-	ExecutorPhone string    `json:"executor_phone,omitempty"`
+	ID            uuid.UUID    `json:"id"`
+	OrderID       uuid.UUID    `json:"order_id"`
+	ExecutorID    uuid.UUID    `json:"executor_id"`
+	OfferedPrice  money.Amount `json:"offered_price"`
+	Status        string       `json:"status"` // PENDING, ACCEPTED, REJECTED
+	CreatedAt     time.Time    `json:"created_at"`
+	ExecutorPhone string       `json:"executor_phone,omitempty"`
 }
 
 // BidRepository defines database operations for bidding. Accepting a bid is a
 // business transaction and lives in the service layer; the repository only
 // provides the locked read and the individual writes it needs.
 type BidRepository interface {
-	CreateBid(orderID, executorID uuid.UUID, offeredPrice float64) (*Bid, error)
+	CreateBid(orderID, executorID uuid.UUID, offeredPrice money.Amount) (*Bid, error)
 	GetBidsForOrder(orderID uuid.UUID) ([]*Bid, error)
 	LockBidForUpdate(q Querier, bidID uuid.UUID) (*Bid, error)
 	SetBidStatus(q Querier, bidID uuid.UUID, status string) error
@@ -39,7 +41,7 @@ func NewBidRepository(db *sql.DB) BidRepository {
 	return &bidRepo{db: db}
 }
 
-func (r *bidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice float64) (*Bid, error) {
+func (r *bidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice money.Amount) (*Bid, error) {
 	// 1. Check if the order is an auction and in SEARCHING status
 	var isAuction bool
 	var status string

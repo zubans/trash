@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // ShiftStatus represents the status of an executor shift.
@@ -18,14 +20,14 @@ const (
 
 // Shift represents an executor work shift.
 type Shift struct {
-	ID            uuid.UUID   `json:"id"`
-	ExecutorID    uuid.UUID   `json:"executor_id"`
-	DurationHours int         `json:"duration_hours"`
-	StartedAt     time.Time   `json:"started_at"`
-	PlannedEndAt  time.Time   `json:"planned_end_at"`
-	ActualEndAt   *time.Time  `json:"actual_end_at"`
-	Status        ShiftStatus `json:"status"`
-	FineAmount    float64     `json:"fine_amount"`
+	ID            uuid.UUID    `json:"id"`
+	ExecutorID    uuid.UUID    `json:"executor_id"`
+	DurationHours int          `json:"duration_hours"`
+	StartedAt     time.Time    `json:"started_at"`
+	PlannedEndAt  time.Time    `json:"planned_end_at"`
+	ActualEndAt   *time.Time   `json:"actual_end_at"`
+	Status        ShiftStatus  `json:"status"`
+	FineAmount    money.Amount `json:"fine_amount"`
 }
 
 // GPSLog represents a single recorded coordinate.
@@ -45,11 +47,11 @@ type ShiftRepository interface {
 	GetShiftByID(shiftID uuid.UUID) (*Shift, error)
 	GetActiveShifts() ([]*Shift, error)
 	End(shiftID uuid.UUID) error
-	Penalize(shiftID uuid.UUID, fine float64) error
+	Penalize(shiftID uuid.UUID, fine money.Amount) error
 
 	// EarlyEnd terminates a shift before its planned end time, records the
 	// penalty amount and marks the shift as PENALIZED.
-	EarlyEnd(shiftID uuid.UUID, fine float64) error
+	EarlyEnd(shiftID uuid.UUID, fine money.Amount) error
 
 	// GetLastShiftByExecutor returns the most recent shift for an executor,
 	// regardless of status (active, completed or penalized).
@@ -156,7 +158,7 @@ func (r *shiftRepo) End(shiftID uuid.UUID) error {
 	return err
 }
 
-func (r *shiftRepo) Penalize(shiftID uuid.UUID, fine float64) error {
+func (r *shiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error {
 	_, err := r.db.Exec(
 		`UPDATE shifts SET status = $1, fine_amount = fine_amount + $2 WHERE id = $3`,
 		ShiftStatusPenalized, fine, shiftID,
@@ -165,7 +167,7 @@ func (r *shiftRepo) Penalize(shiftID uuid.UUID, fine float64) error {
 }
 
 // EarlyEnd terminates a shift before its planned end time and records the fine.
-func (r *shiftRepo) EarlyEnd(shiftID uuid.UUID, fine float64) error {
+func (r *shiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error {
 	_, err := r.db.Exec(
 		`UPDATE shifts SET status = $1, actual_end_at = now(), fine_amount = fine_amount + $2 WHERE id = $3`,
 		ShiftStatusPenalized, fine, shiftID,

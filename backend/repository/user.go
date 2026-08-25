@@ -8,29 +8,31 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // User represents a user record in the database.
 type User struct {
-	ID                     uuid.UUID  `json:"id"`
-	Role                   string     `json:"role"`
-	Phone                  string     `json:"phone"`
-	Email                  string     `json:"email"`
-	LastName               string     `json:"last_name"`
-	FirstName              string     `json:"first_name"`
-	Patronymic             string     `json:"patronymic"`
-	BirthDate              *time.Time `json:"birth_date,omitempty"`
-	PendingEmail           string     `json:"pending_email,omitempty"`
-	EmailVerified          bool       `json:"email_verified"`
-	EmailVerificationToken string     `json:"-"`
-	EmailTokenExpiresAt    *time.Time `json:"-"`
-	PasswordResetCode      string     `json:"-"`
-	PasswordResetExpiresAt *time.Time `json:"-"`
-	Password               string     `json:"-"` // bcrypt hash, managed by the service layer
-	Balance                float64    `json:"balance"`
-	Status                 string     `json:"status"`
-	CreatedAt              time.Time  `json:"created_at"`
-	Address                string     `json:"address,omitempty"`
+	ID                     uuid.UUID    `json:"id"`
+	Role                   string       `json:"role"`
+	Phone                  string       `json:"phone"`
+	Email                  string       `json:"email"`
+	LastName               string       `json:"last_name"`
+	FirstName              string       `json:"first_name"`
+	Patronymic             string       `json:"patronymic"`
+	BirthDate              *time.Time   `json:"birth_date,omitempty"`
+	PendingEmail           string       `json:"pending_email,omitempty"`
+	EmailVerified          bool         `json:"email_verified"`
+	EmailVerificationToken string       `json:"-"`
+	EmailTokenExpiresAt    *time.Time   `json:"-"`
+	PasswordResetCode      string       `json:"-"`
+	PasswordResetExpiresAt *time.Time   `json:"-"`
+	Password               string       `json:"-"` // bcrypt hash, managed by the service layer
+	Balance                money.Amount `json:"balance"`
+	Status                 string       `json:"status"`
+	CreatedAt              time.Time    `json:"created_at"`
+	Address                string       `json:"address,omitempty"`
 }
 
 func (u *User) GetAge() int {
@@ -66,7 +68,7 @@ type UserRepository interface {
 	FindByID(id uuid.UUID) (*User, error)
 	UpdateStatus(id uuid.UUID, status string) error
 	UpdateRole(id uuid.UUID, role string) error
-	UpdateBalance(id uuid.UUID, balance float64) error
+	UpdateBalance(id uuid.UUID, balance money.Amount) error
 	UpdateLastGeo(id uuid.UUID, lastGeo string) error
 	CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
 	GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
@@ -326,7 +328,7 @@ func (r *repo) UpdateRole(id uuid.UUID, role string) error {
 	return err
 }
 
-func (r *repo) UpdateBalance(id uuid.UUID, balance float64) error {
+func (r *repo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	_, err := r.db.Exec(`UPDATE users SET balance = $1 WHERE id = $2`, balance, id)
 	return err
 }

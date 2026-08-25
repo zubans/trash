@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -95,34 +96,36 @@ func (s *OrderService) loadSettings() map[string]float64 {
 }
 
 // CalculatePrice returns the price for a given service variant and urgency flags.
-func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAsap, isDowngraded bool) (float64, error) {
+func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAsap, isDowngraded bool) (money.Amount, error) {
 	variant, err := s.catalogRepo.GetNodeByID(serviceVariantID)
 	if err != nil {
-		return 0, err
+		return money.Zero, err
 	}
 	if variant == nil || !variant.IsVariant() {
-		return 0, errors.New("invalid service variant")
+		return money.Zero, errors.New("invalid service variant")
 	}
 	if variant.BasePrice == nil {
-		return 0, errors.New("variant has no base price")
+		return money.Zero, errors.New("variant has no base price")
 	}
 
 	price := *variant.BasePrice
 
 	if variant.IsAuction {
-		return 0, nil
+		return money.Zero, nil
 	}
 
 	if isDowngraded {
 		return price, nil
 	}
 
+	// Scale rounds once, here, instead of letting a float coefficient smear the
+	// result across the rest of the flow.
 	settings := s.loadSettings()
 	switch {
 	case isAsap:
-		price *= settings["asap_tariff_coeff"]
+		price = price.Scale(settings["asap_tariff_coeff"])
 	case isUrgent:
-		price *= settings["urgent_tariff_coeff"]
+		price = price.Scale(settings["urgent_tariff_coeff"])
 	}
 
 	return price, nil
@@ -161,7 +164,7 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 	if err != nil {
 		return nil, err
 	}
-	if holdAmount <= 0 {
+	if !holdAmount.IsPositive() {
 		return nil, errors.New("invalid order price")
 	}
 
@@ -274,9 +277,9 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 	}
 	// The limit is configured as a magnitude and applied as a negative floor,
 	// e.g. min_balance_limit=500 means "no new orders below -500".
-	minBalanceLimit := -math.Abs(s.settingsFloat("min_balance_limit", defaultMinBalanceLimit))
+	minBalanceLimit := money.FromRubles(-math.Abs(s.settingsFloat("min_balance_limit", defaultMinBalanceLimit)))
 	if balance < minBalanceLimit {
-		return fmt.Errorf("нельзя брать новые заказы: баланс %.2f ниже допустимого лимита (%.2f)", balance, minBalanceLimit)
+		return fmt.Errorf("нельзя брать новые заказы: баланс %s ниже допустимого лимита (%s)", balance, minBalanceLimit)
 	}
 
 	maxActive := settingInt(s.settingsRepo, "max_active_orders", defaultMaxActiveOrders)
@@ -352,7 +355,7 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 		}
 
 		// The penalty is collected, not destroyed: it lands on the fines account.
-		penalty := order.HoldAmount * share
+		penalty := order.HoldAmount.Scale(share)
 		if err := s.ledger.Charge(tx, executorID, repository.AccountFines, penalty, repository.TransactionTypeFine, &order.ID); err != nil {
 			return err
 		}
@@ -418,7 +421,7 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 		// Escrow holds exactly order.HoldAmount for this order, and it drains
 		// completely here: the unspent part back to the customer, the rest to
 		// the executor.
-		refund := order.HoldAmount - finalAmount
+		refund := order.HoldAmount.Sub(finalAmount)
 		if err := s.ledger.Release(tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
 			return err
 		}
@@ -433,7 +436,7 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 			return err
 		}
 
-		if err := s.orderRepo.SetHoldAmount(tx, order.ID, 0); err != nil {
+		if err := s.orderRepo.SetHoldAmount(tx, order.ID, money.Zero); err != nil {
 			return err
 		}
 		return s.orderRepo.Confirm(tx, orderID, finalAmount, isDowngraded)
@@ -465,11 +468,11 @@ func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
 			return errors.New("order cannot be canceled")
 		}
 
-		if order.HoldAmount > 0 {
+		if order.HoldAmount.IsPositive() {
 			if err := s.ledger.Release(tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
 				return err
 			}
-			if err := s.orderRepo.SetHoldAmount(tx, order.ID, 0); err != nil {
+			if err := s.orderRepo.SetHoldAmount(tx, order.ID, money.Zero); err != nil {
 				return err
 			}
 		}
@@ -524,8 +527,8 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 		IsAsap:           false,
 		Comment:          commentPtr,
 		Status:           repository.OrderStatusSearching,
-		HoldAmount:       0,
-		FinalAmount:      0,
+		HoldAmount:       money.Zero,
+		FinalAmount:      money.Zero,
 		PhotoURL:         &photoURL,
 		Address:          &address,
 		CreatedAt:        time.Now(),

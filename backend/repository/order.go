@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // OrderStatus represents the lifecycle status of an order.
@@ -31,8 +33,8 @@ type Order struct {
 	IsUrgent         bool         `json:"is_urgent"`
 	IsAsap           bool         `json:"is_asap"`
 	Status           OrderStatus  `json:"status"`
-	HoldAmount       float64      `json:"hold_amount"`
-	FinalAmount      float64      `json:"final_amount"`
+	HoldAmount       money.Amount `json:"hold_amount"`
+	FinalAmount      money.Amount `json:"final_amount"`
 	IsDowngraded     bool         `json:"is_downgraded"`
 	PhotoURL         *string      `json:"photo_url,omitempty"`
 	Address          *string      `json:"address,omitempty"`
@@ -61,12 +63,12 @@ type OrderRepository interface {
 	// ErrConflict when the entity was not in the expected state.
 	Assign(q Querier, orderID, executorID uuid.UUID) error
 	Execute(q Querier, orderID uuid.UUID) error
-	Confirm(q Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
+	Confirm(q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
 	Cancel(q Querier, orderID uuid.UUID) error
 	Unassign(q Querier, orderID uuid.UUID) error
 	LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error)
-	SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount float64) error
-	AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount float64) error
+	SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount money.Amount) error
+	AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error
 	CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error)
 	CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error)
 
@@ -305,7 +307,7 @@ func (r *orderRepo) Execute(q Querier, orderID uuid.UUID) error {
 	)
 }
 
-func (r *orderRepo) Confirm(q Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
+func (r *orderRepo) Confirm(q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
 	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
@@ -336,7 +338,7 @@ func (r *orderRepo) Unassign(q Querier, orderID uuid.UUID) error {
 // AssignWithHold assigns an executor and records the agreed price in one
 // statement. Used when a customer accepts an auction bid, where the price is
 // only known at that moment.
-func (r *orderRepo) AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount float64) error {
+func (r *orderRepo) AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
 	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now(),
 		    hold_amount = $3, final_amount = $3
@@ -360,7 +362,7 @@ func (r *orderRepo) LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error) 
 // SetHoldAmount adjusts the amount currently held from the customer. It must be
 // kept in step with every refund, otherwise the payout at confirmation time is
 // computed from a stale hold.
-func (r *orderRepo) SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount float64) error {
+func (r *orderRepo) SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount money.Amount) error {
 	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET hold_amount = $1 WHERE id = $2`,
 		holdAmount, orderID,

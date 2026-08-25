@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -169,7 +170,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 		PlannedEndAt: time.Now().Add(time.Hour),
 	})
 
-	bid, err := srv.CreateBid(orderID, execID, 350.00)
+	bid, err := srv.CreateBid(orderID, execID, money.FromRubles(350.00))
 	if err != nil {
 		t.Fatalf("unexpected error creating bid: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 	}
 
 	// Invalid bid price (0 or negative)
-	_, err = srv.CreateBid(orderID, execID, 0)
+	_, err = srv.CreateBid(orderID, execID, money.FromRubles(0))
 	if err == nil {
 		t.Error("expected error for bid price 0")
 	}
@@ -329,9 +330,9 @@ func TestAdminService_Extended(t *testing.T) {
 	_ = srv.UpdateUserRole(u.ID, adminID, "INVALID_ROLE")
 	_ = srv.UpdateUserAddress(u.ID, "New Address")
 	_ = srv.UpdateUserAddress(u.ID, "")
-	_ = srv.TopUpUserBalance(adminID, u.ID, 500.0)
+	_ = srv.TopUpUserBalance(adminID, u.ID, money.FromRubles(500.0))
 	_ = srv.TopUpUserBalance(u.ID, u.ID, 500.0)
-	_ = srv.TopUpUserBalance(adminID, u.ID, -50.0)
+	_ = srv.TopUpUserBalance(adminID, u.ID, money.FromRubles(-50.0))
 
 	users, total, _ := srv.GetUsers(1, 10, "", "", "")
 	if total != 0 || len(users) != 0 {
@@ -491,8 +492,8 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 	u := &repository.User{ID: uuid.New(), Phone: "79998887766"}
 	userRepo.users[u.Phone] = u
 
-	req, err := srv.CreateTopUpRequest(u.ID, 300.0)
-	if err != nil || req.Amount != 300.0 {
+	req, err := srv.CreateTopUpRequest(u.ID, money.FromRubles(300.0))
+	if err != nil || req.Amount != money.FromRubles(300) {
 		t.Fatalf("unexpected error creating top up request: %v", err)
 	}
 

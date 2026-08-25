@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -78,7 +79,7 @@ func (m *mockRepo) UpdateRole(id uuid.UUID, role string) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateBalance(id uuid.UUID, balance float64) error {
+func (m *mockRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Balance = balance

@@ -17,6 +17,7 @@ import (
 
 	"healthlogin/backend/handler"
 	"healthlogin/backend/middleware"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 	"healthlogin/backend/worker"
@@ -112,7 +113,7 @@ func main() {
 
 	// Nightly books check. It reports and never repairs: a balance that drifted
 	// away from its ledger is a bug worth seeing, not a number to overwrite.
-	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, 0.01)
+	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01))
 	reconcileWorker.Start(24 * time.Hour)
 
 	// Expired refresh tokens are dropped daily; used ones are kept until they

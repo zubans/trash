@@ -6,40 +6,42 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // TopUpRequest represents a manual balance top-up request.
 type TopUpRequest struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	UserPhone string     `json:"user_phone"` // Populated via JOIN
-	Amount    float64    `json:"amount"`
-	Status    string     `json:"status"`
-	AdminID   *uuid.UUID `json:"admin_id,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	Amount    money.Amount `json:"amount"`
+	Status    string       `json:"status"`
+	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
 }
 
 // WithdrawalRequest represents a manual balance withdrawal request.
 type WithdrawalRequest struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	UserPhone string     `json:"user_phone"` // Populated via JOIN
-	Amount    float64    `json:"amount"`
-	Status    string     `json:"status"`
-	AdminID   *uuid.UUID `json:"admin_id,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	Amount    money.Amount `json:"amount"`
+	Status    string       `json:"status"`
+	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
 }
 
 // Transaction represents a financial log entry.
 type Transaction struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	UserPhone string     `json:"user_phone"` // Populated via JOIN
-	OrderID   *uuid.UUID `json:"order_id,omitempty"`
-	Type      string     `json:"type"`
-	Amount    float64    `json:"amount"`
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	OrderID   *uuid.UUID   `json:"order_id,omitempty"`
+	Type      string       `json:"type"`
+	Amount    money.Amount `json:"amount"`
 	// Counterparty is the system account on the other side of this entry.
 	// Empty on rows written before system accounts existed.
 	Counterparty string     `json:"counterparty,omitempty"`
@@ -66,19 +68,19 @@ type AdminRepository interface {
 	GetUsers(page, limit int, role, status, search string) ([]*User, int, error)
 	GetTopUpRequests() ([]*TopUpRequest, error)
 	GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error)
-	CreateTopUpRequest(q Querier, userID uuid.UUID, amount float64) (*TopUpRequest, error)
+	CreateTopUpRequest(q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
 	LockTopUpRequest(q Querier, requestID uuid.UUID) (*TopUpRequest, error)
 	SetTopUpStatus(q Querier, requestID, adminID uuid.UUID, status string) error
 	GetWithdrawalRequests() ([]*WithdrawalRequest, error)
 	GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, error)
 	// Withdrawals are a money workflow and live in AdminService; the repository
 	// provides the locked read and the individual writes it needs.
-	CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount float64) (*WithdrawalRequest, error)
+	CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
 	LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
 	SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error
 	HasPendingWithdrawal(userID uuid.UUID) (bool, error)
 	CountAdmins() (int, error)
-	TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error
+	TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error
 	GetTransactions() ([]*Transaction, error)
 	GetActiveShifts() ([]*AdminShift, error)
 	GetActiveOrders() ([]*AdminOrder, error)
@@ -201,7 +203,7 @@ func (r *adminRepo) GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error) {
 	return &req, nil
 }
 
-func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount float64) (*TopUpRequest, error) {
+func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_topup_requests (id, user_id, amount, status, created_at)
@@ -285,7 +287,7 @@ func (r *adminRepo) exec(q Querier) Querier {
 	return q
 }
 
-func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount float64) (*WithdrawalRequest, error) {
+func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_withdrawal_requests (id, user_id, amount, status, created_at)
@@ -342,7 +344,7 @@ func (r *adminRepo) CountAdmins() (int, error) {
 	return count, err
 }
 
-func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
