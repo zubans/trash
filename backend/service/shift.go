@@ -14,18 +14,18 @@ import (
 
 // ShiftService manages executor shifts and geofence checks.
 type ShiftService struct {
-	shiftRepo       repository.ShiftRepository
-	geozoneRepo     repository.GeozoneRepository
-	transactionRepo repository.TransactionRepository
-	settingsRepo    repository.SettingsRepository
-	orderRepo       repository.OrderRepository
-	catalogRepo     repository.ServiceCatalogRepository
-	db              *sql.DB
+	shiftRepo    repository.ShiftRepository
+	geozoneRepo  repository.GeozoneRepository
+	ledger       *Ledger
+	settingsRepo repository.SettingsRepository
+	orderRepo    repository.OrderRepository
+	catalogRepo  repository.ServiceCatalogRepository
+	db           *sql.DB
 }
 
 // NewShiftService creates a ShiftService.
-func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, transactionRepo repository.TransactionRepository, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *ShiftService {
-	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, transactionRepo: transactionRepo, settingsRepo: settingsRepo, orderRepo: orderRepo, catalogRepo: catalogRepo, db: db}
+func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *ShiftService {
+	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo, catalogRepo: catalogRepo, db: db}
 }
 
 // StartShift begins a new shift for an executor and schedules auto-end timer.
@@ -188,24 +188,16 @@ func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, err
 		totalFine = basePenalty*2 + orderCost
 	}
 
-	if s.transactionRepo != nil {
-		if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	if s.ledger != nil {
+		if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 			for _, o := range openOrders {
 				if err := s.orderRepo.Unassign(tx, o.ID); err != nil {
 					return err
 				}
 			}
-			if totalFine <= 0 {
-				return nil
-			}
-			if err := s.transactionRepo.UpdateBalance(tx, executorID, -totalFine); err != nil {
-				return err
-			}
-			return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-				UserID: executorID,
-				Type:   string(repository.TransactionTypeFine),
-				Amount: totalFine,
-			})
+			// The penalty is collected onto the fines account rather than simply
+			// disappearing from the executor's balance.
+			return s.ledger.Charge(tx, executorID, repository.AccountFines, totalFine, repository.TransactionTypeFine, nil)
 		}); err != nil {
 			return nil, err
 		}
@@ -303,16 +295,9 @@ func (s *ShiftService) RecordLocationWithResult(executorID uuid.UUID, lat, lon f
 	}
 
 	fine := s.geofenceFineAmount()
-	if s.transactionRepo != nil {
-		if err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
-			if err := s.transactionRepo.UpdateBalance(tx, executorID, -fine); err != nil {
-				return err
-			}
-			return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-				UserID: executorID,
-				Type:   string(repository.TransactionTypeFine),
-				Amount: fine,
-			})
+	if s.ledger != nil {
+		if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+			return s.ledger.Charge(tx, executorID, repository.AccountFines, fine, repository.TransactionTypeFine, nil)
 		}); err != nil {
 			log.Printf("[ShiftService] failed to charge fine for executor %s: %v", executorID, err)
 		}
@@ -370,8 +355,8 @@ func (s *ShiftService) GetExecutorFinancialHistory(executorID uuid.UUID) (*Execu
 		}
 	}
 
-	if s.transactionRepo != nil {
-		txs, err := s.transactionRepo.GetTransactionsByUserID(executorID)
+	if s.ledger != nil {
+		txs, err := s.ledger.History(executorID)
 		if err == nil && txs != nil {
 			res.Transactions = txs
 		}

@@ -151,6 +151,8 @@ export default defineComponent({
 
     const emailInput = ref('')
     const savingEmail = ref(false)
+    const emailMsg = ref('')
+    const emailMsgIsError = ref(false)
     const userFullName = ref('')
 
     const currentEmail = computed(() => userEmail.value)

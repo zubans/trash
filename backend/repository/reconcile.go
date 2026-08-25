@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -31,17 +32,35 @@ type OrderHoldAnomaly struct {
 	Reason     string    `json:"reason"`
 }
 
+// BooksSummary is the closing position of the whole system.
+type BooksSummary struct {
+	UserTotal    float64         `json:"user_total"`
+	AccountTotal float64         `json:"account_total"`
+	Difference   float64         `json:"difference"`
+	Accounts     []SystemAccount `json:"accounts"`
+	EscrowHeld   float64         `json:"escrow_held"`
+	LiveOrderSum float64         `json:"live_order_sum"`
+	EscrowDrift  float64         `json:"escrow_drift"`
+}
+
 // ReconciliationReport is the outcome of a full pass.
 type ReconciliationReport struct {
 	UsersChecked  int                  `json:"users_checked"`
 	Discrepancies []BalanceDiscrepancy `json:"discrepancies"`
 	HoldAnomalies []OrderHoldAnomaly   `json:"hold_anomalies"`
 	UnknownTypes  []string             `json:"unknown_transaction_types"`
+	Books         BooksSummary         `json:"books"`
+	// BooksOpen is set when the two sides of the system do not cancel out.
+	BooksOpen bool `json:"books_open"`
+	// EscrowMismatch is set when the escrow account and the live order holds
+	// have drifted apart.
+	EscrowMismatch bool `json:"escrow_mismatch"`
 }
 
 // OK reports whether the books balance.
 func (r *ReconciliationReport) OK() bool {
-	return len(r.Discrepancies) == 0 && len(r.HoldAnomalies) == 0 && len(r.UnknownTypes) == 0
+	return len(r.Discrepancies) == 0 && len(r.HoldAnomalies) == 0 &&
+		len(r.UnknownTypes) == 0 && !r.BooksOpen && !r.EscrowMismatch
 }
 
 // Summary renders a one-line result for logs.
@@ -49,10 +68,17 @@ func (r *ReconciliationReport) Summary() string {
 	if r.OK() {
 		return fmt.Sprintf("reconciliation clean: %d users match the ledger", r.UsersChecked)
 	}
-	return fmt.Sprintf(
+	parts := fmt.Sprintf(
 		"reconciliation found problems: %d balance mismatches, %d hold anomalies, %d unknown transaction types (of %d users)",
 		len(r.Discrepancies), len(r.HoldAnomalies), len(r.UnknownTypes), r.UsersChecked,
 	)
+	if r.BooksOpen {
+		parts += fmt.Sprintf("; books do not close by %+.2f", r.Books.Difference)
+	}
+	if r.EscrowMismatch {
+		parts += fmt.Sprintf("; escrow off by %+.2f against live order holds", r.Books.EscrowDrift)
+	}
+	return parts
 }
 
 // ReconciliationRepository verifies that the stored balances agree with the
@@ -149,7 +175,59 @@ func (r *reconcileRepo) Reconcile(tolerance float64) (*ReconciliationReport, err
 	}
 	report.HoldAnomalies = anomalies
 
+	// 4. Do the books close? Every movement touches a user balance and a system
+	//    account, so the two sides must cancel out exactly.
+	books, err := r.books()
+	if err != nil {
+		return nil, err
+	}
+	report.Books = *books
+	report.BooksOpen = math.Abs(books.Difference) > tolerance
+	report.EscrowMismatch = math.Abs(books.EscrowDrift) > tolerance
+
 	return report, nil
+}
+
+// books adds up both sides of the system and compares escrow against the orders
+// it is supposed to be holding money for.
+func (r *reconcileRepo) books() (*BooksSummary, error) {
+	var b BooksSummary
+
+	if err := r.db.QueryRow(`SELECT COALESCE(SUM(balance), 0) FROM users`).Scan(&b.UserTotal); err != nil {
+		return nil, fmt.Errorf("sum user balances: %w", err)
+	}
+	if err := r.db.QueryRow(`SELECT COALESCE(SUM(balance), 0) FROM system_accounts`).Scan(&b.AccountTotal); err != nil {
+		return nil, fmt.Errorf("sum system accounts: %w", err)
+	}
+	b.Difference = b.UserTotal + b.AccountTotal
+
+	rows, err := r.db.Query(`SELECT code, name, balance FROM system_accounts ORDER BY code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a SystemAccount
+		if err := rows.Scan(&a.Code, &a.Name, &a.Balance); err != nil {
+			return nil, err
+		}
+		if a.Code == AccountEscrow {
+			b.EscrowHeld = a.Balance
+		}
+		b.Accounts = append(b.Accounts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := r.db.QueryRow(`
+		SELECT COALESCE(SUM(hold_amount), 0) FROM orders
+		WHERE status IN ('SEARCHING', 'ASSIGNED', 'EXECUTED')`).Scan(&b.LiveOrderSum); err != nil {
+		return nil, fmt.Errorf("sum live order holds: %w", err)
+	}
+	b.EscrowDrift = b.EscrowHeld - b.LiveOrderSum
+
+	return &b, nil
 }
 
 func (r *reconcileRepo) unknownTransactionTypes() ([]string, error) {

@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -131,8 +132,9 @@ func (m *mockUserRepository) UpdateUserName(userID uuid.UUID, lastName, firstNam
 
 // mockAdminRepository implements repository.AdminRepository.
 type mockAdminRepository struct {
-	users    []*repository.User
-	requests map[uuid.UUID]*repository.TopUpRequest
+	users       []*repository.User
+	requests    map[uuid.UUID]*repository.TopUpRequest
+	withdrawals map[uuid.UUID]*repository.WithdrawalRequest
 }
 
 func (m *mockAdminRepository) GetUsers(page, limit int, role, status, search string) ([]*repository.User, int, error) {
@@ -155,7 +157,7 @@ func (m *mockAdminRepository) GetTopUpRequestByID(id uuid.UUID) (*repository.Top
 	return r, nil
 }
 
-func (m *mockAdminRepository) CreateTopUpRequest(userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
+func (m *mockAdminRepository) CreateTopUpRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
 	r := &repository.TopUpRequest{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -167,24 +169,6 @@ func (m *mockAdminRepository) CreateTopUpRequest(userID uuid.UUID, amount float6
 	return r, nil
 }
 
-func (m *mockAdminRepository) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	r := m.requests[requestID]
-	r.Status = "APPROVED"
-	r.AdminID = &adminID
-	now := time.Now()
-	r.UpdatedAt = &now
-	return nil
-}
-
-func (m *mockAdminRepository) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	r := m.requests[requestID]
-	r.Status = "REJECTED"
-	r.AdminID = &adminID
-	now := time.Now()
-	r.UpdatedAt = &now
-	return nil
-}
-
 func (m *mockAdminRepository) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
 	return nil, nil
 }
@@ -193,16 +177,13 @@ func (m *mockAdminRepository) GetWithdrawalRequestByID(id uuid.UUID) (*repositor
 	return nil, nil
 }
 
-func (m *mockAdminRepository) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
-	return &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}, nil
-}
-
-func (m *mockAdminRepository) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockAdminRepository) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
+func (m *mockAdminRepository) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
+	if m.withdrawals == nil {
+		m.withdrawals = make(map[uuid.UUID]*repository.WithdrawalRequest)
+	}
+	m.withdrawals[req.ID] = req
+	return req, nil
 }
 
 func (m *mockAdminRepository) GetTransactions() ([]*repository.Transaction, error) {
@@ -257,7 +238,8 @@ func setupTestHandler() (*AdminHandler, *mockUserRepository, *mockAdminRepositor
 	ar := &mockAdminRepository{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	sr := &mockSettingsRepository{settings: make(map[string]string)}
 
-	svc := service.NewAdminService(ur, ar, sr, "secret", nil)
+	svc := service.NewAdminService(ur, ar, sr, "secret", nil).
+		WithLedger(service.NewLedger(&mockLedgerTxRepo{balances: map[uuid.UUID]float64{}}, &mockLedgerAccounts{}))
 	h := NewAdminHandler(svc)
 	return h, ur, ar, sr
 }
@@ -333,7 +315,7 @@ func TestApproveTopUpRequestsHandler(t *testing.T) {
 	ur.users[customer.ID] = customer
 	ur.users[admin.ID] = admin
 
-	reqObj, _ := ar.CreateTopUpRequest(customer.ID, 150.00)
+	reqObj, _ := ar.CreateTopUpRequest(nil, customer.ID, 150.00)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/finances/topups/"+reqObj.ID.String()+"/approve", nil)
 
@@ -368,3 +350,83 @@ func (m *mockAdminRepository) CountAdmins() (int, error) {
 func (m *mockAdminRepository) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
 	return false, nil
 }
+
+// LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
+// that it lives in AdminService.
+func (m *mockAdminRepository) LockWithdrawalRequest(q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
+	if req, ok := m.withdrawals[requestID]; ok {
+		return req, nil
+	}
+	return nil, repository.ErrConflict
+}
+
+func (m *mockAdminRepository) SetWithdrawalStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+	req, ok := m.withdrawals[requestID]
+	if !ok || req.Status != "PENDING" {
+		return repository.ErrConflict
+	}
+	req.Status = status
+	req.AdminID = &adminID
+	return nil
+}
+
+func (m *mockAdminRepository) LockTopUpRequest(q repository.Querier, requestID uuid.UUID) (*repository.TopUpRequest, error) {
+	if req, ok := m.requests[requestID]; ok {
+		return req, nil
+	}
+	return nil, repository.ErrConflict
+}
+
+func (m *mockAdminRepository) SetTopUpStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+	req, ok := m.requests[requestID]
+	if !ok || req.Status != "PENDING" {
+		return repository.ErrConflict
+	}
+	req.Status = status
+	req.AdminID = &adminID
+	return nil
+}
+
+// --- ledger doubles for the handler tests ---
+
+type mockLedgerTxRepo struct {
+	balances map[uuid.UUID]float64
+}
+
+func (m *mockLedgerTxRepo) GetBalance(userID uuid.UUID) (float64, error) {
+	return m.balances[userID], nil
+}
+
+func (m *mockLedgerTxRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error {
+	m.balances[userID] += delta
+	return nil
+}
+
+func (m *mockLedgerTxRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error {
+	if m.balances[userID] < amount {
+		return repository.ErrInsufficientFunds
+	}
+	m.balances[userID] -= amount
+	return nil
+}
+
+func (m *mockLedgerTxRepo) CreateTransaction(tx *sql.Tx, t *repository.Transaction) error { return nil }
+
+func (m *mockLedgerTxRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*repository.Transaction, error) {
+	return nil, nil
+}
+
+func (m *mockLedgerTxRepo) RunInTx(fn func(*sql.Tx) error) error { return fn(nil) }
+
+type mockLedgerAccounts struct{}
+
+func (m *mockLedgerAccounts) Credit(q repository.Querier, code string, amount float64) error {
+	return nil
+}
+func (m *mockLedgerAccounts) Debit(q repository.Querier, code string, amount float64) error {
+	return nil
+}
+func (m *mockLedgerAccounts) Get(code string) (*repository.SystemAccount, error) {
+	return &repository.SystemAccount{Code: code}, nil
+}
+func (m *mockLedgerAccounts) List() ([]repository.SystemAccount, error) { return nil, nil }

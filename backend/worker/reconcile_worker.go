@@ -48,6 +48,14 @@ func (w *ReconcileWorker) Run() {
 
 	// Loud, and with enough detail to act on without opening a database client.
 	log.Printf("[ALERT] %s", report.Summary())
+	if report.BooksOpen {
+		log.Printf("[ALERT] users hold %.2f, platform accounts hold %.2f: the two sides differ by %+.2f",
+			report.Books.UserTotal, report.Books.AccountTotal, report.Books.Difference)
+	}
+	if report.EscrowMismatch {
+		log.Printf("[ALERT] escrow holds %.2f but live orders account for %.2f (%+.2f)",
+			report.Books.EscrowHeld, report.Books.LiveOrderSum, report.Books.EscrowDrift)
+	}
 	for _, t := range report.UnknownTypes {
 		log.Printf("[ALERT] transaction type %q is not covered by the ledger sign convention; every sum below is unreliable", t)
 	}

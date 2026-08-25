@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,9 +26,32 @@ type CreateReviewDTO struct {
 	Photos  []string `json:"photos"`
 }
 
+// Review input limits. Without them a review is an unbounded write into the
+// database and an unchecked URL rendered in somebody else's browser.
+const (
+	maxCommentRunes = 2000
+	maxReviewPhotos = 10
+)
+
 func (s *ReviewService) CreateReview(orderID, authorID uuid.UUID, dto CreateReviewDTO) (*repository.OrderReview, error) {
 	if dto.Rating < 1 || dto.Rating > 5 {
 		return nil, errors.New("rating must be between 1 and 5")
+	}
+	dto.Comment = strings.TrimSpace(dto.Comment)
+	if len([]rune(dto.Comment)) > maxCommentRunes {
+		return nil, errors.New("комментарий слишком длинный")
+	}
+	if len(dto.Photos) > maxReviewPhotos {
+		return nil, errors.New("слишком много фотографий")
+	}
+	for _, photo := range dto.Photos {
+		// Same rule as order photos: only our own upload paths.
+		if !strings.HasPrefix(photo, "/uploads/") || strings.Contains(photo, "..") {
+			return nil, errors.New("фотографии должны быть загружены через приложение")
+		}
+	}
+	if len(dto.Tags) > 20 {
+		return nil, errors.New("слишком много тегов")
 	}
 
 	order, err := s.orderRepo.FindByID(orderID)

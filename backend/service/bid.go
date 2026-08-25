@@ -12,13 +12,13 @@ import (
 
 // BidService manages bidding business operations.
 type BidService struct {
-	bidRepo         repository.BidRepository
-	orderRepo       repository.OrderRepository
-	shiftRepo       repository.ShiftRepository
-	transactionRepo repository.TransactionRepository
-	userRepo        repository.UserRepository
-	catalogRepo     repository.ServiceCatalogRepository
-	chatRepo        repository.ChatRepository
+	bidRepo     repository.BidRepository
+	orderRepo   repository.OrderRepository
+	shiftRepo   repository.ShiftRepository
+	ledger      *Ledger
+	userRepo    repository.UserRepository
+	catalogRepo repository.ServiceCatalogRepository
+	chatRepo    repository.ChatRepository
 }
 
 // NewBidService creates a new BidService.
@@ -26,19 +26,19 @@ func NewBidService(
 	bidRepo repository.BidRepository,
 	orderRepo repository.OrderRepository,
 	shiftRepo repository.ShiftRepository,
-	transactionRepo repository.TransactionRepository,
+	ledger *Ledger,
 	userRepo repository.UserRepository,
 	catalogRepo repository.ServiceCatalogRepository,
 	chatRepo repository.ChatRepository,
 ) *BidService {
 	return &BidService{
-		bidRepo:         bidRepo,
-		orderRepo:       orderRepo,
-		shiftRepo:       shiftRepo,
-		transactionRepo: transactionRepo,
-		userRepo:        userRepo,
-		catalogRepo:     catalogRepo,
-		chatRepo:        chatRepo,
+		bidRepo:     bidRepo,
+		orderRepo:   orderRepo,
+		shiftRepo:   shiftRepo,
+		ledger:      ledger,
+		userRepo:    userRepo,
+		catalogRepo: catalogRepo,
+		chatRepo:    chatRepo,
 	}
 }
 
@@ -87,8 +87,8 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice float
 		}
 	}
 
-	if s.transactionRepo != nil {
-		balance, err := s.transactionRepo.GetBalance(executorID)
+	if s.ledger != nil {
+		balance, err := s.ledger.GetBalance(executorID)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +122,7 @@ func (s *BidService) GetBidsForOrder(orderID, customerID uuid.UUID) ([]*reposito
 func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 	var acceptedOrderID uuid.UUID
 
-	err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 		bid, err := s.bidRepo.LockBidForUpdate(tx, bidID)
 		if err != nil {
 			return errors.New("bid not found")
@@ -164,7 +164,9 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 			return errors.New("исполнитель сейчас не на смене, выберите другое предложение")
 		}
 
-		if err := s.transactionRepo.Debit(tx, customerID, bid.OfferedPrice); err != nil {
+		// The accepted price moves from the customer into escrow, exactly like a
+		// regular order hold.
+		if err := s.ledger.Reserve(tx, customerID, repository.AccountEscrow, bid.OfferedPrice, repository.TransactionTypeHold, &order.ID); err != nil {
 			return err
 		}
 		if err := s.orderRepo.AssignWithHold(tx, order.ID, bid.ExecutorID, bid.OfferedPrice); err != nil {
@@ -177,12 +179,7 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 			return err
 		}
 		acceptedOrderID = order.ID
-		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
-			UserID:  customerID,
-			OrderID: &order.ID,
-			Type:    string(repository.TransactionTypeHold),
-			Amount:  bid.OfferedPrice,
-		})
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {

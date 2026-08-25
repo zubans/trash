@@ -15,7 +15,7 @@ func newMoneyTestService() (*OrderService, *mockOrderRepo, *mockTransactionRepo)
 	orderRepo := &mockOrderRepo{}
 	txRepo := &mockTransactionRepo{}
 	settings := &orderMockSettingsRepo{settings: map[string]string{}}
-	srv := NewOrderService(orderRepo, txRepo, settings, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+	srv := NewOrderService(orderRepo, NewLedger(txRepo, newMockAccounts()), settings, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
 	return srv, orderRepo, txRepo
 }
 
@@ -154,7 +154,7 @@ func TestEndShiftEarlyChargesPenalty(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
 	settings := &mockSettingsRepo{settings: map[string]string{"shift_early_exit_penalty": "50"}}
-	srv := NewShiftService(shiftRepo, nil, txRepo, settings, &mockOrderRepo{}, nil, nil)
+	srv := NewShiftService(shiftRepo, nil, NewLedger(txRepo, newMockAccounts()), settings, &mockOrderRepo{}, nil, nil)
 
 	executorID := uuid.New()
 	if _, err := shiftRepo.StartShift(executorID, 3); err != nil {
@@ -185,7 +185,7 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
 	txRepo := &mockTransactionRepo{}
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo, txRepo, newMockUserRepo(), newMockCatalogRepo(), nil)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, NewLedger(txRepo, newMockAccounts()), newMockUserRepo(), newMockCatalogRepo(), nil)
 
 	customerID := uuid.New()
 	executorID := uuid.New()
@@ -242,7 +242,7 @@ func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo, &mockTransactionRepo{}, newMockUserRepo(), newMockCatalogRepo(), nil)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, testLedger(), newMockUserRepo(), newMockCatalogRepo(), nil)
 
 	order := &repository.Order{
 		ID:               uuid.New(),
@@ -255,5 +255,199 @@ func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 
 	if err := srv.AcceptBid(bid.ID, uuid.New()); err == nil {
 		t.Error("expected a stranger to be refused")
+	}
+}
+
+// newWithdrawalTestService wires AdminService with a balance-tracking ledger.
+func newWithdrawalTestService() (*AdminService, *mockAdminRepo, *mockRepo, *mockTransactionRepo) {
+	userRepo := newMockRepo()
+	adminRepo := &mockAdminRepo{
+		requests:    make(map[uuid.UUID]*repository.TopUpRequest),
+		withdrawals: make(map[uuid.UUID]*repository.WithdrawalRequest),
+	}
+	txRepo := &mockTransactionRepo{}
+	svc := NewAdminService(userRepo, adminRepo, &mockSettingsRepo{settings: map[string]string{}}, "secret", nil).
+		WithLedger(NewLedger(txRepo, newMockAccounts()))
+	return svc, adminRepo, userRepo, txRepo
+}
+
+// TestWithdrawalReservesFunds covers M-06: a request used to only look at the
+// balance and leave the money spendable.
+func TestWithdrawalReservesFunds(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000010", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+
+	if _, err := svc.CreateWithdrawalRequest(user.ID, 400); err != nil {
+		t.Fatalf("unexpected error requesting withdrawal: %v", err)
+	}
+
+	balance, _ := txRepo.GetBalance(user.ID)
+	if balance != mockDefaultBalance-400 {
+		t.Errorf("expected the money to be reserved at request time, balance is %.2f", balance)
+	}
+
+	var held float64
+	for _, tx := range txRepo.txs {
+		if tx.Type == string(repository.TransactionTypeWithdrawalHold) {
+			held += tx.Amount
+		}
+	}
+	if held != 400 {
+		t.Errorf("expected a WITHDRAWAL_HOLD entry of 400.00, got %.2f", held)
+	}
+}
+
+// TestWithdrawalCannotExceedBalance checks the guarded debit rather than a
+// check-then-write on a stale read.
+func TestWithdrawalCannotExceedBalance(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000011", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+	txRepo.balances = map[uuid.UUID]float64{user.ID: 100}
+
+	if _, err := svc.CreateWithdrawalRequest(user.ID, 500); err == nil {
+		t.Error("expected a request larger than the balance to be refused")
+	}
+	if balance, _ := txRepo.GetBalance(user.ID); balance != 100 {
+		t.Errorf("a refused request must not touch the balance, got %.2f", balance)
+	}
+}
+
+// TestRejectedWithdrawalReturnsTheMoney makes sure a refusal is not a quiet
+// confiscation now that funds leave the balance up front.
+func TestRejectedWithdrawalReturnsTheMoney(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000012", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+
+	req, err := svc.CreateWithdrawalRequest(user.ID, 250)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := svc.RejectWithdrawalRequest(req.ID, uuid.New()); err != nil {
+		t.Fatalf("unexpected error rejecting: %v", err)
+	}
+	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance {
+		t.Errorf("rejecting must return the reserved money, balance is %.2f", balance)
+	}
+
+	// A second decision on the same request must not double-refund.
+	if err := svc.RejectWithdrawalRequest(req.ID, uuid.New()); err == nil {
+		t.Error("expected a second decision to be refused")
+	}
+	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance {
+		t.Errorf("balance must be restored once, got %.2f", balance)
+	}
+}
+
+// TestApprovedWithdrawalDoesNotDebitTwice: the money already left the balance
+// when the request was created, so approval must move nothing.
+func TestApprovedWithdrawalDoesNotDebitTwice(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000013", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+
+	req, err := svc.CreateWithdrawalRequest(user.ID, 300)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := svc.ApproveWithdrawalRequest(req.ID, uuid.New()); err != nil {
+		t.Fatalf("unexpected error approving: %v", err)
+	}
+
+	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance-300 {
+		t.Errorf("approval must not debit again, balance is %.2f", balance)
+	}
+	if err := svc.ApproveWithdrawalRequest(req.ID, uuid.New()); err == nil {
+		t.Error("expected a repeated approval to be refused")
+	}
+}
+
+// TestMoneyIsNeverCreatedOrDestroyed is the point of system accounts: every
+// movement touches two sides, so the sum of user balances and platform accounts
+// stays where it started. Before the ledger existed a fine simply left the
+// executor's balance and stopped existing.
+func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
+	txRepo := &mockTransactionRepo{}
+	accounts := newMockAccounts()
+	ledger := NewLedger(txRepo, accounts)
+
+	orderRepo := &mockOrderRepo{}
+	settings := &orderMockSettingsRepo{settings: map[string]string{}}
+	orders := NewOrderService(orderRepo, ledger, settings, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+
+	customerID := uuid.New()
+	executorID := uuid.New()
+
+	total := func() float64 {
+		sum := 0.0
+		for _, b := range txRepo.balances {
+			sum += b
+		}
+		for _, b := range accounts.balances {
+			sum += b
+		}
+		return sum
+	}
+
+	// Give both participants a starting balance the way the world does.
+	customerStart, _ := txRepo.GetBalance(customerID)
+	executorStart, _ := txRepo.GetBalance(executorID)
+	opening := customerStart + executorStart
+	if total() != opening {
+		t.Fatalf("fixture is not balanced: %.2f vs %.2f", total(), opening)
+	}
+
+	lat, lon := 55.75, 37.61
+	order, err := orders.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	if accounts.balances[repository.AccountEscrow] != order.HoldAmount {
+		t.Errorf("escrow should hold %.2f, holds %.2f", order.HoldAmount, accounts.balances[repository.AccountEscrow])
+	}
+	if got := total(); got != opening {
+		t.Errorf("holding money changed the total: %.2f, expected %.2f", got, opening)
+	}
+
+	// Run the order to completion: escrow drains into the executor.
+	if err := orderRepo.AssignOrder(order.ID, executorID); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	if err := orders.ExecuteOrder(order.ID, executorID); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if err := orders.Confirm(customerID, order.ID); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if accounts.balances[repository.AccountEscrow] != 0 {
+		t.Errorf("escrow must drain on completion, holds %.2f", accounts.balances[repository.AccountEscrow])
+	}
+	if got := total(); got != opening {
+		t.Errorf("completing the order changed the total: %.2f, expected %.2f", got, opening)
+	}
+
+	// A fine is collected, not destroyed.
+	second, err := orders.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 2", &lat, &lon)
+	if err != nil {
+		t.Fatalf("create second order: %v", err)
+	}
+	if err := orderRepo.AssignOrder(second.ID, executorID); err != nil {
+		t.Fatalf("assign second: %v", err)
+	}
+	if err := orders.RejectAssignedOrder(second.ID, executorID); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	if accounts.balances[repository.AccountFines] <= 0 {
+		t.Error("the penalty should have landed on the fines account")
+	}
+	if got := total(); got != opening {
+		t.Errorf("fining an executor changed the total: %.2f, expected %.2f", got, opening)
 	}
 }

@@ -19,6 +19,11 @@ const (
 	TransactionTypeFine       TransactionType = "FINE"
 	TransactionTypeTopUp      TransactionType = "TOP_UP"
 	TransactionTypeWithdrawal TransactionType = "WITHDRAWAL"
+	// TransactionTypeWithdrawalHold reserves money when a withdrawal is
+	// requested; TransactionTypeWithdrawalPaid records that reservation being
+	// paid out. Together they mirror HOLD/PAYMENT on the order side.
+	TransactionTypeWithdrawalHold TransactionType = "WITHDRAWAL_HOLD"
+	TransactionTypeWithdrawalPaid TransactionType = "WITHDRAWAL_PAID"
 )
 
 // ledgerSigns declares how each transaction type moves a user's balance. This is
@@ -36,7 +41,11 @@ var ledgerSigns = map[TransactionType]int{
 	TransactionTypeHold:       -1,
 	TransactionTypeFine:       -1,
 	TransactionTypeWithdrawal: -1,
-	TransactionTypePayment:    0,
+	// Reserving the money is the debit; paying it out moves nothing, because it
+	// already left the balance when the request was created.
+	TransactionTypeWithdrawalHold: -1,
+	TransactionTypePayment:        0,
+	TransactionTypeWithdrawalPaid: 0,
 }
 
 // LedgerSign reports how a transaction type moves the balance, and whether the

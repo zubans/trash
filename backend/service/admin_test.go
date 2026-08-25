@@ -14,6 +14,7 @@ import (
 type mockAdminRepo struct {
 	users        []*repository.User
 	requests     map[uuid.UUID]*repository.TopUpRequest
+	withdrawals  map[uuid.UUID]*repository.WithdrawalRequest
 	transactions []*repository.Transaction
 }
 
@@ -37,7 +38,7 @@ func (m *mockAdminRepo) GetTopUpRequestByID(id uuid.UUID) (*repository.TopUpRequ
 	return r, nil
 }
 
-func (m *mockAdminRepo) CreateTopUpRequest(userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
 	req := &repository.TopUpRequest{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -49,45 +50,6 @@ func (m *mockAdminRepo) CreateTopUpRequest(userID uuid.UUID, amount float64) (*r
 	return req, nil
 }
 
-func (m *mockAdminRepo) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	req, ok := m.requests[requestID]
-	if !ok {
-		return errors.New("not found")
-	}
-	if req.Status != "PENDING" {
-		return errors.New("request is not in PENDING status")
-	}
-	req.Status = "APPROVED"
-	now := time.Now()
-	req.UpdatedAt = &now
-	req.AdminID = &adminID
-
-	m.transactions = append(m.transactions, &repository.Transaction{
-		ID:        uuid.New(),
-		UserID:    req.UserID,
-		Type:      "TOP_UP",
-		Amount:    req.Amount,
-		AdminID:   &adminID,
-		CreatedAt: time.Now(),
-	})
-	return nil
-}
-
-func (m *mockAdminRepo) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	req, ok := m.requests[requestID]
-	if !ok {
-		return errors.New("not found")
-	}
-	if req.Status != "PENDING" {
-		return errors.New("request is not in PENDING status")
-	}
-	req.Status = "REJECTED"
-	now := time.Now()
-	req.UpdatedAt = &now
-	req.AdminID = &adminID
-	return nil
-}
-
 func (m *mockAdminRepo) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
 	return nil, nil
 }
@@ -96,16 +58,13 @@ func (m *mockAdminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*repository.With
 	return nil, errors.New("not found")
 }
 
-func (m *mockAdminRepo) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
-	return &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}, nil
-}
-
-func (m *mockAdminRepo) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockAdminRepo) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
+func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
+	if m.withdrawals == nil {
+		m.withdrawals = make(map[uuid.UUID]*repository.WithdrawalRequest)
+	}
+	m.withdrawals[req.ID] = req
+	return req, nil
 }
 
 func (m *mockAdminRepo) GetTransactions() ([]*repository.Transaction, error) {
@@ -178,7 +137,8 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
+	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	user := &repository.User{
 		ID:     uuid.New(),
@@ -215,7 +175,8 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
+	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	user := &repository.User{
 		ID:     uuid.New(),
@@ -260,7 +221,8 @@ func TestAdminService_Settings(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
+	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	newSettings := map[string]string{
 		"standard_tariff_coeff": "1.5",
@@ -291,4 +253,40 @@ func (m *mockAdminRepo) CountAdmins() (int, error) {
 // HasPendingWithdrawal reports an existing open withdrawal request.
 func (m *mockAdminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
 	return false, nil
+}
+
+// LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
+// that it lives in AdminService.
+func (m *mockAdminRepo) LockWithdrawalRequest(q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
+	if req, ok := m.withdrawals[requestID]; ok {
+		return req, nil
+	}
+	return nil, repository.ErrConflict
+}
+
+func (m *mockAdminRepo) SetWithdrawalStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+	req, ok := m.withdrawals[requestID]
+	if !ok || req.Status != "PENDING" {
+		return repository.ErrConflict
+	}
+	req.Status = status
+	req.AdminID = &adminID
+	return nil
+}
+
+func (m *mockAdminRepo) LockTopUpRequest(q repository.Querier, requestID uuid.UUID) (*repository.TopUpRequest, error) {
+	if req, ok := m.requests[requestID]; ok {
+		return req, nil
+	}
+	return nil, repository.ErrConflict
+}
+
+func (m *mockAdminRepo) SetTopUpStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+	req, ok := m.requests[requestID]
+	if !ok || req.Status != "PENDING" {
+		return repository.ErrConflict
+	}
+	req.Status = status
+	req.AdminID = &adminID
+	return nil
 }
