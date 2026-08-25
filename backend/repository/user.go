@@ -85,18 +85,6 @@ type repo struct {
 
 // New creates a new UserRepository backed by the provided database connection.
 func New(db *sql.DB) UserRepository {
-	_, _ = db.Exec(`
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) NULL;
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255) NULL;
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_code VARCHAR(10) NULL;
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP WITH TIME ZONE NULL;
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100) NOT NULL DEFAULT '';
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(100) NOT NULL DEFAULT '';
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS patronymic VARCHAR(100) NOT NULL DEFAULT '';
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE NULL;
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_attempts INT NOT NULL DEFAULT 0;
-	`)
 	return &repo{db: db}
 }
 

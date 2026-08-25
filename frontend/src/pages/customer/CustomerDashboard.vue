@@ -214,15 +214,19 @@
     <!-- Top Floating Toast Notification for Incoming Messages -->
     <div
       v-if="chatToast"
-      class="chat-top-toast shadow-lg p-3 rounded-lg d-flex align-items-center cursor-pointer"
+      class="toast info chat-toast cursor-pointer"
       @click="openChatByToast"
     >
-      <div class="toast-chat-icon mr-3">💬</div>
-      <div class="flex-grow-1 overflow-hidden">
-        <div class="font-bold text-xs text-white">{{ chatToast.title }}</div>
-        <div class="text-xs text-white-75 truncate">{{ chatToast.text }}</div>
+      <div class="toast-icon">
+        <i class="ph-bold ph-chat-circle-dots"></i>
       </div>
-      <button type="button" class="toast-close-btn ml-2 text-white" @click.stop="chatToast = null">✕</button>
+      <div class="toast-content">
+        <div class="toast-title">{{ chatToast.title }}</div>
+        <div class="toast-message">{{ chatToast.text }}</div>
+      </div>
+      <button type="button" class="toast-close" @click.stop.prevent="chatToast = null">
+        <i class="ph ph-x"></i>
+      </button>
     </div>
 
     <!-- Sliding Chat Panel (Telegram Style) -->

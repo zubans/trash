@@ -97,36 +97,9 @@ type chatRepo struct {
 	db *sql.DB
 }
 
-// NewChatRepository creates a new ChatRepository and ensures required columns exist.
+// NewChatRepository creates a new ChatRepository. Schema changes belong in
+// migrations, not here.
 func NewChatRepository(db *sql.DB) ChatRepository {
-	_, _ = db.Exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NULL;`)
-	_, _ = db.Exec(`
-		CREATE TABLE IF NOT EXISTS support_chats (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-			is_banned BOOLEAN NOT NULL DEFAULT FALSE,
-			banned_until TIMESTAMPTZ NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		);
-		ALTER TABLE support_chats ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE;
-		ALTER TABLE support_chats ADD COLUMN IF NOT EXISTS banned_until TIMESTAMPTZ NULL;
-		CREATE TABLE IF NOT EXISTS support_messages (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			chat_id UUID NOT NULL REFERENCES support_chats(id) ON DELETE CASCADE,
-			sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			text TEXT NOT NULL DEFAULT '',
-			status VARCHAR(32) NOT NULL DEFAULT 'sent',
-			file_url TEXT NULL,
-			file_name TEXT NULL,
-			file_type VARCHAR(32) NULL,
-			file_size BIGINT NULL,
-			is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-			read_at TIMESTAMPTZ NULL,
-			updated_at TIMESTAMPTZ NULL
-		);
-	`)
 	return &chatRepo{db: db}
 }
 

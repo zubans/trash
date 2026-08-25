@@ -47,6 +47,14 @@ func main() {
 		log.Fatalf("JWT_SECRET environment variable is required")
 	}
 
+	// Schema first: the process must not start against a half-built schema.
+	// Set SKIP_MIGRATIONS=1 when migrations are applied by a separate step.
+	if getEnv("SKIP_MIGRATIONS", "") == "" {
+		if err := repository.Migrate(db, getEnv("MIGRATIONS_DIR", "migrations")); err != nil {
+			log.Fatalf("Failed to apply migrations: %v", err)
+		}
+	}
+
 	// Repositories
 	userRepo := repository.New(db)
 	adminRepo := repository.NewAdminRepository(db)
@@ -71,7 +79,7 @@ func main() {
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
-	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, transactionRepo, userRepo, catalogRepo)
+	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, transactionRepo, userRepo, catalogRepo, chatRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo, geocoder)
@@ -129,12 +137,9 @@ func main() {
 	r.Use(middleware.MaxBodyBytes(1 << 20))
 
 	// registerAPIRoutes wires every handler onto the given chi.Router. It is
-	// mounted twice below so that BOTH /api/* (used by the web build via nginx
-	// and by the rebuilt mobile app) and the legacy root paths /* (used by
-	// already-installed mobile APKs that talk directly to port 8089) keep
-	// working. Both mounts carry the same authentication and authorization
-	// middleware; the legacy mount should be removed once installed clients
-	// have been rebuilt.
+	// mounted under /api/* and, while LEGACY_ROOT_ROUTES is enabled, also at the
+	// root for mobile builds that predate the /api prefix. Both mounts carry the
+	// same authentication and authorization middleware.
 	registerAPIRoutes := func(r chi.Router) {
 		r.Get("/health", ph.HealthHandler)
 		r.With(registerLimiter.Middleware).Post("/register", ph.RegisterHandler)
@@ -262,9 +267,15 @@ func main() {
 
 	// Primary mount: /api/* (web via nginx + rebuilt mobile app).
 	r.Route("/api", registerAPIRoutes)
-	// Legacy mount: /* (already-installed mobile APKs talking directly to port
-	// 8089). Kept until all clients are rebuilt with the /api interceptor.
-	registerAPIRoutes(r)
+
+	// Legacy mount: the same API at the root, for installed APKs that predate
+	// the /api prefix. It doubles the exposed surface, so it is a temporary
+	// compatibility measure: set LEGACY_ROOT_ROUTES=0 once telemetry shows no
+	// client hits the root paths any more.
+	if getEnv("LEGACY_ROOT_ROUTES", "1") != "0" {
+		log.Println("LEGACY_ROOT_ROUTES enabled: the API is also served without the /api prefix. Disable it once all mobile clients are rebuilt.")
+		registerAPIRoutes(r)
+	}
 
 	// Release APKs are public by design. Uploaded chat attachments are not:
 	// they are served by an authenticated handler that verifies the caller

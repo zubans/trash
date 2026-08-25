@@ -108,8 +108,6 @@ type serviceCatalogRepo struct {
 
 // NewServiceCatalogRepository creates a new service catalog repository.
 func NewServiceCatalogRepository(db *sql.DB) ServiceCatalogRepository {
-	_, _ = db.Exec(`ALTER TABLE service_nodes ADD COLUMN IF NOT EXISTS requires_verification BOOLEAN NOT NULL DEFAULT FALSE;`)
-	_, _ = db.Exec(`ALTER TABLE service_nodes ADD COLUMN IF NOT EXISTS min_age INT NOT NULL DEFAULT 0;`)
 	return &serviceCatalogRepo{db: db}
 }
 

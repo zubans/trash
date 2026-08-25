@@ -175,3 +175,85 @@ func TestEndShiftEarlyChargesPenalty(t *testing.T) {
 		t.Errorf("expected a 50 penalty for leaving a 3h shift early, got %.2f", fined)
 	}
 }
+
+// TestAcceptBidChecksExecutorAtAcceptTime covers the rules that were missing
+// while the whole accept flow lived in the repository: an executor had to be
+// eligible when the bid was placed, but nothing was re-checked when the
+// customer accepted it.
+func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
+	bidRepo := &mockBidRepo{}
+	orderRepo := &mockOrderRepo{}
+	shiftRepo := &mockShiftRepo{}
+	txRepo := &mockTransactionRepo{}
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, txRepo, newMockUserRepo(), newMockCatalogRepo(), nil)
+
+	customerID := uuid.New()
+	executorID := uuid.New()
+	order := &repository.Order{
+		ID:               uuid.New(),
+		CustomerID:       customerID,
+		ServiceVariantID: constructionVariantID,
+		Status:           repository.OrderStatusSearching,
+	}
+	orderRepo.orders = append(orderRepo.orders, order)
+
+	bid, err := bidRepo.CreateBid(order.ID, executorID, 350.0)
+	if err != nil {
+		t.Fatalf("failed to seed bid: %v", err)
+	}
+
+	// The executor placed the bid but is no longer on shift.
+	if err := srv.AcceptBid(bid.ID, customerID); err == nil {
+		t.Error("expected accept to fail while the executor has no active shift")
+	}
+	if bid.Status != "PENDING" {
+		t.Errorf("bid must stay pending after a failed accept, got %s", bid.Status)
+	}
+
+	// Back on shift: the bid can be accepted, and the hold is taken.
+	shiftRepo.shifts = append(shiftRepo.shifts, &repository.Shift{
+		ID:           uuid.New(),
+		ExecutorID:   executorID,
+		Status:       repository.ShiftStatusActive,
+		PlannedEndAt: time.Now().Add(time.Hour),
+	})
+	if err := srv.AcceptBid(bid.ID, customerID); err != nil {
+		t.Fatalf("expected accept to succeed: %v", err)
+	}
+	if balance, _ := txRepo.GetBalance(customerID); balance != mockDefaultBalance-350.0 {
+		t.Errorf("expected the offer to be held, balance is %.2f", balance)
+	}
+	if order.HoldAmount != 350.0 || order.Status != repository.OrderStatusAssigned {
+		t.Errorf("expected the order assigned at 350.00, got %s / %.2f", order.Status, order.HoldAmount)
+	}
+
+	// A second accept must not double-charge.
+	if err := srv.AcceptBid(bid.ID, customerID); err == nil {
+		t.Error("expected a repeated accept to be refused")
+	}
+	if balance, _ := txRepo.GetBalance(customerID); balance != mockDefaultBalance-350.0 {
+		t.Errorf("balance must be charged once, got %.2f", balance)
+	}
+}
+
+// TestAcceptBidRejectsForeignCustomer keeps ownership enforcement in place after
+// the move out of the repository.
+func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
+	bidRepo := &mockBidRepo{}
+	orderRepo := &mockOrderRepo{}
+	shiftRepo := &mockShiftRepo{}
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, &mockTransactionRepo{}, newMockUserRepo(), newMockCatalogRepo(), nil)
+
+	order := &repository.Order{
+		ID:               uuid.New(),
+		CustomerID:       uuid.New(),
+		ServiceVariantID: constructionVariantID,
+		Status:           repository.OrderStatusSearching,
+	}
+	orderRepo.orders = append(orderRepo.orders, order)
+	bid, _ := bidRepo.CreateBid(order.ID, uuid.New(), 100.0)
+
+	if err := srv.AcceptBid(bid.ID, uuid.New()); err == nil {
+		t.Error("expected a stranger to be refused")
+	}
+}
