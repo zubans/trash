@@ -69,13 +69,18 @@ func main() {
 	catalogRepo := repository.NewServiceCatalogRepository(db)
 	appReleaseRepo := repository.NewAppReleaseRepository(db)
 	reviewRepo := repository.NewReviewRepository(db)
+	refreshRepo := repository.NewRefreshTokenRepository(db)
 	executorGeoRepo := repository.NewExecutorGeoRepository(db)
 
 	// Services
 	geocoder := service.NewGeocoder(db)
 	mailer := service.NewSmtpMailSender()
-	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder, mailer)
-	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, jwtSecret, mailer)
+	// AuthService owns everything session related: issuing access tokens,
+	// rotating refresh tokens and blacklisting revoked access tokens.
+	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder, mailer).
+		WithSessionStorage(refreshRepo, tokenRepo)
+	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
+		WithSessions(authService)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
@@ -97,6 +102,15 @@ func main() {
 	shiftWorker := worker.NewShiftWorker(shiftService)
 	shiftWorker.Start(1 * time.Minute)
 
+	// Expired refresh tokens are dropped daily; used ones are kept until they
+	// expire because replay detection needs to recognise them.
+	go func() {
+		authService.CleanupExpiredRefreshTokens()
+		for range time.Tick(24 * time.Hour) {
+			authService.CleanupExpiredRefreshTokens()
+		}
+	}()
+
 	// Restore auto-end timers for existing active shifts on boot
 	if activeShifts, err := shiftRepo.GetActiveShifts(); err == nil {
 		for _, s := range activeShifts {
@@ -105,7 +119,7 @@ func main() {
 	}
 
 	// Middleware
-	authMiddleware := middleware.NewAuthMiddleware(userRepo, adminService, jwtSecret)
+	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret)
 
 	// Handlers
 	ph := handler.NewPublicHandler(authService)
@@ -144,6 +158,10 @@ func main() {
 		r.Get("/health", ph.HealthHandler)
 		r.With(registerLimiter.Middleware).Post("/register", ph.RegisterHandler)
 		r.With(loginLimiter.Middleware).Post("/login", ph.LoginHandler)
+		// Refreshing is unauthenticated by design: the access token is expired
+		// by the time a client needs this. The refresh token is the credential,
+		// so the endpoint is rate limited like the other credential endpoints.
+		r.With(loginLimiter.Middleware).Post("/auth/refresh", ph.RefreshHandler)
 		r.Get("/auth/verify-email", ph.VerifyEmailHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/forgot-password", ph.ForgotPasswordHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/reset-password", ph.ResetPasswordHandler)
@@ -204,7 +222,7 @@ func main() {
 			r.Post("/orders/{id}/reviews", rh.CreateReview)
 			r.Get("/orders/{id}/reviews/mine", rh.GetOrderReview)
 			r.Post("/finances/withdrawals", ah.CreateWithdrawalRequestHandler)
-			r.Post("/logout", ah.LogoutHandler)
+			r.Post("/logout", ph.LogoutHandler)
 		})
 
 		// Authenticated executor routes

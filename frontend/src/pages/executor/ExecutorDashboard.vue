@@ -96,7 +96,10 @@
           <div class="bc-label">Доступный баланс</div>
           <div class="balance-bottom-row">
             <div class="bc-value">
-              {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              <template v-if="balanceLoaded">
+                {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              </template>
+              <span v-else class="bc-value-placeholder">—</span>
               <span class="bc-currency">{{ currencySymbol }}</span>
             </div>
             <button type="button" class="btn-balance" @click="openWithdrawalModal">
@@ -547,7 +550,7 @@
                 type="number"
                 class="form-input"
                 min="1"
-                :max="balance"
+                :max="balance ?? 0"
                 required
               />
               <i class="ph ph-currency-rub input-icon"></i>
@@ -555,11 +558,11 @@
             <div class="quick-amounts">
               <button type="button" class="amount-pill" @click="withdrawalAmount = (Number(withdrawalAmount) || 0) + 500">+ 500 ₽</button>
               <button type="button" class="amount-pill" @click="withdrawalAmount = (Number(withdrawalAmount) || 0) + 1000">+ 1 000 ₽</button>
-              <button type="button" class="amount-pill" @click="withdrawalAmount = balance">Всё ({{ Number(balance).toFixed(2) }} ₽)</button>
+              <button type="button" class="amount-pill" :disabled="!balanceLoaded" @click="withdrawalAmount = balance ?? 0">Всё ({{ Number(balance ?? 0).toFixed(2) }} ₽)</button>
             </div>
           </div>
 
-          <button type="submit" class="btn-submit-topup" :disabled="submittingWithdrawal || withdrawalAmount <= 0 || withdrawalAmount > balance">
+          <button type="submit" class="btn-submit-topup" :disabled="submittingWithdrawal || !balanceLoaded || withdrawalAmount <= 0 || withdrawalAmount > (balance ?? 0)">
             <span v-if="submittingWithdrawal" class="spinner-sm"></span>
             <template v-else>
               Отправить заявку <i class="ph-bold ph-paper-plane-tilt"></i>
@@ -619,7 +622,7 @@ import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
-import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs, getRefreshToken } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceVariants, type ServiceNode } from '../../api/services'
@@ -643,7 +646,11 @@ export default defineComponent({
     const userEmail = ref('')
     const fullName = ref('')
     const baseAddress = ref('')
-    const balance = ref(0)
+    // The balance is not kept here: it lives in the auth store, so every screen
+    // shows the same value and a refresh benefits all of them at once. null
+    // means "not loaded yet" and renders as a placeholder rather than 0.
+    const balance = computed(() => authStore.balance)
+    const balanceLoaded = computed(() => authStore.balance !== null)
     const status = ref('ACTIVE')
     const showProfileModal = ref(false)
 
@@ -711,6 +718,8 @@ export default defineComponent({
         successMsg.value = 'Вы отказались от заказа'
         showOrderDetailsModal.value = false
         fetchAssignedOrders()
+        // Refusing an assigned order is fined.
+        authStore.fetchMe()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка отказа от заказа'
       }
@@ -818,17 +827,18 @@ export default defineComponent({
     }
 
     const openWithdrawalModal = () => {
-      withdrawalAmount.value = balance.value > 0 ? balance.value : 0
+      withdrawalAmount.value = (balance.value ?? 0) > 0 ? (balance.value as number) : 0
       showWithdrawalModal.value = true
     }
 
     const submitWithdrawal = async () => {
-      if (withdrawalAmount.value <= 0 || withdrawalAmount.value > balance.value || submittingWithdrawal.value) return
+      if (withdrawalAmount.value <= 0 || withdrawalAmount.value > (balance.value ?? 0) || submittingWithdrawal.value) return
       submittingWithdrawal.value = true
       try {
         await api.post('/finances/withdrawals', { amount: withdrawalAmount.value })
         successMsg.value = 'Заявка на вывод средства отправлена администратору!'
         showWithdrawalModal.value = false
+        authStore.fetchMe()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка отправки заявки на вывод'
       } finally {
@@ -884,21 +894,16 @@ export default defineComponent({
     const currentUserId = computed(() => authStore.userID)
 
     const fetchProfile = async () => {
-      if (authStore.user) {
-        phone.value = authStore.user.phone || authStore.phone || ''
-        balance.value = authStore.user.balance || authStore.balance || 0
-        status.value = authStore.user.status || authStore.status || 'ACTIVE'
+      // One call, one source of truth: the store fetches /auth/me and every
+      // consumer of the balance updates with it.
+      const me = await authStore.fetchMe()
+      if (me) {
+        phone.value = me.phone || phone.value
+        userEmail.value = me.email || ''
+        status.value = me.status || status.value
+        fullName.value = authStore.fullName
       }
       try {
-        const res = await api.get('/auth/me')
-        if (res.data) {
-          phone.value = res.data.phone || phone.value
-          userEmail.value = res.data.email || ''
-          balance.value = res.data.balance ?? balance.value
-          status.value = res.data.status || status.value
-          const parts = [res.data.last_name, res.data.first_name, res.data.patronymic].filter((p: string) => p && p.trim())
-          fullName.value = parts.join(' ')
-        }
         const userProfRes = await api.get('/user/profile')
         if (userProfRes.data) {
           if (userProfRes.data.last_geo) {
@@ -918,11 +923,9 @@ export default defineComponent({
           baseAddress.value = custProfRes.data.address
         }
       } catch (err) {
-        // Fallback to authStore
-        if (authStore.user) {
-          phone.value = authStore.user.phone || ''
-          balance.value = authStore.user.balance || 0
-        }
+        // Profile extras (base address, last position) are optional: failing to
+        // load them must not disturb what is already on screen.
+        console.warn('[ExecutorDashboard] failed to load profile extras', err)
       }
     }
 
@@ -973,6 +976,8 @@ export default defineComponent({
         await api.post('/executor/shifts/early-end')
         successMsg.value = 'Смена завершена'
         await fetchActiveShift()
+        // Ending a shift early carries a penalty, so the balance just changed.
+        authStore.fetchMe()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка завершения смены'
       } finally {
@@ -1431,7 +1436,7 @@ export default defineComponent({
 
     const handleLogout = async () => {
       try {
-        await api.post('/logout')
+        await api.post('/logout', { refresh_token: getRefreshToken() })
       } catch (e) {
         console.error(e)
       } finally {
@@ -1441,6 +1446,14 @@ export default defineComponent({
     }
 
     let intervalId: any = null
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      authStore.fetchMe()
+      fetchActiveShift()
+      fetchAssignedOrders()
+      fetchUnreadSummary()
+    }
 
     onMounted(async () => {
       fetchServiceVariants()
@@ -1460,10 +1473,19 @@ export default defineComponent({
         fetchAvailableOrders()
         fetchUnreadSummary()
         checkSupportNotification()
+        // The balance moves without any action from this screen: an order the
+        // customer confirms, a fine, an approved withdrawal. Poll it with the
+        // rest instead of leaving a number from screen-open time on display.
+        authStore.fetchMe()
       }, pollIntervalMs)
+
+      // A backgrounded WebView stops its timers, so whatever was on screen when
+      // the app was suspended is stale on return.
+      document.addEventListener('visibilitychange', onVisibilityChange)
     })
 
     onUnmounted(() => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       closeInlineChat()
       if (intervalId) clearInterval(intervalId)
       if (countdownIntervalId) clearInterval(countdownIntervalId)
@@ -1472,6 +1494,7 @@ export default defineComponent({
     })
 
     return {
+      balanceLoaded,
       showProfileModal,
       userEmail,
       baseAddress,
@@ -1810,6 +1833,8 @@ export default defineComponent({
   position: relative; overflow: hidden;
 }
 .bc-label { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.bc-value-placeholder { opacity: 0.5; }
 
 .balance-bottom-row {
   display: flex;

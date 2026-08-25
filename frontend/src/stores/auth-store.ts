@@ -1,5 +1,23 @@
 import { defineStore } from 'pinia'
-import { getCookie } from '../services/api'
+import api, { getCookie, clearSession, storeSession } from '../services/api'
+
+// CurrentUser mirrors the payload of GET /auth/me. It is the single source of
+// truth for the signed-in user across every screen: pages must not keep their
+// own copy of the balance, or they end up showing values of different ages.
+export interface CurrentUser {
+  id: string
+  phone: string
+  email: string
+  role: string
+  status: string
+  balance: number
+  first_name: string
+  last_name: string
+  patronymic: string
+  birth_date: string
+  age: number
+  is_verified: boolean
+}
 
 function parseJwtSub(token: string): string {
   try {
@@ -63,20 +81,34 @@ export const useAuthStore = defineStore('auth', {
       role: getStoredItem('role') || getCookie('role') || '',
       phone: getStoredItem('phone') || getCookie('phone') || '',
       currency: 'RUB',
+      // null means "not loaded yet" and is deliberately distinct from a zero
+      // balance, so the UI can show a placeholder instead of a wrong 0.
+      user: null as CurrentUser | null,
+      userLoading: false,
+      userError: '',
     }
   },
   getters: {
     isAuthenticated: (state) => !!state.token,
+    balance: (state) => state.user?.balance ?? null,
+    fullName: (state) => {
+      if (!state.user) return ''
+      return [state.user.last_name, state.user.first_name, state.user.patronymic]
+        .filter((part) => part && part.trim())
+        .join(' ')
+    },
     isAdmin: (state) => state.role === 'ADMIN',
     isCustomer: (state) => state.role === 'CUSTOMER',
     isExecutor: (state) => state.role === 'EXECUTOR',
   },
   actions: {
-    login(token: string, role: string, phone: string, userID: string) {
+    login(token: string, role: string, phone: string, userID: string, refreshToken?: string) {
       this.token = token
       this.userID = userID
       this.role = role
       this.phone = phone
+      this.user = null
+      storeSession(token, refreshToken)
       setCookie('token', token, 1)
       setCookie('userID', userID, 1)
       setCookie('role', role, 1)
@@ -92,14 +124,33 @@ export const useAuthStore = defineStore('auth', {
       this.role = ''
       this.phone = ''
       this.currency = 'RUB'
-      document.cookie = 'token=; Max-Age=0; path=/;'
-      document.cookie = 'userID=; Max-Age=0; path=/;'
-      document.cookie = 'role=; Max-Age=0; path=/;'
-      document.cookie = 'phone=; Max-Age=0; path=/;'
-      removeStoredItem('token')
-      removeStoredItem('userID')
-      removeStoredItem('role')
-      removeStoredItem('phone')
+      this.user = null
+      clearSession()
+    },
+
+    /**
+     * Loads the signed-in user. Every screen that shows the balance calls this
+     * instead of fetching /auth/me on its own, so all of them display the same
+     * number at the same time.
+     */
+    async fetchMe(): Promise<CurrentUser | null> {
+      if (!this.token) return null
+      this.userLoading = true
+      try {
+        const res = await api.get('/auth/me')
+        this.user = res.data as CurrentUser
+        this.role = this.user.role || this.role
+        this.phone = this.user.phone || this.phone
+        this.userError = ''
+        return this.user
+      } catch (err: any) {
+        // The previous value is kept: a failed refresh must not blank out a
+        // balance that was correct a moment ago.
+        this.userError = err?.response?.data || 'Не удалось обновить профиль'
+        return this.user
+      } finally {
+        this.userLoading = false
+      }
     },
     setCurrency(currency: string) {
       this.currency = currency || 'RUB'

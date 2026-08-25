@@ -2,9 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"healthlogin/backend/middleware"
 	"healthlogin/backend/service"
 )
 
@@ -39,9 +42,12 @@ type RegisterRequest struct {
 	Lon        *float64 `json:"lon,omitempty"`
 }
 
-// AuthResponse returns a JWT after successful login.
+// AuthResponse returns the token pair after a successful login or refresh.
+// The refresh token is opaque and single-use: every refresh returns a new one.
 type AuthResponse struct {
-	Token string `json:"token"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresAt    string `json:"expires_at"`
 }
 
 // RegisterResponse returns the created user without sensitive fields.
@@ -116,15 +122,79 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.authService.GenerateJWT(user)
+	pair, err := h.authService.IssueTokenPair(user)
 	if err != nil {
 		http.Error(w, "Could not generate token", http.StatusInternalServerError)
 		return
 	}
 
-	resp := AuthResponse{Token: token}
+	writeTokenPair(w, pair)
+}
+
+// writeTokenPair renders a token pair. Responses carrying credentials must not
+// be stored by any cache along the way.
+func writeTokenPair(w http.ResponseWriter, pair *service.TokenPair) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(AuthResponse{
+		Token:        pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresAt:    pair.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// RefreshHandler exchanges a refresh token for a new pair.
+//
+// It is intentionally unauthenticated: by the time a client needs it, the
+// access token has already expired. The refresh token is the credential.
+func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	pair, err := h.authService.Refresh(strings.TrimSpace(req.RefreshToken))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidRefreshToken) {
+			// One answer for every failure mode: unknown, expired, already
+			// used or revoked must not be distinguishable.
+			http.Error(w, "Invalid or expired refresh token", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "Could not refresh session", http.StatusInternalServerError)
+		return
+	}
+
+	writeTokenPair(w, pair)
+}
+
+// LogoutHandler ends the current session. The access token is blacklisted for
+// the rest of its lifetime and the refresh token, when the client sends one, is
+// revoked — without that, logging out would leave a credential that can mint
+// fresh access tokens for another 30 days.
+func (h *PublicHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	tokenStr, ok := r.Context().Value(middleware.TokenKey).(string)
+	if !ok || tokenStr == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// The body is optional: older clients do not send the refresh token.
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if err := h.authService.Logout(tokenStr, strings.TrimSpace(req.RefreshToken)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "logged out successfully"})
 }
 
 // MeHandler returns the current authenticated user details.

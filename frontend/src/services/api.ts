@@ -117,36 +117,123 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Handle auto logout when session expires (401 Unauthorized only)
+// Session handling.
+//
+// The access token is short-lived, so a 401 is the normal end of its life, not
+// a reason to throw the user out. On the first 401 the client exchanges its
+// refresh token for a new pair and replays the original request. Only when the
+// refresh itself fails is the session really over.
+
+const REFRESH_TOKEN_KEY = 'refreshToken'
+
+export function getRefreshToken(): string {
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function storeSession(token: string, refreshToken?: string) {
+  try {
+    localStorage.setItem('token', token)
+    if (refreshToken) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+    }
+  } catch {
+    // localStorage may be unavailable in some environments
+  }
+  setSessionCookie('token', token)
+}
+
+function setSessionCookie(name: string, value: string) {
+  const date = new Date()
+  date.setTime(date.getTime() + 24 * 60 * 60 * 1000)
+  document.cookie = `${name}=${value}; expires=${date.toUTCString()}; path=/; SameSite=Lax`
+}
+
+export function clearSession() {
+  for (const name of ['token', 'userID', 'role', 'phone']) {
+    document.cookie = `${name}=; Max-Age=0; path=/;`
+  }
+  try {
+    for (const key of ['token', 'userID', 'role', 'phone', REFRESH_TOKEN_KEY]) {
+      localStorage.removeItem(key)
+    }
+  } catch {
+    // localStorage may be unavailable in some environments
+  }
+}
+
+function redirectToLogin() {
+  if (Capacitor.isNativePlatform()) {
+    if (window.location.hash !== '#/login') {
+      window.location.hash = '#/login'
+    }
+  } else if (window.location.pathname !== '/login') {
+    window.location.href = '/login'
+  }
+}
+
+// A single in-flight refresh shared by every request that hit a 401 at the same
+// time. Without it, a screen that fires five parallel requests would send five
+// refreshes, and rotation would make four of them look like a replay — which
+// the backend answers by ending every session.
+let refreshInFlight: Promise<string> | null = null
+
+async function refreshSession(): Promise<string> {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) {
+    throw new Error('no refresh token')
+  }
+
+  // A bare axios call: this must not go through the interceptor below, or a
+  // failing refresh would try to refresh itself.
+  const res = await axios.post(
+    `${api.defaults.baseURL || ''}/auth/refresh`,
+    { refresh_token: refreshToken },
+    { headers: { 'Content-Type': 'application/json' } }
+  )
+
+  const token: string = res.data?.token
+  if (!token) {
+    throw new Error('refresh response carried no token')
+  }
+  storeSession(token, res.data?.refresh_token)
+  return token
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      // Clear authentication cookies and localStorage
-      document.cookie = 'token=; Max-Age=0; path=/;'
-      document.cookie = 'userID=; Max-Age=0; path=/;'
-      document.cookie = 'role=; Max-Age=0; path=/;'
-      document.cookie = 'phone=; Max-Age=0; path=/;'
-      try {
-        localStorage.removeItem('token')
-        localStorage.removeItem('userID')
-        localStorage.removeItem('role')
-        localStorage.removeItem('phone')
-      } catch {
-        // localStorage may be unavailable in some environments
-      }
+  async (error) => {
+    const original = error.config
+    const status = error.response?.status
 
-      if (Capacitor.isNativePlatform()) {
-        if (window.location.hash !== '#/login') {
-          window.location.hash = '#/login'
-        }
-      } else {
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
-        }
+    if (status !== 401 || !original || original._retriedAfterRefresh) {
+      if (status === 401) {
+        clearSession()
+        redirectToLogin()
       }
+      return Promise.reject(error)
     }
-    return Promise.reject(error)
+
+    original._retriedAfterRefresh = true
+
+    try {
+      if (!refreshInFlight) {
+        refreshInFlight = refreshSession().finally(() => {
+          refreshInFlight = null
+        })
+      }
+      const token = await refreshInFlight
+      original.headers = original.headers || {}
+      original.headers.Authorization = `Bearer ${token}`
+      return api(original)
+    } catch {
+      clearSession()
+      redirectToLogin()
+      return Promise.reject(error)
+    }
   }
 )
 

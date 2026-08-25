@@ -177,9 +177,8 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "secret", nil)
+	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
 
 	user := &repository.User{
 		ID:     uuid.New(),
@@ -215,9 +214,8 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "secret", nil)
+	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
 
 	user := &repository.User{
 		ID:     uuid.New(),
@@ -261,9 +259,8 @@ func TestAdminService_Settings(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "secret", nil)
+	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
 
 	newSettings := map[string]string{
 		"standard_tariff_coeff": "1.5",

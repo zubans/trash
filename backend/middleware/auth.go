@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/repository"
-	"healthlogin/backend/service"
 )
 
 // Context keys used by the middleware.
@@ -24,22 +23,28 @@ const (
 	RoleKey contextKey = "role"
 )
 
+// SessionChecker reports whether an access token has been blacklisted. It is
+// satisfied by *service.AuthService; the middleware only needs this much.
+type SessionChecker interface {
+	IsAccessTokenRevoked(token string) (bool, error)
+}
+
 // AuthMiddleware validates JWTs and injects user information into the request context.
 type AuthMiddleware struct {
-	userRepo     repository.UserRepository
-	adminService *service.AdminService
-	secret       []byte
+	userRepo repository.UserRepository
+	sessions SessionChecker
+	secret   []byte
 }
 
 // NewAuthMiddleware creates an AuthMiddleware.
-func NewAuthMiddleware(userRepo repository.UserRepository, adminService *service.AdminService, jwtSecret string) *AuthMiddleware {
+func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionChecker, jwtSecret string) *AuthMiddleware {
 	if jwtSecret == "" {
 		jwtSecret = "dev-secret-change-me"
 	}
 	return &AuthMiddleware{
-		userRepo:     userRepo,
-		adminService: adminService,
-		secret:       []byte(jwtSecret),
+		userRepo: userRepo,
+		sessions: sessions,
+		secret:   []byte(jwtSecret),
 	}
 }
 
@@ -103,9 +108,9 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check revocation if admin service is available.
-		if m.adminService != nil {
-			revoked, err := m.adminService.IsTokenRevoked(tokenStr)
+		// Check revocation if session storage is available.
+		if m.sessions != nil {
+			revoked, err := m.sessions.IsAccessTokenRevoked(tokenStr)
 			if err != nil {
 				http.Error(w, "Token check failed", http.StatusInternalServerError)
 				return
