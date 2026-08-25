@@ -71,6 +71,7 @@ func main() {
 	reviewRepo := repository.NewReviewRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	executorGeoRepo := repository.NewExecutorGeoRepository(db)
+	reconcileRepo := repository.NewReconciliationRepository(db)
 
 	// Services
 	geocoder := service.NewGeocoder(db)
@@ -80,7 +81,8 @@ func main() {
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder, mailer).
 		WithSessionStorage(refreshRepo, tokenRepo)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
-		WithSessions(authService)
+		WithSessions(authService).
+		WithReconciliation(reconcileRepo)
 	orderService := service.NewOrderService(orderRepo, transactionRepo, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, transactionRepo, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
@@ -101,6 +103,11 @@ func main() {
 
 	shiftWorker := worker.NewShiftWorker(shiftService)
 	shiftWorker.Start(1 * time.Minute)
+
+	// Nightly books check. It reports and never repairs: a balance that drifted
+	// away from its ledger is a bug worth seeing, not a number to overwrite.
+	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, 0.01)
+	reconcileWorker.Start(24 * time.Hour)
 
 	// Expired refresh tokens are dropped daily; used ones are kept until they
 	// expire because replay detection needs to recognise them.
@@ -264,6 +271,7 @@ func main() {
 			r.Post("/admin/finances/withdrawals/{id}/approve", ah.ApproveWithdrawalRequestsHandler)
 			r.Post("/admin/finances/withdrawals/{id}/reject", ah.RejectWithdrawalRequestsHandler)
 			r.Get("/admin/transactions", ah.GetTransactionsHandler)
+			r.Get("/admin/finances/reconciliation", ah.GetReconciliationHandler)
 			r.Get("/admin/settings", ah.GetSettingsHandler)
 			r.Post("/admin/settings", ah.UpdateSettingsHandler)
 			r.Get("/admin/support/chats", ch.GetAdminSupportChatListHandler)
