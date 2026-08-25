@@ -20,15 +20,17 @@ KEYSTORE_PASS_CMD = if [ -f '$(KEYSTORE_PASSWORD_FILE)' ]; then cat '$(KEYSTORE_
 
 # Database connection for host-side Go tools (bump-android-version, release).
 # The db container does not publish port 5432 to the host (see docker-compose.yml),
-# so connect via the container IP; falls back to localhost when the container
-# is not running (e.g. a local postgres). Credentials come from .env.
+# so connect via the container IP. When the container or the .env values are
+# unavailable, the variables stay empty and the Go tools fall back to their
+# built-in defaults (localhost, healthlogin/healthlogin).
+# Note: exported make variables do NOT reach the $(shell) function, so the
+# variables are passed to the Go tools explicitly via DB_ENV.
 DB_CONTAINER_IP := $(shell docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' healthlogin_db 2>/dev/null)
-ifneq ($(DB_CONTAINER_IP),)
-export DB_HOST ?= $(DB_CONTAINER_IP)
-endif
-export DB_USER ?= $(shell grep '^DB_USER=' .env 2>/dev/null | cut -d= -f2-)
-export DB_PASSWORD ?= $(shell grep '^DB_PASSWORD=' .env 2>/dev/null | cut -d= -f2-)
-export DB_NAME ?= $(shell grep '^DB_NAME=' .env 2>/dev/null | cut -d= -f2-)
+DB_HOST ?= $(DB_CONTAINER_IP)
+DB_USER ?= $(shell grep '^DB_USER=' .env 2>/dev/null | cut -d= -f2-)
+DB_PASSWORD ?= $(shell grep '^DB_PASSWORD=' .env 2>/dev/null | cut -d= -f2-)
+DB_NAME ?= $(shell grep '^DB_NAME=' .env 2>/dev/null | cut -d= -f2-)
+DB_ENV = $(foreach v,DB_HOST DB_USER DB_PASSWORD DB_NAME,$(if $($v),$v='$($v)'))
 
 # Locate build tools for signing. Prefers the newest available version.
 BUILD_TOOLS_DIR := $(lastword $(sort $(wildcard $(ANDROID_SDK_PATH)/build-tools/*)))
@@ -57,7 +59,7 @@ build-android:
 # Fetch the next version code from the database and update build.gradle.
 bump-android-version:
 	@echo "Fetching next version code from database..."
-	$(eval NEXT_VERSION_CODE := $(shell cd backend && go run ./cmd/next-version-code))
+	$(eval NEXT_VERSION_CODE := $(shell cd backend && $(DB_ENV) go run ./cmd/next-version-code))
 	@if [ -z "$(NEXT_VERSION_CODE)" ]; then \
 		echo "ERROR: Could not determine next version code from database"; \
 		exit 1; \
@@ -149,7 +151,7 @@ release-android: build-android-release
 		exit 1; \
 	fi; \
 	echo "Built version code: $$BUILT_VERSION_CODE"; \
-	cd backend && go run ./cmd/release \
+	cd backend && $(DB_ENV) go run ./cmd/release \
 		-apk ../healthlogin-app.apk \
 		-platform android \
 		-version-name $(VERSION) \
