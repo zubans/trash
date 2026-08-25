@@ -501,3 +501,34 @@ func (m *mockRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) er
 	}
 	return nil
 }
+
+// failingMailer stands in for a mail transport that is down.
+type failingMailer struct{ calls int }
+
+func (m *failingMailer) SendEmailVerification(string, string) error { return nil }
+func (m *failingMailer) SendPasswordResetCode(string, string) error {
+	m.calls++
+	return errors.New("dial tcp: connection refused")
+}
+
+// TestRequestPasswordReset_DoesNotRevealAccounts pins the property that made
+// the endpoint an account-existence oracle in production: an unknown address
+// reported success while a known address whose mail could not be sent reported
+// an error, so a 400 meant "this email has an account here".
+func TestRequestPasswordReset_DoesNotRevealAccounts(t *testing.T) {
+	mailer := &failingMailer{}
+	repo := newMockRepo()
+	known := &repository.User{ID: uuid.New(), Phone: "+79990000001", Email: "known@example.com", Role: "CUSTOMER"}
+	repo.users[known.Phone] = known
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, mailer)
+
+	if err := svc.RequestPasswordReset("nobody@example.com"); err != nil {
+		t.Fatalf("an unknown address must report success, got %v", err)
+	}
+	if err := svc.RequestPasswordReset(known.Email); err != nil {
+		t.Fatalf("a known address must report the same thing when mail fails, got %v", err)
+	}
+	if mailer.calls != 1 {
+		t.Errorf("expected exactly one send attempt for the known address, got %d", mailer.calls)
+	}
+}
