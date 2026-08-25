@@ -132,7 +132,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, watch, nextTick, onUnmounted } from 'vue'
+import { defineComponent, ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import api, { resolveFileUrl } from '../services/api'
 import { useAuthStore } from '../stores/auth-store'
 import { Capacitor } from '@capacitor/core'
