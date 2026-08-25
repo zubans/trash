@@ -18,3 +18,5 @@ healthlogin-app.apk
 .env
 .env.*
 !.env.deploy.example
+# APK signature metadata
+*.apk.idsig
