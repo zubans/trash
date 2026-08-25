@@ -82,7 +82,7 @@
           type="button"
           class="btn-dismiss"
           title="Закрыть"
-          @click="dismissed = true"
+          @click="dismiss"
         >
           <i class="ph ph-x"></i>
         </button>
@@ -107,6 +107,7 @@ export default defineComponent({
       bytesDownloaded,
       totalBytes,
       isDownloading,
+      dismissUpdate,
       installUpdate,
     } = useAppUpdate()
 
@@ -115,6 +116,11 @@ export default defineComponent({
 
     const showForceUpdate = computed(() => updateAvailable.value && forceUpdate.value)
     const showBanner = computed(() => updateAvailable.value && !forceUpdate.value && !dismissed.value)
+
+    const dismiss = () => {
+      dismissed.value = true
+      dismissUpdate()
+    }
 
     const formatSize = (bytes: number) => {
       if (!bytes || bytes <= 0) return '0 MB'
@@ -146,6 +152,7 @@ export default defineComponent({
       formattedDownloaded,
       formattedTotal,
       install,
+      dismiss,
     }
   },
 })

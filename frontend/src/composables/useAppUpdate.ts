@@ -19,6 +19,7 @@ const updateAvailable = ref(false)
 const forceUpdate = ref(false)
 const downloadUrl = ref<string | null>(null)
 const versionName = ref<string | null>(null)
+const versionCode = ref<number | null>(null)
 const releaseNotes = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 let activeConsumers = 0
@@ -34,11 +35,6 @@ function resolveDownloadUrl(url: string): string {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url
   }
-  // Use the same API URL that the rest of the app uses (VITE_MOBILE_API_URL
-  // for native builds, VITE_API_URL for web). Previously this only read
-  // VITE_API_URL which on native pointed to the nginx HTTPS port (8443)
-  // instead of the direct backend HTTP port (8089), causing large APK
-  // downloads to proxy through nginx and hang on timeout.
   const base = apiUrl || ''
   const separator = base.endsWith('/') || url.startsWith('/') ? '' : '/'
   return `${base}${separator}${url}`
@@ -65,7 +61,11 @@ async function checkVersion() {
     const remote = response.data
 
     if (remote.version_code > current.versionCode) {
-      updateAvailable.value = true
+      versionCode.value = remote.version_code
+      const dismissedCode = localStorage.getItem('dismissed_app_version_code')
+      const isDismissed = dismissedCode && Number(dismissedCode) === remote.version_code
+
+      updateAvailable.value = !isDismissed
       forceUpdate.value = remote.force_update === true
       downloadUrl.value = resolveDownloadUrl(remote.download_url)
       versionName.value = remote.version_name
@@ -85,6 +85,7 @@ function reset() {
   forceUpdate.value = false
   downloadUrl.value = null
   versionName.value = null
+  versionCode.value = null
   releaseNotes.value = null
   downloadProgress.value = 0
   bytesDownloaded.value = 0
@@ -124,6 +125,13 @@ export function useAppUpdate() {
     stopChecking()
   })
 
+  const dismissUpdate = () => {
+    if (versionCode.value) {
+      localStorage.setItem('dismissed_app_version_code', String(versionCode.value))
+    }
+    updateAvailable.value = false
+  }
+
   const installUpdate = async () => {
     if (!downloadUrl.value) {
       return
@@ -147,6 +155,7 @@ export function useAppUpdate() {
     forceUpdate,
     downloadUrl,
     versionName,
+    versionCode,
     releaseNotes,
     errorMsg,
     downloadProgress,
@@ -154,6 +163,7 @@ export function useAppUpdate() {
     totalBytes,
     isDownloading,
     checkVersion,
+    dismissUpdate,
     installUpdate,
   }
 }
