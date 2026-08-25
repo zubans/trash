@@ -1,5 +1,5 @@
 <template>
-  <div v-if="show" class="support-modal-overlay" @click.self="closeModal">
+  <div v-if="show" class="support-modal-overlay">
     <div class="support-modal-card">
       <!-- Modal Header -->
       <div class="support-modal-header">
