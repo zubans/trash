@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -44,11 +45,12 @@ func NewBidService(
 
 // maxBidPrice caps an offer so a typo (or an abusive client) cannot push a
 // value the NUMERIC(18,2) column cannot hold.
-const maxBidPrice = 10_000_000.0
+// maxBidPrice caps an offer at ten million rubles.
+const maxBidPrice = money.Amount(10_000_000 * 100)
 
 // CreateBid submits a bid on a construction waste order.
-func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice float64) (*repository.Bid, error) {
-	if offeredPrice <= 0 {
+func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
+	if !offeredPrice.IsPositive() {
 		return nil, errors.New("offered price must be greater than zero")
 	}
 	if offeredPrice > maxBidPrice {
@@ -92,7 +94,7 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice float
 		if err != nil {
 			return nil, err
 		}
-		if balance < 0 {
+		if balance.IsNegative() {
 			return nil, errors.New("нельзя делать ставки при отрицательном балансе (уход в минус)")
 		}
 	}

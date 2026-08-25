@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -89,7 +90,7 @@ func (m *mockShiftRepo) End(shiftID uuid.UUID) error {
 	return m.UpdateShiftStatus(shiftID, string(repository.ShiftStatusCompleted))
 }
 
-func (m *mockShiftRepo) Penalize(shiftID uuid.UUID, fine float64) error {
+func (m *mockShiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {
 			s.Status = repository.ShiftStatusPenalized
@@ -100,7 +101,7 @@ func (m *mockShiftRepo) Penalize(shiftID uuid.UUID, fine float64) error {
 	return errors.New("not found")
 }
 
-func (m *mockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine float64) error {
+func (m *mockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {
 			now := time.Now()
@@ -213,15 +214,15 @@ type mockShiftTransactionRepo struct {
 	txs []*repository.Transaction
 }
 
-func (m *mockShiftTransactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
+func (m *mockShiftTransactionRepo) GetBalance(userID uuid.UUID) (money.Amount, error) {
 	return 0, nil
 }
 
-func (m *mockShiftTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error {
+func (m *mockShiftTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
 	return m.UpdateBalance(tx, userID, -amount)
 }
 
-func (m *mockShiftTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error {
+func (m *mockShiftTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
 	return nil
 }
 
@@ -301,8 +302,8 @@ func TestShiftService_EarlyEnd(t *testing.T) {
 	if ended.ActualEndAt == nil {
 		t.Error("expected actual_end_at to be set")
 	}
-	if ended.FineAmount != 50.0 {
-		t.Errorf("expected fine amount 50.0, got %f", ended.FineAmount)
+	if ended.FineAmount != money.FromRubles(50) {
+		t.Errorf("expected fine amount 50.0, got %s", ended.FineAmount)
 	}
 	if shift.Status != repository.ShiftStatusPenalized {
 		t.Errorf("expected original shift status PENALIZED, got %s", shift.Status)
@@ -329,7 +330,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 		CustomerID: customerID,
 		ExecutorID: &executorID,
 		Status:     repository.OrderStatusAssigned,
-		HoldAmount: 300.0,
+		HoldAmount: money.FromRubles(300),
 	})
 
 	ended, err := srv.EarlyEnd(executorID)
@@ -338,9 +339,9 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	}
 
 	// Double penalty (50 * 2) + order cost (300) = 400
-	expectedFine := 400.0
+	expectedFine := money.FromRubles(400)
 	if ended.FineAmount != expectedFine {
-		t.Errorf("expected fine amount %f, got %f", expectedFine, ended.FineAmount)
+		t.Errorf("expected fine amount %s, got %s", expectedFine, ended.FineAmount)
 	}
 	if ended.Status != repository.ShiftStatusPenalized {
 		t.Errorf("expected status PENALIZED, got %s", ended.Status)

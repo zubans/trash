@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -36,7 +37,7 @@ func (l *Ledger) RunInTx(fn func(*sql.Tx) error) error {
 }
 
 // GetBalance reads a user's balance.
-func (l *Ledger) GetBalance(userID uuid.UUID) (float64, error) {
+func (l *Ledger) GetBalance(userID uuid.UUID) (money.Amount, error) {
 	return l.transactions.GetBalance(userID)
 }
 
@@ -52,7 +53,7 @@ type entry struct {
 	AdminID *uuid.UUID
 	Type    repository.TransactionType
 	Account string
-	Amount  float64
+	Amount  money.Amount
 }
 
 func (l *Ledger) record(tx *sql.Tx, e entry) error {
@@ -71,8 +72,8 @@ func (l *Ledger) record(tx *sql.Tx, e entry) error {
 // money the user does not have is never acceptable.
 //
 // Returns repository.ErrInsufficientFunds when the balance is too small.
-func (l *Ledger) Reserve(tx *sql.Tx, userID uuid.UUID, account string, amount float64, kind repository.TransactionType, orderID *uuid.UUID) error {
-	if amount <= 0 {
+func (l *Ledger) Reserve(tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
+	if !amount.IsPositive() {
 		return nil
 	}
 	if err := l.transactions.Debit(tx, userID, amount); err != nil {
@@ -87,8 +88,8 @@ func (l *Ledger) Reserve(tx *sql.Tx, userID uuid.UUID, account string, amount fl
 // Charge moves money from a user to a system account without checking the
 // balance. Used for penalties: an executor's balance is allowed to go negative,
 // which is what min_balance_limit is for.
-func (l *Ledger) Charge(tx *sql.Tx, userID uuid.UUID, account string, amount float64, kind repository.TransactionType, orderID *uuid.UUID) error {
-	if amount <= 0 {
+func (l *Ledger) Charge(tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
+	if !amount.IsPositive() {
 		return nil
 	}
 	if err := l.transactions.UpdateBalance(tx, userID, -amount); err != nil {
@@ -102,8 +103,8 @@ func (l *Ledger) Charge(tx *sql.Tx, userID uuid.UUID, account string, amount flo
 
 // Release moves money from a system account to a user: a refund out of escrow,
 // an executor's reward, a returned withdrawal reservation.
-func (l *Ledger) Release(tx *sql.Tx, account string, userID uuid.UUID, amount float64, kind repository.TransactionType, orderID, adminID *uuid.UUID) error {
-	if amount <= 0 {
+func (l *Ledger) Release(tx *sql.Tx, account string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, orderID, adminID *uuid.UUID) error {
+	if !amount.IsPositive() {
 		return nil
 	}
 	if err := l.accounts.Debit(tx, account, amount); err != nil {
@@ -117,15 +118,15 @@ func (l *Ledger) Release(tx *sql.Tx, account string, userID uuid.UUID, amount fl
 
 // Deposit brings money in from outside: an approved top-up. DEPOSITS goes
 // negative by the same amount, which is how an external source is represented.
-func (l *Ledger) Deposit(tx *sql.Tx, userID uuid.UUID, amount float64, adminID *uuid.UUID) error {
+func (l *Ledger) Deposit(tx *sql.Tx, userID uuid.UUID, amount money.Amount, adminID *uuid.UUID) error {
 	return l.Release(tx, repository.AccountDeposits, userID, amount, repository.TransactionTypeTopUp, nil, adminID)
 }
 
 // Settle moves money between two system accounts, recording the entry against
 // the user it concerns. Used when a payout leaves the system: the reservation
 // goes out through DEPOSITS, the account that represents the outside world.
-func (l *Ledger) Settle(tx *sql.Tx, from, to string, userID uuid.UUID, amount float64, kind repository.TransactionType, adminID *uuid.UUID) error {
-	if amount <= 0 {
+func (l *Ledger) Settle(tx *sql.Tx, from, to string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, adminID *uuid.UUID) error {
+	if !amount.IsPositive() {
 		return nil
 	}
 	if err := l.accounts.Debit(tx, from, amount); err != nil {
@@ -140,6 +141,6 @@ func (l *Ledger) Settle(tx *sql.Tx, from, to string, userID uuid.UUID, amount fl
 // Note records an entry that moves no money, for a step that is worth seeing in
 // the log: PAYMENT marks a hold being spent, and the balance already changed
 // when the hold was taken.
-func (l *Ledger) Note(tx *sql.Tx, userID uuid.UUID, account string, amount float64, kind repository.TransactionType, orderID *uuid.UUID) error {
+func (l *Ledger) Note(tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
 	return l.record(tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
 }

@@ -6,40 +6,42 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // TopUpRequest represents a manual balance top-up request.
 type TopUpRequest struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	UserPhone string     `json:"user_phone"` // Populated via JOIN
-	Amount    float64    `json:"amount"`
-	Status    string     `json:"status"`
-	AdminID   *uuid.UUID `json:"admin_id,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	Amount    money.Amount `json:"amount"`
+	Status    string       `json:"status"`
+	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
 }
 
 // WithdrawalRequest represents a manual balance withdrawal request.
 type WithdrawalRequest struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	UserPhone string     `json:"user_phone"` // Populated via JOIN
-	Amount    float64    `json:"amount"`
-	Status    string     `json:"status"`
-	AdminID   *uuid.UUID `json:"admin_id,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	Amount    money.Amount `json:"amount"`
+	Status    string       `json:"status"`
+	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
 }
 
 // Transaction represents a financial log entry.
 type Transaction struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	UserPhone string     `json:"user_phone"` // Populated via JOIN
-	OrderID   *uuid.UUID `json:"order_id,omitempty"`
-	Type      string     `json:"type"`
-	Amount    float64    `json:"amount"`
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	OrderID   *uuid.UUID   `json:"order_id,omitempty"`
+	Type      string       `json:"type"`
+	Amount    money.Amount `json:"amount"`
 	// Counterparty is the system account on the other side of this entry.
 	// Empty on rows written before system accounts existed.
 	Counterparty string     `json:"counterparty,omitempty"`
@@ -64,25 +66,25 @@ type AdminOrder struct {
 // AdminRepository defines admin database operations.
 type AdminRepository interface {
 	GetUsers(page, limit int, role, status, search string) ([]*User, int, error)
-	GetTopUpRequests() ([]*TopUpRequest, error)
+	GetTopUpRequests(limit, offset int) ([]*TopUpRequest, error)
 	GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error)
-	CreateTopUpRequest(q Querier, userID uuid.UUID, amount float64) (*TopUpRequest, error)
+	CreateTopUpRequest(q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
 	LockTopUpRequest(q Querier, requestID uuid.UUID) (*TopUpRequest, error)
 	SetTopUpStatus(q Querier, requestID, adminID uuid.UUID, status string) error
-	GetWithdrawalRequests() ([]*WithdrawalRequest, error)
+	GetWithdrawalRequests(limit, offset int) ([]*WithdrawalRequest, error)
 	GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, error)
 	// Withdrawals are a money workflow and live in AdminService; the repository
 	// provides the locked read and the individual writes it needs.
-	CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount float64) (*WithdrawalRequest, error)
+	CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
 	LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
 	SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error
 	HasPendingWithdrawal(userID uuid.UUID) (bool, error)
 	CountAdmins() (int, error)
-	TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error
-	GetTransactions() ([]*Transaction, error)
+	TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error
+	GetTransactions(limit, offset int) ([]*Transaction, error)
 	GetActiveShifts() ([]*AdminShift, error)
-	GetActiveOrders() ([]*AdminOrder, error)
-	GetCompletedOrders() ([]*AdminOrder, error)
+	GetActiveOrders(limit, offset int) ([]*AdminOrder, error)
+	GetCompletedOrders(limit, offset int) ([]*AdminOrder, error)
 }
 
 type adminRepo struct {
@@ -162,14 +164,15 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 	return users, total, nil
 }
 
-func (r *adminRepo) GetTopUpRequests() ([]*TopUpRequest, error) {
+func (r *adminRepo) GetTopUpRequests(limit, offset int) ([]*TopUpRequest, error) {
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
 		FROM balance_topup_requests r
 		JOIN users u ON r.user_id = u.id
-		ORDER BY r.created_at DESC`
+		ORDER BY r.created_at DESC
+		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query)
+	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +204,7 @@ func (r *adminRepo) GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error) {
 	return &req, nil
 }
 
-func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount float64) (*TopUpRequest, error) {
+func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_topup_requests (id, user_id, amount, status, created_at)
@@ -239,14 +242,15 @@ func (r *adminRepo) SetTopUpStatus(q Querier, requestID, adminID uuid.UUID, stat
 		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
 }
 
-func (r *adminRepo) GetWithdrawalRequests() ([]*WithdrawalRequest, error) {
+func (r *adminRepo) GetWithdrawalRequests(limit, offset int) ([]*WithdrawalRequest, error) {
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
 		FROM balance_withdrawal_requests r
 		JOIN users u ON r.user_id = u.id
-		ORDER BY r.created_at DESC`
+		ORDER BY r.created_at DESC
+		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query)
+	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +289,7 @@ func (r *adminRepo) exec(q Querier) Querier {
 	return q
 }
 
-func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount float64) (*WithdrawalRequest, error) {
+func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_withdrawal_requests (id, user_id, amount, status, created_at)
@@ -342,7 +346,7 @@ func (r *adminRepo) CountAdmins() (int, error) {
 	return count, err
 }
 
-func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -366,14 +370,15 @@ func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) 
 	return tx.Commit()
 }
 
-func (r *adminRepo) GetTransactions() ([]*Transaction, error) {
+func (r *adminRepo) GetTransactions(limit, offset int) ([]*Transaction, error) {
 	query := `
 		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount, t.admin_id, t.created_at
 		FROM transactions t
 		JOIN users u ON t.user_id = u.id
-		ORDER BY t.created_at DESC`
+		ORDER BY t.created_at DESC
+		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query)
+	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +426,7 @@ func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
 	return shifts, rows.Err()
 }
 
-func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
+func (r *adminRepo) GetActiveOrders(limit, offset int) ([]*AdminOrder, error) {
 	query := `
 		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
@@ -432,9 +437,10 @@ func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
 		LEFT JOIN users eu ON o.executor_id = eu.id
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE o.status IN ($1, $2)
-		ORDER BY o.created_at DESC`
+		ORDER BY o.created_at DESC
+		LIMIT $3 OFFSET $4`
 
-	rows, err := r.db.Query(query, OrderStatusSearching, OrderStatusAssigned)
+	rows, err := r.db.Query(query, OrderStatusSearching, OrderStatusAssigned, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +463,7 @@ func (r *adminRepo) GetActiveOrders() ([]*AdminOrder, error) {
 	return orders, rows.Err()
 }
 
-func (r *adminRepo) GetCompletedOrders() ([]*AdminOrder, error) {
+func (r *adminRepo) GetCompletedOrders(limit, offset int) ([]*AdminOrder, error) {
 	query := `
 		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
@@ -468,9 +474,10 @@ func (r *adminRepo) GetCompletedOrders() ([]*AdminOrder, error) {
 		LEFT JOIN users eu ON o.executor_id = eu.id
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE o.status = $1
-		ORDER BY o.completed_at DESC, o.created_at DESC`
+		ORDER BY o.completed_at DESC, o.created_at DESC
+		LIMIT $2 OFFSET $3`
 
-	rows, err := r.db.Query(query, OrderStatusCompleted)
+	rows, err := r.db.Query(query, OrderStatusCompleted, limit, offset)
 	if err != nil {
 		return nil, err
 	}

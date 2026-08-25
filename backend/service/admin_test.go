@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -22,7 +23,7 @@ func (m *mockAdminRepo) GetUsers(page, limit int, role, status, search string) (
 	return m.users, len(m.users), nil
 }
 
-func (m *mockAdminRepo) GetTopUpRequests() ([]*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) GetTopUpRequests(limit, offset int) ([]*repository.TopUpRequest, error) {
 	var reqs []*repository.TopUpRequest
 	for _, r := range m.requests {
 		reqs = append(reqs, r)
@@ -38,7 +39,7 @@ func (m *mockAdminRepo) GetTopUpRequestByID(id uuid.UUID) (*repository.TopUpRequ
 	return r, nil
 }
 
-func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
 	req := &repository.TopUpRequest{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -50,7 +51,7 @@ func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUI
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) GetWithdrawalRequests(limit, offset int) ([]*repository.WithdrawalRequest, error) {
 	return nil, nil
 }
 
@@ -58,7 +59,7 @@ func (m *mockAdminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*repository.With
 	return nil, errors.New("not found")
 }
 
-func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
 	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
 	if m.withdrawals == nil {
 		m.withdrawals = make(map[uuid.UUID]*repository.WithdrawalRequest)
@@ -67,11 +68,11 @@ func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uui
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetTransactions() ([]*repository.Transaction, error) {
+func (m *mockAdminRepo) GetTransactions(limit, offset int) ([]*repository.Transaction, error) {
 	return m.transactions, nil
 }
 
-func (m *mockAdminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
+func (m *mockAdminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
 	m.transactions = append(m.transactions, &repository.Transaction{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -87,11 +88,11 @@ func (m *mockAdminRepo) GetActiveShifts() ([]*repository.AdminShift, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetActiveOrders() ([]*repository.AdminOrder, error) {
+func (m *mockAdminRepo) GetActiveOrders(limit, offset int) ([]*repository.AdminOrder, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetCompletedOrders() ([]*repository.AdminOrder, error) {
+func (m *mockAdminRepo) GetCompletedOrders(limit, offset int) ([]*repository.AdminOrder, error) {
 	return nil, nil
 }
 
@@ -186,11 +187,11 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	userRepo.users[user.Phone] = user
 
 	// 1. Create top up request
-	req, err := svc.CreateTopUpRequest(user.ID, 500.0)
+	req, err := svc.CreateTopUpRequest(user.ID, money.FromRubles(500.0))
 	if err != nil {
 		t.Fatalf("unexpected error creating top-up: %v", err)
 	}
-	if req.Amount != 500.0 || req.Status != "PENDING" {
+	if req.Amount != money.FromRubles(500) || req.Status != "PENDING" {
 		t.Errorf("unexpected request data: %+v", req)
 	}
 

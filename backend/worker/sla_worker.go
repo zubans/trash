@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/service"
 )
 
@@ -43,7 +44,7 @@ type overdueOrder struct {
 	ID               uuid.UUID
 	CustomerID       uuid.UUID
 	ServiceVariantID uuid.UUID
-	HoldAmount       float64
+	HoldAmount       money.Amount
 }
 
 // CheckSLAOverdue scans for overdue orders and updates them.
@@ -102,9 +103,9 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 		basePrice = o.HoldAmount
 	}
 
-	refund := o.HoldAmount - basePrice
-	if refund < 0 {
-		refund = 0
+	refund := o.HoldAmount.Sub(basePrice)
+	if refund.IsNegative() {
+		refund = money.Zero
 	}
 
 	// 2. Update order columns. hold_amount must follow the refund: the payout at
@@ -128,7 +129,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	}
 
 	// 3. Issue refund if applicable
-	if refund > 0 {
+	if refund.IsPositive() {
 		_, err = tx.Exec(`UPDATE users SET balance = balance + $1 WHERE id = $2`, refund, o.CustomerID)
 		if err != nil {
 			return err

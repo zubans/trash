@@ -175,4 +175,9 @@ async function sendBroadcast() {
 .w-100 {
   width: 100%;
 }
+@media (max-width: 768px) {
+  .email-broadcasts {
+    padding: 0;
+  }
+}
 </style>

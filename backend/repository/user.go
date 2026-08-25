@@ -5,32 +5,35 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // User represents a user record in the database.
 type User struct {
-	ID                     uuid.UUID  `json:"id"`
-	Role                   string     `json:"role"`
-	Phone                  string     `json:"phone"`
-	Email                  string     `json:"email"`
-	LastName               string     `json:"last_name"`
-	FirstName              string     `json:"first_name"`
-	Patronymic             string     `json:"patronymic"`
-	BirthDate              *time.Time `json:"birth_date,omitempty"`
-	PendingEmail           string     `json:"pending_email,omitempty"`
-	EmailVerified          bool       `json:"email_verified"`
-	EmailVerificationToken string     `json:"-"`
-	EmailTokenExpiresAt    *time.Time `json:"-"`
-	PasswordResetCode      string     `json:"-"`
-	PasswordResetExpiresAt *time.Time `json:"-"`
-	Password               string     `json:"-"` // bcrypt hash, managed by the service layer
-	Balance                float64    `json:"balance"`
-	Status                 string     `json:"status"`
-	CreatedAt              time.Time  `json:"created_at"`
-	Address                string     `json:"address,omitempty"`
+	ID                     uuid.UUID    `json:"id"`
+	Role                   string       `json:"role"`
+	Phone                  string       `json:"phone"`
+	Email                  string       `json:"email"`
+	LastName               string       `json:"last_name"`
+	FirstName              string       `json:"first_name"`
+	Patronymic             string       `json:"patronymic"`
+	BirthDate              *time.Time   `json:"birth_date,omitempty"`
+	PendingEmail           string       `json:"pending_email,omitempty"`
+	EmailVerified          bool         `json:"email_verified"`
+	EmailVerificationToken string       `json:"-"`
+	EmailTokenExpiresAt    *time.Time   `json:"-"`
+	PasswordResetCode      string       `json:"-"`
+	PasswordResetExpiresAt *time.Time   `json:"-"`
+	Password               string       `json:"-"` // bcrypt hash, managed by the service layer
+	Balance                money.Amount `json:"balance"`
+	Status                 string       `json:"status"`
+	CreatedAt              time.Time    `json:"created_at"`
+	Address                string       `json:"address,omitempty"`
 }
 
 func (u *User) GetAge() int {
@@ -66,7 +69,7 @@ type UserRepository interface {
 	FindByID(id uuid.UUID) (*User, error)
 	UpdateStatus(id uuid.UUID, status string) error
 	UpdateRole(id uuid.UUID, role string) error
-	UpdateBalance(id uuid.UUID, balance float64) error
+	UpdateBalance(id uuid.UUID, balance money.Amount) error
 	UpdateLastGeo(id uuid.UUID, lastGeo string) error
 	CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
 	GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
@@ -206,7 +209,9 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	var userID uuid.UUID
 	err := r.db.QueryRow(
 		`UPDATE users
-		 SET email_verified = true,
+		 SET email = COALESCE(NULLIF(pending_email, ''), email),
+		     pending_email = NULL,
+		     email_verified = true,
 		     email_verification_token = NULL,
 		     email_token_expires_at = NULL
 		 WHERE email_verification_token = $1 AND (email_token_expires_at IS NULL OR email_token_expires_at > now())
@@ -326,7 +331,7 @@ func (r *repo) UpdateRole(id uuid.UUID, role string) error {
 	return err
 }
 
-func (r *repo) UpdateBalance(id uuid.UUID, balance float64) error {
+func (r *repo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	_, err := r.db.Exec(`UPDATE users SET balance = $1 WHERE id = $2`, balance, id)
 	return err
 }
@@ -341,14 +346,19 @@ func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return err
 }
 
+// CreateCustomerProfile stores the profile and registers the address as the
+// customer's first saved one, so the profile page lists what registration
+// captured instead of showing an empty list next to a working order form.
 func (r *repo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
-	_, err := r.db.Exec(
+	if _, err := r.db.Exec(
 		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
 		 VALUES ($1, '', $2, $3)
 		 ON CONFLICT (user_id) DO UPDATE SET address = $2, last_geo = $3`,
 		userID, address, lastGeo,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return r.saveDefaultAddress(userID, address)
 }
 
 func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
@@ -367,33 +377,59 @@ func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
 }
 
 func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
-	_, err := r.db.Exec(
+	if _, err := r.db.Exec(
 		`INSERT INTO customer_profiles (user_id, full_name, address)
 		 VALUES ($1, '', $2)
 		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
 		userID, address,
-	)
+	); err != nil {
+		return err
+	}
+	return r.saveDefaultAddress(userID, address)
+}
+
+// saveDefaultAddress keeps customer_addresses in step with the profile address,
+// so the two never disagree about where a customer orders from.
+func (r *repo) saveDefaultAddress(userID uuid.UUID, address string) error {
+	if strings.TrimSpace(address) == "" {
+		return nil
+	}
+	if _, err := r.db.Exec(
+		`UPDATE customer_addresses SET is_default = FALSE WHERE user_id = $1 AND is_default`, userID); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(
+		`INSERT INTO customer_addresses (user_id, address, is_default) VALUES ($1, $2, TRUE)
+		 ON CONFLICT (user_id, address) DO UPDATE SET is_default = TRUE`,
+		userID, address)
 	return err
 }
 
+// UpdateUserEmail records a requested address as pending and sends the user a
+// verification link. The current address stays in place until the new one is
+// confirmed: writing it straight into email meant an unverified address became
+// the account's address immediately, which let somebody occupy an address that
+// its real owner had not registered yet, and dropped the working address of a
+// user who mistyped.
 func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
 	row := r.db.QueryRow(
 		`UPDATE users
-		 SET email = $1, pending_email = NULL, email_verified = false, email_verification_token = $2, email_token_expires_at = $3
+		 SET pending_email = $1, email_verification_token = $2, email_token_expires_at = $3
 		 WHERE id = $4
-		 RETURNING id, role, phone, COALESCE(email, ''), email_verified, email_verification_token, balance, status, created_at`,
+		 RETURNING id, role, phone, COALESCE(email, ''), COALESCE(pending_email, ''), email_verified, email_verification_token, balance, status, created_at`,
 		email, verificationToken, expiresAt, userID,
 	)
 	var u User
-	var emailStr string
+	var emailStr, pendingStr string
 	err := row.Scan(
-		&u.ID, &u.Role, &u.Phone, &emailStr, &u.EmailVerified,
+		&u.ID, &u.Role, &u.Phone, &emailStr, &pendingStr, &u.EmailVerified,
 		&u.EmailVerificationToken, &u.Balance, &u.Status, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	u.Email = emailStr
+	u.PendingEmail = pendingStr
 	return &u, nil
 }
 

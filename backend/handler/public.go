@@ -213,18 +213,19 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 		birthDateStr = user.BirthDate.Format("2006-01-02")
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":          user.ID,
-		"phone":       user.Phone,
-		"email":       user.Email,
-		"role":        user.Role,
-		"balance":     user.Balance,
-		"status":      user.Status,
-		"first_name":  user.FirstName,
-		"last_name":   user.LastName,
-		"patronymic":  user.Patronymic,
-		"birth_date":  birthDateStr,
-		"age":         user.GetAge(),
-		"is_verified": user.IsVerified(),
+		"id":            user.ID,
+		"phone":         user.Phone,
+		"email":         user.Email,
+		"role":          user.Role,
+		"balance":       user.Balance,
+		"status":        user.Status,
+		"first_name":    user.FirstName,
+		"last_name":     user.LastName,
+		"patronymic":    user.Patronymic,
+		"birth_date":    birthDateStr,
+		"age":           user.GetAge(),
+		"is_verified":   user.IsVerified(),
+		"pending_email": user.PendingEmail,
 	})
 }
 
@@ -337,10 +338,14 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// The address only changes once the link in the mail is followed, so the
+	// response says what is pending rather than claiming it is done.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "ok",
-		"email":  updatedUser.Email,
+		"status":        "ok",
+		"email":         updatedUser.Email,
+		"pending_email": updatedUser.PendingEmail,
+		"message":       "Подтвердите новый адрес по ссылке в письме — до этого почта остаётся прежней",
 	})
 }
 

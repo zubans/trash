@@ -204,4 +204,11 @@ export default defineComponent({
 .gap-3 {
   gap: 12px;
 }
+
+@media (max-width: 768px) {
+  .settings-card {
+    max-width: 100%;
+    padding: 12px !important;
+  }
+}
 </style>

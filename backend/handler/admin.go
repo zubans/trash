@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/middleware"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
@@ -184,7 +186,7 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		Amount float64 `json:"amount"`
+		Amount money.Amount `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -200,9 +202,17 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]string{"message": "balance topped up successfully"})
 }
 
-// GetTopUpRequestsHandler lists all manual balance top-up requests.
+// pageParams reads limit/offset from the query string. Both are optional; the
+// service clamps them.
+func pageParams(r *http.Request) (int, int) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	return limit, offset
+}
+
+// GetTopUpRequestsHandler lists manual balance top-up requests.
 func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	reqs, err := h.adminService.GetTopUpRequests()
+	reqs, err := h.adminService.GetTopUpRequests(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -269,7 +279,7 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 	}
 
 	var req struct {
-		Amount float64 `json:"amount"`
+		Amount money.Amount `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -289,7 +299,7 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 
 // GetWithdrawalRequestsHandler lists all manual balance withdrawal requests.
 func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	reqs, err := h.adminService.GetWithdrawalRequests()
+	reqs, err := h.adminService.GetWithdrawalRequests(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -350,10 +360,10 @@ func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r 
 // GetReconciliationHandler reports whether stored balances still agree with the
 // transaction log.
 func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.Request) {
-	tolerance := 0.01
+	tolerance := money.FromRubles(0.01)
 	if raw := r.URL.Query().Get("tolerance"); raw != "" {
-		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || parsed < 0 {
+		parsed, err := money.ParseRubles(raw)
+		if err != nil || parsed.IsNegative() {
 			http.Error(w, "invalid tolerance", http.StatusBadRequest)
 			return
 		}
@@ -382,7 +392,7 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 
 // GetTransactionsHandler retrieves audit logs of transactions.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	txs, err := h.adminService.GetTransactions()
+	txs, err := h.adminService.GetTransactions(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -446,7 +456,7 @@ func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req struct {
-		Amount float64 `json:"amount"`
+		Amount money.Amount `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -482,6 +492,106 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(profile)
 }
 
+// writeAddresses renders the saved-address list the profile page expects.
+func writeAddresses(w http.ResponseWriter, addresses []repository.CustomerAddress, err error) {
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrAddressLimitReached):
+			http.Error(w, "можно сохранить не более 2 адресов", http.StatusConflict)
+		case errors.Is(err, repository.ErrAddressNotFound):
+			http.Error(w, "адрес не найден", http.StatusNotFound)
+		default:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"addresses": addresses})
+}
+
+// AddAddressHandler saves a pickup address for the authenticated customer.
+func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	addresses, err := h.adminService.AddAddress(user.ID, req.Address)
+	writeAddresses(w, addresses, err)
+}
+
+// DeleteAddressHandler removes one of the caller's saved addresses. The client
+// addresses it by id; a positional index is also accepted because the installed
+// app sends the row number.
+func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	raw := chi.URLParam(r, "id")
+	addressID, err := uuid.Parse(raw)
+	if err != nil {
+		index, convErr := strconv.Atoi(raw)
+		if convErr != nil {
+			http.Error(w, "invalid address id", http.StatusBadRequest)
+			return
+		}
+		current, listErr := h.adminService.ListAddresses(user.ID)
+		if listErr != nil {
+			http.Error(w, listErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		if index < 0 || index >= len(current) {
+			http.Error(w, "адрес не найден", http.StatusNotFound)
+			return
+		}
+		addressID = current[index].ID
+	}
+
+	addresses, err := h.adminService.DeleteAddress(user.ID, addressID)
+	writeAddresses(w, addresses, err)
+}
+
+// SetDefaultAddressHandler marks which saved address new orders start from.
+func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ID      string `json:"id"`
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var (
+		addresses []repository.CustomerAddress
+		err       error
+	)
+	if id, parseErr := uuid.Parse(req.ID); parseErr == nil {
+		addresses, err = h.adminService.SetDefaultAddress(user.ID, id)
+	} else {
+		addresses, err = h.adminService.SetDefaultAddressByValue(user.ID, req.Address)
+	}
+	writeAddresses(w, addresses, err)
+}
+
 // GetActiveShiftsHandler lists all active executor shifts.
 func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Request) {
 	shifts, err := h.adminService.GetActiveShifts()
@@ -495,7 +605,7 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 
 // GetActiveOrdersHandler lists active customer orders (searching or assigned).
 func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.adminService.GetActiveOrders()
+	orders, err := h.adminService.GetActiveOrders(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -506,7 +616,7 @@ func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Req
 
 // GetCompletedOrdersHandler lists completed customer orders.
 func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.adminService.GetCompletedOrders()
+	orders, err := h.adminService.GetCompletedOrders(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

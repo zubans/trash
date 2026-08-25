@@ -3,6 +3,8 @@ package repository
 import (
 	"database/sql"
 	"errors"
+
+	"healthlogin/backend/money"
 )
 
 // System account codes. Every movement of user money faces one of these, so the
@@ -27,9 +29,9 @@ var ErrUnknownSystemAccount = errors.New("unknown system account")
 
 // SystemAccount is one side of the platform's books.
 type SystemAccount struct {
-	Code    string  `json:"code"`
-	Name    string  `json:"name"`
-	Balance float64 `json:"balance"`
+	Code    string       `json:"code"`
+	Name    string       `json:"name"`
+	Balance money.Amount `json:"balance"`
 }
 
 // SystemAccountRepository moves money on the platform's own accounts.
@@ -37,8 +39,8 @@ type SystemAccountRepository interface {
 	// Credit adds to an account; Debit subtracts. Both take the caller's
 	// transaction, because an account movement is always the other half of a
 	// user balance movement and the two must commit together.
-	Credit(q Querier, code string, amount float64) error
-	Debit(q Querier, code string, amount float64) error
+	Credit(q Querier, code string, amount money.Amount) error
+	Debit(q Querier, code string, amount money.Amount) error
 	List() ([]SystemAccount, error)
 	Get(code string) (*SystemAccount, error)
 }
@@ -59,18 +61,18 @@ func (r *systemAccountRepo) exec(q Querier) Querier {
 	return q
 }
 
-func (r *systemAccountRepo) Credit(q Querier, code string, amount float64) error {
+func (r *systemAccountRepo) Credit(q Querier, code string, amount money.Amount) error {
 	return r.move(q, code, amount)
 }
 
-func (r *systemAccountRepo) Debit(q Querier, code string, amount float64) error {
-	return r.move(q, code, -amount)
+func (r *systemAccountRepo) Debit(q Querier, code string, amount money.Amount) error {
+	return r.move(q, code, amount.Neg())
 }
 
 // move applies a delta. A zero amount is a no-op rather than an error: several
 // call sites legitimately move nothing (a refund of zero, a fine of zero).
-func (r *systemAccountRepo) move(q Querier, code string, delta float64) error {
-	if delta == 0 {
+func (r *systemAccountRepo) move(q Querier, code string, delta money.Amount) error {
+	if delta.IsZero() {
 		return nil
 	}
 	err := execExpectingOne(r.exec(q),

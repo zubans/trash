@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -28,6 +29,7 @@ type AdminService struct {
 	userRepo      repository.UserRepository
 	adminRepo     repository.AdminRepository
 	settingsRepo  repository.SettingsRepository
+	addressRepo   repository.CustomerAddressRepository
 	ledger        *Ledger
 	reconcileRepo repository.ReconciliationRepository
 	sessions      SessionRevoker
@@ -59,6 +61,58 @@ func NewAdminService(
 	}
 }
 
+// WithAddresses attaches the saved-address store used by the customer profile.
+func (s *AdminService) WithAddresses(addressRepo repository.CustomerAddressRepository) *AdminService {
+	s.addressRepo = addressRepo
+	return s
+}
+
+// ListAddresses returns a customer's saved pickup addresses.
+func (s *AdminService) ListAddresses(userID uuid.UUID) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.List(userID)
+}
+
+// AddAddress saves a new pickup address, normalising it the same way
+// registration does so the geocoder and the order form agree on its shape.
+func (s *AdminService) AddAddress(userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	normalized, err := normalizeAddress(address)
+	if err != nil {
+		return nil, err
+	}
+	return s.addressRepo.Add(userID, normalized)
+}
+
+// DeleteAddress removes one of the customer's addresses.
+func (s *AdminService) DeleteAddress(userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.Delete(userID, addressID)
+}
+
+// SetDefaultAddress marks which address new orders should start from.
+func (s *AdminService) SetDefaultAddress(userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.SetDefault(userID, addressID)
+}
+
+// SetDefaultAddressByValue is the same, for clients that identify an address by
+// its text.
+func (s *AdminService) SetDefaultAddressByValue(userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.SetDefaultByValue(userID, strings.TrimSpace(address))
+}
+
 // WithLedger attaches the ledger. Top-ups and withdrawals move money, and the
 // ledger is the only thing that can move it.
 func (s *AdminService) WithLedger(ledger *Ledger) *AdminService {
@@ -74,12 +128,12 @@ func (s *AdminService) WithReconciliation(repo repository.ReconciliationReposito
 
 // Reconcile compares every stored balance with the sum of that user's ledger
 // entries. Read-only: a mismatch is reported, never silently corrected.
-func (s *AdminService) Reconcile(tolerance float64) (*repository.ReconciliationReport, error) {
+func (s *AdminService) Reconcile(tolerance money.Amount) (*repository.ReconciliationReport, error) {
 	if s.reconcileRepo == nil {
 		return nil, errors.New("reconciliation is not configured")
 	}
-	if tolerance < 0 {
-		tolerance = 0
+	if tolerance.IsNegative() {
+		tolerance = money.Zero
 	}
 	return s.reconcileRepo.Reconcile(tolerance)
 }
@@ -208,8 +262,8 @@ func (s *AdminService) UpdateUserName(userID uuid.UUID, lastName, firstName, pat
 
 // TopUpUserBalance adds funds directly to a user's balance.
 // Only non-admin users may be topped up, and an admin cannot credit themselves.
-func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {
-	if amount <= 0 {
+func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
+	if !amount.IsPositive() {
 		return errors.New("amount must be greater than zero")
 	}
 
@@ -229,14 +283,30 @@ func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount float6
 	return s.adminRepo.TopUpUserBalance(userID, adminID, amount)
 }
 
-// GetTopUpRequests lists all balance top-up requests.
-func (s *AdminService) GetTopUpRequests() ([]*repository.TopUpRequest, error) {
-	return s.adminRepo.GetTopUpRequests()
+// page normalises a requested page size. Admin listings used to return whole
+// tables, which is both a slow response and an easy way to strain the database.
+func page(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxAdminPageSize {
+		limit = maxAdminPageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+// GetTopUpRequests lists balance top-up requests, newest first.
+func (s *AdminService) GetTopUpRequests(limit, offset int) ([]*repository.TopUpRequest, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetTopUpRequests(limit, offset)
 }
 
 // CreateTopUpRequest creates a pending balance top-up request.
-func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount float64) (*repository.TopUpRequest, error) {
-	if amount <= 0 {
+func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
+	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
 
@@ -297,8 +367,9 @@ func (s *AdminService) decideTopUp(requestID, adminID uuid.UUID, status string) 
 }
 
 // GetWithdrawalRequests lists all balance withdrawal requests.
-func (s *AdminService) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
-	return s.adminRepo.GetWithdrawalRequests()
+func (s *AdminService) GetWithdrawalRequests(limit, offset int) ([]*repository.WithdrawalRequest, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetWithdrawalRequests(limit, offset)
 }
 
 // CreateWithdrawalRequest reserves the requested amount and records a pending
@@ -309,8 +380,8 @@ func (s *AdminService) GetWithdrawalRequests() ([]*repository.WithdrawalRequest,
 // a user could queue several requests against the same money and spend it while
 // they waited — the payout queue then contained amounts that could not all be
 // honoured.
-func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
-	if amount <= 0 {
+func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
+	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
 	if s.ledger == nil {
@@ -408,8 +479,9 @@ func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status str
 }
 
 // GetTransactions retrieves transaction history.
-func (s *AdminService) GetTransactions() ([]*repository.Transaction, error) {
-	return s.adminRepo.GetTransactions()
+func (s *AdminService) GetTransactions(limit, offset int) ([]*repository.Transaction, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetTransactions(limit, offset)
 }
 
 // GetActiveShifts returns all currently active executor shifts.
@@ -418,13 +490,15 @@ func (s *AdminService) GetActiveShifts() ([]*repository.AdminShift, error) {
 }
 
 // GetActiveOrders returns customer orders that are still active (searching or assigned).
-func (s *AdminService) GetActiveOrders() ([]*repository.AdminOrder, error) {
-	return s.adminRepo.GetActiveOrders()
+func (s *AdminService) GetActiveOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetActiveOrders(limit, offset)
 }
 
 // GetCompletedOrders returns completed customer orders.
-func (s *AdminService) GetCompletedOrders() ([]*repository.AdminOrder, error) {
-	return s.adminRepo.GetCompletedOrders()
+func (s *AdminService) GetCompletedOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetCompletedOrders(limit, offset)
 }
 
 // GetProfile returns the authenticated user's profile including customer address.
@@ -455,6 +529,29 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 	} else if cp != nil {
 		profile["address"] = cp.Address
 		profile["last_geo"] = cp.LastGeo.String
+	}
+
+	// Saved addresses. "address" and "default_address" carry the same value so
+	// that the dashboards, which read the former, keep working alongside the
+	// profile page, which reads the latter.
+	profile["addresses"] = []repository.CustomerAddress{}
+	if s.addressRepo != nil {
+		addresses, err := s.addressRepo.List(userID)
+		if err != nil {
+			log.Printf("[GetProfile] failed to load addresses for %s: %v", userID, err)
+		} else {
+			profile["addresses"] = addresses
+			for _, a := range addresses {
+				if a.IsDefault {
+					profile["default_address"] = a.Address
+					profile["address"] = a.Address
+					break
+				}
+			}
+		}
+	}
+	if _, ok := profile["default_address"]; !ok {
+		profile["default_address"] = profile["address"]
 	}
 
 	return profile, nil

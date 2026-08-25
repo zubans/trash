@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -13,11 +14,11 @@ import (
 // money either way.
 type ReconcileWorker struct {
 	repo      repository.ReconciliationRepository
-	tolerance float64
+	tolerance money.Amount
 }
 
 // NewReconcileWorker creates a ReconcileWorker.
-func NewReconcileWorker(repo repository.ReconciliationRepository, tolerance float64) *ReconcileWorker {
+func NewReconcileWorker(repo repository.ReconciliationRepository, tolerance money.Amount) *ReconcileWorker {
 	return &ReconcileWorker{repo: repo, tolerance: tolerance}
 }
 
@@ -49,21 +50,21 @@ func (w *ReconcileWorker) Run() {
 	// Loud, and with enough detail to act on without opening a database client.
 	log.Printf("[ALERT] %s", report.Summary())
 	if report.BooksOpen {
-		log.Printf("[ALERT] users hold %.2f, platform accounts hold %.2f: the two sides differ by %+.2f",
+		log.Printf("[ALERT] users hold %s, platform accounts hold %s: the two sides differ by %s",
 			report.Books.UserTotal, report.Books.AccountTotal, report.Books.Difference)
 	}
 	if report.EscrowMismatch {
-		log.Printf("[ALERT] escrow holds %.2f but live orders account for %.2f (%+.2f)",
+		log.Printf("[ALERT] escrow holds %s but live orders account for %s (%s)",
 			report.Books.EscrowHeld, report.Books.LiveOrderSum, report.Books.EscrowDrift)
 	}
 	for _, t := range report.UnknownTypes {
 		log.Printf("[ALERT] transaction type %q is not covered by the ledger sign convention; every sum below is unreliable", t)
 	}
 	for _, d := range report.Discrepancies {
-		log.Printf("[ALERT] user %s (%s): balance %.2f vs ledger %.2f, difference %+.2f",
+		log.Printf("[ALERT] user %s (%s): balance %s vs ledger %s, difference %s",
 			d.UserID, d.Phone, d.Balance, d.Ledger, d.Difference)
 	}
 	for _, a := range report.HoldAnomalies {
-		log.Printf("[ALERT] order %s (%s): hold %.2f — %s", a.OrderID, a.Status, a.HoldAmount, a.Reason)
+		log.Printf("[ALERT] order %s (%s): hold %s — %s", a.OrderID, a.Status, a.HoldAmount, a.Reason)
 	}
 }

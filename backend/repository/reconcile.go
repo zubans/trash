@@ -3,44 +3,45 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // BalanceDiscrepancy is one user whose stored balance does not match the sum of
 // their ledger entries.
 type BalanceDiscrepancy struct {
-	UserID     uuid.UUID `json:"user_id"`
-	Phone      string    `json:"phone"`
-	Role       string    `json:"role"`
-	Balance    float64   `json:"balance"`
-	Ledger     float64   `json:"ledger"`
-	Difference float64   `json:"difference"`
-	Entries    int       `json:"entries"`
+	UserID     uuid.UUID    `json:"user_id"`
+	Phone      string       `json:"phone"`
+	Role       string       `json:"role"`
+	Balance    money.Amount `json:"balance"`
+	Ledger     money.Amount `json:"ledger"`
+	Difference money.Amount `json:"difference"`
+	Entries    int          `json:"entries"`
 }
 
 // OrderHoldAnomaly is an order whose held amount contradicts its status: money
 // still held on a finished order, or nothing held on a live one.
 type OrderHoldAnomaly struct {
-	OrderID    uuid.UUID `json:"order_id"`
-	CustomerID uuid.UUID `json:"customer_id"`
-	Status     string    `json:"status"`
-	HoldAmount float64   `json:"hold_amount"`
-	Reason     string    `json:"reason"`
+	OrderID    uuid.UUID    `json:"order_id"`
+	CustomerID uuid.UUID    `json:"customer_id"`
+	Status     string       `json:"status"`
+	HoldAmount money.Amount `json:"hold_amount"`
+	Reason     string       `json:"reason"`
 }
 
 // BooksSummary is the closing position of the whole system.
 type BooksSummary struct {
-	UserTotal    float64         `json:"user_total"`
-	AccountTotal float64         `json:"account_total"`
-	Difference   float64         `json:"difference"`
+	UserTotal    money.Amount    `json:"user_total"`
+	AccountTotal money.Amount    `json:"account_total"`
+	Difference   money.Amount    `json:"difference"`
 	Accounts     []SystemAccount `json:"accounts"`
-	EscrowHeld   float64         `json:"escrow_held"`
-	LiveOrderSum float64         `json:"live_order_sum"`
-	EscrowDrift  float64         `json:"escrow_drift"`
+	EscrowHeld   money.Amount    `json:"escrow_held"`
+	LiveOrderSum money.Amount    `json:"live_order_sum"`
+	EscrowDrift  money.Amount    `json:"escrow_drift"`
 }
 
 // ReconciliationReport is the outcome of a full pass.
@@ -73,10 +74,10 @@ func (r *ReconciliationReport) Summary() string {
 		len(r.Discrepancies), len(r.HoldAnomalies), len(r.UnknownTypes), r.UsersChecked,
 	)
 	if r.BooksOpen {
-		parts += fmt.Sprintf("; books do not close by %+.2f", r.Books.Difference)
+		parts += fmt.Sprintf("; books do not close by %s", r.Books.Difference)
 	}
 	if r.EscrowMismatch {
-		parts += fmt.Sprintf("; escrow off by %+.2f against live order holds", r.Books.EscrowDrift)
+		parts += fmt.Sprintf("; escrow off by %s against live order holds", r.Books.EscrowDrift)
 	}
 	return parts
 }
@@ -84,7 +85,7 @@ func (r *ReconciliationReport) Summary() string {
 // ReconciliationRepository verifies that the stored balances agree with the
 // transaction log.
 type ReconciliationRepository interface {
-	Reconcile(tolerance float64) (*ReconciliationReport, error)
+	Reconcile(tolerance money.Amount) (*ReconciliationReport, error)
 }
 
 type reconcileRepo struct {
@@ -125,7 +126,7 @@ func ledgerSumExpr(column string) string {
 
 // Reconcile compares every user's balance with the sum of their ledger entries.
 // tolerance absorbs float rounding; pass 0.01 to allow a kopeck of drift.
-func (r *reconcileRepo) Reconcile(tolerance float64) (*ReconciliationReport, error) {
+func (r *reconcileRepo) Reconcile(tolerance money.Amount) (*ReconciliationReport, error) {
 	report := &ReconciliationReport{}
 
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&report.UsersChecked); err != nil {
@@ -161,7 +162,7 @@ func (r *reconcileRepo) Reconcile(tolerance float64) (*ReconciliationReport, err
 		if err := rows.Scan(&d.UserID, &d.Phone, &d.Role, &d.Balance, &d.Ledger, &d.Entries); err != nil {
 			return nil, err
 		}
-		d.Difference = d.Balance - d.Ledger
+		d.Difference = d.Balance.Sub(d.Ledger)
 		report.Discrepancies = append(report.Discrepancies, d)
 	}
 	if err := rows.Err(); err != nil {
@@ -182,8 +183,8 @@ func (r *reconcileRepo) Reconcile(tolerance float64) (*ReconciliationReport, err
 		return nil, err
 	}
 	report.Books = *books
-	report.BooksOpen = math.Abs(books.Difference) > tolerance
-	report.EscrowMismatch = math.Abs(books.EscrowDrift) > tolerance
+	report.BooksOpen = books.Difference.Abs() > tolerance
+	report.EscrowMismatch = books.EscrowDrift.Abs() > tolerance
 
 	return report, nil
 }
@@ -199,7 +200,7 @@ func (r *reconcileRepo) books() (*BooksSummary, error) {
 	if err := r.db.QueryRow(`SELECT COALESCE(SUM(balance), 0) FROM system_accounts`).Scan(&b.AccountTotal); err != nil {
 		return nil, fmt.Errorf("sum system accounts: %w", err)
 	}
-	b.Difference = b.UserTotal + b.AccountTotal
+	b.Difference = b.UserTotal.Add(b.AccountTotal)
 
 	rows, err := r.db.Query(`SELECT code, name, balance FROM system_accounts ORDER BY code`)
 	if err != nil {
@@ -225,7 +226,7 @@ func (r *reconcileRepo) books() (*BooksSummary, error) {
 		WHERE status IN ('SEARCHING', 'ASSIGNED', 'EXECUTED')`).Scan(&b.LiveOrderSum); err != nil {
 		return nil, fmt.Errorf("sum live order holds: %w", err)
 	}
-	b.EscrowDrift = b.EscrowHeld - b.LiveOrderSum
+	b.EscrowDrift = b.EscrowHeld.Sub(b.LiveOrderSum)
 
 	return &b, nil
 }
@@ -261,7 +262,7 @@ func (r *reconcileRepo) unknownTransactionTypes() ([]string, error) {
 // holdAnomalies finds orders whose held amount contradicts their status. A
 // finished order still holding money, or a live paid order holding none, is the
 // signature of a refund or payout that ran without its state transition.
-func (r *reconcileRepo) holdAnomalies(tolerance float64) ([]OrderHoldAnomaly, error) {
+func (r *reconcileRepo) holdAnomalies(tolerance money.Amount) ([]OrderHoldAnomaly, error) {
 	rows, err := r.db.Query(`
 		SELECT o.id, o.customer_id, o.status::text, o.hold_amount,
 		       CASE

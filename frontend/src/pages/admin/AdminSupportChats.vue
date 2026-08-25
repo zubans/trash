@@ -2,7 +2,7 @@
   <div class="admin-support-chats">
     <div class="telegram-container">
       <!-- Left Sidebar: User Chat List -->
-      <div class="chat-sidebar">
+      <div :class="['chat-sidebar', { 'mobile-hidden': selectedChat }]">
         <div class="sidebar-header">
           <h2 class="sidebar-title">Диалоги с клиентами</h2>
           <div class="search-box">
@@ -50,10 +50,13 @@
       </div>
 
       <!-- Right Panel: Active Dialogue -->
-      <div class="chat-main">
+      <div :class="['chat-main', { 'mobile-hidden': !selectedChat }]">
         <template v-if="selectedChat">
           <!-- Chat Header -->
           <div class="main-header">
+            <button type="button" class="btn-back-chat" title="К списку чатов" @click="selectedChat = null">
+              <i class="ph-bold ph-arrow-left"></i>
+            </button>
             <div class="user-meta-header">
               <div class="avatar" :class="getAvatarClass(selectedChat.role)">
                 {{ getInitials(selectedChat) }}
@@ -750,4 +753,53 @@ export default defineComponent({
 
 .font-size-huge { font-size: 64px; }
 .empty-state { text-align: center; color: #94a3b8; padding: 32px; font-size: 14px; }
+.btn-back-chat {
+  display: none;
+  background: #f1f5f9;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #0f172a;
+  cursor: pointer;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .admin-support-chats {
+    height: calc(100vh - 100px);
+  }
+  .telegram-container {
+    flex-direction: column;
+  }
+  .chat-sidebar {
+    width: 100% !important;
+    height: 100%;
+  }
+  .chat-main {
+    width: 100% !important;
+    height: 100%;
+  }
+  .chat-sidebar.mobile-hidden,
+  .chat-main.mobile-hidden {
+    display: none !important;
+  }
+  .btn-back-chat {
+    display: flex;
+  }
+  .user-meta-header {
+    gap: 8px;
+  }
+  .header-name {
+    font-size: 14px;
+  }
+  .header-details {
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+}
 </style>

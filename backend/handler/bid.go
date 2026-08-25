@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/middleware"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
@@ -73,7 +74,7 @@ func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		OfferedPrice float64 `json:"offered_price"`
+		OfferedPrice money.Amount `json:"offered_price"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)

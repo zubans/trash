@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -17,7 +18,7 @@ type mockOrderRepo struct {
 	orders []*repository.Order
 }
 
-func (m *mockOrderRepo) CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*repository.Order, error) {
+func (m *mockOrderRepo) CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount money.Amount, lastGeo string) (*repository.Order, error) {
 	o := &repository.Order{
 		ID:               uuid.New(),
 		CustomerID:       customerID,
@@ -204,7 +205,7 @@ func (m *mockOrderRepo) Assign(q repository.Querier, orderID, executorID uuid.UU
 }
 
 // AssignWithHold mirrors the guarded assignment used when a bid is accepted.
-func (m *mockOrderRepo) AssignWithHold(q repository.Querier, orderID, executorID uuid.UUID, holdAmount float64) error {
+func (m *mockOrderRepo) AssignWithHold(q repository.Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
 			if o.Status != repository.OrderStatusSearching || o.ExecutorID != nil {
@@ -226,7 +227,7 @@ func (m *mockOrderRepo) LockForUpdate(q repository.Querier, orderID uuid.UUID) (
 	return m.GetOrderByID(orderID)
 }
 
-func (m *mockOrderRepo) SetHoldAmount(q repository.Querier, orderID uuid.UUID, holdAmount float64) error {
+func (m *mockOrderRepo) SetHoldAmount(q repository.Querier, orderID uuid.UUID, holdAmount money.Amount) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
 			o.HoldAmount = holdAmount
@@ -236,7 +237,7 @@ func (m *mockOrderRepo) SetHoldAmount(q repository.Querier, orderID uuid.UUID, h
 	return repository.ErrConflict
 }
 
-func (m *mockOrderRepo) Confirm(q repository.Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error {
+func (m *mockOrderRepo) Confirm(q repository.Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
 			if o.Status != repository.OrderStatusExecuted {
@@ -291,9 +292,9 @@ type mockCatalogRepo struct {
 }
 
 func newMockCatalogRepo() *mockCatalogRepo {
-	bp100 := 100.0
-	bp200 := 200.0
-	bp0 := 0.0
+	bp100 := money.FromRubles(100)
+	bp200 := money.FromRubles(200)
+	bp0 := money.Zero
 	return &mockCatalogRepo{
 		nodes: map[uuid.UUID]*repository.ServiceNode{
 			standardVariantID: {
@@ -405,7 +406,7 @@ func (m *orderMockShiftRepo) CheckShiftGeofence(shift *repository.Shift, lat, lo
 	return true, nil
 }
 
-func (m *orderMockShiftRepo) ApplyEarlyEndPenalty(shiftID uuid.UUID, amount float64) (*repository.Shift, error) {
+func (m *orderMockShiftRepo) ApplyEarlyEndPenalty(shiftID uuid.UUID, amount money.Amount) (*repository.Shift, error) {
 	return nil, nil
 }
 
@@ -417,11 +418,11 @@ func (m *orderMockShiftRepo) Create(shift *repository.Shift) error { return nil 
 
 func (m *orderMockShiftRepo) End(shiftID uuid.UUID) error { return nil }
 
-func (m *orderMockShiftRepo) Penalize(shiftID uuid.UUID, fine float64) error { return nil }
+func (m *orderMockShiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error { return nil }
 
 func (m *orderMockShiftRepo) SaveGPSLog(log *repository.GPSLog) error { return nil }
 
-func (m *orderMockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine float64) error { return nil }
+func (m *orderMockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error { return nil }
 
 func (m *orderMockShiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*repository.Shift, error) {
 	return nil, nil
@@ -454,9 +455,9 @@ func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error) {
 	birth := time.Now().AddDate(-30, 0, 0)
 	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", EmailVerified: true, BirthDate: &birth}, nil
 }
-func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error    { return nil }
-func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error        { return nil }
-func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance float64) error { return nil }
+func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error         { return nil }
+func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error             { return nil }
+func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error { return nil }
 func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	m.lastGeo[id] = lastGeo
 	return nil
@@ -493,14 +494,14 @@ func (m *mockOrderRepo) FindAllByExecutor(executorID uuid.UUID) ([]repository.Or
 
 type mockTransactionRepo struct {
 	txs      []*repository.Transaction
-	balances map[uuid.UUID]float64
+	balances map[uuid.UUID]money.Amount
 }
 
-const mockDefaultBalance = 10000.0
+const mockDefaultBalance = money.Amount(10000 * 100)
 
-func (m *mockTransactionRepo) balance(userID uuid.UUID) float64 {
+func (m *mockTransactionRepo) balance(userID uuid.UUID) money.Amount {
 	if m.balances == nil {
-		m.balances = make(map[uuid.UUID]float64)
+		m.balances = make(map[uuid.UUID]money.Amount)
 	}
 	if _, ok := m.balances[userID]; !ok {
 		m.balances[userID] = mockDefaultBalance
@@ -508,21 +509,21 @@ func (m *mockTransactionRepo) balance(userID uuid.UUID) float64 {
 	return m.balances[userID]
 }
 
-func (m *mockTransactionRepo) GetBalance(userID uuid.UUID) (float64, error) {
+func (m *mockTransactionRepo) GetBalance(userID uuid.UUID) (money.Amount, error) {
 	return m.balance(userID), nil
 }
 
-func (m *mockTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta float64) error {
-	m.balances[userID] = m.balance(userID) + delta
+func (m *mockTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
+	m.balances[userID] = m.balance(userID).Add(delta)
 	return nil
 }
 
 // Debit refuses to go below zero, like the guarded UPDATE in the real repository.
-func (m *mockTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount float64) error {
+func (m *mockTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
 	if m.balance(userID) < amount {
 		return repository.ErrInsufficientFunds
 	}
-	m.balances[userID] = m.balance(userID) - amount
+	m.balances[userID] = m.balance(userID).Sub(amount)
 	return nil
 }
 
@@ -552,23 +553,23 @@ func TestOrderService_CalculatePrice(t *testing.T) {
 	srv := NewOrderService(&mockOrderRepo{}, testLedger(), setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	p, err := srv.CalculatePrice(standardVariantID, false, false, false)
-	if err != nil || p != 100.0 {
-		t.Errorf("expected 100.0, got %f, err: %v", p, err)
+	if err != nil || p != money.FromRubles(100) {
+		t.Errorf("expected 100.0, got %s, err: %v", p, err)
 	}
 
 	p, err = srv.CalculatePrice(largeVariantID, true, false, false)
-	if err != nil || p != 600.0 {
-		t.Errorf("expected 600.0, got %f, err: %v", p, err)
+	if err != nil || p != money.FromRubles(600) {
+		t.Errorf("expected 600.0, got %s, err: %v", p, err)
 	}
 
 	p, err = srv.CalculatePrice(standardVariantID, false, true, false)
-	if err != nil || p != 800.0 {
-		t.Errorf("expected 800.0, got %f, err: %v", p, err)
+	if err != nil || p != money.FromRubles(800) {
+		t.Errorf("expected 800.0, got %s, err: %v", p, err)
 	}
 
 	p, err = srv.CalculatePrice(constructionVariantID, false, false, false)
-	if err != nil || p != 0.0 {
-		t.Errorf("expected 0.0 for auction, got %f, err: %v", p, err)
+	if err != nil || p != money.Zero {
+		t.Errorf("expected 0.0 for auction, got %s, err: %v", p, err)
 	}
 }
 
@@ -590,8 +591,8 @@ func TestOrderService_CreateOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating order: %v", err)
 	}
-	if order.HoldAmount != 100.0 {
-		t.Errorf("expected hold amount 100.0, got %f", order.HoldAmount)
+	if order.HoldAmount != money.FromRubles(100) {
+		t.Errorf("expected hold amount 100.0, got %s", order.HoldAmount)
 	}
 	if order.Status != "SEARCHING" {
 		t.Errorf("expected status SEARCHING, got %s", order.Status)
@@ -667,7 +668,7 @@ func TestOrderService_CreateConstructionOrder(t *testing.T) {
 		t.Errorf("expected construction variant %s, got %s", constructionVariantID, order.ServiceVariantID)
 	}
 	if order.HoldAmount != 0 {
-		t.Errorf("expected hold amount 0 for auction, got %f", order.HoldAmount)
+		t.Errorf("expected hold amount 0 for auction, got %s", order.HoldAmount)
 	}
 }
 
@@ -700,8 +701,8 @@ func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 			if !o.IsDowngraded {
 				t.Error("expected order to be downgraded")
 			}
-			if o.FinalAmount != 100.0 {
-				t.Errorf("expected final amount 100.0 after downgrade, got %f", o.FinalAmount)
+			if o.FinalAmount != money.FromRubles(100) {
+				t.Errorf("expected final amount 100.0 after downgrade, got %s", o.FinalAmount)
 			}
 		}
 	}
@@ -762,11 +763,11 @@ func TestOrderService_AcceptLimits(t *testing.T) {
 // mockAccounts is an in-memory SystemAccountRepository. It mirrors the real one
 // closely enough that a test can assert where money went, not just that it left.
 type mockAccounts struct {
-	balances map[string]float64
+	balances map[string]money.Amount
 }
 
 func newMockAccounts() *mockAccounts {
-	return &mockAccounts{balances: map[string]float64{
+	return &mockAccounts{balances: map[string]money.Amount{
 		repository.AccountEscrow:   0,
 		repository.AccountFines:    0,
 		repository.AccountDeposits: 0,
@@ -774,19 +775,19 @@ func newMockAccounts() *mockAccounts {
 	}}
 }
 
-func (m *mockAccounts) Credit(q repository.Querier, code string, amount float64) error {
+func (m *mockAccounts) Credit(q repository.Querier, code string, amount money.Amount) error {
 	if _, ok := m.balances[code]; !ok {
 		return repository.ErrUnknownSystemAccount
 	}
-	m.balances[code] += amount
+	m.balances[code] = m.balances[code].Add(amount)
 	return nil
 }
 
-func (m *mockAccounts) Debit(q repository.Querier, code string, amount float64) error {
+func (m *mockAccounts) Debit(q repository.Querier, code string, amount money.Amount) error {
 	if _, ok := m.balances[code]; !ok {
 		return repository.ErrUnknownSystemAccount
 	}
-	m.balances[code] -= amount
+	m.balances[code] = m.balances[code].Sub(amount)
 	return nil
 }
 

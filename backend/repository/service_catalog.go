@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/money"
 )
 
 // ServiceNodeType defines the type of a catalog node.
@@ -56,7 +58,7 @@ type ServiceNode struct {
 	Name                 LocalizedText   `json:"name"`
 	Description          LocalizedText   `json:"description,omitempty"`
 	NodeType             ServiceNodeType `json:"node_type"`
-	BasePrice            *float64        `json:"base_price,omitempty"`
+	BasePrice            *money.Amount   `json:"base_price,omitempty"`
 	IsAuction            bool            `json:"is_auction"`
 	IsActive             bool            `json:"is_active"`
 	SortOrder            int             `json:"sort_order"`

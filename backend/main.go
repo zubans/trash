@@ -17,6 +17,7 @@ import (
 
 	"healthlogin/backend/handler"
 	"healthlogin/backend/middleware"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 	"healthlogin/backend/worker"
@@ -71,6 +72,7 @@ func main() {
 	reviewRepo := repository.NewReviewRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	executorGeoRepo := repository.NewExecutorGeoRepository(db)
+	addressRepo := repository.NewCustomerAddressRepository(db)
 	reconcileRepo := repository.NewReconciliationRepository(db)
 	systemAccountRepo := repository.NewSystemAccountRepository(db)
 
@@ -88,6 +90,7 @@ func main() {
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
 		WithSessions(authService).
 		WithLedger(ledger).
+		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
@@ -107,12 +110,14 @@ func main() {
 	auctionWorker := worker.NewAuctionWorker(db)
 	auctionWorker.Start(1 * time.Minute)
 
+	// The only thing that closes an expired shift: one periodic scan, which also
+	// picks up shifts that were running when the process restarted.
 	shiftWorker := worker.NewShiftWorker(shiftService)
 	shiftWorker.Start(1 * time.Minute)
 
 	// Nightly books check. It reports and never repairs: a balance that drifted
 	// away from its ledger is a bug worth seeing, not a number to overwrite.
-	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, 0.01)
+	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01))
 	reconcileWorker.Start(24 * time.Hour)
 
 	// Expired refresh tokens are dropped daily; used ones are kept until they
@@ -123,13 +128,6 @@ func main() {
 			authService.CleanupExpiredRefreshTokens()
 		}
 	}()
-
-	// Restore auto-end timers for existing active shifts on boot
-	if activeShifts, err := shiftRepo.GetActiveShifts(); err == nil {
-		for _, s := range activeShifts {
-			shiftService.ScheduleShiftAutoEnd(s)
-		}
-	}
 
 	// Middleware
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret)
@@ -220,6 +218,9 @@ func main() {
 			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
+			r.Post("/user/address", ah.AddAddressHandler)
+			r.Post("/user/address/default", ah.SetDefaultAddressHandler)
+			r.Delete("/user/address/{id}", ah.DeleteAddressHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
 			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)
