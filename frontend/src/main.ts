@@ -8,10 +8,9 @@ import 'leaflet/dist/leaflet.css'
 // third-party code executing in the app's origin next to the session token,
 // with no pinned version and no integrity check — and it took the whole icon
 // set down with it whenever unpkg was unreachable. Only the weights the app
-// actually uses are imported.
-import '@phosphor-icons/web/regular'
-import '@phosphor-icons/web/bold'
-import '@phosphor-icons/web/fill'
+import '@phosphor-icons/web/regular/style.css'
+import '@phosphor-icons/web/bold/style.css'
+import '@phosphor-icons/web/fill/style.css'
 import App from './App.vue'
 import router from './router'
 import { i18n } from './i18n'
