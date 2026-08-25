@@ -1,6 +1,7 @@
 package service
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,10 @@ import (
 	"healthlogin/backend/repository"
 )
 
+// maxAdminPageSize caps admin listings so a single request cannot ask for the
+// whole table.
+const maxAdminPageSize = 200
+
 // SessionRevoker ends every session of a user. Satisfied by *AuthService;
 // AdminService only needs this much of it.
 type SessionRevoker interface {
@@ -20,13 +25,14 @@ type SessionRevoker interface {
 
 // AdminService manages administrative business logic.
 type AdminService struct {
-	userRepo      repository.UserRepository
-	adminRepo     repository.AdminRepository
-	settingsRepo  repository.SettingsRepository
-	reconcileRepo repository.ReconciliationRepository
-	sessions      SessionRevoker
-	mailer        MailSender
-	jwtSecret     []byte
+	userRepo        repository.UserRepository
+	adminRepo       repository.AdminRepository
+	settingsRepo    repository.SettingsRepository
+	transactionRepo repository.TransactionRepository
+	reconcileRepo   repository.ReconciliationRepository
+	sessions        SessionRevoker
+	mailer          MailSender
+	jwtSecret       []byte
 }
 
 // NewAdminService creates a new AdminService.
@@ -51,6 +57,13 @@ func NewAdminService(
 		mailer:       mailer,
 		jwtSecret:    []byte(secret),
 	}
+}
+
+// WithLedger attaches the balance store. Withdrawals move money, so the service
+// needs it to reserve funds when a request is created.
+func (s *AdminService) WithLedger(transactionRepo repository.TransactionRepository) *AdminService {
+	s.transactionRepo = transactionRepo
+	return s
 }
 
 // WithReconciliation enables the balance/ledger consistency report.
@@ -91,7 +104,20 @@ func (s *AdminService) revokeSessions(userID uuid.UUID, reason string) {
 }
 
 // GetUsers retrieves a list of users with filters and search.
+//
+// role and status are validated here rather than handed straight to the enum
+// columns: an unexpected value used to surface as a database error and a 500,
+// which is both a bad answer and a way to probe the schema.
 func (s *AdminService) GetUsers(page, limit int, role, status, search string) ([]*repository.User, int, error) {
+	if role != "" && role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
+		return nil, 0, errors.New("invalid role filter")
+	}
+	if status != "" && status != "ACTIVE" && status != "BANNED" {
+		return nil, 0, errors.New("invalid status filter")
+	}
+	if limit > maxAdminPageSize {
+		limit = maxAdminPageSize
+	}
 	return s.adminRepo.GetUsers(page, limit, role, status, search)
 }
 
@@ -260,10 +286,20 @@ func (s *AdminService) GetWithdrawalRequests() ([]*repository.WithdrawalRequest,
 	return s.adminRepo.GetWithdrawalRequests()
 }
 
-// CreateWithdrawalRequest creates a pending balance withdrawal request.
+// CreateWithdrawalRequest reserves the requested amount and records a pending
+// request for it.
+//
+// The money is taken out of the balance immediately, exactly like an order hold.
+// Previously a request only checked the balance and left the funds spendable, so
+// a user could queue several requests against the same money and spend it while
+// they waited — the payout queue then contained amounts that could not all be
+// honoured.
 func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
 	if amount <= 0 {
 		return nil, errors.New("amount must be greater than zero")
+	}
+	if s.transactionRepo == nil {
+		return nil, errors.New("ledger is not configured")
 	}
 
 	user, err := s.userRepo.FindByID(userID)
@@ -272,9 +308,6 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64)
 	}
 	if user.Status == "BANNED" {
 		return nil, errors.New("cannot request withdrawal for a banned user")
-	}
-	if user.Balance < amount {
-		return nil, errors.New("insufficient balance for withdrawal")
 	}
 
 	pending, err := s.adminRepo.HasPendingWithdrawal(userID)
@@ -285,33 +318,91 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount float64)
 		return nil, errors.New("у вас уже есть заявка на вывод в обработке")
 	}
 
-	return s.adminRepo.CreateWithdrawalRequest(userID, amount)
+	var created *repository.WithdrawalRequest
+	err = s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+		// Guarded debit: the balance has to cover the request at this moment,
+		// not at some earlier read.
+		if err := s.transactionRepo.Debit(tx, userID, amount); err != nil {
+			return err
+		}
+		req, err := s.adminRepo.CreateWithdrawalRequest(tx, userID, amount)
+		if err != nil {
+			return err
+		}
+		created = req
+		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+			UserID: userID,
+			Type:   string(repository.TransactionTypeWithdrawalHold),
+			Amount: amount,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrInsufficientFunds) {
+			return nil, errors.New("insufficient balance for withdrawal")
+		}
+		return nil, err
+	}
+	return created, nil
 }
 
-// ApproveWithdrawalRequest approves a withdrawal request.
+// ApproveWithdrawalRequest marks a reserved withdrawal as paid out. No balance
+// movement happens here: the money left the balance when the request was
+// created, and this records that reservation being spent.
 func (s *AdminService) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	req, err := s.adminRepo.GetWithdrawalRequestByID(requestID)
-	if err != nil {
-		return err
-	}
-	if req.Status != "PENDING" {
-		return errors.New("request is not in PENDING status")
-	}
-
-	return s.adminRepo.ApproveWithdrawalRequest(requestID, adminID)
+	return s.decideWithdrawal(requestID, adminID, "APPROVED")
 }
 
-// RejectWithdrawalRequest rejects a withdrawal request.
+// RejectWithdrawalRequest returns the reserved money to the user.
 func (s *AdminService) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	req, err := s.adminRepo.GetWithdrawalRequestByID(requestID)
-	if err != nil {
-		return err
-	}
-	if req.Status != "PENDING" {
-		return errors.New("request is not in PENDING status")
+	return s.decideWithdrawal(requestID, adminID, "REJECTED")
+}
+
+func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status string) error {
+	if s.transactionRepo == nil {
+		return errors.New("ledger is not configured")
 	}
 
-	return s.adminRepo.RejectWithdrawalRequest(requestID, adminID)
+	err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+		req, err := s.adminRepo.LockWithdrawalRequest(tx, requestID)
+		if err != nil {
+			return errors.New("request not found")
+		}
+		if req.Status != "PENDING" {
+			return errors.New("request is not in PENDING status")
+		}
+
+		if err := s.adminRepo.SetWithdrawalStatus(tx, requestID, adminID, status); err != nil {
+			return err
+		}
+
+		if status == "REJECTED" {
+			// Give the reserved money back.
+			if err := s.transactionRepo.UpdateBalance(tx, req.UserID, req.Amount); err != nil {
+				return err
+			}
+			return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+				UserID:  req.UserID,
+				Type:    string(repository.TransactionTypeRefund),
+				Amount:  req.Amount,
+				AdminID: &adminID,
+			})
+		}
+
+		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+			UserID:  req.UserID,
+			Type:    string(repository.TransactionTypeWithdrawalPaid),
+			Amount:  req.Amount,
+			AdminID: &adminID,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return errors.New("request is not in PENDING status")
+		}
+		return err
+	}
+	log.Printf("[AUDIT] admin %s set withdrawal request %s to %s", adminID, requestID, status)
+	return nil
 }
 
 // GetTransactions retrieves transaction history.

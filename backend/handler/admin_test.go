@@ -131,8 +131,9 @@ func (m *mockUserRepository) UpdateUserName(userID uuid.UUID, lastName, firstNam
 
 // mockAdminRepository implements repository.AdminRepository.
 type mockAdminRepository struct {
-	users    []*repository.User
-	requests map[uuid.UUID]*repository.TopUpRequest
+	users       []*repository.User
+	requests    map[uuid.UUID]*repository.TopUpRequest
+	withdrawals map[uuid.UUID]*repository.WithdrawalRequest
 }
 
 func (m *mockAdminRepository) GetUsers(page, limit int, role, status, search string) ([]*repository.User, int, error) {
@@ -193,16 +194,13 @@ func (m *mockAdminRepository) GetWithdrawalRequestByID(id uuid.UUID) (*repositor
 	return nil, nil
 }
 
-func (m *mockAdminRepository) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
-	return &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}, nil
-}
-
-func (m *mockAdminRepository) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockAdminRepository) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
+func (m *mockAdminRepository) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
+	if m.withdrawals == nil {
+		m.withdrawals = make(map[uuid.UUID]*repository.WithdrawalRequest)
+	}
+	m.withdrawals[req.ID] = req
+	return req, nil
 }
 
 func (m *mockAdminRepository) GetTransactions() ([]*repository.Transaction, error) {
@@ -367,4 +365,23 @@ func (m *mockAdminRepository) CountAdmins() (int, error) {
 // HasPendingWithdrawal reports an existing open withdrawal request.
 func (m *mockAdminRepository) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
 	return false, nil
+}
+
+// LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
+// that it lives in AdminService.
+func (m *mockAdminRepository) LockWithdrawalRequest(q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
+	if req, ok := m.withdrawals[requestID]; ok {
+		return req, nil
+	}
+	return nil, repository.ErrConflict
+}
+
+func (m *mockAdminRepository) SetWithdrawalStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+	req, ok := m.withdrawals[requestID]
+	if !ok || req.Status != "PENDING" {
+		return repository.ErrConflict
+	}
+	req.Status = status
+	req.AdminID = &adminID
+	return nil
 }

@@ -257,3 +257,114 @@ func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 		t.Error("expected a stranger to be refused")
 	}
 }
+
+// newWithdrawalTestService wires AdminService with a balance-tracking ledger.
+func newWithdrawalTestService() (*AdminService, *mockAdminRepo, *mockRepo, *mockTransactionRepo) {
+	userRepo := newMockRepo()
+	adminRepo := &mockAdminRepo{
+		requests:    make(map[uuid.UUID]*repository.TopUpRequest),
+		withdrawals: make(map[uuid.UUID]*repository.WithdrawalRequest),
+	}
+	txRepo := &mockTransactionRepo{}
+	svc := NewAdminService(userRepo, adminRepo, &mockSettingsRepo{settings: map[string]string{}}, "secret", nil).
+		WithLedger(txRepo)
+	return svc, adminRepo, userRepo, txRepo
+}
+
+// TestWithdrawalReservesFunds covers M-06: a request used to only look at the
+// balance and leave the money spendable.
+func TestWithdrawalReservesFunds(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000010", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+
+	if _, err := svc.CreateWithdrawalRequest(user.ID, 400); err != nil {
+		t.Fatalf("unexpected error requesting withdrawal: %v", err)
+	}
+
+	balance, _ := txRepo.GetBalance(user.ID)
+	if balance != mockDefaultBalance-400 {
+		t.Errorf("expected the money to be reserved at request time, balance is %.2f", balance)
+	}
+
+	var held float64
+	for _, tx := range txRepo.txs {
+		if tx.Type == string(repository.TransactionTypeWithdrawalHold) {
+			held += tx.Amount
+		}
+	}
+	if held != 400 {
+		t.Errorf("expected a WITHDRAWAL_HOLD entry of 400.00, got %.2f", held)
+	}
+}
+
+// TestWithdrawalCannotExceedBalance checks the guarded debit rather than a
+// check-then-write on a stale read.
+func TestWithdrawalCannotExceedBalance(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000011", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+	txRepo.balances = map[uuid.UUID]float64{user.ID: 100}
+
+	if _, err := svc.CreateWithdrawalRequest(user.ID, 500); err == nil {
+		t.Error("expected a request larger than the balance to be refused")
+	}
+	if balance, _ := txRepo.GetBalance(user.ID); balance != 100 {
+		t.Errorf("a refused request must not touch the balance, got %.2f", balance)
+	}
+}
+
+// TestRejectedWithdrawalReturnsTheMoney makes sure a refusal is not a quiet
+// confiscation now that funds leave the balance up front.
+func TestRejectedWithdrawalReturnsTheMoney(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000012", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+
+	req, err := svc.CreateWithdrawalRequest(user.ID, 250)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := svc.RejectWithdrawalRequest(req.ID, uuid.New()); err != nil {
+		t.Fatalf("unexpected error rejecting: %v", err)
+	}
+	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance {
+		t.Errorf("rejecting must return the reserved money, balance is %.2f", balance)
+	}
+
+	// A second decision on the same request must not double-refund.
+	if err := svc.RejectWithdrawalRequest(req.ID, uuid.New()); err == nil {
+		t.Error("expected a second decision to be refused")
+	}
+	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance {
+		t.Errorf("balance must be restored once, got %.2f", balance)
+	}
+}
+
+// TestApprovedWithdrawalDoesNotDebitTwice: the money already left the balance
+// when the request was created, so approval must move nothing.
+func TestApprovedWithdrawalDoesNotDebitTwice(t *testing.T) {
+	svc, _, userRepo, txRepo := newWithdrawalTestService()
+
+	user := &repository.User{ID: uuid.New(), Phone: "+79990000013", Role: "EXECUTOR", Status: "ACTIVE"}
+	userRepo.users[user.Phone] = user
+
+	req, err := svc.CreateWithdrawalRequest(user.ID, 300)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := svc.ApproveWithdrawalRequest(req.ID, uuid.New()); err != nil {
+		t.Fatalf("unexpected error approving: %v", err)
+	}
+
+	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance-300 {
+		t.Errorf("approval must not debit again, balance is %.2f", balance)
+	}
+	if err := svc.ApproveWithdrawalRequest(req.ID, uuid.New()); err == nil {
+		t.Error("expected a repeated approval to be refused")
+	}
+}

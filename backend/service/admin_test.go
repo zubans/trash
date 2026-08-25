@@ -14,6 +14,7 @@ import (
 type mockAdminRepo struct {
 	users        []*repository.User
 	requests     map[uuid.UUID]*repository.TopUpRequest
+	withdrawals  map[uuid.UUID]*repository.WithdrawalRequest
 	transactions []*repository.Transaction
 }
 
@@ -96,16 +97,13 @@ func (m *mockAdminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*repository.With
 	return nil, errors.New("not found")
 }
 
-func (m *mockAdminRepo) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
-	return &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}, nil
-}
-
-func (m *mockAdminRepo) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockAdminRepo) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return nil
+func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount float64) (*repository.WithdrawalRequest, error) {
+	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
+	if m.withdrawals == nil {
+		m.withdrawals = make(map[uuid.UUID]*repository.WithdrawalRequest)
+	}
+	m.withdrawals[req.ID] = req
+	return req, nil
 }
 
 func (m *mockAdminRepo) GetTransactions() ([]*repository.Transaction, error) {
@@ -291,4 +289,23 @@ func (m *mockAdminRepo) CountAdmins() (int, error) {
 // HasPendingWithdrawal reports an existing open withdrawal request.
 func (m *mockAdminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
 	return false, nil
+}
+
+// LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
+// that it lives in AdminService.
+func (m *mockAdminRepo) LockWithdrawalRequest(q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
+	if req, ok := m.withdrawals[requestID]; ok {
+		return req, nil
+	}
+	return nil, repository.ErrConflict
+}
+
+func (m *mockAdminRepo) SetWithdrawalStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+	req, ok := m.withdrawals[requestID]
+	if !ok || req.Status != "PENDING" {
+		return repository.ErrConflict
+	}
+	req.Status = status
+	req.AdminID = &adminID
+	return nil
 }

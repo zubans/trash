@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -122,20 +123,54 @@ type NominatimResponse struct {
 // Geocoder provides address-to-coordinate resolution and autocomplete
 // backed by OpenStreetMap Nominatim.
 type Geocoder struct {
-	db          *sql.DB
-	client      *http.Client
-	baseURL     string
-	rateLimiter <-chan time.Time
+	db      *sql.DB
+	client  *http.Client
+	baseURL string
+	// upstreamSlot serialises calls to Nominatim, which allows one request per
+	// second on the free tier. It is a buffered channel rather than a bare
+	// time.Tick receive so that a caller can give up instead of queueing
+	// forever: an unbounded queue on a shared limiter meant one client could
+	// stall address lookup — and therefore order creation — for everyone.
+	upstreamSlot chan struct{}
+}
+
+// upstreamWaitTimeout bounds how long a caller waits for its turn at the
+// upstream geocoder before giving up.
+const upstreamWaitTimeout = 3 * time.Second
+
+// ErrGeocoderBusy reports that the shared upstream slot did not free up in time.
+var ErrGeocoderBusy = errors.New("geocoder is busy, try again")
+
+// acquireUpstream waits for the shared once-per-second slot. It returns
+// ErrGeocoderBusy rather than blocking indefinitely.
+func (g *Geocoder) acquireUpstream() error {
+	select {
+	case <-g.upstreamSlot:
+		// Refill the slot a second from now, keeping the upstream rate at 1/s.
+		time.AfterFunc(time.Second, func() {
+			select {
+			case g.upstreamSlot <- struct{}{}:
+			default:
+			}
+		})
+		return nil
+	case <-time.After(upstreamWaitTimeout):
+		return ErrGeocoderBusy
+	}
 }
 
 // NewGeocoder creates a Geocoder backed by Nominatim (OpenStreetMap).
 func NewGeocoder(db *sql.DB) *Geocoder {
-	// Nominatim requires a maximum of 1 request per second for free usage.
+	// Nominatim allows one request per second on the free tier; the single slot
+	// below enforces that.
+	slot := make(chan struct{}, 1)
+	slot <- struct{}{}
+
 	return &Geocoder{
-		db:          db,
-		client:      &http.Client{Timeout: 10 * time.Second},
-		baseURL:     "https://nominatim.openstreetmap.org/search",
-		rateLimiter: time.Tick(time.Second),
+		db:           db,
+		client:       &http.Client{Timeout: 10 * time.Second},
+		baseURL:      "https://nominatim.openstreetmap.org/search",
+		upstreamSlot: slot,
 	}
 }
 
@@ -150,7 +185,9 @@ func (g *Geocoder) Autocomplete(query string) ([]AutocompleteResult, error) {
 		return []AutocompleteResult{}, nil
 	}
 
-	<-g.rateLimiter
+	if err := g.acquireUpstream(); err != nil {
+		return nil, err
+	}
 
 	u, err := url.Parse(g.baseURL)
 	if err != nil {
@@ -228,7 +265,9 @@ func (g *Geocoder) Geocode(address string) (*GeocodingResult, error) {
 		return cached, nil
 	}
 
-	<-g.rateLimiter
+	if err := g.acquireUpstream(); err != nil {
+		return nil, err
+	}
 
 	u, err := url.Parse(g.baseURL)
 	if err != nil {

@@ -69,11 +69,13 @@ type AdminRepository interface {
 	RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error
 	GetWithdrawalRequests() ([]*WithdrawalRequest, error)
 	GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, error)
-	CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*WithdrawalRequest, error)
+	// Withdrawals are a money workflow and live in AdminService; the repository
+	// provides the locked read and the individual writes it needs.
+	CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount float64) (*WithdrawalRequest, error)
+	LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
+	SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error
 	HasPendingWithdrawal(userID uuid.UUID) (bool, error)
 	CountAdmins() (int, error)
-	ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error
-	RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error
 	TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error
 	GetTransactions() ([]*Transaction, error)
 	GetActiveShifts() ([]*AdminShift, error)
@@ -340,7 +342,14 @@ func (r *adminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, 
 	return &req, nil
 }
 
-func (r *adminRepo) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*WithdrawalRequest, error) {
+func (r *adminRepo) exec(q Querier) Querier {
+	if q == nil {
+		return r.db
+	}
+	return q
+}
+
+func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount float64) (*WithdrawalRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_withdrawal_requests (id, user_id, amount, status, created_at)
@@ -348,11 +357,34 @@ func (r *adminRepo) CreateWithdrawalRequest(userID uuid.UUID, amount float64) (*
 		RETURNING id, user_id, amount, status, created_at`
 
 	var req WithdrawalRequest
-	err := r.db.QueryRow(query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
+	err := r.exec(q).QueryRow(query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &req, nil
+}
+
+// LockWithdrawalRequest reads a request taking a row lock, so two admins acting
+// at the same time serialise instead of both seeing it as PENDING.
+func (r *adminRepo) LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*WithdrawalRequest, error) {
+	var req WithdrawalRequest
+	err := r.exec(q).QueryRow(`
+		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
+		FROM balance_withdrawal_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
+		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+// SetWithdrawalStatus decides a pending request. The guard makes a second
+// decision on the same request fail instead of overwriting the first.
+func (r *adminRepo) SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error {
+	return execExpectingOne(r.exec(q), `
+		UPDATE balance_withdrawal_requests
+		SET status = $1::withdrawal_status, admin_id = $2, updated_at = now()
+		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
 }
 
 // HasPendingWithdrawal reports whether the user already has an open request.
@@ -372,105 +404,6 @@ func (r *adminRepo) CountAdmins() (int, error) {
 	var count int
 	err := r.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
 	return count, err
-}
-
-func (r *adminRepo) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// 1. Lock request row and check status/amount
-	var status string
-	var amount float64
-	var userID uuid.UUID
-	queryLock := `
-		SELECT status, amount, user_id
-		FROM balance_withdrawal_requests
-		WHERE id = $1 FOR UPDATE`
-	err = tx.QueryRow(queryLock, requestID).Scan(&status, &amount, &userID)
-	if err != nil {
-		return err
-	}
-
-	if status != "PENDING" {
-		return errors.New("request is not in PENDING status")
-	}
-
-	// 2. Lock user balance to ensure sufficient funds
-	var userBalance float64
-	err = tx.QueryRow(`SELECT balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&userBalance)
-	if err != nil {
-		return err
-	}
-	if userBalance < amount {
-		return errors.New("insufficient balance for withdrawal")
-	}
-
-	// 3. Update status of the request
-	queryUpdateReq := `
-		UPDATE balance_withdrawal_requests
-		SET status = 'APPROVED', admin_id = $1, updated_at = now()
-		WHERE id = $2`
-	_, err = tx.Exec(queryUpdateReq, adminID, requestID)
-	if err != nil {
-		return err
-	}
-
-	// 4. Deduct user's balance
-	queryUpdateUser := `
-		UPDATE users
-		SET balance = balance - $1
-		WHERE id = $2`
-	_, err = tx.Exec(queryUpdateUser, amount, userID)
-	if err != nil {
-		return err
-	}
-
-	// 5. Log the transaction
-	queryLogTx := `
-		INSERT INTO transactions (user_id, type, amount, admin_id, created_at)
-		VALUES ($1, 'WITHDRAWAL', $2, $3, now())`
-	_, err = tx.Exec(queryLogTx, userID, amount, adminID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
-func (r *adminRepo) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	var status string
-	queryLock := `
-		SELECT status
-		FROM balance_withdrawal_requests
-		WHERE id = $1 FOR UPDATE`
-	err = tx.QueryRow(queryLock, requestID).Scan(&status)
-	if err != nil {
-		return err
-	}
-
-	if status != "PENDING" {
-		return errors.New("request is not in PENDING status")
-	}
-
-	queryUpdateReq := `
-		UPDATE balance_withdrawal_requests
-		SET status = 'REJECTED', admin_id = $1, updated_at = now()
-		WHERE id = $2`
-	_, err = tx.Exec(queryUpdateReq, adminID, requestID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
 }
 
 func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount float64) error {

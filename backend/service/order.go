@@ -537,8 +537,15 @@ func (s *OrderService) Cancel(customerID, orderID uuid.UUID) error {
 
 // CreateConstructionOrder creates a construction waste auction order.
 func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, address, comment string, lat, lon *float64) (*repository.Order, error) {
+	photoURL = strings.TrimSpace(photoURL)
 	if photoURL == "" {
 		return nil, errors.New("photo URL is required")
+	}
+	// Only a path produced by our own upload endpoint is accepted. The value
+	// used to be stored verbatim and rendered in the admin panel, so an
+	// arbitrary URL there is somebody else's content on our page.
+	if !strings.HasPrefix(photoURL, "/uploads/") || strings.Contains(photoURL, "..") {
+		return nil, errors.New("photo must be uploaded through the app")
 	}
 
 	variant, err := s.catalogRepo.GetNodeByCode("trash_construction")

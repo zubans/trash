@@ -650,7 +650,16 @@ func TestOrderService_CreateConstructionOrder(t *testing.T) {
 		t.Error("expected error creating construction order without photo URL")
 	}
 
-	order, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61", "", nil, nil)
+	// Only paths produced by our own upload endpoint are accepted; an arbitrary
+	// URL would end up rendered in the admin panel.
+	if _, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61", "", nil, nil); err == nil {
+		t.Error("expected an external photo URL to be refused")
+	}
+	if _, err := srv.CreateConstructionOrder(customerID, "/uploads/../../etc/passwd", "55.75,37.61", "", nil, nil); err == nil {
+		t.Error("expected a traversing photo path to be refused")
+	}
+
+	order, err := srv.CreateConstructionOrder(customerID, "/uploads/chat/photo.jpg", "55.75,37.61", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating construction order: %v", err)
 	}
