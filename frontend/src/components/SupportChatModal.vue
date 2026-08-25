@@ -26,14 +26,14 @@
           <span>Загрузка чата...</span>
         </div>
 
-        <div v-else-if="messages.length === 0" class="support-welcome">
+        <div v-else-if="!messages || messages.length === 0" class="support-welcome">
           <div class="welcome-icon">💬</div>
           <h4>Здравствуйте!</h4>
           <p>Напишите нам, если у вас возникли вопросы или нужна помощь. Администратор ответит в ближайшее время.</p>
         </div>
 
         <div
-          v-for="msg in messages"
+          v-for="msg in (messages || [])"
           :key="msg.id"
           :class="['msg-bubble-wrap', isMyMessage(msg) ? 'outgoing' : 'incoming']"
         >
@@ -224,8 +224,9 @@ export default defineComponent({
       if (!chatId.value) return
       try {
         const response = await api.get(`/support/chats/${chatId.value}/messages`)
-        const newMsgs = response.data || []
-        if (newMsgs.length !== messages.value.length) {
+        const newMsgs = Array.isArray(response.data) ? response.data : []
+        const currentLen = (messages.value && Array.isArray(messages.value)) ? messages.value.length : 0
+        if (newMsgs.length !== currentLen) {
           messages.value = newMsgs
           scrollToBottom()
         } else {
@@ -233,11 +234,13 @@ export default defineComponent({
         }
       } catch (err) {
         console.error('[SupportChatModal] failed to fetch messages:', err)
+        messages.value = messages.value || []
       }
     }
 
     const loadSupportChat = async () => {
       loading.value = true
+      messages.value = []
       try {
         const res = await api.get('/support/chat')
         if (res.data?.id) {
@@ -246,9 +249,14 @@ export default defineComponent({
           bannedUntil.value = res.data.banned_until || null
           await fetchMessages()
           startPolling()
+        } else {
+          chatId.value = null
+          messages.value = []
         }
       } catch (err) {
         console.error('[SupportChatModal] failed to get support chat:', err)
+        chatId.value = null
+        messages.value = []
       } finally {
         loading.value = false
       }
