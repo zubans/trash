@@ -372,8 +372,14 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 
 	if s.mailer != nil {
 		if err := s.mailer.SendPasswordResetCode(email, code); err != nil {
+			// The answer must not depend on whether the address has an account.
+			// Returning an error here while an unknown address gets a cheerful
+			// success turns this endpoint into an account-existence oracle —
+			// the very thing the unknown-address branch above exists to avoid.
+			// A transport that is down is an operator problem, visible in this
+			// log and in the reconciliation of the mail queue, not something to
+			// report back to an anonymous caller.
 			log.Printf("[PASSWORD RESET] Failed to send email to user %s: %v", user.ID, err)
-			return errors.New("не удалось отправить письмо с кодом. Попробуйте позже.")
 		}
 	}
 
