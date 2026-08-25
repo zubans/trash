@@ -6,8 +6,10 @@ services:
       POSTGRES_USER: ${DB_USER:-healthlogin}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       POSTGRES_DB: ${DB_NAME:-healthlogin}
+    # Migrations are applied by the backend on start (repository.Migrate), not by
+    # the entrypoint init scripts: those only run once on an empty volume, which
+    # is why schema changes used to be patched in from Go code at runtime.
     volumes:
-      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
       - postgres_data:/var/lib/postgresql/data
     # The database is reachable only from the compose network. Publish 5432 to
     # 127.0.0.1 locally if you need psql from the host, never to 0.0.0.0.
@@ -45,6 +47,9 @@ services:
       TLS_CERT_FILE: /app/certs/localhost-cert.pem
       TLS_KEY_FILE: /app/certs/localhost-key.pem
       MOBILE_HTTP_ADDR: :8081
+      # Serve the API at the root as well, for installed APKs built before the
+      # /api prefix. Set to 0 once every client is rebuilt.
+      LEGACY_ROOT_ROUTES: ${LEGACY_ROOT_ROUTES:-1}
       RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
       UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
       ACCEPT_RADIUS_KM: ${ACCEPT_RADIUS_KM:-0.5}

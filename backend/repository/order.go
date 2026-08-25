@@ -60,23 +60,18 @@ type OrderRepository interface {
 	// own transaction; pass nil to run on the connection pool. They return
 	// ErrConflict when the entity was not in the expected state.
 	Assign(q Querier, orderID, executorID uuid.UUID) error
-	AssignOrder(orderID, executorID uuid.UUID) error
 	Execute(q Querier, orderID uuid.UUID) error
 	Confirm(q Querier, orderID uuid.UUID, finalAmount float64, isDowngraded bool) error
 	Cancel(q Querier, orderID uuid.UUID) error
 	Unassign(q Querier, orderID uuid.UUID) error
 	LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error)
 	SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount float64) error
+	AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount float64) error
 	CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error)
 	CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error)
 
-	// Legacy/test-compatible methods
-	CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*Order, error)
-	ConfirmOrderExecution(orderID uuid.UUID) error
-	CancelOrder(orderID uuid.UUID) error
 	GetExecutorAssignedOrders(executorID uuid.UUID) ([]*Order, error)
 	GetCustomerOrders(customerID uuid.UUID) ([]*Order, error)
-	CreateConstructionOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, photoURL, lastGeo string) (*Order, error)
 	GetAvailableAuctionOrders() ([]*Order, error)
 }
 
@@ -87,7 +82,6 @@ type orderRepo struct {
 
 // NewOrderRepository creates a new OrderRepository.
 func NewOrderRepository(db *sql.DB) OrderRepository {
-	_, _ = db.Exec(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT NULL;`)
 	return &orderRepo{db: db}
 }
 
@@ -304,10 +298,6 @@ func (r *orderRepo) Assign(q Querier, orderID, executorID uuid.UUID) error {
 	)
 }
 
-func (r *orderRepo) AssignOrder(orderID, executorID uuid.UUID) error {
-	return r.Assign(nil, orderID, executorID)
-}
-
 func (r *orderRepo) Execute(q Querier, orderID uuid.UUID) error {
 	return execExpectingOne(r.exec(q),
 		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
@@ -343,6 +333,18 @@ func (r *orderRepo) Unassign(q Querier, orderID uuid.UUID) error {
 	)
 }
 
+// AssignWithHold assigns an executor and records the agreed price in one
+// statement. Used when a customer accepts an auction bid, where the price is
+// only known at that moment.
+func (r *orderRepo) AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount float64) error {
+	return execExpectingOne(r.exec(q),
+		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now(),
+		    hold_amount = $3, final_amount = $3
+		 WHERE id = $4 AND status = $5 AND executor_id IS NULL`,
+		executorID, OrderStatusAssigned, holdAmount, orderID, OrderStatusSearching,
+	)
+}
+
 // LockForUpdate reads an order inside a transaction taking a row lock, so that
 // concurrent confirm/cancel requests serialise instead of both seeing the same
 // pre-transition state.
@@ -363,35 +365,6 @@ func (r *orderRepo) SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount float
 		`UPDATE orders SET hold_amount = $1 WHERE id = $2`,
 		holdAmount, orderID,
 	)
-}
-
-// CreateOrderWithHold creates a standard order and blocks customer balance.
-func (r *orderRepo) CreateOrderWithHold(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount float64, lastGeo string) (*Order, error) {
-	order := &Order{
-		ID:               uuid.New(),
-		CustomerID:       customerID,
-		ServiceVariantID: serviceVariantID,
-		IsUrgent:         isUrgent,
-		IsAsap:           isAsap,
-		Status:           OrderStatusSearching,
-		HoldAmount:       holdAmount,
-		FinalAmount:      holdAmount,
-		CreatedAt:        time.Now(),
-	}
-	if err := r.Create(nil, order); err != nil {
-		return nil, err
-	}
-	return order, nil
-}
-
-// ConfirmOrderExecution marks an order as completed.
-func (r *orderRepo) ConfirmOrderExecution(orderID uuid.UUID) error {
-	return r.Confirm(nil, orderID, 0, false)
-}
-
-// CancelOrder cancels an order.
-func (r *orderRepo) CancelOrder(orderID uuid.UUID) error {
-	return r.Cancel(nil, orderID)
 }
 
 // GetExecutorAssignedOrders returns orders assigned to a specific executor.
@@ -418,27 +391,6 @@ func (r *orderRepo) GetCustomerOrders(customerID uuid.UUID) ([]*Order, error) {
 		result[i] = &orders[i]
 	}
 	return result, nil
-}
-
-// CreateConstructionOrder creates a construction waste auction order.
-func (r *orderRepo) CreateConstructionOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, photoURL, lastGeo string) (*Order, error) {
-	photo := &photoURL
-	order := &Order{
-		ID:               uuid.New(),
-		CustomerID:       customerID,
-		ServiceVariantID: serviceVariantID,
-		IsUrgent:         false,
-		IsAsap:           false,
-		Status:           OrderStatusSearching,
-		HoldAmount:       0,
-		FinalAmount:      0,
-		PhotoURL:         photo,
-		CreatedAt:        time.Now(),
-	}
-	if err := r.Create(nil, order); err != nil {
-		return nil, err
-	}
-	return order, nil
 }
 
 // GetAvailableAuctionOrders returns open auction orders.

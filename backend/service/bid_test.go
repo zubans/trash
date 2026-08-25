@@ -37,14 +37,36 @@ func (m *mockBidRepo) GetBidsForOrder(orderID uuid.UUID) ([]*repository.Bid, err
 	return list, nil
 }
 
-func (m *mockBidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
+func (m *mockBidRepo) LockBidForUpdate(q repository.Querier, bidID uuid.UUID) (*repository.Bid, error) {
 	for _, b := range m.bids {
 		if b.ID == bidID {
-			b.Status = "ACCEPTED"
+			return b, nil
+		}
+	}
+	return nil, errors.New("bid not found")
+}
+
+func (m *mockBidRepo) SetBidStatus(q repository.Querier, bidID uuid.UUID, status string) error {
+	for _, b := range m.bids {
+		if b.ID == bidID {
+			// Mirrors the guarded UPDATE: only a pending bid can be decided.
+			if b.Status != "PENDING" {
+				return repository.ErrConflict
+			}
+			b.Status = status
 			return nil
 		}
 	}
-	return errors.New("bid not found")
+	return repository.ErrConflict
+}
+
+func (m *mockBidRepo) RejectOtherBids(q repository.Querier, orderID, exceptBidID uuid.UUID) error {
+	for _, b := range m.bids {
+		if b.OrderID == orderID && b.ID != exceptBidID && b.Status == "PENDING" {
+			b.Status = "REJECTED"
+		}
+	}
+	return nil
 }
 
 func TestBidService_CreateBid(t *testing.T) {
@@ -53,7 +75,7 @@ func TestBidService_CreateBid(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	catalogRepo := newMockCatalogRepo()
 	userRepo := newMockUserRepo()
-	srv := NewBidService(bidRepo, orderRepo, shiftRepo, nil, userRepo, catalogRepo)
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, &mockTransactionRepo{}, userRepo, catalogRepo, nil)
 
 	executorID := uuid.New()
 

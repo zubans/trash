@@ -203,6 +203,24 @@ func (m *mockOrderRepo) Assign(q repository.Querier, orderID, executorID uuid.UU
 	return m.AssignOrder(orderID, executorID)
 }
 
+// AssignWithHold mirrors the guarded assignment used when a bid is accepted.
+func (m *mockOrderRepo) AssignWithHold(q repository.Querier, orderID, executorID uuid.UUID, holdAmount float64) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			if o.Status != repository.OrderStatusSearching || o.ExecutorID != nil {
+				return repository.ErrConflict
+			}
+			exec := executorID
+			o.ExecutorID = &exec
+			o.Status = repository.OrderStatusAssigned
+			o.HoldAmount = holdAmount
+			o.FinalAmount = holdAmount
+			return nil
+		}
+	}
+	return repository.ErrConflict
+}
+
 // LockForUpdate mirrors the real repository's row lock read.
 func (m *mockOrderRepo) LockForUpdate(q repository.Querier, orderID uuid.UUID) (*repository.Order, error) {
 	return m.GetOrderByID(orderID)

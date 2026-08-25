@@ -2,7 +2,6 @@ package repository
 
 import (
 	"database/sql"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,13 +41,11 @@ type GPSLog struct {
 // ShiftRepository defines storage operations for shifts and GPS logs.
 type ShiftRepository interface {
 	Create(shift *Shift) error
-	FindActiveByExecutor(executorID uuid.UUID) (*Shift, error)
 	GetActiveShift(executorID uuid.UUID) (*Shift, error)
 	GetShiftByID(shiftID uuid.UUID) (*Shift, error)
 	GetActiveShifts() ([]*Shift, error)
 	End(shiftID uuid.UUID) error
 	Penalize(shiftID uuid.UUID, fine float64) error
-	SaveGPSLog(log *GPSLog) error
 
 	// EarlyEnd terminates a shift before its planned end time, records the
 	// penalty amount and marks the shift as PENALIZED.
@@ -58,12 +55,9 @@ type ShiftRepository interface {
 	// regardless of status (active, completed or penalized).
 	GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error)
 
-	// Legacy/test-compatible methods
 	StartShift(executorID uuid.UUID, durationHours int) (*Shift, error)
-	UpdateShiftStatus(shiftID uuid.UUID, status string) error
 	AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error
 	GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error)
-	GetGeozoneByID(id int) (*Geozone, error)
 }
 
 // shiftRepo implements ShiftRepository using *sql.DB.
@@ -101,7 +95,8 @@ func (r *shiftRepo) Create(shift *Shift) error {
 	return err
 }
 
-func (r *shiftRepo) FindActiveByExecutor(executorID uuid.UUID) (*Shift, error) {
+// findActiveByExecutor is the implementation behind GetActiveShift.
+func (r *shiftRepo) findActiveByExecutor(executorID uuid.UUID) (*Shift, error) {
 	row := r.db.QueryRow(
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
 		 FROM shifts WHERE executor_id = $1 AND status = $2`,
@@ -115,7 +110,7 @@ func (r *shiftRepo) FindActiveByExecutor(executorID uuid.UUID) (*Shift, error) {
 }
 
 func (r *shiftRepo) GetActiveShift(executorID uuid.UUID) (*Shift, error) {
-	return r.FindActiveByExecutor(executorID)
+	return r.findActiveByExecutor(executorID)
 }
 
 func (r *shiftRepo) GetShiftByID(shiftID uuid.UUID) (*Shift, error) {
@@ -195,7 +190,7 @@ func (r *shiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error)
 	return &s, nil
 }
 
-func (r *shiftRepo) SaveGPSLog(log *GPSLog) error {
+func (r *shiftRepo) saveGPSLog(log *GPSLog) error {
 	_, err := r.db.Exec(
 		`INSERT INTO shift_gps_logs (id, shift_id, latitude, longitude, is_inside, recorded_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -221,12 +216,6 @@ func (r *shiftRepo) StartShift(executorID uuid.UUID, durationHours int) (*Shift,
 	return shift, nil
 }
 
-// UpdateShiftStatus updates a shift status by ID.
-func (r *shiftRepo) UpdateShiftStatus(shiftID uuid.UUID, status string) error {
-	_, err := r.db.Exec(`UPDATE shifts SET status = $1 WHERE id = $2`, status, shiftID)
-	return err
-}
-
 // AddGPSLog records a coordinate and whether it was inside the geozone.
 func (r *shiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error {
 	log := &GPSLog{
@@ -237,7 +226,7 @@ func (r *shiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool
 		IsInside:   isInside,
 		RecordedAt: time.Now(),
 	}
-	return r.SaveGPSLog(log)
+	return r.saveGPSLog(log)
 }
 
 // GetLastGPSLogs returns recent inside/outside flags for a shift.
@@ -260,24 +249,4 @@ func (r *shiftRepo) GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error)
 		logs = append(logs, isInside)
 	}
 	return logs, rows.Err()
-}
-
-// GetGeozoneByID loads a geozone by ID.
-func (r *shiftRepo) GetGeozoneByID(id int) (*Geozone, error) {
-	var g Geozone
-	var coordinatesRaw []byte
-	err := r.db.QueryRow(
-		`SELECT id, name, type, center_latitude, center_longitude, radius_meters, coordinates FROM geozones WHERE id = $1`, id,
-	).Scan(&g.ID, &g.Name, &g.Type, &g.CenterLatitude, &g.CenterLongitude, &g.RadiusMeters, &coordinatesRaw)
-	if err != nil {
-		return nil, err
-	}
-	if len(coordinatesRaw) > 0 {
-		s := string(coordinatesRaw)
-		g.Coordinates = &s
-		if err := json.Unmarshal(coordinatesRaw, &g.Polygon); err != nil {
-			return nil, err
-		}
-	}
-	return &g, nil
 }

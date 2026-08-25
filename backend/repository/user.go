@@ -86,6 +86,7 @@ type repo struct {
 
 // New creates a new UserRepository backed by the provided database connection.
 func New(db *sql.DB) UserRepository {
+<<<<<<< HEAD
 	_, _ = db.Exec(`
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) NULL;
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
@@ -99,6 +100,8 @@ func New(db *sql.DB) UserRepository {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_attempts INT NOT NULL DEFAULT 0;
 		UPDATE users SET phone = '+7' || SUBSTRING(REGEXP_REPLACE(phone, '[^0-9]', '', 'g') FROM 2) WHERE phone NOT LIKE '+7%' AND LENGTH(REGEXP_REPLACE(phone, '[^0-9]', '', 'g')) = 11;
 	`)
+=======
+>>>>>>> security/audit-fixes
 	return &repo{db: db}
 }
 

@@ -62,16 +62,18 @@
 
       <!-- Toast Notifications Container -->
       <div class="toast-container">
-        <!-- Chat Toast Notification -->
+        <!-- Chat / Support Toast Notification -->
         <div
           v-if="chatToast"
-          class="chat-top-toast cursor-pointer"
+          class="toast info chat-toast cursor-pointer"
           @click="openChatByToast"
         >
-          <div class="toast-chat-icon">💬</div>
-          <div class="toast-chat-content">
-            <div class="toast-chat-title">{{ chatToast.title }}</div>
-            <div class="toast-chat-text">{{ chatToast.text }}</div>
+          <div class="toast-icon">
+            <i class="ph-bold ph-chat-circle-dots"></i>
+          </div>
+          <div class="toast-content">
+            <div class="toast-title">{{ chatToast.title }}</div>
+            <div class="toast-message">{{ chatToast.text }}</div>
           </div>
           <button type="button" class="toast-close" @click.stop.prevent="closeToast">
             <i class="ph ph-x"></i>
@@ -2140,6 +2142,14 @@ export default defineComponent({
 .toast.info .toast-icon { 
   color: var(--accent-main, #6366f1); 
   background: rgba(99, 102, 241, 0.1); 
+}
+
+.toast.chat-toast {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.toast.chat-toast:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 35px -10px rgba(99, 102, 241, 0.25);
 }
 
 .toast-icon {

@@ -1,7 +1,9 @@
 package service
 
 import (
+	"database/sql"
 	"errors"
+	"log"
 
 	"github.com/google/uuid"
 
@@ -16,6 +18,7 @@ type BidService struct {
 	transactionRepo repository.TransactionRepository
 	userRepo        repository.UserRepository
 	catalogRepo     repository.ServiceCatalogRepository
+	chatRepo        repository.ChatRepository
 }
 
 // NewBidService creates a new BidService.
@@ -26,6 +29,7 @@ func NewBidService(
 	transactionRepo repository.TransactionRepository,
 	userRepo repository.UserRepository,
 	catalogRepo repository.ServiceCatalogRepository,
+	chatRepo repository.ChatRepository,
 ) *BidService {
 	return &BidService{
 		bidRepo:         bidRepo,
@@ -34,6 +38,7 @@ func NewBidService(
 		transactionRepo: transactionRepo,
 		userRepo:        userRepo,
 		catalogRepo:     catalogRepo,
+		chatRepo:        chatRepo,
 	}
 }
 
@@ -108,7 +113,93 @@ func (s *BidService) GetBidsForOrder(orderID, customerID uuid.UUID) ([]*reposito
 	return s.bidRepo.GetBidsForOrder(orderID)
 }
 
-// AcceptBid accepts a bid, holds customer balance, and assigns the executor.
+// AcceptBid accepts an offer: it holds the customer's money, assigns the
+// executor and closes the remaining offers, all in one transaction.
+//
+// This used to live in the repository, which meant it applied a different set
+// of rules than Accept() for regular orders — an executor could win an auction
+// while banned, off shift, or below the age the service variant requires.
 func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
-	return s.bidRepo.AcceptBid(bidID, customerID)
+	var acceptedOrderID uuid.UUID
+
+	err := s.transactionRepo.RunInTx(func(tx *sql.Tx) error {
+		bid, err := s.bidRepo.LockBidForUpdate(tx, bidID)
+		if err != nil {
+			return errors.New("bid not found")
+		}
+		if bid.Status != "PENDING" {
+			return errors.New("bid is not pending")
+		}
+
+		order, err := s.orderRepo.LockForUpdate(tx, bid.OrderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.CustomerID != customerID {
+			return errors.New("forbidden: you do not own this order")
+		}
+		if order.Status != repository.OrderStatusSearching {
+			return errors.New("order is no longer in searching status")
+		}
+
+		variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID)
+		if err != nil {
+			return err
+		}
+		if variant == nil || !variant.IsAuction {
+			return errors.New("order is not an auction")
+		}
+
+		// The executor must still be allowed to take this order at the moment
+		// the customer accepts, not only when the bid was placed.
+		executor, err := s.userRepo.FindByID(bid.ExecutorID)
+		if err != nil {
+			return errors.New("executor not found")
+		}
+		if err := canExecutorTakeOrder(executor, variant); err != nil {
+			return err
+		}
+		shift, err := s.shiftRepo.GetActiveShift(bid.ExecutorID)
+		if err != nil || shift == nil {
+			return errors.New("исполнитель сейчас не на смене, выберите другое предложение")
+		}
+
+		if err := s.transactionRepo.Debit(tx, customerID, bid.OfferedPrice); err != nil {
+			return err
+		}
+		if err := s.orderRepo.AssignWithHold(tx, order.ID, bid.ExecutorID, bid.OfferedPrice); err != nil {
+			return err
+		}
+		if err := s.bidRepo.SetBidStatus(tx, bid.ID, "ACCEPTED"); err != nil {
+			return err
+		}
+		if err := s.bidRepo.RejectOtherBids(tx, order.ID, bid.ID); err != nil {
+			return err
+		}
+		acceptedOrderID = order.ID
+		return s.transactionRepo.CreateTransaction(tx, &repository.Transaction{
+			UserID:  customerID,
+			OrderID: &order.ID,
+			Type:    string(repository.TransactionTypeHold),
+			Amount:  bid.OfferedPrice,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrInsufficientFunds) {
+			return errors.New("insufficient balance to accept this bid")
+		}
+		if errors.Is(err, repository.ErrConflict) {
+			return errors.New("предложение уже неактуально, обновите список")
+		}
+		return err
+	}
+
+	// The chat room is not part of the money transaction: failing to create it
+	// must not undo an accepted bid.
+	if s.chatRepo != nil {
+		if _, err := s.chatRepo.CreateChat(acceptedOrderID); err != nil {
+			log.Printf("[BidService] failed to create chat for order %s: %v", acceptedOrderID, err)
+		}
+	}
+	return nil
 }

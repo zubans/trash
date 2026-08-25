@@ -19,11 +19,15 @@ type Bid struct {
 	ExecutorPhone string    `json:"executor_phone,omitempty"`
 }
 
-// BidRepository defines database operations for bidding.
+// BidRepository defines database operations for bidding. Accepting a bid is a
+// business transaction and lives in the service layer; the repository only
+// provides the locked read and the individual writes it needs.
 type BidRepository interface {
 	CreateBid(orderID, executorID uuid.UUID, offeredPrice float64) (*Bid, error)
 	GetBidsForOrder(orderID uuid.UUID) ([]*Bid, error)
-	AcceptBid(bidID, customerID uuid.UUID) error
+	LockBidForUpdate(q Querier, bidID uuid.UUID) (*Bid, error)
+	SetBidStatus(q Querier, bidID uuid.UUID, status string) error
+	RejectOtherBids(q Querier, orderID, exceptBidID uuid.UUID) error
 }
 
 type bidRepo struct {
@@ -104,105 +108,40 @@ func (r *bidRepo) GetBidsForOrder(orderID uuid.UUID) ([]*Bid, error) {
 	return bids, rows.Err()
 }
 
-func (r *bidRepo) AcceptBid(bidID, customerID uuid.UUID) error {
-	tx, err := r.db.Begin()
+// LockBidForUpdate reads a bid taking a row lock, so two customers accepting
+// concurrently serialise instead of both seeing it as PENDING.
+func (r *bidRepo) LockBidForUpdate(q Querier, bidID uuid.UUID) (*Bid, error) {
+	var b Bid
+	err := r.exec(q).QueryRow(`
+		SELECT id, order_id, executor_id, offered_price, status, created_at
+		FROM bids WHERE id = $1 FOR UPDATE`, bidID).Scan(
+		&b.ID, &b.OrderID, &b.ExecutorID, &b.OfferedPrice, &b.Status, &b.CreatedAt,
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer tx.Rollback()
+	return &b, nil
+}
 
-	// 1. Get bid details
-	var orderID, executorID uuid.UUID
-	var offeredPrice float64
-	var bidStatus string
-	err = tx.QueryRow(`
-		SELECT order_id, executor_id, offered_price, status 
-		FROM bids 
-		WHERE id = $1 FOR UPDATE`, bidID).Scan(&orderID, &executorID, &offeredPrice, &bidStatus)
-	if err != nil {
-		return err
-	}
-	if bidStatus != "PENDING" {
-		return errors.New("bid is not pending")
-	}
+// SetBidStatus moves a bid out of PENDING; the guard keeps a concurrent accept
+// from overwriting an already decided bid.
+func (r *bidRepo) SetBidStatus(q Querier, bidID uuid.UUID, status string) error {
+	return execExpectingOne(r.exec(q),
+		`UPDATE bids SET status = $1 WHERE id = $2 AND status = 'PENDING'`, status, bidID)
+}
 
-	// 2. Lock and verify order ownership & status
-	var ordCustomerID uuid.UUID
-	var ordStatus string
-	var isAuction bool
-	err = tx.QueryRow(`
-		SELECT o.customer_id, o.status, sn.is_auction
-		FROM orders o
-		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.id = $1 FOR UPDATE`, orderID).Scan(&ordCustomerID, &ordStatus, &isAuction)
-	if err != nil {
-		return err
-	}
-	if ordCustomerID != customerID {
-		return errors.New("forbidden: you do not own this order")
-	}
-	if ordStatus != "SEARCHING" {
-		return errors.New("order is no longer in searching status")
-	}
-	if !isAuction {
-		return errors.New("order is not an auction")
-	}
+// RejectOtherBids closes every other open offer on an order. It may legitimately
+// affect no rows, so it is not guarded.
+func (r *bidRepo) RejectOtherBids(q Querier, orderID, exceptBidID uuid.UUID) error {
+	_, err := r.exec(q).Exec(
+		`UPDATE bids SET status = 'REJECTED' WHERE order_id = $1 AND id != $2 AND status = 'PENDING'`,
+		orderID, exceptBidID)
+	return err
+}
 
-	// 3. Lock and check customer balance
-	var balance float64
-	err = tx.QueryRow(`SELECT balance FROM users WHERE id = $1 FOR UPDATE`, customerID).Scan(&balance)
-	if err != nil {
-		return err
+func (r *bidRepo) exec(q Querier) Querier {
+	if q == nil {
+		return r.db
 	}
-	if balance < offeredPrice {
-		return errors.New("insufficient balance to accept this bid")
-	}
-
-	// 4. Deduct customer balance
-	_, err = tx.Exec(`UPDATE users SET balance = balance - $1 WHERE id = $2`, offeredPrice, customerID)
-	if err != nil {
-		return err
-	}
-
-	// 5. Update order: status to ASSIGNED, executor assigned, hold_amount set to offered price
-	_, err = tx.Exec(`
-		UPDATE orders 
-		SET executor_id = $1, status = 'ASSIGNED', hold_amount = $2, final_amount = $2 
-		WHERE id = $3`,
-		executorID, offeredPrice, orderID)
-	if err != nil {
-		return err
-	}
-
-	// 6. Update bid status to ACCEPTED
-	_, err = tx.Exec(`UPDATE bids SET status = 'ACCEPTED' WHERE id = $1`, bidID)
-	if err != nil {
-		return err
-	}
-
-	// 7. Update other bids for this order to REJECTED
-	_, err = tx.Exec(`UPDATE bids SET status = 'REJECTED' WHERE order_id = $1 AND id != $2`, orderID, bidID)
-	if err != nil {
-		return err
-	}
-
-	// 8. Log HOLD transaction
-	_, err = tx.Exec(`
-		INSERT INTO transactions (user_id, order_id, type, amount, created_at)
-		VALUES ($1, $2, 'HOLD', $3, now())`,
-		customerID, orderID, offeredPrice)
-	if err != nil {
-		return err
-	}
-
-	// 9. Create Chat Room
-	_, err = tx.Exec(`
-		INSERT INTO chats (order_id, is_active) 
-		VALUES ($1, TRUE) 
-		ON CONFLICT (order_id) DO UPDATE SET is_active = TRUE`, orderID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return q
 }

@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate migrate-docker bump-android-version
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate bump-android-version
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -200,22 +200,13 @@ restart: stop start register-release
 logs:
 	$(call compose,logs -f)
 
-# Run database migrations manually
-# Uses psql if available locally, otherwise falls back to docker exec
+# Apply pending database migrations.
+# The backend also does this on start; this target is for applying them without
+# restarting the service. Applied versions are tracked in schema_migrations, so
+# running it twice is a no-op.
 migrate:
 	@echo "Running database migrations..."
-	@if command -v psql >/dev/null 2>&1; then \
-		for f in backend/migrations/*.sql; do \
-			echo "Applying $$f..."; \
-			psql "postgres://healthlogin:healthlogin@localhost:5432/healthlogin" -f "$$f"; \
-		done; \
-	else \
-		echo "psql not found, applying migrations via docker exec..."; \
-		for f in backend/migrations/*.sql; do \
-			echo "Applying $$f..."; \
-			docker exec -i healthlogin_db psql -U healthlogin -d healthlogin < "$$f"; \
-		done; \
-	fi
+	$(call compose,exec backend ./migrate)
 	@echo "Migrations applied."
 
 clean:
