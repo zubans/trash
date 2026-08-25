@@ -205,8 +205,8 @@ func (r *repo) Create(user *User) error {
 func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	var userID uuid.UUID
 	err := r.db.QueryRow(
-		`UPDATE users 
-		 SET email_verified = true, 
+		`UPDATE users
+		 SET email_verified = true,
 		     email_verification_token = NULL,
 		     email_token_expires_at = NULL
 		 WHERE email_verification_token = $1 AND (email_token_expires_at IS NULL OR email_token_expires_at > now())
