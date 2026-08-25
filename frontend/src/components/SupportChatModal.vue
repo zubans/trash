@@ -372,6 +372,19 @@ export default defineComponent({
       { immediate: true }
     )
 
+
+    // Disable body scrolling while modal is open
+    watch(
+      () => props.show,
+      (val) => {
+        if (val) {
+          document.body.style.overflow = 'hidden'
+        } else {
+          document.body.style.overflow = ''
+        }
+      }
+    )
+
     onUnmounted(() => {
       stopPolling()
     })
