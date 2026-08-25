@@ -173,7 +173,7 @@ export default defineComponent({
       addressMsg.value = ''
       addressMsgIsError.value = false
       try {
-        await api.post('/customer/addresses', { address: addressInput.value })
+        await api.post('/user/address', { address: addressInput.value })
         addressMsg.value = 'Базовый адрес успешно обновлен!'
         emit('addressUpdated', addressInput.value)
       } catch (err: any) {

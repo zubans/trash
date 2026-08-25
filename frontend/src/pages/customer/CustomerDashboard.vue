@@ -1182,7 +1182,7 @@ export default defineComponent({
       }
 
       // Open websocket.
-      const wsUrl = buildChatWebSocketUrl(order.id, authStore.token)
+      const wsUrl = buildChatWebSocketUrl(order.id)
 
       if (isNative) {
         try {

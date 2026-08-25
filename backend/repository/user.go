@@ -75,6 +75,7 @@ type UserRepository interface {
 	GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
 	UpdateCustomerAddress(userID uuid.UUID, address string) error
 	VerifyEmailToken(token string) (*User, error)
+	UpdatePassword(userID uuid.UUID, newHashedPassword string) error
 	SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
 	ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
 	UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
@@ -233,6 +234,16 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 		return nil, err
 	}
 	return r.FindByID(userID)
+}
+
+// UpdatePassword replaces the stored hash and clears any pending reset code, so
+// a code issued before the change cannot be used afterwards.
+func (r *repo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
+	return execExpectingOne(r.db,
+		`UPDATE users SET password = $1, password_reset_code = NULL,
+		    password_reset_expires_at = NULL, password_reset_attempts = 0
+		 WHERE id = $2`,
+		newHashedPassword, userID)
 }
 
 func (r *repo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {

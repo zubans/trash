@@ -218,6 +218,7 @@ func main() {
 			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
+			r.With(passwordResetLimiter.Middleware).Post("/user/change-password", ph.ChangePasswordHandler)
 			r.Post("/user/address", ah.AddAddressHandler)
 			r.Post("/user/address/default", ah.SetDefaultAddressHandler)
 			r.Delete("/user/address/{id}", ah.DeleteAddressHandler)

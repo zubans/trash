@@ -491,3 +491,13 @@ func TestGenerateJWT_InvalidWithWrongSecret(t *testing.T) {
 		t.Fatal("token must be invalid when verified with a different secret")
 	}
 }
+
+func (m *mockRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
+	for _, u := range m.users {
+		if u.ID == userID {
+			u.Password = newHashedPassword
+			return nil
+		}
+	}
+	return nil
+}

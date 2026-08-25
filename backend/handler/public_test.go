@@ -337,3 +337,13 @@ func (m *mockAccessTokenRepo) RevokeToken(tokenHash string, expiresAt time.Time)
 	m.revoked[tokenHash] = expiresAt
 	return nil
 }
+
+func (m *mockUserRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
+	for _, u := range m.users {
+		if u.ID == userID {
+			u.Password = newHashedPassword
+			return nil
+		}
+	}
+	return nil
+}

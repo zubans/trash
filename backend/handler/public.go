@@ -349,6 +349,33 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// ChangePasswordHandler replaces the caller's password.
+func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	pair, err := h.authService.ChangePassword(user.ID, req.OldPassword, req.NewPassword)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// The new pair keeps this device signed in; every other session was ended.
+	writeTokenPair(w, pair)
+}
+
 // UpdateBirthDateHandler updates user's birth date.
 func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)

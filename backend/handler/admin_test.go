@@ -431,3 +431,13 @@ func (m *mockLedgerAccounts) Get(code string) (*repository.SystemAccount, error)
 	return &repository.SystemAccount{Code: code}, nil
 }
 func (m *mockLedgerAccounts) List() ([]repository.SystemAccount, error) { return nil, nil }
+
+func (m *mockUserRepository) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
+	for _, u := range m.users {
+		if u.ID == userID {
+			u.Password = newHashedPassword
+			return nil
+		}
+	}
+	return nil
+}

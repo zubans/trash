@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"healthlogin/backend/repository"
 )
@@ -201,5 +202,54 @@ func TestIssuedAccessTokenCarriesTheUser(t *testing.T) {
 	}
 	if pair.ExpiresAt.Before(time.Now()) {
 		t.Error("expires_at must be in the future")
+	}
+}
+
+// TestChangePasswordRequiresTheCurrentOne covers the endpoint that the profile
+// page has always called and that did not exist until now.
+func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
+	svc, repo, refresh, user := newSessionTestService(t)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Str0ngPassw0rd"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	repo.users[user.Phone].Password = string(hash)
+
+	// A session that is about to be ended by the change.
+	if _, err := svc.IssueTokenPair(user); err != nil {
+		t.Fatalf("issue pair: %v", err)
+	}
+
+	if _, err := svc.ChangePassword(user.ID, "wrong-password", "An0therStr0ng!"); err == nil {
+		t.Error("expected the wrong current password to be refused")
+	}
+	if _, err := svc.ChangePassword(user.ID, "Str0ngPassw0rd", "short"); err == nil {
+		t.Error("expected a weak new password to be refused")
+	}
+	if _, err := svc.ChangePassword(user.ID, "Str0ngPassw0rd", "Str0ngPassw0rd"); err == nil {
+		t.Error("expected an unchanged password to be refused")
+	}
+
+	pair, err := svc.ChangePassword(user.ID, "Str0ngPassw0rd", "An0therStr0ng!")
+	if err != nil {
+		t.Fatalf("unexpected error changing password: %v", err)
+	}
+	if pair.RefreshToken == "" {
+		t.Error("the caller must receive a usable session back")
+	}
+
+	// The new password works and the old one does not.
+	stored := repo.users[user.Phone].Password
+	if bcrypt.CompareHashAndPassword([]byte(stored), []byte("An0therStr0ng!")) != nil {
+		t.Error("the new password was not stored")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(stored), []byte("Str0ngPassw0rd")) == nil {
+		t.Error("the old password still works")
+	}
+
+	// Only the freshly issued session survives.
+	if n := refresh.usableCount(user.ID); n != 1 {
+		t.Errorf("expected every other session to end, %d are usable", n)
 	}
 }
