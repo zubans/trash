@@ -431,23 +431,6 @@ func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(topupReq)
 }
 
-// LogoutHandler blacklists the current session token.
-func (h *AdminHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	tokenStr, ok := r.Context().Value(middleware.TokenKey).(string)
-	if !ok || tokenStr == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	if err := h.adminService.RevokeToken(tokenStr); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "logged out successfully"})
-}
-
 // GetProfileHandler returns the authenticated user's profile info including customer address.
 func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)

@@ -494,7 +494,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import UpdateBanner from '../../components/UpdateBanner.vue'
-import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError, isDebug } from '../../services/api'
+import api, { buildChatWebSocketUrl, resolveFileUrl, formatApiError, isDebug, getRefreshToken } from '../../services/api'
 import { NativeWebSocket } from '../../plugins/native-websocket'
 import { compressImage } from '../../utils/imageCompressor'
 import {
@@ -1350,7 +1350,7 @@ export default defineComponent({
 
     const handleLogout = async () => {
       try {
-        await api.post('/logout')
+        await api.post('/logout', { refresh_token: getRefreshToken() })
       } catch (e) {
         console.error(e)
       } finally {

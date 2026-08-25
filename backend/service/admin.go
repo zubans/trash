@@ -1,27 +1,29 @@
 package service
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"healthlogin/backend/repository"
 )
+
+// SessionRevoker ends every session of a user. Satisfied by *AuthService;
+// AdminService only needs this much of it.
+type SessionRevoker interface {
+	RevokeAllSessions(userID uuid.UUID) error
+}
 
 // AdminService manages administrative business logic.
 type AdminService struct {
 	userRepo     repository.UserRepository
 	adminRepo    repository.AdminRepository
 	settingsRepo repository.SettingsRepository
-	tokenRepo    repository.TokenRepository
+	sessions     SessionRevoker
 	mailer       MailSender
 	jwtSecret    []byte
 }
@@ -31,7 +33,6 @@ func NewAdminService(
 	userRepo repository.UserRepository,
 	adminRepo repository.AdminRepository,
 	settingsRepo repository.SettingsRepository,
-	tokenRepo repository.TokenRepository,
 	jwtSecret string,
 	mailer MailSender,
 ) *AdminService {
@@ -46,50 +47,28 @@ func NewAdminService(
 		userRepo:     userRepo,
 		adminRepo:    adminRepo,
 		settingsRepo: settingsRepo,
-		tokenRepo:    tokenRepo,
 		mailer:       mailer,
 		jwtSecret:    []byte(secret),
 	}
 }
 
-// HashToken computes the SHA256 hash of a JWT token.
-func (s *AdminService) HashToken(token string) string {
-	h := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(h[:])
+// WithSessions lets the service end a user's sessions when their access is
+// changed. Without it, a ban or a demotion would only take effect once the
+// refresh token expires.
+func (s *AdminService) WithSessions(sessions SessionRevoker) *AdminService {
+	s.sessions = sessions
+	return s
 }
 
-// IsTokenRevoked checks if the token has been blacklisted.
-func (s *AdminService) IsTokenRevoked(token string) (bool, error) {
-	hash := s.HashToken(token)
-	return s.tokenRepo.IsTokenRevoked(hash)
-}
-
-// RevokeToken adds a token to the blacklist.
-func (s *AdminService) RevokeToken(tokenStr string) error {
-	// Parse without validation first to get expiry time
-	token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
-	if err != nil {
-		return err
+// revokeSessions ends every session of a user, logging but not failing on error:
+// the access change itself has already been persisted.
+func (s *AdminService) revokeSessions(userID uuid.UUID, reason string) {
+	if s.sessions == nil {
+		return
 	}
-
-	var expiresAt time.Time
-	if claims, ok := token.Claims.(jwt.MapClaims); ok {
-		if expVal, ok := claims["exp"]; ok {
-			switch exp := expVal.(type) {
-			case float64:
-				expiresAt = time.Unix(int64(exp), 0)
-			case int64:
-				expiresAt = time.Unix(exp, 0)
-			}
-		}
+	if err := s.sessions.RevokeAllSessions(userID); err != nil {
+		log.Printf("[AUDIT] failed to end sessions of user %s after %s: %v", userID, reason, err)
 	}
-
-	if expiresAt.IsZero() {
-		expiresAt = time.Now().Add(24 * time.Hour) // fallback
-	}
-
-	hash := s.HashToken(tokenStr)
-	return s.tokenRepo.RevokeToken(hash, expiresAt)
 }
 
 // GetUsers retrieves a list of users with filters and search.
@@ -107,6 +86,12 @@ func (s *AdminService) UpdateUserStatus(userID, adminID uuid.UUID, status string
 	}
 	if err := s.userRepo.UpdateStatus(userID, status); err != nil {
 		return err
+	}
+	if status == "BANNED" {
+		// A ban has to end the sessions too: RequireAuth rejects the banned user
+		// on the next request, but their refresh token would otherwise keep
+		// minting access tokens.
+		s.revokeSessions(userID, "ban")
 	}
 	log.Printf("[AUDIT] admin %s set status of user %s to %s", adminID, userID, status)
 	return nil
@@ -139,6 +124,10 @@ func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) er
 	if err := s.userRepo.UpdateRole(userID, role); err != nil {
 		return err
 	}
+	// Authorization reads the role from the database on every request, so the
+	// change is already effective; ending the sessions makes the client pick up
+	// its new role instead of rendering a UI it can no longer use.
+	s.revokeSessions(userID, "role change")
 	log.Printf("[AUDIT] admin %s changed role of user %s: %s -> %s", adminID, userID, current.Role, role)
 	return nil
 }

@@ -586,7 +586,7 @@ export default defineComponent({
             return
           }
 
-          authStore.login(token, claims.role, claims.phone, claims.sub)
+          authStore.login(token, claims.role, claims.phone, claims.sub, response.data.refresh_token)
 
           if (claims.role === 'ADMIN') {
             router.push('/admin')

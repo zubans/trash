@@ -41,10 +41,12 @@ func normalizeAddress(address string) (string, error) {
 
 // AuthService handles user registration and authentication.
 type AuthService struct {
-	repo     repository.UserRepository
-	geocoder GeoCoder
-	mailer   MailSender
-	secret   []byte
+	repo        repository.UserRepository
+	refreshRepo repository.RefreshTokenRepository
+	tokenRepo   repository.TokenRepository
+	geocoder    GeoCoder
+	mailer      MailSender
+	secret      []byte
 }
 
 // JWTClaims contains the data extracted from a validated access token.
@@ -72,6 +74,15 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geo
 		mailer = NewSmtpMailSender()
 	}
 	return &AuthService{repo: repo, geocoder: geocoder, mailer: mailer, secret: []byte(secret)}
+}
+
+// WithSessionStorage attaches the stores that back session handling: refresh
+// tokens and the access-token blacklist. Without them the service can still
+// issue access tokens, which is what the unit tests rely on.
+func (s *AuthService) WithSessionStorage(refreshRepo repository.RefreshTokenRepository, tokenRepo repository.TokenRepository) *AuthService {
+	s.refreshRepo = refreshRepo
+	s.tokenRepo = tokenRepo
+	return s
 }
 
 // minPasswordLength is the shortest password accepted at registration and at
@@ -279,7 +290,8 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error) {
 		"sub":   user.ID.String(),
 		"phone": user.Phone,
 		"role":  user.Role,
-		"exp":   time.Now().Add(15 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(accessTokenTTL).Unix(),
 	})
 	return token.SignedString(s.secret)
 }

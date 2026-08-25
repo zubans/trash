@@ -50,7 +50,10 @@
           <div class="bc-label">Доступный баланс</div>
           <div class="balance-bottom-row">
             <div class="bc-value">
-              {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              <template v-if="balanceLoaded">
+                {{ Number(balance).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              </template>
+              <span v-else class="bc-value-placeholder">—</span>
               <span class="bc-currency">{{ currencySymbol }}</span>
             </div>
             <button type="button" class="btn-balance" @click="showTopUpModal = true">
@@ -446,7 +449,10 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const phone = ref('79207050707')
-    const balance = ref(1980.00)
+    // Reads through to the auth store: no local copy, and no placeholder amount
+    // standing in for a real balance while the profile loads.
+    const balance = computed(() => authStore.balance)
+    const balanceLoaded = computed(() => authStore.balance !== null)
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
     const formattedPhone = computed(() => {
@@ -596,10 +602,11 @@ export default defineComponent({
           const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
           fullName.value = parts.join(' ')
         }
+        // Keep the shared user state in step with what this screen just read.
+        authStore.fetchMe()
         const response = await api.get('/customer/profile')
         if (response.data) {
           if (response.data.phone) phone.value = response.data.phone
-          if (response.data.balance !== undefined) balance.value = response.data.balance
           if (response.data.address) {
             defaultAddress.value = response.data.address
             orderAddress.value = response.data.address
@@ -1524,6 +1531,8 @@ export default defineComponent({
   position: relative; overflow: hidden;
 }
 .bc-label { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.bc-value-placeholder { opacity: 0.5; }
 
 .balance-bottom-row {
   display: flex;

@@ -256,9 +256,8 @@ func setupTestHandler() (*AdminHandler, *mockUserRepository, *mockAdminRepositor
 	ur := &mockUserRepository{users: make(map[uuid.UUID]*repository.User)}
 	ar := &mockAdminRepository{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	sr := &mockSettingsRepository{settings: make(map[string]string)}
-	tr := &mockTokenRepository{}
 
-	svc := service.NewAdminService(ur, ar, sr, tr, "secret", nil)
+	svc := service.NewAdminService(ur, ar, sr, "secret", nil)
 	h := NewAdminHandler(svc)
 	return h, ur, ar, sr
 }

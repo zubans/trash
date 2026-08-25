@@ -318,8 +318,7 @@ func TestAdminService_Extended(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	tokenRepo := &mockTokenRepo{blacklisted: make(map[string]time.Time)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, tokenRepo, "test-secret", nil)
+	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "test-secret", nil)
 
 	u := &repository.User{ID: uuid.New(), Phone: "70000000000", Role: "CUSTOMER"}
 	userRepo.users[u.Phone] = u
@@ -345,15 +344,6 @@ func TestAdminService_Extended(t *testing.T) {
 	prof, err := srv.GetProfile(u.ID)
 	if err != nil || prof["phone"] != "70000000000" {
 		t.Errorf("expected user profile with phone, got %v", prof)
-	}
-
-	// Revoke tokens
-	authSrv := NewAuthServiceWithSecret(userRepo, "test-secret", nil, nil)
-	token, _ := authSrv.GenerateJWT(u)
-	_ = srv.RevokeToken(token)
-	rev, _ := srv.IsTokenRevoked(token)
-	if !rev {
-		t.Error("expected token to be revoked")
 	}
 
 	_ = srv.RejectTopUpRequest(uuid.New(), adminID)
@@ -494,7 +484,7 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, &mockTokenRepo{}, "secret", nil)
+	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil)
 
 	u := &repository.User{ID: uuid.New(), Phone: "79998887766"}
 	userRepo.users[u.Phone] = u

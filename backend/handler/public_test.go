@@ -135,7 +135,11 @@ func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, pat
 
 func newTestPublicHandler() *PublicHandler {
 	repo := newMockUserRepo()
-	return NewPublicHandler(service.NewAuthService(repo, nil))
+	// Sessions are part of the login path now, so the handler tests wire the
+	// same storage the server does.
+	auth := service.NewAuthService(repo, nil).
+		WithSessionStorage(newMockRefreshRepo(), newMockAccessTokenRepo())
+	return NewPublicHandler(auth)
 }
 
 func TestHealthHandler(t *testing.T) {
@@ -255,4 +259,80 @@ func TestLoginHandlerInvalidCredentials(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("LoginHandler returned wrong status: got %v want %v", rr.Code, http.StatusUnauthorized)
 	}
+}
+
+// --- session storage doubles ---
+
+type mockRefreshRepo struct {
+	tokens map[string]*repository.RefreshToken
+}
+
+func newMockRefreshRepo() *mockRefreshRepo {
+	return &mockRefreshRepo{tokens: make(map[string]*repository.RefreshToken)}
+}
+
+func (m *mockRefreshRepo) Create(userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+	m.tokens[tokenHash] = &repository.RefreshToken{
+		ID:        uuid.New(),
+		UserID:    userID,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	}
+	return nil
+}
+
+func (m *mockRefreshRepo) FindByHash(tokenHash string) (*repository.RefreshToken, error) {
+	t, ok := m.tokens[tokenHash]
+	if !ok {
+		return nil, repository.ErrRefreshTokenNotFound
+	}
+	return t, nil
+}
+
+func (m *mockRefreshRepo) MarkUsed(tokenHash string) error {
+	t, ok := m.tokens[tokenHash]
+	if !ok || !t.IsUsable(time.Now()) {
+		return repository.ErrConflict
+	}
+	now := time.Now()
+	t.UsedAt = &now
+	return nil
+}
+
+func (m *mockRefreshRepo) RevokeAllForUser(userID uuid.UUID) error {
+	now := time.Now()
+	for _, t := range m.tokens {
+		if t.UserID == userID && t.RevokedAt == nil {
+			t.RevokedAt = &now
+		}
+	}
+	return nil
+}
+
+func (m *mockRefreshRepo) Revoke(tokenHash string) error {
+	if t, ok := m.tokens[tokenHash]; ok && t.RevokedAt == nil {
+		now := time.Now()
+		t.RevokedAt = &now
+	}
+	return nil
+}
+
+func (m *mockRefreshRepo) DeleteExpired() (int64, error) { return 0, nil }
+
+type mockAccessTokenRepo struct {
+	revoked map[string]time.Time
+}
+
+func newMockAccessTokenRepo() *mockAccessTokenRepo {
+	return &mockAccessTokenRepo{revoked: make(map[string]time.Time)}
+}
+
+func (m *mockAccessTokenRepo) IsTokenRevoked(tokenHash string) (bool, error) {
+	exp, ok := m.revoked[tokenHash]
+	return ok && exp.After(time.Now()), nil
+}
+
+func (m *mockAccessTokenRepo) RevokeToken(tokenHash string, expiresAt time.Time) error {
+	m.revoked[tokenHash] = expiresAt
+	return nil
 }
