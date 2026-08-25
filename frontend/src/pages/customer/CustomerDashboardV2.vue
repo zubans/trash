@@ -453,6 +453,9 @@ export default defineComponent({
     // standing in for a real balance while the profile loads.
     const balance = computed(() => authStore.balance)
     const balanceLoaded = computed(() => authStore.balance !== null)
+    // The template has always rendered a "verified" badge on this value, and it
+    // was never defined anywhere: the badge could not appear for anyone.
+    const isVerified = computed(() => authStore.user?.is_verified ?? false)
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
     const formattedPhone = computed(() => {
@@ -581,15 +584,6 @@ export default defineComponent({
       else if (isUrgent.value) price *= 3
       return price
     })
-
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
 
     const userEmail = ref('')
     const fullName = ref('')
@@ -1319,6 +1313,10 @@ export default defineComponent({
       phone,
       formattedPhone,
       balance,
+      // Exposed so the template can tell "not loaded yet" from a real zero.
+      // Without it v-if reads undefined and the card shows a dash forever.
+      balanceLoaded,
+      isVerified,
       currencySymbol,
       successMsg,
       errorMsg,

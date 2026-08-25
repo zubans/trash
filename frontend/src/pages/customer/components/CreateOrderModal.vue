@@ -133,18 +133,23 @@
 
 <script lang="ts">
 import { defineComponent, computed, onMounted, watch } from 'vue'
+import type { PropType } from 'vue'
 
 export default defineComponent({
   name: 'CreateOrderModal',
   props: {
     modelValue: { type: Boolean, required: true },
     orderAddress: { type: String, default: '' },
-    orderLat: { type: Number, default: null },
-    orderLon: { type: Number, default: null },
+    // Declared nullable because that is what the dashboard passes: these are
+    // refs that start as null until a category is picked or an address is
+    // geocoded. Typing them as plain String/Number made every binding a type
+    // error, which nothing was checking.
+    orderLat: { type: Number as PropType<number | null>, default: null },
+    orderLon: { type: Number as PropType<number | null>, default: null },
     geocodeError: { type: String, default: '' },
-    selectedCategoryId: { type: String, default: '' },
-    selectedSubCategoryId: { type: String, default: '' },
-    selectedVariantId: { type: String, default: '' },
+    selectedCategoryId: { type: String as PropType<string | null>, default: null },
+    selectedSubCategoryId: { type: String as PropType<string | null>, default: null },
+    selectedVariantId: { type: String as PropType<string | null>, default: null },
     categoryOptions: { type: Array as () => any[], default: () => [] },
     subCategoryOptions: { type: Array as () => any[], default: () => [] },
     variantOptions: { type: Array as () => any[], default: () => [] },
@@ -194,15 +199,6 @@ export default defineComponent({
       return 'ph-fill ph-wrench'
     }
 
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
-
     watch(show, (val) => {
       if (val) {
         document.body.style.overflow = 'hidden'
@@ -212,7 +208,6 @@ export default defineComponent({
     }, { immediate: true })
 
     onMounted(() => {
-      loadPhosphorIcons()
     })
 
     return {

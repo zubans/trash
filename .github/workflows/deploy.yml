@@ -42,6 +42,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Typecheck Frontend
+        run: |
+          cd frontend
+          npm run typecheck
+
       - name: Run Frontend Tests
         run: |
           cd frontend

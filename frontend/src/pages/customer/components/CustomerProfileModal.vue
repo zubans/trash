@@ -199,22 +199,13 @@ export default defineComponent({
       }
     }
 
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
-
     onMounted(() => {
-      loadPhosphorIcons()
     })
 
     return { 
       show,
       userEmail: currentEmail,
+      currentEmail,
       emailInput,
       savingEmail,
       emailMsg,

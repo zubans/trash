@@ -239,7 +239,7 @@ export default defineComponent({
     const { t } = useI18n()
     const authStore = useAuthStore()
 
-    const users = ref([])
+    const users = ref<any[]>([])
     const totalUsers = ref(0)
     const page = ref(1)
     const limit = ref(10)

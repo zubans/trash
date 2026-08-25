@@ -65,7 +65,6 @@
 
 <script lang="ts">
 import { defineComponent, ref, onMounted, computed } from 'vue'
-import { useI18n } from 'vue-i18n'
 import type { ServiceNode } from '../../api/services'
 import {
   getAdminServiceNodes,
@@ -85,7 +84,6 @@ export default defineComponent({
   name: 'ServiceCatalog',
   components: { ServiceNodeTree, ServiceNodeForm },
   setup() {
-    const { t } = useI18n()
     const tree = ref<TreeItem[]>([])
     const loading = ref(false)
     const showFormModal = ref(false)

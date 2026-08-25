@@ -42,7 +42,7 @@ export default defineComponent({
   setup() {
     const { t } = useI18n()
     const authStore = useAuthStore()
-    const transactions = ref([])
+    const transactions = ref<any[]>([])
     const loading = ref(false)
 
     const currencySymbol = computed(() => {
@@ -101,6 +101,7 @@ export default defineComponent({
 
     return {
       transactions,
+      currencySymbol,
       loading,
       columns,
       getTypeColor,

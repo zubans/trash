@@ -52,7 +52,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed, watch, onMounted, nextTick } from 'vue'
+import {defineComponent, ref, computed, watch, nextTick} from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '../../../services/api'

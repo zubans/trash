@@ -21,7 +21,7 @@
           </div>
           <div class="banner-info">
             <div class="banner-phone-row">
-              <span class="banner-phone">{{ userPhone || '7 920 705 07 07' }}</span>
+              <span class="banner-phone">{{ userPhone || '—' }}</span>
             </div>
             <div v-if="userFullName" class="banner-fullname">{{ userFullName }}</div>
             <span v-else class="banner-subtitle">Личный кабинет заказчика</span>
@@ -165,7 +165,7 @@ export default defineComponent({
           userFullName.value = parts.join(' ')
         }
         const res = await api.get('/user/profile')
-        userPhone.value = res.data.phone || authStore.userPhone || ''
+        userPhone.value = res.data.phone || authStore.phone || ''
         userEmail.value = res.data.email || ''
         emailInput.value = userEmail.value
         customerAddresses.value = res.data.addresses || []
@@ -230,17 +230,7 @@ export default defineComponent({
       router.push('/customer')
     }
 
-    const loadPhosphorIcons = () => {
-      if (!document.getElementById('phosphor-icons-script')) {
-        const script = document.createElement('script')
-        script.id = 'phosphor-icons-script'
-        script.src = 'https://unpkg.com/@phosphor-icons/web'
-        document.head.appendChild(script)
-      }
-    }
-
     onMounted(() => {
-      loadPhosphorIcons()
       fetchUserProfile()
     })
 
