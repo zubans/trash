@@ -72,6 +72,7 @@ func main() {
 	reviewRepo := repository.NewReviewRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	executorGeoRepo := repository.NewExecutorGeoRepository(db)
+	addressRepo := repository.NewCustomerAddressRepository(db)
 	reconcileRepo := repository.NewReconciliationRepository(db)
 	systemAccountRepo := repository.NewSystemAccountRepository(db)
 
@@ -89,6 +90,7 @@ func main() {
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
 		WithSessions(authService).
 		WithLedger(ledger).
+		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
@@ -216,6 +218,9 @@ func main() {
 			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
+			r.Post("/user/address", ah.AddAddressHandler)
+			r.Post("/user/address/default", ah.SetDefaultAddressHandler)
+			r.Delete("/user/address/{id}", ah.DeleteAddressHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
 			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)

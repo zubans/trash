@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -489,6 +490,106 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(profile)
+}
+
+// writeAddresses renders the saved-address list the profile page expects.
+func writeAddresses(w http.ResponseWriter, addresses []repository.CustomerAddress, err error) {
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrAddressLimitReached):
+			http.Error(w, "можно сохранить не более 2 адресов", http.StatusConflict)
+		case errors.Is(err, repository.ErrAddressNotFound):
+			http.Error(w, "адрес не найден", http.StatusNotFound)
+		default:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"addresses": addresses})
+}
+
+// AddAddressHandler saves a pickup address for the authenticated customer.
+func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	addresses, err := h.adminService.AddAddress(user.ID, req.Address)
+	writeAddresses(w, addresses, err)
+}
+
+// DeleteAddressHandler removes one of the caller's saved addresses. The client
+// addresses it by id; a positional index is also accepted because the installed
+// app sends the row number.
+func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	raw := chi.URLParam(r, "id")
+	addressID, err := uuid.Parse(raw)
+	if err != nil {
+		index, convErr := strconv.Atoi(raw)
+		if convErr != nil {
+			http.Error(w, "invalid address id", http.StatusBadRequest)
+			return
+		}
+		current, listErr := h.adminService.ListAddresses(user.ID)
+		if listErr != nil {
+			http.Error(w, listErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		if index < 0 || index >= len(current) {
+			http.Error(w, "адрес не найден", http.StatusNotFound)
+			return
+		}
+		addressID = current[index].ID
+	}
+
+	addresses, err := h.adminService.DeleteAddress(user.ID, addressID)
+	writeAddresses(w, addresses, err)
+}
+
+// SetDefaultAddressHandler marks which saved address new orders start from.
+func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ID      string `json:"id"`
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var (
+		addresses []repository.CustomerAddress
+		err       error
+	)
+	if id, parseErr := uuid.Parse(req.ID); parseErr == nil {
+		addresses, err = h.adminService.SetDefaultAddress(user.ID, id)
+	} else {
+		addresses, err = h.adminService.SetDefaultAddressByValue(user.ID, req.Address)
+	}
+	writeAddresses(w, addresses, err)
 }
 
 // GetActiveShiftsHandler lists all active executor shifts.

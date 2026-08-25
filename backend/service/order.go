@@ -212,13 +212,17 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 	}
 
 	if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+		// The order row goes in first: the ledger entry references it, and
+		// transactions.order_id is a foreign key checked immediately. Ordering
+		// costs nothing here — both statements share one transaction, so a
+		// failed hold rolls the order back with it.
+		if err := s.orderRepo.Create(tx, order); err != nil {
+			return err
+		}
 		// Reserve is a single conditional debit paired with a credit to escrow:
 		// the money is not destroyed, it moves to the account that holds it for
 		// the duration of the order.
-		if err := s.ledger.Reserve(tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID); err != nil {
-			return err
-		}
-		return s.orderRepo.Create(tx, order)
+		return s.ledger.Reserve(tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID)
 	}); err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {
 			return nil, errors.New("insufficient balance")

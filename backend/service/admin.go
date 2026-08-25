@@ -29,6 +29,7 @@ type AdminService struct {
 	userRepo      repository.UserRepository
 	adminRepo     repository.AdminRepository
 	settingsRepo  repository.SettingsRepository
+	addressRepo   repository.CustomerAddressRepository
 	ledger        *Ledger
 	reconcileRepo repository.ReconciliationRepository
 	sessions      SessionRevoker
@@ -58,6 +59,58 @@ func NewAdminService(
 		mailer:       mailer,
 		jwtSecret:    []byte(secret),
 	}
+}
+
+// WithAddresses attaches the saved-address store used by the customer profile.
+func (s *AdminService) WithAddresses(addressRepo repository.CustomerAddressRepository) *AdminService {
+	s.addressRepo = addressRepo
+	return s
+}
+
+// ListAddresses returns a customer's saved pickup addresses.
+func (s *AdminService) ListAddresses(userID uuid.UUID) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.List(userID)
+}
+
+// AddAddress saves a new pickup address, normalising it the same way
+// registration does so the geocoder and the order form agree on its shape.
+func (s *AdminService) AddAddress(userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	normalized, err := normalizeAddress(address)
+	if err != nil {
+		return nil, err
+	}
+	return s.addressRepo.Add(userID, normalized)
+}
+
+// DeleteAddress removes one of the customer's addresses.
+func (s *AdminService) DeleteAddress(userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.Delete(userID, addressID)
+}
+
+// SetDefaultAddress marks which address new orders should start from.
+func (s *AdminService) SetDefaultAddress(userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.SetDefault(userID, addressID)
+}
+
+// SetDefaultAddressByValue is the same, for clients that identify an address by
+// its text.
+func (s *AdminService) SetDefaultAddressByValue(userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+	if s.addressRepo == nil {
+		return nil, errors.New("address storage is not configured")
+	}
+	return s.addressRepo.SetDefaultByValue(userID, strings.TrimSpace(address))
 }
 
 // WithLedger attaches the ledger. Top-ups and withdrawals move money, and the
@@ -476,6 +529,29 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 	} else if cp != nil {
 		profile["address"] = cp.Address
 		profile["last_geo"] = cp.LastGeo.String
+	}
+
+	// Saved addresses. "address" and "default_address" carry the same value so
+	// that the dashboards, which read the former, keep working alongside the
+	// profile page, which reads the latter.
+	profile["addresses"] = []repository.CustomerAddress{}
+	if s.addressRepo != nil {
+		addresses, err := s.addressRepo.List(userID)
+		if err != nil {
+			log.Printf("[GetProfile] failed to load addresses for %s: %v", userID, err)
+		} else {
+			profile["addresses"] = addresses
+			for _, a := range addresses {
+				if a.IsDefault {
+					profile["default_address"] = a.Address
+					profile["address"] = a.Address
+					break
+				}
+			}
+		}
+	}
+	if _, ok := profile["default_address"]; !ok {
+		profile["default_address"] = profile["address"]
 	}
 
 	return profile, nil

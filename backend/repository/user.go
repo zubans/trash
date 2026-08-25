@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -345,14 +346,19 @@ func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	return err
 }
 
+// CreateCustomerProfile stores the profile and registers the address as the
+// customer's first saved one, so the profile page lists what registration
+// captured instead of showing an empty list next to a working order form.
 func (r *repo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
-	_, err := r.db.Exec(
+	if _, err := r.db.Exec(
 		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
 		 VALUES ($1, '', $2, $3)
 		 ON CONFLICT (user_id) DO UPDATE SET address = $2, last_geo = $3`,
 		userID, address, lastGeo,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return r.saveDefaultAddress(userID, address)
 }
 
 func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
@@ -371,12 +377,31 @@ func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
 }
 
 func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
-	_, err := r.db.Exec(
+	if _, err := r.db.Exec(
 		`INSERT INTO customer_profiles (user_id, full_name, address)
 		 VALUES ($1, '', $2)
 		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
 		userID, address,
-	)
+	); err != nil {
+		return err
+	}
+	return r.saveDefaultAddress(userID, address)
+}
+
+// saveDefaultAddress keeps customer_addresses in step with the profile address,
+// so the two never disagree about where a customer orders from.
+func (r *repo) saveDefaultAddress(userID uuid.UUID, address string) error {
+	if strings.TrimSpace(address) == "" {
+		return nil
+	}
+	if _, err := r.db.Exec(
+		`UPDATE customer_addresses SET is_default = FALSE WHERE user_id = $1 AND is_default`, userID); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(
+		`INSERT INTO customer_addresses (user_id, address, is_default) VALUES ($1, $2, TRUE)
+		 ON CONFLICT (user_id, address) DO UPDATE SET is_default = TRUE`,
+		userID, address)
 	return err
 }
 

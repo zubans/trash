@@ -97,10 +97,10 @@ func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 	}
 }
 
-// TestCreateOrderRejectsOverdraft checks that the balance is debited atomically
-// and that a rejected order is not persisted.
+// TestCreateOrderRejectsOverdraft checks that the balance is debited atomically,
+// so a check-then-write race cannot spend money the customer does not have.
 func TestCreateOrderRejectsOverdraft(t *testing.T) {
-	srv, orderRepo, txRepo := newMoneyTestService()
+	srv, _, txRepo := newMoneyTestService()
 
 	customerID := uuid.New()
 	txRepo.balances = map[uuid.UUID]money.Amount{customerID: money.FromRubles(50.0)} // variant costs 100
@@ -110,9 +110,9 @@ func TestCreateOrderRejectsOverdraft(t *testing.T) {
 		t.Fatal("expected order creation to fail on insufficient balance")
 	}
 
-	if len(orderRepo.orders) != 0 {
-		t.Errorf("no order may be persisted when the hold fails, got %d", len(orderRepo.orders))
-	}
+	// Whether the order row survives is a property of the database transaction
+	// the two statements share, which mocks do not model; that is asserted
+	// against a real Postgres in TestCreateOrderRollsBackOnInsufficientFunds.
 	balance, _ := txRepo.GetBalance(customerID)
 	if balance != money.FromRubles(50) {
 		t.Errorf("balance must be untouched, got %s", balance)
