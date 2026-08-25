@@ -340,8 +340,8 @@ func TestAdminService_Extended(t *testing.T) {
 	}
 
 	_, _ = srv.GetActiveShifts()
-	_, _ = srv.GetActiveOrders()
-	_, _ = srv.GetCompletedOrders()
+	_, _ = srv.GetActiveOrders(0, 0)
+	_, _ = srv.GetCompletedOrders(0, 0)
 
 	prof, err := srv.GetProfile(u.ID)
 	if err != nil || prof["phone"] != "70000000000" {
@@ -349,7 +349,7 @@ func TestAdminService_Extended(t *testing.T) {
 	}
 
 	_ = srv.RejectTopUpRequest(uuid.New(), adminID)
-	_, _ = srv.GetTransactions()
+	_, _ = srv.GetTransactions(0, 0)
 }
 
 func TestChatService_Extended(t *testing.T) {
@@ -497,7 +497,7 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 		t.Fatalf("unexpected error creating top up request: %v", err)
 	}
 
-	reqs, err := srv.GetTopUpRequests()
+	reqs, err := srv.GetTopUpRequests(0, 0)
 	if err != nil || len(reqs) != 1 {
 		t.Errorf("expected 1 top up request, got %d", len(reqs))
 	}

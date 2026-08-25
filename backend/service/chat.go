@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -264,7 +265,7 @@ func (s *ChatService) GetMessages(orderID, userID uuid.UUID) ([]*repository.Mess
 		return nil, err
 	}
 	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
-		return nil, errors.New("forbidden: you do not belong to this order")
+		return nil, ErrForbidden
 	}
 
 	chat, err := s.chatRepo.GetChatByOrderID(orderID)
@@ -290,11 +291,11 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 		return nil, err
 	}
 	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
-		return nil, errors.New("forbidden: you are not a participant in this order")
+		return nil, ErrForbidden
 	}
 
 	if order.Status == "COMPLETED" || order.Status == "CANCELED" {
-		return nil, errors.New("chat is locked (order completed or canceled)")
+		return nil, fmt.Errorf("%w: order completed or canceled", ErrChatLocked)
 	}
 
 	chat, err := s.chatRepo.GetChatByOrderID(orderID)
@@ -302,7 +303,7 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 		return nil, err
 	}
 	if chat == nil || !chat.IsActive {
-		return nil, errors.New("chat is locked (read-only)")
+		return nil, ErrChatLocked
 	}
 
 	if len([]rune(text)) > maxMessageRunes {
@@ -339,11 +340,11 @@ func (s *ChatService) SendMessageWithAttachment(orderID, userID uuid.UUID, text,
 		return nil, err
 	}
 	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
-		return nil, errors.New("forbidden: you are not a participant in this order")
+		return nil, ErrForbidden
 	}
 
 	if order.Status == "COMPLETED" || order.Status == "CANCELED" {
-		return nil, errors.New("chat is locked (order completed or canceled)")
+		return nil, fmt.Errorf("%w: order completed or canceled", ErrChatLocked)
 	}
 
 	chat, err := s.chatRepo.GetChatByOrderID(orderID)
@@ -351,7 +352,7 @@ func (s *ChatService) SendMessageWithAttachment(orderID, userID uuid.UUID, text,
 		return nil, err
 	}
 	if chat == nil || !chat.IsActive {
-		return nil, errors.New("chat is locked (read-only)")
+		return nil, ErrChatLocked
 	}
 
 	savedMsg, err := s.chatRepo.SaveMessageWithAttachment(chat.ID, userID, text, fileURL, fileName, fileType, fileSize)
@@ -537,8 +538,15 @@ func (s *ChatService) GetOrCreateSupportChat(userID uuid.UUID) (*repository.Supp
 	return s.chatRepo.GetOrCreateSupportChat(userID)
 }
 
-// ErrForbidden reports that the caller is not a participant of the conversation.
-var ErrForbidden = errors.New("forbidden: this chat does not belong to you")
+// Errors the chat service returns. Handlers map them to status codes by
+// identity: matching on the text of an error is how a rename silently turns a
+// 403 into a 500.
+var (
+	// ErrForbidden reports that the caller is not a participant of the conversation.
+	ErrForbidden = errors.New("forbidden: this chat does not belong to you")
+	// ErrChatLocked reports that the conversation no longer accepts messages.
+	ErrChatLocked = errors.New("chat is locked (read-only)")
+)
 
 // authorizeSupportChat allows the owner of the chat and any admin. Support
 // conversations are addressed by chat id, so without this check any

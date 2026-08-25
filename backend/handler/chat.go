@@ -62,11 +62,14 @@ func safeExtension(fileName string) (string, error) {
 	return ext, nil
 }
 
-// writeChatError maps service errors to HTTP status codes.
+// writeChatError maps service errors to HTTP status codes by error identity,
+// never by matching on the message text.
 func writeChatError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
 		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, service.ErrChatLocked):
+		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
@@ -182,13 +185,7 @@ func (h *ChatHandler) SendMessageHandler(w http.ResponseWriter, r *http.Request)
 	msg, err := h.chatService.SendMessage(orderID, user.ID, req.Text)
 	if err != nil {
 		log.Printf("[SendMessageHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
-		status := http.StatusInternalServerError
-		if strings.Contains(err.Error(), "forbidden") {
-			status = http.StatusForbidden
-		} else if strings.Contains(err.Error(), "locked") {
-			status = http.StatusConflict
-		}
-		http.Error(w, err.Error(), status)
+		writeChatError(w, err)
 		return
 	}
 

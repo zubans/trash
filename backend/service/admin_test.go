@@ -23,7 +23,7 @@ func (m *mockAdminRepo) GetUsers(page, limit int, role, status, search string) (
 	return m.users, len(m.users), nil
 }
 
-func (m *mockAdminRepo) GetTopUpRequests() ([]*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) GetTopUpRequests(limit, offset int) ([]*repository.TopUpRequest, error) {
 	var reqs []*repository.TopUpRequest
 	for _, r := range m.requests {
 		reqs = append(reqs, r)
@@ -51,7 +51,7 @@ func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUI
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) GetWithdrawalRequests(limit, offset int) ([]*repository.WithdrawalRequest, error) {
 	return nil, nil
 }
 
@@ -68,7 +68,7 @@ func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uui
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetTransactions() ([]*repository.Transaction, error) {
+func (m *mockAdminRepo) GetTransactions(limit, offset int) ([]*repository.Transaction, error) {
 	return m.transactions, nil
 }
 
@@ -88,11 +88,11 @@ func (m *mockAdminRepo) GetActiveShifts() ([]*repository.AdminShift, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetActiveOrders() ([]*repository.AdminOrder, error) {
+func (m *mockAdminRepo) GetActiveOrders(limit, offset int) ([]*repository.AdminOrder, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetCompletedOrders() ([]*repository.AdminOrder, error) {
+func (m *mockAdminRepo) GetCompletedOrders(limit, offset int) ([]*repository.AdminOrder, error) {
 	return nil, nil
 }
 

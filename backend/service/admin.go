@@ -230,9 +230,25 @@ func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.
 	return s.adminRepo.TopUpUserBalance(userID, adminID, amount)
 }
 
-// GetTopUpRequests lists all balance top-up requests.
-func (s *AdminService) GetTopUpRequests() ([]*repository.TopUpRequest, error) {
-	return s.adminRepo.GetTopUpRequests()
+// page normalises a requested page size. Admin listings used to return whole
+// tables, which is both a slow response and an easy way to strain the database.
+func page(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxAdminPageSize {
+		limit = maxAdminPageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+// GetTopUpRequests lists balance top-up requests, newest first.
+func (s *AdminService) GetTopUpRequests(limit, offset int) ([]*repository.TopUpRequest, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetTopUpRequests(limit, offset)
 }
 
 // CreateTopUpRequest creates a pending balance top-up request.
@@ -298,8 +314,9 @@ func (s *AdminService) decideTopUp(requestID, adminID uuid.UUID, status string) 
 }
 
 // GetWithdrawalRequests lists all balance withdrawal requests.
-func (s *AdminService) GetWithdrawalRequests() ([]*repository.WithdrawalRequest, error) {
-	return s.adminRepo.GetWithdrawalRequests()
+func (s *AdminService) GetWithdrawalRequests(limit, offset int) ([]*repository.WithdrawalRequest, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetWithdrawalRequests(limit, offset)
 }
 
 // CreateWithdrawalRequest reserves the requested amount and records a pending
@@ -409,8 +426,9 @@ func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status str
 }
 
 // GetTransactions retrieves transaction history.
-func (s *AdminService) GetTransactions() ([]*repository.Transaction, error) {
-	return s.adminRepo.GetTransactions()
+func (s *AdminService) GetTransactions(limit, offset int) ([]*repository.Transaction, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetTransactions(limit, offset)
 }
 
 // GetActiveShifts returns all currently active executor shifts.
@@ -419,13 +437,15 @@ func (s *AdminService) GetActiveShifts() ([]*repository.AdminShift, error) {
 }
 
 // GetActiveOrders returns customer orders that are still active (searching or assigned).
-func (s *AdminService) GetActiveOrders() ([]*repository.AdminOrder, error) {
-	return s.adminRepo.GetActiveOrders()
+func (s *AdminService) GetActiveOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetActiveOrders(limit, offset)
 }
 
 // GetCompletedOrders returns completed customer orders.
-func (s *AdminService) GetCompletedOrders() ([]*repository.AdminOrder, error) {
-	return s.adminRepo.GetCompletedOrders()
+func (s *AdminService) GetCompletedOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetCompletedOrders(limit, offset)
 }
 
 // GetProfile returns the authenticated user's profile including customer address.

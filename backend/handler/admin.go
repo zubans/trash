@@ -201,9 +201,17 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]string{"message": "balance topped up successfully"})
 }
 
-// GetTopUpRequestsHandler lists all manual balance top-up requests.
+// pageParams reads limit/offset from the query string. Both are optional; the
+// service clamps them.
+func pageParams(r *http.Request) (int, int) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	return limit, offset
+}
+
+// GetTopUpRequestsHandler lists manual balance top-up requests.
 func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	reqs, err := h.adminService.GetTopUpRequests()
+	reqs, err := h.adminService.GetTopUpRequests(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -290,7 +298,7 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 
 // GetWithdrawalRequestsHandler lists all manual balance withdrawal requests.
 func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	reqs, err := h.adminService.GetWithdrawalRequests()
+	reqs, err := h.adminService.GetWithdrawalRequests(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -383,7 +391,7 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 
 // GetTransactionsHandler retrieves audit logs of transactions.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	txs, err := h.adminService.GetTransactions()
+	txs, err := h.adminService.GetTransactions(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -496,7 +504,7 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 
 // GetActiveOrdersHandler lists active customer orders (searching or assigned).
 func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.adminService.GetActiveOrders()
+	orders, err := h.adminService.GetActiveOrders(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -507,7 +515,7 @@ func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Req
 
 // GetCompletedOrdersHandler lists completed customer orders.
 func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.adminService.GetCompletedOrders()
+	orders, err := h.adminService.GetCompletedOrders(pageParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

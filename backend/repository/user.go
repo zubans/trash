@@ -208,7 +208,9 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	var userID uuid.UUID
 	err := r.db.QueryRow(
 		`UPDATE users
-		 SET email_verified = true,
+		 SET email = COALESCE(NULLIF(pending_email, ''), email),
+		     pending_email = NULL,
+		     email_verified = true,
 		     email_verification_token = NULL,
 		     email_token_expires_at = NULL
 		 WHERE email_verification_token = $1 AND (email_token_expires_at IS NULL OR email_token_expires_at > now())
@@ -378,24 +380,31 @@ func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	return err
 }
 
+// UpdateUserEmail records a requested address as pending and sends the user a
+// verification link. The current address stays in place until the new one is
+// confirmed: writing it straight into email meant an unverified address became
+// the account's address immediately, which let somebody occupy an address that
+// its real owner had not registered yet, and dropped the working address of a
+// user who mistyped.
 func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
 	row := r.db.QueryRow(
 		`UPDATE users
-		 SET email = $1, pending_email = NULL, email_verified = false, email_verification_token = $2, email_token_expires_at = $3
+		 SET pending_email = $1, email_verification_token = $2, email_token_expires_at = $3
 		 WHERE id = $4
-		 RETURNING id, role, phone, COALESCE(email, ''), email_verified, email_verification_token, balance, status, created_at`,
+		 RETURNING id, role, phone, COALESCE(email, ''), COALESCE(pending_email, ''), email_verified, email_verification_token, balance, status, created_at`,
 		email, verificationToken, expiresAt, userID,
 	)
 	var u User
-	var emailStr string
+	var emailStr, pendingStr string
 	err := row.Scan(
-		&u.ID, &u.Role, &u.Phone, &emailStr, &u.EmailVerified,
+		&u.ID, &u.Role, &u.Phone, &emailStr, &pendingStr, &u.EmailVerified,
 		&u.EmailVerificationToken, &u.Balance, &u.Status, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	u.Email = emailStr
+	u.PendingEmail = pendingStr
 	return &u, nil
 }
 

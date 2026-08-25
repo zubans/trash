@@ -43,32 +43,14 @@ func (s *ShiftService) StartShift(executorID uuid.UUID, durationHours int) (*rep
 		return nil, errors.New("active shift already exists")
 	}
 
-	shift, err := s.shiftRepo.StartShift(executorID, durationHours)
-	if err != nil {
-		return nil, err
-	}
-
-	s.ScheduleShiftAutoEnd(shift)
-	return shift, nil
+	return s.shiftRepo.StartShift(executorID, durationHours)
 }
 
-// ScheduleShiftAutoEnd starts a Goroutine timer to automatically complete a shift when planned_end_at is reached.
-func (s *ShiftService) ScheduleShiftAutoEnd(shift *repository.Shift) {
-	if shift == nil || shift.Status != repository.ShiftStatusActive {
-		return
-	}
-	duration := time.Until(shift.PlannedEndAt)
-	if duration <= 0 {
-		_ = s.EndShiftByID(shift.ID)
-		return
-	}
-
-	go func(shiftID uuid.UUID, d time.Duration) {
-		timer := time.NewTimer(d)
-		<-timer.C
-		_ = s.EndShiftByID(shiftID)
-	}(shift.ID, duration)
-}
+// Shifts are closed by a single mechanism: ShiftWorker scans for expired ones
+// on a timer (see AutoEndExpiredShifts). There used to be three — a goroutine
+// with a timer per shift, this scan, and a restore pass on boot that recreated
+// the timers — which meant a shift could be closed by whichever raced first, and
+// the per-shift goroutines were lost on every restart anyway.
 
 // EndShiftByID completes an active shift if it hasn't already been finished.
 func (s *ShiftService) EndShiftByID(shiftID uuid.UUID) error {

@@ -108,6 +108,8 @@ func main() {
 	auctionWorker := worker.NewAuctionWorker(db)
 	auctionWorker.Start(1 * time.Minute)
 
+	// The only thing that closes an expired shift: one periodic scan, which also
+	// picks up shifts that were running when the process restarted.
 	shiftWorker := worker.NewShiftWorker(shiftService)
 	shiftWorker.Start(1 * time.Minute)
 
@@ -124,13 +126,6 @@ func main() {
 			authService.CleanupExpiredRefreshTokens()
 		}
 	}()
-
-	// Restore auto-end timers for existing active shifts on boot
-	if activeShifts, err := shiftRepo.GetActiveShifts(); err == nil {
-		for _, s := range activeShifts {
-			shiftService.ScheduleShiftAutoEnd(s)
-		}
-	}
 
 	// Middleware
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret)
