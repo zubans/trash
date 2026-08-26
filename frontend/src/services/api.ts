@@ -32,19 +32,26 @@ export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 15) * 1000
 
 export function formatApiError(err: any, fallbackMessage: string): string {
+  const serverMsg = err.response?.data
+  let serverText = ''
+  if (typeof serverMsg === 'string' && serverMsg.trim()) {
+    serverText = serverMsg.trim()
+  } else if (serverMsg && typeof serverMsg.error === 'string') {
+    serverText = serverMsg.error.trim()
+  } else if (serverMsg && typeof serverMsg.message === 'string') {
+    serverText = serverMsg.message.trim()
+  }
+
   if (isDebug) {
     const baseURL = err.config?.baseURL || ''
     const url = err.config?.url || ''
     const fullURL = url.startsWith('http') ? url : `${baseURL}${url}`
     const status = err.response?.status ? `HTTP ${err.response.status}` : 'no response'
-    const errorText = err.message || 'Unknown error'
-    return `Request failed\nURL: ${fullURL || 'unknown'}\nStatus: ${status}\nError: ${errorText}`
+    const errorText = serverText || err.message || 'Unknown error'
+    return `${errorText}\n\n[Debug Info]\nURL: ${fullURL || 'unknown'}\nStatus: ${status}`
   }
 
-  if (err.response && err.response.data) {
-    return typeof err.response.data === 'string' ? err.response.data : fallbackMessage
-  }
-  return fallbackMessage
+  return serverText || fallbackMessage
 }
 
 const api = axios.create({
