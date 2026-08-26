@@ -99,21 +99,21 @@
 
         <!-- Add New Address Form -->
         <div v-if="customerAddresses.length < 2" class="add-address-form">
-          <input
-            type="text"
-            v-model="newAddressInput"
-            placeholder="Введите новый адрес..."
-            class="add-input"
-            @keyup.enter="addNewAddress"
+          <AddressAutocomplete
+            v-model="newAddress"
+            class="add-address-field"
+            placeholder="Начните вводить адрес..."
+            hint="Выберите адрес из подсказок и укажите квартиру"
           />
           <button
             type="button"
             class="btn-add"
-            :disabled="!newAddressInput.trim()"
+            :disabled="!newAddress || addingAddress"
             @click="addNewAddress"
           >
             <i class="ph-bold ph-plus"></i> Добавить
           </button>
+          <p v-if="addressError" class="address-add-error">{{ addressError }}</p>
         </div>
         <div v-else class="limit-warning-banner">
           <span>ℹ️ Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
@@ -136,9 +136,11 @@ import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
+import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 
 export default defineComponent({
   name: 'CustomerProfilePage',
+  components: { AddressAutocomplete },
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()
@@ -147,7 +149,9 @@ export default defineComponent({
     const userPhone = ref('')
     const customerAddresses = ref<any[]>([])
     const defaultAddress = ref('')
-    const newAddressInput = ref('')
+    const newAddress = ref<StructuredAddress | null>(null)
+    const addingAddress = ref(false)
+    const addressError = ref('')
 
     const emailInput = ref('')
     const savingEmail = ref(false)
@@ -201,16 +205,39 @@ export default defineComponent({
     }
 
     const addNewAddress = async () => {
-      if (!newAddressInput.value.trim() || customerAddresses.value.length >= 2) return
+      const chosen = newAddress.value
+      if (!chosen || customerAddresses.value.length >= 2 || addingAddress.value) return
+
+      addingAddress.value = true
+      addressError.value = ''
       try {
-        const res = await api.post('/user/address', { address: newAddressInput.value.trim() })
+        // The parts are sent, not a line. Coordinates travel with them, so an
+        // address added here is visible to distance matching — one added
+        // through the old free-text box never was.
+        const res = await api.post('/user/address', {
+          address: chosen.value,
+          region: chosen.region,
+          city: chosen.city,
+          street: chosen.street,
+          house: chosen.house,
+          flat: chosen.flat,
+          fias_id: chosen.fias_id,
+          lat: chosen.lat,
+          lon: chosen.lon,
+          source: chosen.source,
+        })
         customerAddresses.value = res.data.addresses || []
         if (customerAddresses.value.length === 1) {
-          defaultAddress.value = newAddressInput.value.trim()
+          defaultAddress.value = customerAddresses.value[0].address
         }
-        newAddressInput.value = ''
-      } catch (err) {
-        console.error('Failed to add address:', err)
+        newAddress.value = null
+      } catch (err: any) {
+        // Previously this only reached the console, so a rejected address
+        // looked like a button that did nothing.
+        addressError.value =
+          err?.response?.data?.error || err?.response?.data || 'Не удалось сохранить адрес'
+      } finally {
+        addingAddress.value = false
       }
     }
 
@@ -240,7 +267,9 @@ export default defineComponent({
       userPhone,
       customerAddresses,
       defaultAddress,
-      newAddressInput,
+      newAddress,
+      addingAddress,
+      addressError,
       emailInput,
       savingEmail,
       emailMsg,
@@ -564,6 +593,15 @@ export default defineComponent({
 }
 
 /* Add address form */
+.add-address-field { flex: 1 1 100%; }
+
+.address-add-error {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  color: #dc2626;
+}
+
 .add-address-form {
   display: flex;
   gap: 12px;
@@ -651,7 +689,16 @@ export default defineComponent({
 @media (max-width: 640px) {
   .profile-card { padding: 20px; border-radius: 20px; }
   .top-nav { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .input-wrapper, .add-address-form { flex-direction: column; }
+  .input-wrapper, .add-address-field { flex: 1 1 100%; }
+
+.address-add-error {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  color: #dc2626;
+}
+
+.add-address-form { flex-direction: column; }
   .btn-save-email, .btn-add { width: 100%; justify-content: center; }
   .btn-back-home { width: 100%; justify-content: center; }
 }

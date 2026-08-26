@@ -390,7 +390,8 @@
       <!-- Customer Profile Modal -->
       <CustomerProfileModal
         v-model="showProfileModal"
-        v-model:new-address-input="newAddressInput"
+        v-model:new-address="newAddress"
+        :address-error="addressError"
         :is-verified="false"
         :user-email="userEmail"
         :customer-addresses="customerAddresses"
@@ -417,6 +418,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import type { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
@@ -495,7 +497,9 @@ export default defineComponent({
     const customerAddresses = ref<any[]>([
       { address: 'Москва, ул. Тверская, д. 1' }
     ])
-    const newAddressInput = ref('')
+    const newAddress = ref<StructuredAddress | null>(null)
+    const addressSaving = ref(false)
+    const addressError = ref('')
 
     // Orders
     const orders = ref<any[]>([])
@@ -613,8 +617,19 @@ export default defineComponent({
     }
 
     const geocodeAddress = async () => {
-      geocoding.value = true
       geocodeError.value = ''
+
+      // A saved address now carries the coordinates it was chosen with, so the
+      // common case needs no lookup at all. Only addresses stored before that
+      // — and typed-in ones — still have to be resolved.
+      const saved = customerAddresses.value.find((a: any) => a.address === orderAddress.value)
+      if (saved && saved.lat != null && saved.lon != null) {
+        orderLat.value = saved.lat
+        orderLon.value = saved.lon
+        return
+      }
+
+      geocoding.value = true
       orderLat.value = null
       orderLon.value = null
       try {
@@ -1200,21 +1215,62 @@ export default defineComponent({
       }
     }
 
-    const setActiveAddress = (addr: string) => {
+    const setActiveAddress = async (addr: string) => {
       defaultAddress.value = addr
       orderAddress.value = addr
+      try {
+        await api.post('/user/address/default', { address: addr })
+      } catch (err) {
+        console.error('Failed to set the default address:', err)
+      }
     }
 
-    const addNewAddress = () => {
-      if (!newAddressInput.value.trim()) return
-      customerAddresses.value.push({ address: newAddressInput.value.trim() })
-      defaultAddress.value = newAddressInput.value.trim()
-      orderAddress.value = newAddressInput.value.trim()
-      newAddressInput.value = ''
+    // These used to change the local array and nothing else, so an address
+    // added here vanished on the next load and one removed here came back.
+    const addNewAddress = async () => {
+      const chosen = newAddress.value
+      if (!chosen || addressSaving.value) return
+
+      addressSaving.value = true
+      addressError.value = ''
+      try {
+        const res = await api.post('/user/address', {
+          address: chosen.value,
+          region: chosen.region,
+          city: chosen.city,
+          street: chosen.street,
+          house: chosen.house,
+          flat: chosen.flat,
+          fias_id: chosen.fias_id,
+          lat: chosen.lat,
+          lon: chosen.lon,
+          source: chosen.source,
+        })
+        customerAddresses.value = res.data.addresses || []
+        defaultAddress.value = chosen.value
+        orderAddress.value = chosen.value
+        newAddress.value = null
+      } catch (err: any) {
+        addressError.value =
+          err?.response?.data?.error || err?.response?.data || 'Не удалось сохранить адрес'
+      } finally {
+        addressSaving.value = false
+      }
     }
 
-    const removeAddress = (idx: number) => {
-      customerAddresses.value.splice(idx, 1)
+    const removeAddress = async (idx: number) => {
+      const target = customerAddresses.value[idx]
+      if (!target?.id) return
+      try {
+        const res = await api.delete(`/user/address/${target.id}`)
+        customerAddresses.value = res.data.addresses || []
+        if (!customerAddresses.value.some((a: any) => a.address === defaultAddress.value)) {
+          defaultAddress.value = customerAddresses.value[0]?.address || ''
+          orderAddress.value = defaultAddress.value
+        }
+      } catch (err) {
+        console.error('Failed to remove the address:', err)
+      }
     }
 
     const getOrderTitles = (order: any) => {
@@ -1322,7 +1378,9 @@ export default defineComponent({
       errorMsg,
       defaultAddress,
       customerAddresses,
-      newAddressInput,
+      newAddress,
+      addressSaving,
+      addressError,
       activeOrders,
       historyOrders,
       isHistoryCollapsed,

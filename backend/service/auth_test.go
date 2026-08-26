@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -530,5 +531,52 @@ func TestRequestPasswordReset_DoesNotRevealAccounts(t *testing.T) {
 	}
 	if mailer.calls != 1 {
 		t.Errorf("expected exactly one send attempt for the known address, got %d", mailer.calls)
+	}
+}
+
+// TestRegisterAcceptsRealBuildingNumbers is the user-visible half of the
+// address change. Registration used to demand a purely numeric house number, so
+// anyone living in a корпус or a строение could pick their address from the
+// suggestion list and then be refused by the form. These are ordinary Russian
+// addresses and they must go through.
+func TestRegisterAcceptsRealBuildingNumbers(t *testing.T) {
+	addresses := []string{
+		"Россия, Москва, Тверская улица, д. 12к1",
+		"Россия, Москва, Тверская улица, д. 10 стр. 2",
+		"Россия, Курск, улица Ленина, д. 5А кв. 3",
+		"Россия, Москва, Тверская улица, д. 7, кв. 35",
+	}
+
+	for i, address := range addresses {
+		svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
+		phone := fmt.Sprintf("+7900123%04d", 7000+i)
+		email := fmt.Sprintf("building-%d@example.com", i)
+
+		if _, err := svc.Register(phone, email, "strong-password",
+			"Иванов", "Иван", "Иванович", address, "CUSTOMER"); err != nil {
+			t.Errorf("%q must be accepted: %v", address, err)
+		}
+	}
+}
+
+// TestRegisterStillRequiresABuilding: relaxing the format must not turn into
+// accepting anything. An address without a house cannot be delivered to.
+func TestRegisterStillRequiresABuilding(t *testing.T) {
+	rejected := []string{
+		"Россия, Москва, Тверская улица",
+		"Москва",
+		"   ",
+		"случайный текст",
+	}
+
+	for i, address := range rejected {
+		svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
+		phone := fmt.Sprintf("+7900124%04d", 8000+i)
+		email := fmt.Sprintf("nohouse-%d@example.com", i)
+
+		if _, err := svc.Register(phone, email, "strong-password",
+			"Иванов", "Иван", "Иванович", address, "CUSTOMER"); err == nil {
+			t.Errorf("%q has no building and must be refused", address)
+		}
 	}
 }

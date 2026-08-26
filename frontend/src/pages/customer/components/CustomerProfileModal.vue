@@ -97,22 +97,22 @@
 
       <!-- Add New Address Form -->
       <div v-if="customerAddresses.length < 2" class="add-address-form">
-        <input
-          type="text"
-          :value="newAddressInput"
-          @input="$emit('update:newAddressInput', ($event.target as HTMLInputElement).value)"
-          placeholder="Введите новый адрес..."
-          class="add-input"
-          @keyup.enter="$emit('addNewAddress')"
+        <AddressAutocomplete
+          class="add-address-field"
+          :model-value="newAddress"
+          placeholder="Начните вводить адрес..."
+          hint="Выберите адрес из подсказок и укажите квартиру"
+          @update:model-value="$emit('update:newAddress', $event)"
         />
         <button
           type="button"
           class="btn-add"
-          :disabled="!newAddressInput.trim()"
+          :disabled="!newAddress"
           @click="$emit('addNewAddress')"
         >
           <i class="ph-bold ph-plus"></i> Добавить
         </button>
+        <p v-if="addressError" class="address-add-error">{{ addressError }}</p>
       </div>
       <div v-else class="limit-warning-banner">
         <span>ℹ️ Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
@@ -129,22 +129,25 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, onMounted, ref, watch } from 'vue'
+import { defineComponent, computed, onMounted, ref, watch, PropType } from 'vue'
 import api from '../../../services/api'
+import AddressAutocomplete, { StructuredAddress } from '../../../components/AddressAutocomplete.vue'
 
 export default defineComponent({
   name: 'CustomerProfileModal',
+  components: { AddressAutocomplete },
   props: {
     modelValue: { type: Boolean, required: true },
     isVerified: { type: Boolean, default: false },
     userEmail: { type: String, default: '' },
     customerAddresses: { type: Array as () => any[], default: () => [] },
     defaultAddress: { type: String, default: '' },
-    newAddressInput: { type: String, default: '' },
+    newAddress: { type: Object as PropType<StructuredAddress | null>, default: null },
+    addressError: { type: String, default: '' },
   },
   emits: [
     'update:modelValue',
-    'update:newAddressInput',
+    'update:newAddress',
     'setActiveAddress',
     'addNewAddress',
     'removeAddress',
@@ -543,6 +546,15 @@ export default defineComponent({
 }
 
 /* --- Add Address Form --- */
+.add-address-field { flex: 1 1 100%; }
+
+.address-add-error {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  color: #dc2626;
+}
+
 .add-address-form {
   display: flex;
   gap: 8px;
@@ -695,7 +707,16 @@ export default defineComponent({
 @media (max-width: 480px) {
   .modal-card { padding: 24px; border-radius: 28px; }
   .v-header { flex-direction: column; align-items: flex-start; gap: 8px; }
-  .add-address-form { flex-direction: column; }
+  .add-address-field { flex: 1 1 100%; }
+
+.address-add-error {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  color: #dc2626;
+}
+
+.add-address-form { flex-direction: column; }
   .btn-add { padding: 14px; justify-content: center; }
   .modal-footer { justify-content: stretch; }
   .btn-cancel { width: 100%; }

@@ -137,48 +137,16 @@
           </div>
         </div>
 
-        <!-- Address Autocomplete for Registration -->
-        <div v-if="mode === 'register'" class="form-group mb-3 address-autocomplete">
-          <label class="form-label">{{ role === 'CUSTOMER' ? $t('login.pickupAddress') : 'Базовый адрес (откуда искать заказы)' }}</label>
-          <div class="input-wrapper">
-            <input
-              v-model="address"
-              type="text"
-              :placeholder="$t('login.pickupAddressPlaceholder')"
-              class="form-input"
-              required
-              autocomplete="off"
-              @input="onAddressInput"
-            />
-            <i class="ph ph-map-pin input-icon"></i>
-            <span v-if="autocompleteLoading" class="input-spinner" />
-          </div>
-          <div v-if="addressSuggestions.length > 0" class="suggestions-dropdown">
-            <div
-              v-for="(suggestion, index) in addressSuggestions"
-              :key="index"
-              class="suggestion-item"
-              @click="selectAddress(suggestion)"
-            >
-              {{ suggestion.display }}
-            </div>
-          </div>
-          <div class="text-secondary text-xs mt-2">{{ $t('login.addressHint') }}</div>
-        </div>
-
-        <!-- Flat Number for Customer Registration -->
-        <div v-if="mode === 'register' && role === 'CUSTOMER'" class="form-group mb-3">
-          <label class="form-label">{{ $t('login.flatNumber') }}</label>
-          <div class="input-wrapper">
-            <input
-              v-model="flatNumber"
-              type="text"
-              :placeholder="$t('login.flatNumberPlaceholder')"
-              class="form-input"
-              autocomplete="off"
-            />
-            <i class="ph ph-buildings input-icon"></i>
-          </div>
+        <!-- Address, with the flat inside the same field -->
+        <div v-if="mode === 'register'" class="form-group mb-3">
+          <AddressAutocomplete
+            v-model="pickedAddress"
+            :label="role === 'CUSTOMER' ? $t('login.pickupAddress') : 'Базовый адрес (откуда искать заказы)'"
+            :placeholder="$t('login.pickupAddressPlaceholder')"
+            :hint="$t('login.addressHint')"
+            :flat-placeholder="$t('login.flatNumberPlaceholder')"
+            :needs-flat="role === 'CUSTOMER'"
+          />
         </div>
 
         <!-- Email Input for Registration -->
@@ -292,6 +260,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api, { formatApiError } from '../../services/api'
+import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import { formatPhoneMask, cleanPhoneDigits } from '../../utils/phoneMask'
 
@@ -313,7 +282,7 @@ function parseJwt(token: string) {
 
 export default defineComponent({
   name: 'Login',
-  components: { LanguageSwitcher },
+  components: { LanguageSwitcher, AddressAutocomplete },
   setup() {
     const router = useRouter()
     const route = useRoute()
@@ -385,15 +354,13 @@ export default defineComponent({
     const firstName = ref('')
     const patronymic = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
-    const address = ref('')
-    const flatNumber = ref('')
-    const addressSuggestions = ref<any[]>([])
-    const autocompleteLoading = ref(false)
-    const selectedCoords = ref<{ lat: number; lon: number } | null>(null)
+    // The whole address, as the register spells it: parts, coordinates and the
+    // flat together. Null until something is actually chosen from the list,
+    // which is also what stops a half-typed street from being submitted.
+    const pickedAddress = ref<StructuredAddress | null>(null)
     const error = ref('')
     const message = ref('')
     const loading = ref(false)
-    let autocompleteTimeout: any = null
 
     const showForgotModal = ref(false)
     const resetStep = ref(1)
@@ -500,62 +467,16 @@ export default defineComponent({
     watch(mode, () => {
       error.value = ''
       message.value = ''
-      addressSuggestions.value = []
-      autocompleteLoading.value = false
       role.value = 'CUSTOMER'
       lastName.value = ''
       firstName.value = ''
       patronymic.value = ''
-      flatNumber.value = ''
-      selectedCoords.value = null
+      pickedAddress.value = null
       focusSubmitButton()
     })
 
-    const onAddressInput = () => {
-      addressSuggestions.value = []
-      selectedCoords.value = null
-      clearTimeout(autocompleteTimeout)
-      const query = address.value.trim()
-      if (query.length < 3) {
-        autocompleteLoading.value = false
-        return
-      }
-      autocompleteLoading.value = true
-      autocompleteTimeout = setTimeout(async () => {
-        try {
-          const response = await api.get('/geo/autocomplete', { params: { q: query } })
-          addressSuggestions.value = response.data || []
-        } catch (err) {
-          console.error('Autocomplete failed:', err)
-        } finally {
-          autocompleteLoading.value = false
-        }
-      }, 400)
-    }
 
-    const selectAddress = (suggestion: any) => {
-      address.value = suggestion.address
-      selectedCoords.value = { lat: suggestion.lat, lon: suggestion.lon }
-      addressSuggestions.value = []
-    }
 
-    function normalizeAddress(streetAddress: string, flat?: string): string {
-      const flatPart = flat && flat.trim() ? ` кв. ${flat.trim()}` : ''
-      const full = `${streetAddress.trim()}${flatPart}`
-      const match = full.match(/^Россия,\s*([^,]+?),\s*([^,]+?),\s*д\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$/i)
-      if (!match) {
-        throw new Error(t('login.addressFormatError'))
-      }
-      const city = match[1].trim()
-      const road = match[2].trim()
-      const house = match[3].trim()
-      const flatNum = match[4] ? match[4].trim() : (flat && flat.trim() ? flat.trim() : '')
-      let result = `Россия, ${city}, ${road}, д. ${house}`
-      if (flatNum) {
-        result += ` кв. ${flatNum}`
-      }
-      return result
-    }
 
     const handleSubmit = async () => {
       error.value = ''
@@ -598,17 +519,25 @@ export default defineComponent({
             role: role.value,
           }
 
-          let normalizedAddress: string
-          try {
-            normalizedAddress = normalizeAddress(address.value, flatNumber.value)
-          } catch (addrErr: any) {
-            error.value = addrErr.message || t('login.addressFormatError')
+          const chosen = pickedAddress.value
+          if (!chosen) {
+            error.value = t('login.addressNotChosen')
             return
           }
-          payload.address = normalizedAddress
-          if (selectedCoords.value) {
-            payload.lat = selectedCoords.value.lat
-            payload.lon = selectedCoords.value.lon
+          // The parts go over the wire, not a line to be parsed back. That is
+          // what lets an address like "12 к. 1" through, and it carries the
+          // coordinates the dispatcher matches on.
+          payload.address = chosen.value
+          payload.region = chosen.region
+          payload.city = chosen.city
+          payload.street = chosen.street
+          payload.house = chosen.house
+          payload.flat = chosen.flat
+          payload.fias_id = chosen.fias_id
+          payload.source = chosen.source
+          if (chosen.lat !== undefined && chosen.lon !== undefined) {
+            payload.lat = chosen.lat
+            payload.lon = chosen.lon
           }
 
           await api.post('/register', payload)
@@ -620,9 +549,7 @@ export default defineComponent({
           firstName.value = ''
           patronymic.value = ''
           role.value = 'CUSTOMER'
-          address.value = ''
-          flatNumber.value = ''
-          selectedCoords.value = null
+          pickedAddress.value = null
         }
       } catch (err: any) {
         error.value = formatApiError(err, t('login.networkError'))
@@ -644,16 +571,11 @@ export default defineComponent({
       firstName,
       patronymic,
       role,
-      address,
-      flatNumber,
-      addressSuggestions,
-      autocompleteLoading,
+      pickedAddress,
       error,
       message,
       loading,
       handleSubmit,
-      onAddressInput,
-      selectAddress,
       showForgotModal,
       resetStep,
       resetEmail,

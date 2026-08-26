@@ -13,13 +13,13 @@
     "pickupAddressPlaceholder": "Россия, Москва, Тверская улица, д. 1",
     "flatNumber": "Квартира",
     "flatNumberPlaceholder": "101",
-    "addressHint": "Начните вводить адрес, выберите подсказку и укажите квартиру",
+    "addressHint": "Начните вводить адрес и выберите его из подсказок",
     "role": "Кем вы хотите быть",
-    "addressFormatError": "Адрес должен быть в формате: Россия, Город, Улица, д.#### [кв. ###]",
     "failedParse": "Не удалось распознать сессию. Попробуйте ещё раз.",
     "roleNotSupported": "Роль не поддерживается.",
     "registrationSuccess": "Регистрация прошла успешно! Теперь вы можете войти.",
-    "networkError": "Ошибка сети. Попробуйте ещё раз."
+    "networkError": "Ошибка сети. Попробуйте ещё раз.",
+    "addressNotChosen": "Выберите адрес из подсказок — так мы найдём дом на карте"
   },
   "app": {
     "adminTitle": "АДМИНКА TRASH DISPOSAL",
@@ -80,7 +80,6 @@
     "durationHours": "Длительность (ч)",
     "startedAt": "Начало",
     "plannedEndAt": "Плановое окончание",
-    "status": "Статус",
     "serviceType": "Тип услуги",
     "urgent": "Срочный",
     "asap": "ASAP",
@@ -111,7 +110,6 @@
     "confirmDeleteNode": "Удалить узел",
     "holdAmount": "Холд",
     "finalAmount": "Итоговая сумма",
-    "address": "Адрес",
     "createdAt": "Создан",
     "completedAt": "Завершён",
     "topUpError": "Не удалось пополнить баланс",
@@ -287,7 +285,6 @@
     "assignedAt": "Назначен",
     "completedAt": "Завершён",
     "canceledAt": "Отменён",
-    "status": "Статус",
     "totalAmount": "Итоговая сумма"
   },
   "executor": {
@@ -368,7 +365,6 @@
     "txAmount": "Сумма",
     "txDate": "Дата",
     "reward": "Вознаграждение",
-    "fine": "Штраф",
     "topup": "Пополнение",
     "refund": "Возврат",
     "hold": "Удержание",

@@ -521,15 +521,13 @@ func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req struct {
-		Address string `json:"address"`
-	}
+	var req addressRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	addresses, err := h.adminService.AddAddress(user.ID, req.Address)
+	addresses, err := h.adminService.AddAddress(user.ID, req.toAddress())
 	writeAddresses(w, addresses, err)
 }
 
@@ -645,4 +643,56 @@ func (h *AdminHandler) SendBroadcastEmailHandler(w http.ResponseWriter, r *http.
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
+}
+
+// addressRequest accepts both shapes a client can send: the single line the
+// installed mobile builds still post, and the parts that come straight from the
+// suggestion list. Sending the parts is what lets a корпус or a строение
+// through, since nothing has to parse them back out of the line.
+type addressRequest struct {
+	Address string   `json:"address"`
+	Region  string   `json:"region"`
+	City    string   `json:"city"`
+	Street  string   `json:"street"`
+	House   string   `json:"house"`
+	Flat    string   `json:"flat"`
+	FiasID  string   `json:"fias_id"`
+	Lat     *float64 `json:"lat"`
+	Lon     *float64 `json:"lon"`
+	Source  string   `json:"source"`
+}
+
+// toAddress prefers the parts and falls back to splitting the line.
+func (r addressRequest) toAddress() service.Address {
+	if r.City == "" && r.Street == "" && r.House == "" {
+		addr := service.ParseAddressLine(r.Address)
+		// A flat sent alongside a legacy line still applies: that is how the
+		// older registration screen submits one.
+		if r.Flat != "" {
+			addr = addr.WithFlat(r.Flat)
+		}
+		return addr
+	}
+
+	return service.Address{
+		Value:  r.Address,
+		Region: r.Region,
+		City:   r.City,
+		Street: r.Street,
+		House:  r.House,
+		Flat:   r.Flat,
+		FiasID: r.FiasID,
+		Lat:    r.Lat,
+		Lon:    r.Lon,
+		Source: firstNonEmpty(r.Source, service.SourceDaData),
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

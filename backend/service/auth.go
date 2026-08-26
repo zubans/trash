@@ -19,26 +19,6 @@ import (
 	"healthlogin/backend/repository"
 )
 
-var addressRegex = regexp.MustCompile(`^Россия,\s*([^,]+?),\s*([^,]+?),\s*д\.\s*(\d+)(?:\s+кв\.\s*(\d+))?$`)
-
-// normalizeAddress validates and canonicalizes the pickup address.
-// Expected input: "Россия, Город, Улица, д.#### [кв. ###]" where # are digits.
-// The flat number is optional. City and street can be any Russian city/street.
-func normalizeAddress(address string) (string, error) {
-	matches := addressRegex.FindStringSubmatch(address)
-	if matches == nil {
-		return "", errors.New("address must match format: Россия, Город, Улица, д.#### [кв. ###]")
-	}
-	city := strings.TrimSpace(matches[1])
-	road := strings.TrimSpace(matches[2])
-	house := matches[3]
-	flat := matches[4]
-	if flat != "" {
-		return fmt.Sprintf("Россия, %s, %s, д. %s кв. %s", city, road, house, flat), nil
-	}
-	return fmt.Sprintf("Россия, %s, %s, д. %s", city, road, house), nil
-}
-
 // AuthService handles user registration and authentication.
 type AuthService struct {
 	repo        repository.UserRepository
@@ -160,18 +140,19 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	if !validRegistrationRole(role) {
 		return nil, errors.New("invalid role: must be CUSTOMER or EXECUTOR")
 	}
-	if address == "" {
+	if strings.TrimSpace(address) == "" {
 		return nil, errors.New("address is required")
 	}
 
-	var normalizedAddress string
-	if address != "" {
-		var err error
-		normalizedAddress, err = normalizeAddress(address)
-		if err != nil {
-			return nil, err
-		}
+	// The address is checked for what it has to contain — a settlement, a
+	// street and a building — rather than matched against a fixed spelling.
+	// The old format check demanded a purely numeric house number, so a person
+	// living at 12к1 could not register at all.
+	parsedAddress := ParseAddressLine(address)
+	if err := parsedAddress.Validate(); err != nil {
+		return nil, err
 	}
+	normalizedAddress := parsedAddress.Compose()
 
 	existingPhone, err := s.repo.FindByPhone(phone)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
