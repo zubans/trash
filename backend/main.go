@@ -82,6 +82,14 @@ func main() {
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
 
 	geocoder := service.NewGeocoder(db)
+	// DaData when a key is configured, the old Nominatim path otherwise, so a
+	// deployment without a key still starts and still suggests addresses.
+	addressSuggester := service.NewAddressSuggester(service.NewDaData(), geocoder)
+	if addressSuggester.UsesDaData() {
+		log.Printf("[address] suggestions served by DaData")
+	} else {
+		log.Printf("[address] DADATA_API_KEY is not set; falling back to Nominatim, which has no apartment data and is rate limited to one request per second for the whole platform")
+	}
 	mailer := service.NewSmtpMailSender()
 	// AuthService owns everything session related: issuing access tokens,
 	// rotating refresh tokens and blacklisting revoked access tokens.
@@ -139,7 +147,7 @@ func main() {
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
-	gh := handler.NewGeoHandler(geocoder)
+	gh := handler.NewGeoHandler(geocoder, addressSuggester)
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
@@ -180,6 +188,7 @@ func main() {
 		// access to it stalls order creation for everyone.
 		r.With(geoLimiter.Middleware).Get("/geo/geocode", gh.Geocode)
 		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
+		r.With(geoLimiter.Middleware).Get("/geo/suggest", gh.Suggest)
 		r.Get("/settings", ah.GetPublicSettingsHandler)
 		r.Get("/service-categories", sch.ListRootCategories)
 		r.Get("/service-categories/{id}/children", sch.ListChildren)
