@@ -32,15 +32,8 @@ export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 15) * 1000
 
 export function formatApiError(err: any, fallbackMessage: string): string {
-  const serverMsg = err.response?.data
-  let serverText = ''
-  if (typeof serverMsg === 'string' && serverMsg.trim()) {
-    serverText = serverMsg.trim()
-  } else if (serverMsg && typeof serverMsg.error === 'string') {
-    serverText = serverMsg.error.trim()
-  } else if (serverMsg && typeof serverMsg.message === 'string') {
-    serverText = serverMsg.message.trim()
-  }
+  const data = err.response?.data
+  const serverText = (typeof data === 'string' ? data : data?.error || data?.message || '').trim()
 
   if (isDebug) {
     const baseURL = err.config?.baseURL || ''
