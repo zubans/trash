@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"healthlogin/backend/metrics"
 )
 
 // AuctionWorker automatically cancels auction orders that remain unmatched for 7 days.
@@ -23,7 +25,7 @@ func (w *AuctionWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := w.CheckExpiredAuctions(); err != nil {
+			if err := metrics.TrackWorker("auction", w.CheckExpiredAuctions); err != nil {
 				log.Printf("[AuctionWorker] Error checking expired auctions: %v", err)
 			}
 		}

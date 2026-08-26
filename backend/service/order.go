@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -242,6 +243,7 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 		}
 	}
 
+	metrics.OrderEvent("created")
 	s.hydrateServiceVariant(order)
 	return order, nil
 }
@@ -310,6 +312,7 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 		}
 		return err
 	}
+	metrics.OrderEvent("accepted")
 	return nil
 }
 
@@ -349,7 +352,7 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 		share = 1
 	}
 
-	return s.ledger.RunInTx(func(tx *sql.Tx) error {
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
@@ -365,6 +368,10 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 		}
 		return s.orderRepo.Unassign(tx, orderID)
 	})
+	if err == nil {
+		metrics.OrderEvent("rejected")
+	}
+	return err
 }
 
 // ExecuteOrder marks an order as EXECUTED by the executor and sends a system chat message.
@@ -380,6 +387,7 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 	if err := s.orderRepo.Execute(nil, orderID); err != nil {
 		return err
 	}
+	metrics.OrderEvent("executed")
 
 	// Send system notification message in chat
 	if s.chatRepo != nil {
@@ -397,7 +405,9 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 // cannot both pay out the executor, and the payout is derived from the hold
 // that is actually still held (see the SLA downgrade path).
 func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
-	return s.ledger.RunInTx(func(tx *sql.Tx) error {
+	// Counted after the transaction returns, never inside it: a confirmation
+	// that rolled back paid nobody and must not show up as revenue.
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
@@ -445,6 +455,10 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 		}
 		return s.orderRepo.Confirm(tx, orderID, finalAmount, isDowngraded)
 	})
+	if err == nil {
+		metrics.OrderEvent("confirmed")
+	}
+	return err
 }
 
 // Confirm completes an order for a specific customer (alias compatible with handler).
@@ -463,7 +477,7 @@ func (s *OrderService) Confirm(customerID, orderID uuid.UUID) error {
 // refund and the status change share one transaction and one row lock, and the
 // hold is zeroed, so a repeated or concurrent cancel cannot pay out again.
 func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
-	return s.ledger.RunInTx(func(tx *sql.Tx) error {
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
@@ -482,6 +496,10 @@ func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
 		}
 		return s.orderRepo.Cancel(tx, orderID)
 	})
+	if err == nil {
+		metrics.OrderEvent("cancelled")
+	}
+	return err
 }
 
 // Cancel cancels an order for a specific customer (alias compatible with handler).
@@ -566,6 +584,7 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 		}
 	}
 
+	metrics.OrderEvent("created_auction")
 	s.hydrateServiceVariant(order)
 	return order, nil
 }

@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -36,11 +37,23 @@ func (w *ReconcileWorker) Start(interval time.Duration) {
 
 // Run performs one pass and logs the outcome.
 func (w *ReconcileWorker) Run() {
+	started := time.Now()
 	report, err := w.repo.Reconcile(w.tolerance)
+	metrics.WorkerRun("reconcile", time.Since(started), err)
 	if err != nil {
+		metrics.ReconcileFailed()
 		log.Printf("[ReconcileWorker] reconciliation failed: %v", err)
 		return
 	}
+
+	metrics.ReconcileReport(
+		report.OK(),
+		len(report.Discrepancies),
+		len(report.HoldAnomalies),
+		len(report.UnknownTypes),
+		report.Books.Difference.Rubles(),
+		report.Books.EscrowDrift.Rubles(),
+	)
 
 	if report.OK() {
 		log.Printf("[ReconcileWorker] %s", report.Summary())

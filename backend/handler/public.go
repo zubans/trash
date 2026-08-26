@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/service"
 )
@@ -84,6 +85,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 
 	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
+		metrics.AuthEvent("register", "denied")
 		if err.Error() == "user with this phone already exists" || err.Error() == "user with this email already exists" {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -91,6 +93,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	metrics.AuthEvent("register", "ok")
 
 	resp := RegisterResponse{
 		ID:    user.ID.String(),
@@ -120,16 +123,22 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.authService.Authenticate(req.Phone, req.Password)
 	if err != nil {
+		// Counted separately from the 401 rate in the HTTP metrics: a burst of
+		// denied logins against valid accounts is a credential-stuffing signal,
+		// not just traffic.
+		metrics.AuthEvent("login", "denied")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	pair, err := h.authService.IssueTokenPair(user)
 	if err != nil {
+		metrics.AuthEvent("login", "error")
 		http.Error(w, "Could not generate token", http.StatusInternalServerError)
 		return
 	}
 
+	metrics.AuthEvent("login", "ok")
 	writeTokenPair(w, pair)
 }
 
@@ -160,6 +169,7 @@ func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 
 	pair, err := h.authService.Refresh(strings.TrimSpace(req.RefreshToken))
 	if err != nil {
+		metrics.AuthEvent("refresh", "denied")
 		if errors.Is(err, service.ErrInvalidRefreshToken) {
 			// One answer for every failure mode: unknown, expired, already
 			// used or revoked must not be distinguishable.
@@ -170,6 +180,7 @@ func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metrics.AuthEvent("refresh", "ok")
 	writeTokenPair(w, pair)
 }
 
@@ -279,6 +290,7 @@ func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := h.authService.RequestPasswordReset(req.Email); err != nil {
+		metrics.AuthEvent("password_reset_request", "denied")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -287,6 +299,7 @@ func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	metrics.AuthEvent("password_reset_request", "ok")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Код восстановления отправлен на ваш Email",
@@ -306,9 +319,11 @@ func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.authService.ResetPassword(req.Email, req.Code, req.NewPassword); err != nil {
+		metrics.AuthEvent("password_reset", "denied")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	metrics.AuthEvent("password_reset", "ok")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{

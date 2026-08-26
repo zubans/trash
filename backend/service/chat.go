@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/repository"
 )
 
@@ -314,6 +315,7 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 	if err != nil {
 		return nil, err
 	}
+	metrics.ChatMessage("order")
 
 	// Broadcast to any active WebSocket clients in the room.
 	bytes, err := json.Marshal(savedMsg)
@@ -432,7 +434,13 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 		}
 	}
 
-	go s.ReadPump(client, room)
+	// The gauge is paired here rather than inside ReadPump so a connection can
+	// never be counted without its matching decrement.
+	metrics.ChatConnected("order")
+	go func() {
+		defer metrics.ChatDisconnected("order")
+		s.ReadPump(client, room)
+	}()
 }
 
 // EditMessage updates message text if owned by sender and broadcasts message_edited event.
@@ -585,7 +593,12 @@ func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, role, text 
 	if len([]rune(text)) > maxMessageRunes {
 		return nil, errors.New("сообщение слишком длинное")
 	}
-	return s.chatRepo.SaveSupportMessage(chatID, senderID, text)
+	msg, err := s.chatRepo.SaveSupportMessage(chatID, senderID, text)
+	if err != nil {
+		return nil, err
+	}
+	metrics.ChatMessage("support")
+	return msg, nil
 }
 
 // SaveSupportMessageWithAttachment saves a new support message with file attachment.

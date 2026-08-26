@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -43,7 +44,12 @@ func (s *ShiftService) StartShift(executorID uuid.UUID, durationHours int) (*rep
 		return nil, errors.New("active shift already exists")
 	}
 
-	return s.shiftRepo.StartShift(executorID, durationHours)
+	shift, err := s.shiftRepo.StartShift(executorID, durationHours)
+	if err != nil {
+		return nil, err
+	}
+	metrics.ShiftEvent("started")
+	return shift, nil
 }
 
 // Shifts are closed by a single mechanism: ShiftWorker scans for expired ones
@@ -59,7 +65,11 @@ func (s *ShiftService) EndShiftByID(shiftID uuid.UUID) error {
 		return nil
 	}
 	log.Printf("[ShiftService] Auto-closing expired shift %s for executor %s (planned_end_at: %v)", shift.ID, shift.ExecutorID, shift.PlannedEndAt)
-	return s.shiftRepo.End(shift.ID)
+	if err := s.shiftRepo.End(shift.ID); err != nil {
+		return err
+	}
+	metrics.ShiftEvent("auto_closed")
+	return nil
 }
 
 // AutoEndExpiredShifts scans all active shifts and completes any that have passed their planned_end_at.
@@ -140,6 +150,7 @@ func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, err
 		if err := s.shiftRepo.End(shift.ID); err != nil {
 			return nil, err
 		}
+		metrics.ShiftEvent("ended")
 		return s.shiftRepo.GetShiftByID(shift.ID)
 	}
 
@@ -189,6 +200,7 @@ func (s *ShiftService) finishShift(executorID uuid.UUID) (*repository.Shift, err
 	if err := s.shiftRepo.EarlyEnd(shift.ID, totalFine); err != nil {
 		return nil, err
 	}
+	metrics.ShiftEvent("ended_early")
 
 	updated, err := s.shiftRepo.GetShiftByID(shift.ID)
 	if err != nil {
@@ -262,6 +274,7 @@ func (s *ShiftService) RecordLocationWithResult(executorID uuid.UUID, lat, lon f
 	if inside {
 		return inside, nil
 	}
+	metrics.ShiftEvent("geofence_violation")
 
 	logs, err := s.shiftRepo.GetLastGPSLogs(shift.ID, 3)
 	if err != nil {
@@ -289,6 +302,7 @@ func (s *ShiftService) RecordLocationWithResult(executorID uuid.UUID, lat, lon f
 	if err := s.shiftRepo.Penalize(shift.ID, fine); err != nil {
 		log.Printf("[ShiftService] failed to penalize shift %s: %v", shift.ID, err)
 	}
+	metrics.ShiftEvent("geofence_penalty")
 	return inside, nil
 }
 

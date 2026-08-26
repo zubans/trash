@@ -16,6 +16,7 @@ import (
 	_ "net/http/pprof"
 
 	"healthlogin/backend/handler"
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
@@ -42,6 +43,11 @@ func main() {
 	if err := waitForDB(db); err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
+
+	// Observability. The pool counters are registered before anything starts
+	// using the pool, so a saturated pool at startup is visible too.
+	metrics.RegisterDB(db, "main")
+	metrics.SetBuildInfo(getEnv("APP_VERSION", "dev"), getEnv("GIT_COMMIT", "unknown"))
 
 	jwtSecret := getEnv("JWT_SECRET", "")
 	if jwtSecret == "" {
@@ -175,6 +181,9 @@ func main() {
 	r.Use(corsMiddleware)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(chiMiddleware.Recoverer)
+	// Inside Recoverer so a panic is counted as the 500 the client actually
+	// received, rather than vanishing from the request counters entirely.
+	r.Use(metrics.Middleware)
 	r.Use(chiMiddleware.Logger)
 	r.Use(middleware.MaxBodyBytes(1 << 20))
 
@@ -343,6 +352,11 @@ func main() {
 		r.Get("/uploads/*", ch.ServeAttachmentHandler)
 		r.Get("/api/uploads/*", ch.ServeAttachmentHandler)
 	})
+
+	// Prometheus scrape target. Bound to the compose network only: nginx never
+	// proxies it and the port is not published to the host. Set METRICS_ADDR to
+	// an empty value to turn the listener off.
+	metrics.Serve(getEnv("METRICS_ADDR", ":9091"))
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {

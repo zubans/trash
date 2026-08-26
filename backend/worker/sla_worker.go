@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/service"
 )
@@ -32,7 +33,7 @@ func (w *SLAWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := w.CheckSLAOverdue(); err != nil {
+			if err := metrics.TrackWorker("sla", w.CheckSLAOverdue); err != nil {
 				log.Printf("[SLAWorker] Error checking overdue orders: %v", err)
 			}
 		}
@@ -78,6 +79,7 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 		if err != nil {
 			log.Printf("[SLAWorker] Failed to downgrade order %s: %v", o.ID, err)
 		} else {
+			metrics.OrderEvent("downgraded")
 			log.Printf("[SLAWorker] Downgraded order %s to REGULAR due to delay. Customer refunded.", o.ID)
 		}
 	}

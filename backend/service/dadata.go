@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"healthlogin/backend/metrics"
 )
 
 // DaData suggests Russian addresses from the state address register.
@@ -112,11 +114,16 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Token "+d.apiKey)
 
+	started := time.Now()
 	resp, err := d.client.Do(req)
 	if err != nil {
+		metrics.UpstreamCall("dadata", "suggest", time.Since(started), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
+	// A rejected key and an exhausted quota both look like "no suggestions" to
+	// the user, so they are separate label values rather than one error bucket.
+	metrics.UpstreamResult("dadata", "suggest", daDataOutcome(resp.StatusCode), time.Since(started))
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -192,4 +199,18 @@ func composeHouse(house, houseType, block, blockType string) string {
 		house += " " + bt + ". " + b
 	}
 	return house
+}
+
+// daDataOutcome maps an HTTP status onto the outcome label used in metrics.
+func daDataOutcome(status int) string {
+	switch status {
+	case http.StatusOK:
+		return "ok"
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "unauthorized"
+	case http.StatusTooManyRequests:
+		return "rate_limited"
+	default:
+		return "http_error"
+	}
 }

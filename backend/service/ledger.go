@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -57,7 +58,7 @@ type entry struct {
 }
 
 func (l *Ledger) record(tx *sql.Tx, e entry) error {
-	return l.transactions.CreateTransaction(tx, &repository.Transaction{
+	err := l.transactions.CreateTransaction(tx, &repository.Transaction{
 		UserID:       e.UserID,
 		OrderID:      e.OrderID,
 		AdminID:      e.AdminID,
@@ -65,6 +66,16 @@ func (l *Ledger) record(tx *sql.Tx, e entry) error {
 		Amount:       e.Amount,
 		Counterparty: e.Account,
 	})
+	// Counted here rather than at each call site: this is the one funnel every
+	// movement passes through, so the totals cannot drift from the log. The
+	// entry may still be rolled back with its transaction, which is why the
+	// authoritative number stays the reconciliation pass and this is a rate.
+	if err != nil {
+		metrics.LedgerError(string(e.Type))
+		return err
+	}
+	metrics.LedgerEntry(string(e.Type), e.Account, e.Amount.Rubles())
+	return nil
 }
 
 // Reserve moves money from a user to a system account, but only if the balance

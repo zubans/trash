@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/repository"
 )
 
@@ -37,7 +38,7 @@ func (s *MatchingService) StartMatchingWorker(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := s.MatchOrders(); err != nil {
+			if err := metrics.TrackWorker("matching", s.MatchOrders); err != nil {
 				log.Printf("[MatchingWorker] Error: %v", err)
 			}
 		}
@@ -70,6 +71,7 @@ func (s *MatchingService) MatchOrders() error {
 		return err
 	}
 	if len(orders) == 0 {
+		metrics.SetMarketplaceDepth(0, 0)
 		return nil
 	}
 
@@ -100,6 +102,9 @@ func (s *MatchingService) MatchOrders() error {
 	if err != nil {
 		return err
 	}
+	// Published before the early return: a queue with nobody on shift is the
+	// case worth seeing, and returning early used to leave the gauges stale.
+	metrics.SetMarketplaceDepth(len(orders), len(activeShifts))
 	if len(activeShifts) == 0 {
 		return nil
 	}
@@ -198,8 +203,11 @@ func (s *MatchingService) MatchOrders() error {
 		if matchedExecutorID != uuid.Nil {
 			err = s.orderRepo.Assign(nil, order.ID, matchedExecutorID)
 			if err != nil {
+				metrics.MatchingAssignment("error")
 				log.Printf("[MatchingWorker] Error assigning order %s to executor %s: %v", order.ID, matchedExecutorID, err)
 			} else {
+				metrics.MatchingAssignment("assigned")
+				metrics.OrderEvent("assigned")
 				log.Printf("[MatchingWorker] Matched order %s with executor %s in Zone %d", order.ID, matchedExecutorID, geozoneID)
 			}
 		}

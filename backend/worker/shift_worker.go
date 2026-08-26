@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/service"
 )
 
@@ -22,7 +23,7 @@ func (w *ShiftWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := w.shiftService.AutoEndExpiredShifts(); err != nil {
+			if err := metrics.TrackWorker("shift_autoclose", w.shiftService.AutoEndExpiredShifts); err != nil {
 				log.Printf("[ShiftWorker] Error auto-ending expired shifts: %v", err)
 			}
 		}

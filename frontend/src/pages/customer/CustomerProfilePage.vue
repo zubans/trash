@@ -689,7 +689,8 @@ export default defineComponent({
 @media (max-width: 640px) {
   .profile-card { padding: 20px; border-radius: 20px; }
   .top-nav { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .input-wrapper, .add-address-field { flex: 1 1 100%; }
+  .input-wrapper { flex-direction: column; align-items: stretch; gap: 10px; }
+  .add-address-field { flex: 1 1 100%; }
 
 .address-add-error {
   flex: 1 1 100%;

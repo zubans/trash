@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -99,7 +100,12 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 		}
 	}
 
-	return s.bidRepo.CreateBid(orderID, executorID, offeredPrice)
+	bid, err := s.bidRepo.CreateBid(orderID, executorID, offeredPrice)
+	if err != nil {
+		return nil, err
+	}
+	metrics.BidEvent("placed")
+	return bid, nil
 }
 
 // GetBidsForOrder lists bids placed on an order, but only for the customer who
@@ -200,5 +206,7 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 			log.Printf("[BidService] failed to create chat for order %s: %v", acceptedOrderID, err)
 		}
 	}
+	metrics.BidEvent("accepted")
+	metrics.OrderEvent("assigned")
 	return nil
 }

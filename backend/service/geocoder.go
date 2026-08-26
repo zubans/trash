@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"healthlogin/backend/metrics"
 )
 
 // stringField extracts a string value from a JSON object decoded into map[string]interface{}.
@@ -186,6 +188,9 @@ func (g *Geocoder) Autocomplete(query string) ([]AutocompleteResult, error) {
 	}
 
 	if err := g.acquireUpstream(); err != nil {
+		// The shared 1/s slot was never freed in time. Worth its own label: it
+		// means the platform is throttling itself, not that Nominatim is down.
+		metrics.UpstreamResult("nominatim", "autocomplete", "busy", 0)
 		return nil, err
 	}
 
@@ -208,15 +213,19 @@ func (g *Geocoder) Autocomplete(query string) ([]AutocompleteResult, error) {
 	}
 	req.Header.Set("User-Agent", "healthlogin/1.0")
 
+	started := time.Now()
 	resp, err := g.client.Do(req)
 	if err != nil {
+		metrics.UpstreamCall("nominatim", "autocomplete", time.Since(started), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		metrics.UpstreamResult("nominatim", "autocomplete", "http_error", time.Since(started))
 		return nil, fmt.Errorf("geocoder returned status %d", resp.StatusCode)
 	}
+	metrics.UpstreamResult("nominatim", "autocomplete", "ok", time.Since(started))
 
 	var results []NominatimResponse
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
@@ -262,10 +271,12 @@ func (g *Geocoder) Geocode(address string) (*GeocodingResult, error) {
 
 	// Try cache first.
 	if cached, err := g.fromCache(address); err == nil && cached != nil {
+		metrics.UpstreamResult("nominatim", "geocode", "cache_hit", 0)
 		return cached, nil
 	}
 
 	if err := g.acquireUpstream(); err != nil {
+		metrics.UpstreamResult("nominatim", "geocode", "busy", 0)
 		return nil, err
 	}
 
@@ -287,15 +298,19 @@ func (g *Geocoder) Geocode(address string) (*GeocodingResult, error) {
 	}
 	req.Header.Set("User-Agent", "healthlogin/1.0")
 
+	started := time.Now()
 	resp, err := g.client.Do(req)
 	if err != nil {
+		metrics.UpstreamCall("nominatim", "geocode", time.Since(started), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		metrics.UpstreamResult("nominatim", "geocode", "http_error", time.Since(started))
 		return nil, fmt.Errorf("geocoder returned status %d", resp.StatusCode)
 	}
+	metrics.UpstreamResult("nominatim", "geocode", "ok", time.Since(started))
 
 	var results []NominatimResponse
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {

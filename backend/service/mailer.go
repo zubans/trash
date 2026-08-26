@@ -9,6 +9,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
+
+	"healthlogin/backend/metrics"
 )
 
 type unencryptedPlainAuth struct {
@@ -131,7 +134,21 @@ func NewSmtpMailSender() *SmtpMailSender {
 // would let the caller add arbitrary headers such as Bcc.
 var validRecipient = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
+// SendEmail submits one message. It is the public entry point used for
+// broadcasts; the templated system mails below go through sendKind so a failing
+// password reset is distinguishable from a failing newsletter on the dashboard.
 func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
+	return m.sendKind("broadcast", to, subject, bodyHTML)
+}
+
+func (m *SmtpMailSender) sendKind(kind, to, subject, bodyHTML string) error {
+	started := time.Now()
+	err := m.send(to, subject, bodyHTML)
+	metrics.MailSend(kind, time.Since(started), err)
+	return err
+}
+
+func (m *SmtpMailSender) send(to, subject, bodyHTML string) error {
 	to = strings.TrimSpace(to)
 	if !validRecipient.MatchString(to) {
 		return fmt.Errorf("invalid recipient address")
@@ -191,7 +208,7 @@ func (m *SmtpMailSender) SendEmailVerification(toEmail, token string) error {
 		</div>
 	`, verifyURL, verifyURL)
 
-	return m.SendEmail(toEmail, subject, body)
+	return m.sendKind("email_verification", toEmail, subject, body)
 }
 
 func (m *SmtpMailSender) SendPasswordResetCode(toEmail, code string) error {
@@ -211,5 +228,5 @@ func (m *SmtpMailSender) SendPasswordResetCode(toEmail, code string) error {
 		</div>
 	`, code)
 
-	return m.SendEmail(toEmail, subject, body)
+	return m.sendKind("password_reset", toEmail, subject, body)
 }

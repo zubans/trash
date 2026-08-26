@@ -7,9 +7,13 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
+	"time"
+
+	"healthlogin/backend/metrics"
 )
 
 // AppEndpointsHandler serves the VLESS fallback endpoint list to the mobile app.
@@ -43,6 +47,7 @@ func NewAppEndpointsHandler(filePath, appKey, encKeyHex string) *AppEndpointsHan
 // Serve handles GET /app/endpoints.
 func (h *AppEndpointsHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	if h.appKey == "" || len(h.encKey) != 32 || h.filePath == "" {
+		metrics.AppEndpointsRequest("unconfigured")
 		http.Error(w, "endpoint list not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -50,21 +55,26 @@ func (h *AppEndpointsHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	// Constant-time auth. Never reveal which half is wrong.
 	provided := r.Header.Get("X-App-Key")
 	if subtle.ConstantTimeCompare([]byte(provided), []byte(h.appKey)) != 1 {
+		metrics.AppEndpointsRequest("forbidden")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	plaintext, err := os.ReadFile(h.filePath)
 	if err != nil {
+		metrics.AppEndpointsRequest("unavailable")
 		http.Error(w, "endpoint list unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	h.publishListStats(plaintext)
 
 	sealed, err := h.encrypt(plaintext)
 	if err != nil {
+		metrics.AppEndpointsRequest("encrypt_error")
 		http.Error(w, "encryption failed", http.StatusInternalServerError)
 		return
 	}
+	metrics.AppEndpointsRequest("ok")
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -91,4 +101,23 @@ func (h *AppEndpointsHandler) encrypt(plaintext []byte) (string, error) {
 	out = append(out, nonce...)
 	out = append(out, ct...)
 	return base64.StdEncoding.EncodeToString(out), nil
+}
+
+// publishListStats reports what is actually in the list the client just got.
+// A list that parses but carries no configs answers 200 and still leaves the
+// app with nowhere to fall back to, so the count is worth a gauge of its own;
+// an unparseable file reports zero for the same reason.
+func (h *AppEndpointsHandler) publishListStats(plaintext []byte) {
+	var doc struct {
+		Configs []json.RawMessage `json:"configs"`
+	}
+	count := 0
+	if err := json.Unmarshal(plaintext, &doc); err == nil {
+		count = len(doc.Configs)
+	}
+	var mtime time.Time
+	if info, err := os.Stat(h.filePath); err == nil {
+		mtime = info.ModTime()
+	}
+	metrics.AppEndpointsFile(count, mtime)
 }

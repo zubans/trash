@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check probe-once
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -240,6 +240,54 @@ migrate:
 reconcile:
 	@echo "Reconciling balances against the ledger..."
 	$(call compose,exec backend ./reconcile)
+
+# --- Monitoring -----------------------------------------------------------
+#
+# The stack is an overlay on the main compose file rather than part of it, so
+# the application can be started and restarted without it. Every UI binds to
+# 127.0.0.1; reach them through an SSH tunnel (see doc/monitoring.md).
+
+MONITORING_COMPOSE = -f docker-compose.yml -f docker-compose.monitoring.yml
+
+monitoring-up:
+	@echo "Starting Prometheus, Grafana, Alertmanager, exporters and the VLESS prober..."
+	$(call compose,$(MONITORING_COMPOSE) up -d --build prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter)
+	@echo "Monitoring started (all bound to localhost):"
+	@echo "  Grafana:      http://127.0.0.1:3000"
+	@echo "  Prometheus:   http://127.0.0.1:9090"
+	@echo "  Alertmanager: http://127.0.0.1:9093"
+
+monitoring-down:
+	@echo "Stopping monitoring only; the application keeps running."
+	$(call compose,$(MONITORING_COMPOSE) stop prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter)
+	$(call compose,$(MONITORING_COMPOSE) rm -f prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter)
+
+monitoring-logs:
+	$(call compose,$(MONITORING_COMPOSE) logs -f prometheus alertmanager grafana vlessprobe)
+
+# Reload Prometheus after editing rules, without dropping the series database.
+monitoring-reload:
+	@echo "Reloading Prometheus configuration and rules..."
+	@curl -sf -X POST http://127.0.0.1:9090/-/reload && echo "Reloaded." || \
+		echo "Reload failed — check that Prometheus is running and the config parses."
+
+# Validate the rule files before they are deployed. A rule with a typo is
+# silently never evaluated, which is the worst failure mode monitoring has.
+monitoring-check:
+	@echo "Checking Prometheus configuration and alert rules..."
+	docker run --rm \
+		-v $(PWD)/monitoring/prometheus:/etc/prometheus:ro \
+		--entrypoint promtool prom/prometheus:v3.1.0 \
+		check config /etc/prometheus/prometheus.yml
+	@echo "Configuration and rules are valid."
+
+# Run one VLESS probe pass in the foreground and print the resulting metrics.
+# Useful after editing vless-endpoints.json, when waiting for the next scrape
+# is slower than just asking.
+probe-once:
+	@echo "Probing the VLESS fallback channel once..."
+	$(call compose,$(MONITORING_COMPOSE) exec vlessprobe wget -qO- http://127.0.0.1:9102/metrics) | grep -E '^vless_' || \
+		echo "The prober is not running. Start it with: make monitoring-up"
 
 clean:
 	rm -f healthlogin-app.apk
