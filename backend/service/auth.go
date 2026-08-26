@@ -381,7 +381,7 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) error {
 	email = strings.TrimSpace(email)
 	code = strings.TrimSpace(code)
 	if email == "" || code == "" || newPassword == "" {
-		return errors.New("email, code and new password are required")
+		return errors.New("укажите Email, код и новый пароль")
 	}
 	if err := validatePassword(newPassword); err != nil {
 		return err

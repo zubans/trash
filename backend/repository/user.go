@@ -281,7 +281,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 	).Scan(&userID, &storedCode, &expiresAt, &attempts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("invalid or expired reset code")
+			return nil, errors.New("неверный или истекший код сброса")
 		}
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 	}
 
 	if !storedCode.Valid || storedCode.String == "" || !expiresAt.Valid || expiresAt.Time.Before(time.Now()) {
-		return nil, errors.New("invalid or expired reset code")
+		return nil, errors.New("неверный или истекший код сброса")
 	}
 
 	if attempts >= maxResetAttempts {
@@ -315,7 +315,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return nil, errors.New("invalid or expired reset code")
+		return nil, errors.New("неверный или истекший код сброса")
 	}
 
 	if _, err := tx.Exec(
