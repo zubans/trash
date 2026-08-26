@@ -103,23 +103,10 @@ export default defineComponent({
           map = null
         }
 
-        // Pickup zone radius = 500m -> diameter = 1000m (1km).
-        // Scale to 5 * pickup zone diameter = 5000m (5km view diameter, 2500m view radius).
-        const pickupZoneRadius = 500
-        const pickupZoneDiameter = pickupZoneRadius * 2
-        const viewRadius = (pickupZoneDiameter * 5) / 2 // 2500m radius
+        // Initialize Leaflet map with initial center and default zoom 14 (~2.5km radius view)
+        map = L.map(container).setView([props.currentLat, props.currentLon], 14)
 
-        map = L.map(container)
-        const viewBounds = L.circle([props.currentLat, props.currentLon], { radius: viewRadius }).getBounds()
-        map.fitBounds(viewBounds, { animate: false })
-
-        setTimeout(() => {
-          if (map) {
-            map.invalidateSize()
-            map.fitBounds(viewBounds, { animate: false })
-          }
-        }, 100)
-
+        // Tile layer attached immediately
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '© OpenStreetMap',
@@ -173,6 +160,19 @@ export default defineComponent({
 
         markersLayer = L.layerGroup().addTo(map)
         fetchMapOrders()
+
+        // Scale view bounds to 5 * pickup zone diameter (500m radius -> 1000m diameter -> 5000m view diameter = 2500m view radius)
+        const updateViewBounds = () => {
+          if (!map) return
+          map.invalidateSize()
+          const viewRadius = 2500
+          const viewBounds = L.circle([props.currentLat, props.currentLon], { radius: viewRadius }).getBounds()
+          map.fitBounds(viewBounds, { animate: false })
+        }
+
+        updateViewBounds()
+        setTimeout(updateViewBounds, 150)
+        setTimeout(updateViewBounds, 350)
       })
     }
 
