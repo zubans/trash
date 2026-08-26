@@ -580,3 +580,42 @@ func TestRegisterStillRequiresABuilding(t *testing.T) {
 		}
 	}
 }
+
+// recordingRepo notes what was written to the reset code, so a test can tell a
+// stored code from a cleared one.
+type resetCodeRecorder struct {
+	*mockRepo
+	lastCode string
+	writes   int
+}
+
+func (r *resetCodeRecorder) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+	r.lastCode = code
+	r.writes++
+	return r.mockRepo.SetPasswordResetCode(userID, code, expiresAt)
+}
+
+// TestUndeliveredResetCodeIsCleared covers what the production log exposed: the
+// send failed and the next line still announced that a code had been sent. The
+// code is now removed when it cannot be delivered, so a stored code always
+// means a code somebody can actually receive — and the previous one is not left
+// overwritten by a code that never arrived.
+func TestUndeliveredResetCodeIsCleared(t *testing.T) {
+	base := newMockRepo()
+	known := &repository.User{ID: uuid.New(), Phone: "+79990000002", Email: "known@example.com", Role: "CUSTOMER"}
+	base.users[known.Phone] = known
+
+	repo := &resetCodeRecorder{mockRepo: base}
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, &failingMailer{})
+
+	if err := svc.RequestPasswordReset(known.Email); err != nil {
+		t.Fatalf("the caller must still see success: %v", err)
+	}
+
+	if repo.writes != 2 {
+		t.Fatalf("expected the code to be written and then cleared, got %d writes", repo.writes)
+	}
+	if repo.lastCode != "" {
+		t.Errorf("an undeliverable code must not stay stored, found %q", repo.lastCode)
+	}
+}

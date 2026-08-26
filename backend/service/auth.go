@@ -358,9 +358,16 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 			// success turns this endpoint into an account-existence oracle —
 			// the very thing the unknown-address branch above exists to avoid.
 			// A transport that is down is an operator problem, visible in this
-			// log and in the reconciliation of the mail queue, not something to
-			// report back to an anonymous caller.
-			log.Printf("[PASSWORD RESET] Failed to send email to user %s: %v", user.ID, err)
+			// log, not something to report back to an anonymous caller.
+			//
+			// The stored code is cleared: it can never be delivered, and leaving
+			// it in place would keep the previous code overwritten and the
+			// attempt counter reset for nothing.
+			log.Printf("[PASSWORD RESET] user %s: the code was NOT delivered: %v", user.ID, err)
+			if clearErr := s.repo.SetPasswordResetCode(user.ID, "", time.Now()); clearErr != nil {
+				log.Printf("[PASSWORD RESET] user %s: could not clear the undelivered code: %v", user.ID, clearErr)
+			}
+			return nil
 		}
 	}
 
