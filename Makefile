@@ -168,7 +168,7 @@ setup-smtp-creds:
 	SMTP_USER=$${SMTP_USER:-system@moya-usluga.ru}; \
 	SMTP_PASS=$$(grep '^SMTP_PASSWORD=' .env 2>/dev/null | cut -d= -f2-); \
 	if [ -n "$$SMTP_PASS" ]; then \
-		$(call compose,exec -T mailserver /bin/maddy -config /data/maddy.conf creds remove "$$SMTP_USER" 2>/dev/null || true) ; \
+		$(call compose,exec -T mailserver /bin/maddy -config /data/maddy.conf creds remove --yes "$$SMTP_USER" 2>/dev/null || true) ; \
 		printf "%s\n%s\n" "$$SMTP_PASS" "$$SMTP_PASS" | $(call compose,exec -T mailserver /bin/maddy -config /data/maddy.conf creds create "$$SMTP_USER" 2>/dev/null || true) ; \
 		echo "SMTP credentials synchronized for $$SMTP_USER."; \
 	fi
