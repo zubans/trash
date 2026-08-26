@@ -13,13 +13,13 @@
     "pickupAddressPlaceholder": "Russia, Moscow, Tverskaya Street, bld. 1",
     "flatNumber": "Flat",
     "flatNumberPlaceholder": "101",
-    "addressHint": "Start typing the address, pick a suggestion, then enter the flat number",
+    "addressHint": "Start typing the address and pick it from the suggestions",
     "role": "I want to be",
-    "addressFormatError": "Address must be in format: Russia, City, Street, bld.#### [apt. ###]",
     "failedParse": "Failed to parse user session. Try again.",
     "roleNotSupported": "Role not supported.",
     "registrationSuccess": "Registration successful! You can now log in.",
-    "networkError": "Network error. Please try again."
+    "networkError": "Network error. Please try again.",
+    "addressNotChosen": "Pick the address from the suggestions so we can find the building"
   },
   "app": {
     "adminTitle": "TRASH DISPOSAL ADMIN",
@@ -80,7 +80,6 @@
     "durationHours": "Duration (h)",
     "startedAt": "Started At",
     "plannedEndAt": "Planned End",
-    "status": "Status",
     "serviceType": "Service Type",
     "urgent": "Urgent",
     "asap": "ASAP",
@@ -111,7 +110,6 @@
     "confirmDeleteNode": "Delete node",
     "holdAmount": "Hold Amount",
     "finalAmount": "Final Amount",
-    "address": "Address",
     "createdAt": "Created At",
     "completedAt": "Completed At",
     "topUpError": "Failed to top up balance",
