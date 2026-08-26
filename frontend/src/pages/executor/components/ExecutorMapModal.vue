@@ -103,7 +103,22 @@ export default defineComponent({
           map = null
         }
 
-        map = L.map(container).setView([props.currentLat, props.currentLon], 12)
+        // Pickup zone radius = 500m -> diameter = 1000m (1km).
+        // Scale to 5 * pickup zone diameter = 5000m (5km view diameter, 2500m view radius).
+        const pickupZoneRadius = 500
+        const pickupZoneDiameter = pickupZoneRadius * 2
+        const viewRadius = (pickupZoneDiameter * 5) / 2 // 2500m radius
+
+        map = L.map(container)
+        const viewBounds = L.circle([props.currentLat, props.currentLon], { radius: viewRadius }).getBounds()
+        map.fitBounds(viewBounds, { animate: false })
+
+        setTimeout(() => {
+          if (map) {
+            map.invalidateSize()
+            map.fitBounds(viewBounds, { animate: false })
+          }
+        }, 100)
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
