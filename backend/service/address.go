@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"strings"
+
+	"healthlogin/backend/repository"
 )
 
 // Address is a postal address held as its parts rather than as one string.
@@ -105,4 +107,57 @@ func (a Address) Validate() error {
 		return fmt.Errorf("выберите адрес с номером дома из списка подсказок")
 	}
 	return nil
+}
+
+// ParseAddressLine recovers the parts of an address that arrived as one line.
+// Only two things still produce those: the mobile builds already installed, and
+// the rows saved before the parts were stored. Anything picked from the
+// suggestion list arrives already split.
+func ParseAddressLine(line string) Address {
+	return parseLegacyCanonical(line)
+}
+
+// ToRecord converts an address into the row the repository stores. Value is
+// recomposed rather than trusted, so the line shown to a person always matches
+// the parts beside it — including the apartment, which used to be appended by
+// the client and could disagree with what was stored.
+func (a Address) ToRecord() repository.CustomerAddress {
+	return repository.CustomerAddress{
+		Address: a.Compose(),
+		Region:  strings.TrimSpace(a.Region),
+		City:    strings.TrimSpace(a.City),
+		Street:  strings.TrimSpace(a.Street),
+		House:   strings.TrimSpace(a.House),
+		Flat:    strings.TrimSpace(a.Flat),
+		FiasID:  strings.TrimSpace(a.FiasID),
+		Lat:     a.Lat,
+		Lon:     a.Lon,
+		Source:  a.Source,
+	}
+}
+
+// AddressFromRecord rebuilds the working address from a stored row, filling the
+// parts from the display line for rows written before they were stored.
+func AddressFromRecord(rec repository.CustomerAddress) Address {
+	addr := Address{
+		Value:  rec.Address,
+		Region: rec.Region,
+		City:   rec.City,
+		Street: rec.Street,
+		House:  rec.House,
+		Flat:   rec.Flat,
+		FiasID: rec.FiasID,
+		Lat:    rec.Lat,
+		Lon:    rec.Lon,
+		Source: rec.Source,
+	}
+	if addr.City == "" && addr.Street == "" && addr.House == "" {
+		parsed := parseLegacyCanonical(rec.Address)
+		addr.Region, addr.City, addr.Street = parsed.Region, parsed.City, parsed.Street
+		addr.House, addr.Flat = parsed.House, parsed.Flat
+		if addr.Source == "" {
+			addr.Source = SourceLegacyText
+		}
+	}
+	return addr
 }

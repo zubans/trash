@@ -75,17 +75,20 @@ func (s *AdminService) ListAddresses(userID uuid.UUID) ([]repository.CustomerAdd
 	return s.addressRepo.List(userID)
 }
 
-// AddAddress saves a new pickup address, normalising it the same way
-// registration does so the geocoder and the order form agree on its shape.
-func (s *AdminService) AddAddress(userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+// AddAddress saves a new pickup address.
+//
+// The address arrives already split into its parts when it came from the
+// suggestion list. A client that still sends a single line — the mobile builds
+// in people's hands do — has it split here, so those keep working and are no
+// longer held to the old numeric-house-number format.
+func (s *AdminService) AddAddress(userID uuid.UUID, address Address) ([]repository.CustomerAddress, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
-	normalized, err := normalizeAddress(address)
-	if err != nil {
+	if err := address.Validate(); err != nil {
 		return nil, err
 	}
-	return s.addressRepo.Add(userID, normalized)
+	return s.addressRepo.Add(userID, address.ToRecord())
 }
 
 // DeleteAddress removes one of the customer's addresses.
@@ -233,13 +236,14 @@ func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) er
 
 // UpdateUserAddress updates a customer's pickup address (admin-only).
 func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error {
-	if address == "" {
+	if strings.TrimSpace(address) == "" {
 		return errors.New("address is required")
 	}
-	normalizedAddress, err := normalizeAddress(address)
-	if err != nil {
+	parsed := ParseAddressLine(address)
+	if err := parsed.Validate(); err != nil {
 		return err
 	}
+	normalizedAddress := parsed.Compose()
 	if _, err := s.userRepo.FindByID(userID); err != nil {
 		return errors.New("user not found")
 	}

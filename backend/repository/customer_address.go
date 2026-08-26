@@ -17,17 +17,58 @@ var ErrAddressLimitReached = errors.New("address limit reached")
 // ErrAddressNotFound is returned for an address that is not the caller's.
 var ErrAddressNotFound = errors.New("address not found")
 
-// CustomerAddress is one saved pickup address.
+// CustomerAddress is one saved pickup address, kept as its parts.
+//
+// Address remains the display line so that clients reading only that keep
+// working; the parts beside it are what everything new uses. Rows saved before
+// the parts existed carry them empty, and the service layer recovers them from
+// the line on read.
 type CustomerAddress struct {
 	ID        uuid.UUID `json:"id"`
 	Address   string    `json:"address"`
 	IsDefault bool      `json:"is_default"`
+
+	Region string `json:"region,omitempty"`
+	City   string `json:"city,omitempty"`
+	Street string `json:"street,omitempty"`
+	House  string `json:"house,omitempty"`
+	Flat   string `json:"flat,omitempty"`
+	FiasID string `json:"fias_id,omitempty"`
+
+	Lat *float64 `json:"lat,omitempty"`
+	Lon *float64 `json:"lon,omitempty"`
+
+	Source string `json:"source,omitempty"`
+}
+
+// addressColumns lists the stored columns once, so the SELECTs and the scan
+// cannot drift apart.
+const addressColumns = `id, address, is_default,
+	COALESCE(region, ''), COALESCE(city, ''), COALESCE(street, ''),
+	COALESCE(house, ''), COALESCE(flat, ''), COALESCE(fias_id, ''),
+	geo_lat, geo_lon, COALESCE(source, '')`
+
+// scanAddresses reads a result set of addressColumns.
+func scanAddresses(rows *sql.Rows) ([]CustomerAddress, error) {
+	addresses := make([]CustomerAddress, 0, MaxCustomerAddresses)
+	for rows.Next() {
+		var a CustomerAddress
+		if err := rows.Scan(
+			&a.ID, &a.Address, &a.IsDefault,
+			&a.Region, &a.City, &a.Street, &a.House, &a.Flat, &a.FiasID,
+			&a.Lat, &a.Lon, &a.Source,
+		); err != nil {
+			return nil, err
+		}
+		addresses = append(addresses, a)
+	}
+	return addresses, rows.Err()
 }
 
 // CustomerAddressRepository stores the addresses a customer orders from.
 type CustomerAddressRepository interface {
 	List(userID uuid.UUID) ([]CustomerAddress, error)
-	Add(userID uuid.UUID, address string) ([]CustomerAddress, error)
+	Add(userID uuid.UUID, address CustomerAddress) ([]CustomerAddress, error)
 	Delete(userID, addressID uuid.UUID) ([]CustomerAddress, error)
 	SetDefault(userID, addressID uuid.UUID) ([]CustomerAddress, error)
 	// SetDefaultByValue keeps the older clients working: they identify an
@@ -49,26 +90,18 @@ func NewCustomerAddressRepository(db *sql.DB) CustomerAddressRepository {
 // so the order the client renders is stable.
 func (r *customerAddressRepo) List(userID uuid.UUID) ([]CustomerAddress, error) {
 	rows, err := r.db.Query(
-		`SELECT id, address, is_default FROM customer_addresses
+		`SELECT `+addressColumns+` FROM customer_addresses
 		 WHERE user_id = $1 ORDER BY is_default DESC, created_at`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	addresses := make([]CustomerAddress, 0, MaxCustomerAddresses)
-	for rows.Next() {
-		var a CustomerAddress
-		if err := rows.Scan(&a.ID, &a.Address, &a.IsDefault); err != nil {
-			return nil, err
-		}
-		addresses = append(addresses, a)
-	}
-	return addresses, rows.Err()
+	return scanAddresses(rows)
 }
 
 // Add saves an address, making it the default when it is the first one.
-func (r *customerAddressRepo) Add(userID uuid.UUID, address string) ([]CustomerAddress, error) {
+func (r *customerAddressRepo) Add(userID uuid.UUID, address CustomerAddress) ([]CustomerAddress, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -84,9 +117,17 @@ func (r *customerAddressRepo) Add(userID uuid.UUID, address string) ([]CustomerA
 	}
 
 	if _, err := tx.Exec(
-		`INSERT INTO customer_addresses (user_id, address, is_default) VALUES ($1, $2, $3)
-		 ON CONFLICT (user_id, address) DO NOTHING`,
-		userID, address, count == 0); err != nil {
+		`INSERT INTO customer_addresses
+		     (user_id, address, is_default, region, city, street, house, flat, fias_id, geo_lat, geo_lon, source)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		 ON CONFLICT (user_id, address) DO UPDATE SET
+		     region = EXCLUDED.region, city = EXCLUDED.city, street = EXCLUDED.street,
+		     house = EXCLUDED.house, flat = EXCLUDED.flat, fias_id = EXCLUDED.fias_id,
+		     geo_lat = EXCLUDED.geo_lat, geo_lon = EXCLUDED.geo_lon, source = EXCLUDED.source`,
+		userID, address.Address, count == 0,
+		address.Region, address.City, address.Street, address.House, address.Flat, address.FiasID,
+		address.Lat, address.Lon, address.Source,
+	); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
