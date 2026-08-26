@@ -4,9 +4,20 @@ import { Capacitor } from '@capacitor/core'
 function resolveApiUrl(): string {
   const isNative = Capacitor.isNativePlatform()
   if (isNative) {
-    return (import.meta.env.VITE_MOBILE_API_URL as string)
-          || (import.meta.env.VITE_API_URL as string)
-          || 'http://94.103.9.172:8089'  }
+    // Native builds have no origin to fall back on, so the URL must come from
+    // the build env (.env.android sets VITE_API_URL). There is deliberately no
+    // hardcoded default: a wrong one points the app at a host we do not serve
+    // and fails as if the backend were down.
+    const url = (import.meta.env.VITE_MOBILE_API_URL as string)
+             || (import.meta.env.VITE_API_URL as string)
+    if (!url) {
+      console.error(
+        'API URL is not configured: set VITE_MOBILE_API_URL or VITE_API_URL for the native build.',
+      )
+      return ''
+    }
+    return url
+  }
   // Web builds always use relative URLs (baseURL = ''). The browser resolves
   // them against the current origin — whatever host/port/proto the user opened.
   // This makes VITE_API_URL unnecessary for web and avoids mismatches when the
