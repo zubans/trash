@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "configs": [
+    {
+      "remarks": "🇫🇮 Helsinki",
+      "log": { "loglevel": "warning" },
+      "outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "vless",
+          "settings": { "address": "helsinki.tdvin.com", "port": 443, "id": "REPLACE-WITH-YOUR-VLESS-UUID", "encryption": "none" },
+          "streamSettings": {
+            "network": "xhttp",
+            "security": "tls",
+            "xhttpSettings": { "mode": "auto", "path": "/wl7m2xq8", "host": "helsinki.tdvin.com" },
+            "tlsSettings": { "serverName": "helsinki.tdvin.com", "fingerprint": "chrome", "alpn": ["h2"], "allowInsecure": false }
+          }
+        },
+        { "tag": "block", "protocol": "blackhole", "settings": { "response": { "type": "none" } } },
+        { "tag": "direct", "protocol": "freedom", "settings": {} }
+      ]
+    },
+    {
+      "remarks": "🇳🇱 Amsterdam",
+      "log": { "loglevel": "warning" },
+      "outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "vless",
+          "settings": { "address": "72.56.81.195", "port": 443, "id": "REPLACE-WITH-YOUR-VLESS-UUID", "encryption": "none", "flow": "xtls-rprx-vision" },
+          "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "tcpSettings": { "header": { "type": "none" } },
+            "realitySettings": { "serverName": "yahoo.com", "fingerprint": "qq", "shortId": "REPLACE-SHORT-ID", "publicKey": "REPLACE-WITH-REALITY-PUBLIC-KEY", "spiderX": "" }
+          }
+        },
+        { "tag": "block", "protocol": "blackhole", "settings": { "response": { "type": "none" } } },
+        { "tag": "direct", "protocol": "freedom", "settings": {} }
+      ]
+    },
+    {
+      "remarks": "🇷🇺 Moscow",
+      "log": { "loglevel": "warning" },
+      "outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "vless",
+          "settings": { "address": "cube.tdvin.com", "port": 443, "id": "REPLACE-WITH-YOUR-VLESS-UUID", "encryption": "none", "flow": "xtls-rprx-vision" },
+          "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "tcpSettings": { "header": { "type": "none" } },
+            "realitySettings": { "serverName": "cube.tdvin.com", "fingerprint": "safari", "shortId": "REPLACE-SHORT-ID", "publicKey": "REPLACE-WITH-REALITY-PUBLIC-KEY", "spiderX": "" }
+          }
+        },
+        { "tag": "block", "protocol": "blackhole", "settings": { "response": { "type": "none" } } },
+        { "tag": "direct", "protocol": "freedom", "settings": {} }
+      ]
+    }
+  ]
+}
