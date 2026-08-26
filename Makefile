@@ -162,10 +162,22 @@ release-android: build-android-release
 	@echo "Restoring original build.gradle..."
 	mv frontend/android/app/build.gradle.bak frontend/android/app/build.gradle
 
+setup-smtp-creds:
+	@echo "Ensuring SMTP user credentials in mailserver..."
+	@SMTP_USER=$$(grep '^SMTP_USER=' .env 2>/dev/null | cut -d= -f2-); \
+	SMTP_USER=$${SMTP_USER:-system@moya-usluga.ru}; \
+	SMTP_PASS=$$(grep '^SMTP_PASSWORD=' .env 2>/dev/null | cut -d= -f2-); \
+	if [ -n "$$SMTP_PASS" ]; then \
+		$(call compose,exec -T mailserver /bin/maddy -config /data/maddy.conf creds remove "$$SMTP_USER" 2>/dev/null || true) ; \
+		printf "%s\n%s\n" "$$SMTP_PASS" "$$SMTP_PASS" | $(call compose,exec -T mailserver /bin/maddy -config /data/maddy.conf creds create "$$SMTP_USER" 2>/dev/null || true) ; \
+		echo "SMTP credentials synchronized for $$SMTP_USER."; \
+	fi
+
 # Start backend, frontend and database via Docker Compose
 start:
 	@echo "Starting backend, frontend and database..."
 	$(call compose,up -d --build)
+	@$(MAKE) setup-smtp-creds || true
 	@echo "Services started."
 	@echo "  Backend:  https://localhost:8088"
 	@echo "  Frontend: https://localhost:8443"

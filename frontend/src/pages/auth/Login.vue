@@ -217,9 +217,9 @@
             <span class="alert-text">{{ resetSuccessMsg }}</span>
           </div>
           <div class="form-group mb-3">
-            <label class="form-label">6-значный код из Email</label>
+            <label class="form-label">8-значный код из Email</label>
             <div class="input-wrapper">
-              <input v-model="resetCode" type="text" class="form-input" placeholder="123456" maxlength="6" required />
+              <input v-model="resetCode" type="text" class="form-input" placeholder="12345678" maxlength="8" required />
               <i class="ph ph-key input-icon"></i>
             </div>
           </div>
