@@ -1,0 +1,16 @@
+apiVersion: 1
+
+providers:
+  - name: healthlogin
+    orgId: 1
+    folder: healthlogin
+    type: file
+    # Dashboards are provisioned from files and edits in the UI are not saved
+    # back: the file in git stays the source of truth, so a panel someone
+    # dragged at 3am does not quietly become the definition.
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

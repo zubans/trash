@@ -1,0 +1,185 @@
+# Monitoring stack, layered on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+#
+# It is a separate file rather than extra services in the main one so the
+# application stack can still be started, restarted and debugged without
+# dragging eight more containers along — and so a broken Grafana can never keep
+# the backend from coming up.
+#
+# Every UI here is bound to 127.0.0.1. Prometheus, Alertmanager and Grafana
+# together expose the internal shape of the system, the database credentials in
+# an exporter's environment and, in Grafana's case, a login form. Reach them
+# over an SSH tunnel:
+#
+#   ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 user@server
+#
+# Nothing in this file is published to 0.0.0.0 on purpose. If Grafana ever needs
+# to be public, put it behind nginx with authentication rather than moving the
+# binding here.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: healthlogin_prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 30 days covers "was this happening last month too?" without letting the
+      # series database grow unbounded on a single-server deployment.
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.size=8GB
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: healthlogin_alertmanager
+    restart: unless-stopped
+    # The config is a template: the Telegram token is substituted at start so it
+    # never has to be committed. See monitoring/alertmanager/entrypoint.sh.
+    entrypoint: ["/etc/alertmanager/entrypoint.sh"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required for alerting}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID is required for alerting}
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.tmpl.yml:/etc/alertmanager/alertmanager.tmpl.yml:ro
+      - ./monitoring/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: healthlogin_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      # Nobody signs up for a single-operator dashboard.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+
+  # The end-to-end prober for the VLESS fallback channel. It fetches the
+  # endpoint list through the public API exactly as the Android app does, then
+  # runs each config through xray and pulls the health URL through the tunnel.
+  vlessprobe:
+    build:
+      context: .
+      dockerfile: monitoring/vlessprobe/Dockerfile
+    container_name: healthlogin_vlessprobe
+    restart: unless-stopped
+    environment:
+      # Going through the public URL rather than the mounted file is deliberate:
+      # it exercises nginx, the handler, the access key and the decryption — the
+      # whole path a client depends on — instead of only the servers behind it.
+      PROBE_ENDPOINTS_URL: ${PROBE_ENDPOINTS_URL:-https://moya-usluga.ru/api/app/endpoints}
+      PROBE_APP_KEY: ${APP_ENDPOINTS_KEY:?APP_ENDPOINTS_KEY is required}
+      PROBE_ENC_KEY: ${APP_ENDPOINTS_ENC_KEY:?APP_ENDPOINTS_ENC_KEY is required}
+      # Used only when the URL above cannot be read.
+      PROBE_ENDPOINTS_FILE: /app/vless-endpoints.json
+      PROBE_TARGET_URL: ${PROBE_TARGET_URL:-https://moya-usluga.ru/health}
+      PROBE_INTERVAL: ${PROBE_INTERVAL:-2m}
+      PROBE_TIMEOUT: ${PROBE_TIMEOUT:-20s}
+    volumes:
+      - ./vless-endpoints.json:/app/vless-endpoints.json:ro
+    expose:
+      - "9102"
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: healthlogin_node_exporter
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($$|/)
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    expose:
+      - "9100"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: healthlogin_cadvisor
+    restart: unless-stopped
+    # Read-only access to the daemon socket. cAdvisor only lists and inspects,
+    # but the socket is still root on the host, so it is never mounted writable.
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    expose:
+      - "8080"
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: healthlogin_postgres_exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${DB_USER:-healthlogin}:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/${DB_NAME:-healthlogin}?sslmode=disable"
+      PG_EXPORTER_EXCLUDE_DATABASES: "template0,template1"
+    expose:
+      - "9187"
+    depends_on:
+      - db
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.0
+    container_name: healthlogin_nginx_exporter
+    restart: unless-stopped
+    # stub_status is served on 8080 inside the frontend container and is not
+    # published anywhere; see the matching server block in nginx.conf.
+    command:
+      - --nginx.scrape-uri=http://frontend:8080/stub_status
+    expose:
+      - "9113"
+    depends_on:
+      - frontend
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: healthlogin_blackbox
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./monitoring/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    expose:
+      - "9115"
+
+volumes:
+  prometheus_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  grafana_data:
+    driver: local

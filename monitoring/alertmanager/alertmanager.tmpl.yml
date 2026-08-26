@@ -1,0 +1,70 @@
+# Alertmanager routing.
+#
+# One destination, a Telegram chat, because there is one person on call. The
+# grouping below matters more than the routing: without it a network blip sends
+# one message per affected target, and a burst of twenty messages gets muted as
+# reliably as no message at all.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  # Group by alert name and service so "all endpoints down" arrives as one
+  # message listing them, not as one message per endpoint.
+  group_by: ['alertname', 'service']
+  group_wait: 45s
+  group_interval: 5m
+  # A page that is still firing is repeated every 4 hours; anything longer and a
+  # problem that started overnight is easy to lose.
+  repeat_interval: 4h
+  receiver: telegram
+
+  routes:
+    # Tickets are the same channel, quieter: no re-sending every four hours.
+    - matchers:
+        - severity = "ticket"
+      receiver: telegram
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 24h
+
+inhibit_rules:
+  # When the backend is down, everything downstream of it is also down. Saying
+  # so twenty times does not add information.
+  - source_matchers:
+      - alertname = "BackendDown"
+    target_matchers:
+      - severity =~ "page|ticket"
+    equal: ['environment']
+
+  # A dead endpoint cannot also have a working proxy; the specific alert wins.
+  - source_matchers:
+      - alertname = "VlessEndpointDown"
+    target_matchers:
+      - alertname = "VlessTunnelBroken"
+    equal: ['remarks']
+
+  # The whole channel being down subsumes the partial-degradation ticket.
+  - source_matchers:
+      - alertname = "VlessFallbackChannelDown"
+    target_matchers:
+      - alertname =~ "VlessFallbackChannelDegraded|VlessEndpointDown|VlessTunnelBroken"
+    equal: ['environment']
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      # Both values come from the environment via envsubst at container start;
+      # see monitoring/alertmanager/entrypoint.sh. Never commit the real token.
+      - bot_token: '${TELEGRAM_BOT_TOKEN}'
+        chat_id: ${TELEGRAM_CHAT_ID}
+        api_url: 'https://api.telegram.org'
+        parse_mode: 'HTML'
+        send_resolved: true
+        message: |
+          {{ if eq .Status "firing" }}{{ if eq (index .Alerts 0).Labels.severity "page" }}🔴{{ else }}🟡{{ end }}{{ else }}✅{{ end }} <b>{{ .Status | toUpper }}{{ if eq .Status "firing" }} · {{ .Alerts.Firing | len }}{{ end }}</b>
+          {{ range .Alerts }}
+          <b>{{ .Annotations.summary }}</b>
+          {{ .Annotations.description }}
+          {{ if .Labels.instance }}<i>{{ .Labels.instance }}</i>{{ end }}
+          {{ end }}

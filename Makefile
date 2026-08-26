@@ -247,11 +247,24 @@ reconcile:
 # the application can be started and restarted without it. Every UI binds to
 # 127.0.0.1; reach them through an SSH tunnel (see doc/monitoring.md).
 
-MONITORING_COMPOSE = -f docker-compose.yml -f docker-compose.monitoring.yml
+# Monitoring secrets live in their own env file. The application deploy
+# rewrites .env wholesale on every run, so anything the monitoring stack needs
+# would be lost the next time the two deploys race — which they now do, since
+# they run as parallel CI jobs.
+#
+# Passing any --env-file stops Compose from loading .env automatically, so .env
+# is passed explicitly whenever it exists; values in the later file win.
+MONITORING_ENV = $(if $(wildcard .env),--env-file .env) $(if $(wildcard .env.monitoring),--env-file .env.monitoring)
+MONITORING_COMPOSE = $(MONITORING_ENV) -f docker-compose.yml -f docker-compose.monitoring.yml
+MONITORING_SERVICES = prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter
 
+# --no-deps keeps this from starting or recreating db and frontend: the
+# application deploy may be running at the same time, and two processes bringing
+# the same containers up is how you get a half-restarted stack. The exporters
+# retry until their target is back, which is the correct behaviour anyway.
 monitoring-up:
 	@echo "Starting Prometheus, Grafana, Alertmanager, exporters and the VLESS prober..."
-	$(call compose,$(MONITORING_COMPOSE) up -d --build prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter)
+	$(call compose,$(MONITORING_COMPOSE) up -d --build --no-deps $(MONITORING_SERVICES))
 	@echo "Monitoring started (all bound to localhost):"
 	@echo "  Grafana:      http://127.0.0.1:3000"
 	@echo "  Prometheus:   http://127.0.0.1:9090"
@@ -259,8 +272,8 @@ monitoring-up:
 
 monitoring-down:
 	@echo "Stopping monitoring only; the application keeps running."
-	$(call compose,$(MONITORING_COMPOSE) stop prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter)
-	$(call compose,$(MONITORING_COMPOSE) rm -f prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter)
+	$(call compose,$(MONITORING_COMPOSE) stop $(MONITORING_SERVICES))
+	$(call compose,$(MONITORING_COMPOSE) rm -f $(MONITORING_SERVICES))
 
 monitoring-logs:
 	$(call compose,$(MONITORING_COMPOSE) logs -f prometheus alertmanager grafana vlessprobe)

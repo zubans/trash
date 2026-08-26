@@ -5,12 +5,110 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# The application deploy and the monitoring deploy run as parallel jobs against
+# the same server directory. Two *runs* doing that at the same time is a
+# different matter, so runs are serialised and the newer one waits rather than
+# cancelling: a half-applied deploy is worse than a slow one.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: docker.io
   BACKEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/healthlogin-backend
   FRONTEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/healthlogin-frontend
 
 jobs:
+  # Which half of the stack did this push actually touch?
+  #
+  # The monitoring containers are deployed by their own job, so a push that only
+  # changes Prometheus rules, a dashboard or the prober has no business
+  # rebuilding the backend image, restarting the application and rebuilding the
+  # Android APK. The test is deliberately a deny-list — "everything here is
+  # monitoring-only, so skip the app deploy" — rather than an allow-list of app
+  # paths: an unrecognised file then deploys as it always has, instead of
+  # silently not deploying at all.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      monitoring: ${{ steps.filter.outputs.monitoring }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # The diff needs the commit this push started from.
+          fetch-depth: 0
+
+      - name: Detect which parts changed
+        id: filter
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          # Paths that only ever affect the monitoring stack. backend/metrics/
+          # is deliberately absent: it is compiled into the backend binary, so a
+          # change there is an application change.
+          ONLY_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/cmd/vlessprobe/|doc/monitoring\.md$)'
+          # Paths that should redeploy monitoring. Wider than the set above: the
+          # prober shares a Go module with the backend and is started by the
+          # Makefile, so both move it.
+          TOUCHES_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/cmd/vlessprobe/|backend/go\.(mod|sum)$|Makefile$)'
+
+          run_all() {
+            echo "Deploying both halves."
+            echo "app=true"        >> "$GITHUB_OUTPUT"
+            echo "monitoring=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Manual runs, first pushes and force pushes have no usable base to
+          # diff against. Deploying everything is the safe reading of "we do not
+          # know what changed".
+          #
+          # These are `if` blocks rather than `cond && run_all`: under
+          # `set -e` a false one-liner test is itself a failing command and
+          # would abort the job.
+          if [ "$EVENT" != "push" ]; then
+            echo "Event is $EVENT, not a push."
+            run_all
+          fi
+          case "$BEFORE" in
+            ""|0000000000000000000000000000000000000000)
+              echo "No base commit for this push."
+              run_all
+              ;;
+          esac
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "Base commit $BEFORE is not in this clone (force push?)."
+            run_all
+          fi
+
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
+          if [ -z "$CHANGED" ]; then
+            echo "Diff is empty."
+            run_all
+          fi
+          echo "Changed files:"
+          echo "$CHANGED" | sed 's/^/  /'
+
+          if echo "$CHANGED" | grep -qvE "$ONLY_MONITORING"; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only monitoring paths changed: skipping the application deploy."
+            echo "app=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -qE "$TOUCHES_MONITORING"; then
+            echo "monitoring=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing under monitoring changed: leaving it running as is."
+            echo "monitoring=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -60,7 +158,8 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.app == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -118,7 +217,10 @@ jobs:
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
             echo "Fetching latest repository files..."
-            git pull origin main
+            # The monitoring deploy runs at the same time and shares this
+            # checkout. Two concurrent pulls fight over index.lock, so the pull
+            # — and only the pull — is serialised between the two jobs.
+            flock /tmp/healthlogin-deploy-git.lock git pull origin main
             
             # Write production .env file from GitHub Actions secrets & variables
             echo "Writing production .env file from GitHub Secrets..."
@@ -163,3 +265,87 @@ jobs:
           DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
           APP_ENDPOINTS_KEY: ${{ secrets.APP_ENDPOINTS_KEY }}
           APP_ENDPOINTS_ENC_KEY: ${{ secrets.APP_ENDPOINTS_ENC_KEY }}
+
+  # Monitoring is deployed by its own job, in parallel with `deploy`.
+  #
+  # It is not downstream of build-and-push because nothing here ships in the
+  # application images: Prometheus, Grafana and the exporters are upstream
+  # images, and the VLESS prober is built on the server from this checkout. It
+  # is downstream of `test` because that prober is compiled from the same Go
+  # module as the backend.
+  #
+  # Nothing in this job restarts the application. `make monitoring-up` passes
+  # --no-deps precisely so that it cannot, even while `deploy` is mid-restart.
+  deploy-monitoring:
+    runs-on: ubuntu-latest
+    needs: [changes, test]
+    if: needs.changes.outputs.monitoring == 'true'
+    steps:
+      - name: Deploy monitoring stack via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GRAFANA_ADMIN_USER,GRAFANA_ADMIN_PASSWORD,GRAFANA_ROOT_URL,PROBE_ENDPOINTS_URL,PROBE_TARGET_URL,PROBE_INTERVAL
+          script: |
+            set -e
+            cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
+            echo "Fetching latest repository files..."
+            flock /tmp/healthlogin-deploy-git.lock git pull origin main
+
+            # The monitoring stack reads the database password and the endpoint
+            # keys from the application's .env. It is written by the deploy job
+            # and persists between runs, so a monitoring-only push finds it
+            # already there — but say so plainly if it is missing rather than
+            # failing later inside Compose.
+            if [ ! -f .env ]; then
+              echo "ERROR: .env is missing. Run the application deploy once first." >&2
+              exit 1
+            fi
+
+            # Monitoring secrets go in their own file: the application deploy
+            # rewrites .env wholesale, and appending to it would lose these on
+            # the next run — or, worse, half-lose them mid-race.
+            echo "Writing .env.monitoring from GitHub Secrets..."
+            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\nGRAFANA_ADMIN_USER=%s\nGRAFANA_ADMIN_PASSWORD=%s\nGRAFANA_ROOT_URL=%s\nPROBE_ENDPOINTS_URL=%s\nPROBE_TARGET_URL=%s\nPROBE_INTERVAL=%s\n" \
+              "${TELEGRAM_BOT_TOKEN}" \
+              "${TELEGRAM_CHAT_ID}" \
+              "${GRAFANA_ADMIN_USER:-admin}" \
+              "${GRAFANA_ADMIN_PASSWORD}" \
+              "${GRAFANA_ROOT_URL:-http://localhost:3000}" \
+              "${PROBE_ENDPOINTS_URL:-https://moya-usluga.ru/api/app/endpoints}" \
+              "${PROBE_TARGET_URL:-https://moya-usluga.ru/health}" \
+              "${PROBE_INTERVAL:-2m}" > .env.monitoring
+            chmod 600 .env.monitoring
+
+            # Rules are validated before they are applied. Prometheus starts
+            # happily with a rule that does not parse — it simply never
+            # evaluates it, which is the one failure mode monitoring must not
+            # have.
+            echo "Validating Prometheus configuration and alert rules..."
+            make monitoring-check
+
+            echo "Starting/updating monitoring containers..."
+            make monitoring-up
+
+            # A changed bind-mounted file does not recreate a container, so
+            # neither of these picks up an edit on its own: Alertmanager renders
+            # its config from the template at start, and Prometheus re-reads
+            # rules only when asked.
+            echo "Applying configuration changes..."
+            docker restart healthlogin_alertmanager >/dev/null
+            sleep 5
+            make monitoring-reload
+
+            echo "Monitoring deployment finished successfully."
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GRAFANA_ADMIN_USER: ${{ vars.GRAFANA_ADMIN_USER }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          GRAFANA_ROOT_URL: ${{ vars.GRAFANA_ROOT_URL }}
+          PROBE_ENDPOINTS_URL: ${{ vars.PROBE_ENDPOINTS_URL }}
+          PROBE_TARGET_URL: ${{ vars.PROBE_TARGET_URL }}
+          PROBE_INTERVAL: ${{ vars.PROBE_INTERVAL }}

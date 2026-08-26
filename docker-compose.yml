@@ -69,6 +69,13 @@ services:
       APP_ENDPOINTS_KEY: ${APP_ENDPOINTS_KEY:?APP_ENDPOINTS_KEY is required}
       APP_ENDPOINTS_ENC_KEY: ${APP_ENDPOINTS_ENC_KEY:?APP_ENDPOINTS_ENC_KEY is required}
       APP_ENDPOINTS_FILE: /app/vless-endpoints.json
+      # Prometheus scrape target, on its own listener. Reachable only from the
+      # compose network — it is never published to the host and nginx does not
+      # proxy it. Set to an empty value to turn metrics off entirely.
+      METRICS_ADDR: ${METRICS_ADDR:-:9091}
+      # Surfaces in healthlogin_build_info so a dashboard can answer "which
+      # build is actually running right now?".
+      APP_VERSION: ${BACKEND_TAG:-dev}
     depends_on:
       - db
       - mailserver
@@ -83,6 +90,7 @@ services:
     # network for nginx (it is plain HTTP and must not be published).
     expose:
       - "8081"
+      - "9091"
     ports:
       - "127.0.0.1:8088:8080"
 

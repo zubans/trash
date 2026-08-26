@@ -35,6 +35,7 @@
 | **Рейтинги & Жизненный цикл** | Двухсторонняя система рейтингов (Байесовское среднее), статус `EXECUTED` и последовательность. | [`rating_system_and_order_lifecycle.md`](./rating_system_and_order_lifecycle.md) |
 | **Карта & Гео-ограничения** | Интерактивная карта Leaflet (10км / 2км), 10-мин кулдаун и аномалии. | [`executor_map_and_geofencing.md`](./executor_map_and_geofencing.md) |
 | **Инфраструктура & Деплой** | Docker-окружение, конфигурация Nginx и автоматический деплой через CI/CD. | [`deployment.md`](./deployment.md) |
+| **Метрики & Мониторинг** | Метрики бэкенда, Prometheus/Grafana/Alertmanager, экспортеры и сквозная проба резервного VPN-канала. | [`monitoring.md`](./monitoring.md) |
 | **Миграции БД** | Полный перечень SQL-миграций и порядок их применения. | [`migration.md`](./migration.md) |
 
 ---

@@ -1,0 +1,217 @@
+# Alerting rules for the application and the infrastructure under it.
+#
+# Two severities, and they mean different things:
+#   page     — users are affected right now, or money is at stake.
+#   ticket   — worth fixing this week; routed to the same chat, without urgency.
+#
+# Every rule carries a `for` long enough to survive a deploy or a restart.
+groups:
+  - name: availability
+    rules:
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Бэкенд не отвечает на сбор метрик"
+          description: "Prometheus не может собрать метрики с {{ $labels.instance }} более 2 минут. Либо процесс упал, либо метрик-листенер не поднялся."
+
+      - alert: PublicEndpointDown
+        expr: probe_success{job="blackbox_http"} == 0
+        for: 3m
+        labels:
+          severity: page
+        annotations:
+          summary: "Публичный адрес {{ $labels.instance }} недоступен"
+          description: "Внешняя проверка не проходит 3 минуты. Бэкенд может быть жив — сначала посмотрите nginx и сертификат."
+
+      - alert: TLSCertificateExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Сертификат {{ $labels.instance }} истекает через {{ $value | printf \"%.0f\" }} дней"
+          description: "Продлите сертификат. После 0 дней это станет полным отказом сервиса, а не тикетом."
+
+      - alert: MailSubmissionDown
+        expr: probe_success{job="blackbox_smtp", instance="mailserver:587"} == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Maddy не принимает почту на 587"
+          description: "Без submission не уходят письма подтверждения и коды сброса пароля — регистрация останавливается."
+
+  - name: application
+    rules:
+      - alert: HighServerErrorRate
+        expr: |
+          sum(rate(healthlogin_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(healthlogin_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Более 5% запросов отвечают 5xx"
+          description: "Текущая доля: {{ $value | humanizePercentage }}. Смотрите разбивку по маршрутам на дашборде Backend."
+
+      - alert: SlowAPI
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, route) (rate(healthlogin_http_request_duration_seconds_bucket[5m]))
+          ) > 3
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "p95 маршрута {{ $labels.route }} превышает 3 секунды"
+          description: "Держится 10 минут. Обычно это база или внешний адресный сервис."
+
+      - alert: DatabasePoolSaturated
+        expr: |
+          go_sql_blocked_seconds_total{db_name="main"} > 0
+          and rate(go_sql_blocked_seconds_total{db_name="main"}[5m]) > 1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Запросы ждут свободного соединения с базой"
+          description: "Пул исчерпан: каждую секунду больше секунды суммарного ожидания. Это выглядит как медленная база, но лечится размером пула или запросами."
+
+      - alert: AddressProviderFailing
+        expr: |
+          sum(rate(healthlogin_upstream_requests_total{upstream="dadata", result!="ok"}[10m]))
+            / sum(rate(healthlogin_upstream_requests_total{upstream="dadata"}[10m])) > 0.2
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "DaData отвечает ошибками более чем на 20% запросов"
+          description: "Без подсказок адреса регистрацию невозможно завершить. Проверьте ключ и квоту: результат {{ $labels.result }}."
+
+      - alert: SystemMailFailing
+        expr: |
+          sum(rate(healthlogin_mail_sends_total{result="error"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "Системная почта не уходит ({{ $labels.kind }})"
+          description: "Письма подтверждения и коды сброса пароля не доставляются. Пользователь этого не видит — он видит, что код «не пришёл»."
+
+      - alert: BackgroundWorkerStalled
+        expr: |
+          time() - max by (worker) (healthlogin_worker_last_success_timestamp_seconds) > 900
+          and on() up{job="backend"} == 1
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Фоновый обработчик {{ $labels.worker }} не отрабатывал 15 минут"
+          description: "Процесс жив, но проход не завершался успешно. Заказы могут не назначаться и смены не закрываться."
+
+      - alert: OrdersQueuedWithNoExecutors
+        expr: healthlogin_orders_searching > 0 and healthlogin_shifts_active == 0
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Заказы ждут, а на смене никого нет"
+          description: "{{ $value }} заказов в поиске полчаса без единого исполнителя на смене. Технически всё исправно — работать некому."
+
+  - name: money
+    rules:
+      # The reconciliation pass is the one thing that can prove the books are
+      # intact. A drift here is never a monitoring artefact: it is somebody's
+      # money in the wrong place.
+      - alert: LedgerDrift
+        expr: healthlogin_reconcile_ok == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Сверка балансов нашла расхождение"
+          description: "Баланс разошёлся с журналом транзакций. Не правьте баланс — ищите операцию, которая его сдвинула: /admin/finances/reconciliation."
+
+      - alert: ReconciliationNotRunning
+        expr: time() - healthlogin_reconcile_last_run_timestamp_seconds > 172800
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Сверка балансов не проходила больше двух суток"
+          description: "Она запускается раз в сутки. Отсутствие расхождений сейчас не значит ничего — их просто никто не искал."
+
+      - alert: LedgerWriteErrors
+        expr: sum(rate(healthlogin_ledger_errors_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Записи в финансовый журнал падают с ошибкой"
+          description: "Тип операции: {{ $labels.op }}. Транзакция откатывается целиком, но повторяющаяся ошибка означает, что деньги не двигаются вообще."
+
+  - name: security
+    rules:
+      - alert: CredentialStuffingSuspected
+        expr: sum(rate(healthlogin_auth_events_total{event="login", result="denied"}[5m])) > 2
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Всплеск неудачных входов"
+          description: "Более 2 отказов в секунду в течение 10 минут. Ограничитель частоты работает, но всплеск стоит посмотреть."
+
+      - alert: EndpointListProbedWithWrongKey
+        expr: sum(rate(healthlogin_app_endpoints_requests_total{result="forbidden"}[10m])) > 0.2
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Список VLESS-endpoint'ов запрашивают с неверным ключом"
+          description: "Либо в обращении осталась старая сборка приложения с прежним APP_KEY, либо URL нашли снаружи."
+
+  - name: resources
+    rules:
+      - alert: HostDiskFillingUp
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.10
+        for: 30m
+        labels:
+          severity: page
+        annotations:
+          summary: "На {{ $labels.mountpoint }} осталось меньше 10% места"
+          description: "Полный диск останавливает PostgreSQL и загрузку вложений. Кандидаты на чистку: releases/, uploads/, логи Docker."
+
+      - alert: HostMemoryPressure
+        expr: |
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Свободной памяти меньше 10%"
+          description: "Следующим шагом OOM killer выберет процесс сам, и обычно это PostgreSQL."
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "PostgreSQL недоступен"
+          description: "Экспортер не может подключиться к базе. Без неё бэкенд не отвечает ни на один запрос с данными."
+
+      - alert: ContainerRestartLoop
+        expr: |
+          increase(container_start_time_seconds{name=~"healthlogin_.*"}[15m]) > 0
+          and changes(container_start_time_seconds{name=~"healthlogin_.*"}[1h]) > 3
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Контейнер {{ $labels.name }} перезапускается по кругу"
+          description: "Более трёх стартов за час. Обычно это падение на старте: смотрите docker logs."
