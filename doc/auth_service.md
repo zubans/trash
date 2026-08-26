@@ -17,7 +17,10 @@
 backend/
 ├── service/
 │   ├── auth.go       # реализация AuthService (регистрация, подтверждение email, сброс пароля)
-│   ├── geocoder.go   # геокодирование адресов
+│   ├── address.go    # модель адреса (части, сборка строки, валидация)
+│   ├── dadata.go     # подсказки адресов DaData
+│   ├── address_suggest.go # единая точка входа подсказок + legacy-формат
+│   ├── geocoder.go   # геокодирование адресов (Nominatim + кэш)
 │   └── auth_test.go  # юнит-тесты
 ├── repository/
 │   └── user.go       # контракт UserRepository и реализация на SQL
@@ -41,9 +44,9 @@ type UserRepository interface {
     UpdateRole(id uuid.UUID, role string) error
     UpdateBalance(id uuid.UUID, balance float64) error
     UpdateLastGeo(id uuid.UUID, lastGeo string) error
-    CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
+    CreateCustomerProfile(userID uuid.UUID, address CustomerAddress, lastGeo string) error
     GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
-    UpdateCustomerAddress(userID uuid.UUID, address string) error
+    UpdateCustomerAddress(userID uuid.UUID, address CustomerAddress) error
 }
 ```
 
@@ -57,13 +60,16 @@ authSvc := service.NewAuthService(repo, geocoder) // читает JWT_SECRET и�
 
 ## Публичные методы
 
-### RegisterWithCoordinates
+### RegisterWithAddress / RegisterWithCoordinates
 
 ```go
-func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, role string, lat, lon *float64) (*repository.User, error)
+func (s *AuthService) RegisterWithAddress(phone, email, password, lastName, firstName, patronymic, address string, structured Address, role string, lat, lon *float64) (*repository.User, error)
+func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, firstName, patronymic, address, role string, lat, lon *float64) (*repository.User, error)
 ```
 
 Создаёт нового пользователя (`CUSTOMER` или `EXECUTOR`).
+
+`RegisterWithAddress` — основной метод: принимает адрес уже разложенный на части (так его присылает клиент, собранный против списка подсказок). `RegisterWithCoordinates` оставлен как обёртка для клиентов, которые шлют адрес одной строкой.
 
 **Поведение:**
 1. Проверяет, что `phone`, `email`, `password` и `address` заполнены.
@@ -72,6 +78,9 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, address, r
 4. Хеширует пароль `bcrypt`.
 5. Генерирует UUID токен верификации почты `email_verification_token` со сроком действия **60 минут** (`email_token_expires_at`). Введённая почта сохраняется во временном поле `pending_email`, а основное поле `email` остаётся пустым до перехода по ссылке.
 6. На указанный `pending_email` отправляется одноразовая ссылка подтверждения. Поле `email` активируется и сохраняется только после успешного перехода пользователя по ссылке.
+7. Адрес проверяется по содержанию, а не по написанию: нужны населённый пункт, улица и дом (`Address.Validate`). Если части не пришли, строка раскладывается на сервере (`ParseAddressLine`). Части сохраняются рядом со строкой — см. [`address_suggestions.md`](./address_suggestions.md).
+
+> Прежняя проверка требовала формат `Россия, Город, Улица, д.<цифры> [кв. <цифры>]` и, как следствие, чисто числовой номер дома — человек с адресом `12к1` не мог зарегистрироваться вовсе. Регулярное выражение `normalizeAddress` удалено.
 
 ### VerifyEmail / RequestPasswordReset / ResetPassword
 
@@ -130,7 +139,7 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
    - При смене Email отправляется `POST /api/user/email`, требующий повторной верификации.
 2. **Профиль Исполнителя (`ExecutorProfileModal.vue`)**:
    - Отображает ФИО, телефон, Email и **базовый адрес начала поиска заказов**.
-   - Позволяет редактировать базовый адрес (автокомплит с геокодированием) и электронную почту.
+   - Позволяет редактировать базовый адрес (автокомплит) и электронную почту. Экран исполнителя пока использует legacy-эндпоинт `GET /geo/autocomplete` и строковый адрес.
 
 ## Безопасность
 

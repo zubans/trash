@@ -9,7 +9,7 @@
     "password": "Пароль",
     "signInBtn": "Войти",
     "signUpBtn": "Зарегистрироваться",
-    "pickupAddress": "Адрес забора мусора",
+    "pickupAddress": "Ваш адрес",
     "pickupAddressPlaceholder": "Россия, Москва, Тверская улица, д. 1",
     "flatNumber": "Квартира",
     "flatNumberPlaceholder": "101",

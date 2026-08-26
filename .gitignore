@@ -20,3 +20,8 @@ healthlogin-app.apk
 !.env.deploy.example
 # APK signature metadata
 *.apk.idsig
+
+# VLESS endpoint list holds live server addresses and Reality keys.
+# The real file is mounted into the backend; commit only the template.
+/vless-endpoints.json
+!vless-endpoints.example.json

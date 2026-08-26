@@ -27,12 +27,15 @@
 | **Жизненный цикл заказов** | Статусы заказов (`SEARCHING`, `ASSIGNED`, `COMPLETED`, `CANCELED`) и SLA-контроль. | [`order_lifecycle.md`](./order_lifecycle.md) |
 | **Строительный мусор (Аукцион)** | Торги по заказам категории `CONSTRUCTION`, подача и принятие ставок. | [`bids_and_auction.md`](./bids_and_auction.md) |
 | **Геолокация & Мэтчинг** | Авто-мэтчинг в радиусе 2 км, проверка геозон (`CIRCLE`/`POLYGON`), контроля смен. | [`geolocation_and_matching.md`](./geolocation_and_matching.md) |
+| **Адреса & Подсказки** | Подсказки DaData, структурное хранение адреса (город/улица/дом/квартира/ФИАС) и координаты вместе с подсказкой. | [`address_suggestions.md`](./address_suggestions.md) |
 | **Чат в реальном времени** | WebSocket-чат между заказчиком и исполнителем, блокировки и события. | [`chat.md`](./chat.md) |
 | **Панель администратора** | Разделы управления пользователями, заявками на пополнение, с динамическими настройками. | [`admin_panel.md`](./admin_panel.md) |
 | **Автообновление (Android)** | In-App автообновление с нативным прогресс-баром байтов скачивания. | [`app_update.md`](./app_update.md) |
+| **Резервный канал (Android)** | Прозрачное переключение на VLESS-туннель, когда прямой путь до API недоступен; зашифрованный список endpoint'ов. | [`mobile_fallback_channel.md`](./mobile_fallback_channel.md) |
 | **Рейтинги & Жизненный цикл** | Двухсторонняя система рейтингов (Байесовское среднее), статус `EXECUTED` и последовательность. | [`rating_system_and_order_lifecycle.md`](./rating_system_and_order_lifecycle.md) |
 | **Карта & Гео-ограничения** | Интерактивная карта Leaflet (10км / 2км), 10-мин кулдаун и аномалии. | [`executor_map_and_geofencing.md`](./executor_map_and_geofencing.md) |
 | **Инфраструктура & Деплой** | Docker-окружение, конфигурация Nginx и автоматический деплой через CI/CD. | [`deployment.md`](./deployment.md) |
+| **Миграции БД** | Полный перечень SQL-миграций и порядок их применения. | [`migration.md`](./migration.md) |
 
 ---
 

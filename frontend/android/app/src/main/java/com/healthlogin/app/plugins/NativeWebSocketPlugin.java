@@ -33,6 +33,11 @@ public class NativeWebSocketPlugin extends Plugin {
         builder.connectTimeout(10, TimeUnit.SECONDS);
         builder.pingInterval(15, TimeUnit.SECONDS); // Automatic Ping/Pong Keep-Alive
 
+        // Route the chat socket through the covert VLESS channel: in DIRECT mode
+        // this selector returns NO_PROXY, and while on PROXY it tunnels the
+        // backend host through the local SOCKS. Matches the API traffic path.
+        builder.proxySelector(com.healthlogin.app.net.VlessChannel.get().proxySelector());
+
         try {
             // Trust all certificates (Self-signed TLS support)
             javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{

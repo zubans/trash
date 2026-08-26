@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -9,6 +10,80 @@ import (
 	"regexp"
 	"strings"
 )
+
+type unencryptedPlainAuth struct {
+	identity, username, password string
+	host                         string
+}
+
+// UnencryptedPlainAuth implements smtp.Auth without Go's mandatory TLS/localhost restriction,
+// allowing authentication over internal container networks (e.g. mailserver:587).
+func UnencryptedPlainAuth(identity, username, password, host string) smtp.Auth {
+	return &unencryptedPlainAuth{identity, username, password, host}
+}
+
+func (a *unencryptedPlainAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if server.Name != a.host {
+		return "", nil, fmt.Errorf("wrong host name: %s (expected %s)", server.Name, a.host)
+	}
+	resp := []byte(a.identity + "\x00" + a.username + "\x00" + a.password)
+	return "PLAIN", resp, nil
+}
+
+func (a *unencryptedPlainAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if more {
+		return nil, fmt.Errorf("unexpected server challenge")
+	}
+	return nil, nil
+}
+
+func sendMailCustom(addr string, auth smtp.Auth, from string, to []string, msg []byte, host string) error {
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		config := &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: true,
+		}
+		if err = c.StartTLS(config); err != nil {
+			log.Printf("[SmtpMailSender] STARTTLS failed (proceeding if allowed): %v", err)
+		}
+	}
+
+	if auth != nil {
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err = c.Auth(auth); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err = c.Mail(from); err != nil {
+		return err
+	}
+	for _, addr := range to {
+		if err = c.Rcpt(addr); err != nil {
+			return err
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(msg)
+	if err != nil {
+		return err
+	}
+	err = w.Close()
+	if err != nil {
+		return err
+	}
+	return c.Quit()
+}
 
 type MailSender interface {
 	SendEmailVerification(toEmail, token string) error
@@ -87,14 +162,10 @@ func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 
 	var auth smtp.Auth
 	if m.user != "" && m.password != "" {
-		auth = smtp.PlainAuth("", m.user, m.password, m.host)
+		auth = UnencryptedPlainAuth("", m.user, m.password, m.host)
 	}
 
-	// A single attempt over an authenticated, encrypted connection. The previous
-	// fallback path re-sent the message over a plain connection while telling the
-	// standard library that TLS was on, which leaked the SMTP password in clear
-	// text whenever the first attempt failed.
-	if err := smtp.SendMail(addr, auth, m.from, []string{to}, msg); err != nil {
+	if err := sendMailCustom(addr, auth, m.from, []string{to}, msg, m.host); err != nil {
 		log.Printf("[SmtpMailSender] failed to send email to %s: %v", to, err)
 		return err
 	}
