@@ -6,46 +6,29 @@ import (
 	"strings"
 )
 
-// AddressSuggester answers address lookups from whichever provider is
-// configured. DaData is used when a key is present; otherwise the old Nominatim
-// path stays in place so a deployment without a key keeps working.
+// AddressSuggester answers address lookups. DaData is the only provider:
+// falling back to Nominatim would quietly return addresses with no apartment
+// and no reliable house number, which is the failure this change exists to
+// remove. When it is not configured, address entry reports that plainly rather
+// than degrading into something that looks like it works.
 type AddressSuggester struct {
-	dadata   *DaData
-	geocoder *Geocoder
+	dadata *DaData
 }
 
-// NewAddressSuggester wires the providers.
-func NewAddressSuggester(dadata *DaData, geocoder *Geocoder) *AddressSuggester {
-	return &AddressSuggester{dadata: dadata, geocoder: geocoder}
+// NewAddressSuggester wires the provider.
+func NewAddressSuggester(dadata *DaData) *AddressSuggester {
+	return &AddressSuggester{dadata: dadata}
 }
 
-// UsesDaData reports which provider is live, for the startup log.
-func (s *AddressSuggester) UsesDaData() bool { return s.dadata != nil }
+// Configured reports whether suggestions can be served at all.
+func (s *AddressSuggester) Configured() bool { return s.dadata != nil }
 
 // Suggest returns structured suggestions for a partial query.
 func (s *AddressSuggester) Suggest(ctx context.Context, query string, count int) ([]Address, error) {
-	if s.dadata != nil {
-		return s.dadata.Suggest(ctx, query, count)
-	}
-	if s.geocoder == nil {
+	if s.dadata == nil {
 		return nil, ErrNoAddressProvider
 	}
-
-	legacy, err := s.geocoder.Autocomplete(query)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Address, 0, len(legacy))
-	for _, l := range legacy {
-		addr := parseLegacyCanonical(l.Address)
-		addr.Source = SourceNominatim
-		if l.Lat != 0 || l.Lon != 0 {
-			lat, lon := l.Lat, l.Lon
-			addr.Lat, addr.Lon = &lat, &lon
-		}
-		out = append(out, addr)
-	}
-	return out, nil
+	return s.dadata.Suggest(ctx, query, count)
 }
 
 // LegacySuggest returns the shape the installed mobile clients expect:
@@ -54,7 +37,7 @@ func (s *AddressSuggester) Suggest(ctx context.Context, query string, count int)
 // released with has to survive even though the provider behind it changed.
 func (s *AddressSuggester) LegacySuggest(ctx context.Context, query string) ([]AutocompleteResult, error) {
 	if s.dadata == nil {
-		return s.geocoder.Autocomplete(query)
+		return nil, ErrNoAddressProvider
 	}
 
 	suggestions, err := s.dadata.Suggest(ctx, query, 7)

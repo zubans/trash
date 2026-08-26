@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+)
 
 // TestComposeKeepsBuildingsTheOldRegexRejected is the point of the change: the
 // previous format check accepted only a purely numeric house number, so a
@@ -148,5 +152,41 @@ func TestComposeHouseKeepsCorpusAndBuilding(t *testing.T) {
 			t.Errorf("composeHouse(%q,%q,%q,%q) = %q, want %q",
 				c.house, c.houseType, c.block, c.blockType, got, c.want)
 		}
+	}
+}
+
+// TestSuggestionsFailLoudlyWithoutAProvider: there is no fallback by design, so
+// a deployment with no key must say it cannot suggest addresses rather than
+// return an empty list, which reads to a user as "your street does not exist".
+func TestSuggestionsFailLoudlyWithoutAProvider(t *testing.T) {
+	suggester := NewAddressSuggester(nil)
+
+	if suggester.Configured() {
+		t.Error("a suggester with no provider must not report itself configured")
+	}
+	if _, err := suggester.Suggest(context.Background(), "Тверская", 5); !errors.Is(err, ErrNoAddressProvider) {
+		t.Errorf("expected ErrNoAddressProvider, got %v", err)
+	}
+	if _, err := suggester.LegacySuggest(context.Background(), "Тверская"); !errors.Is(err, ErrNoAddressProvider) {
+		t.Errorf("expected ErrNoAddressProvider from the legacy path too, got %v", err)
+	}
+}
+
+// TestNewDaDataNeedsAKey covers the switch that decides whether suggestions are
+// available at all.
+func TestNewDaDataNeedsAKey(t *testing.T) {
+	t.Setenv("DADATA_API_KEY", "")
+	if NewDaData() != nil {
+		t.Error("no key must yield no provider")
+	}
+
+	t.Setenv("DADATA_API_KEY", "  ")
+	if NewDaData() != nil {
+		t.Error("a blank key must yield no provider")
+	}
+
+	t.Setenv("DADATA_API_KEY", "test-key")
+	if NewDaData() == nil {
+		t.Error("a key must yield a provider")
 	}
 }

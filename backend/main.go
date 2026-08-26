@@ -82,13 +82,17 @@ func main() {
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
 
 	geocoder := service.NewGeocoder(db)
-	// DaData when a key is configured, the old Nominatim path otherwise, so a
-	// deployment without a key still starts and still suggests addresses.
-	addressSuggester := service.NewAddressSuggester(service.NewDaData(), geocoder)
-	if addressSuggester.UsesDaData() {
+	// DaData is the only source of address suggestions. There is deliberately
+	// no fallback: the alternative had no apartment data and rejected ordinary
+	// house numbers, and silently serving that again would hide the
+	// misconfiguration behind an address entry that half works.
+	addressSuggester := service.NewAddressSuggester(service.NewDaData())
+	if addressSuggester.Configured() {
 		log.Printf("[address] suggestions served by DaData")
 	} else {
-		log.Printf("[address] DADATA_API_KEY is not set; falling back to Nominatim, which has no apartment data and is rate limited to one request per second for the whole platform")
+		// Not fatal: a missing key must not take down orders, chat and payments
+		// along with it. Address entry reports 503 until the key is set.
+		log.Printf("[address] WARNING: DADATA_API_KEY is not set — address suggestions will return 503 and registration cannot complete")
 	}
 	mailer := service.NewSmtpMailSender()
 	// AuthService owns everything session related: issuing access tokens,

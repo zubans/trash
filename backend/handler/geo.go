@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -50,7 +51,7 @@ func (h *GeoHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
 	// what this returns would break clients that are already in people's hands.
 	suggestions, err := h.suggester.LegacySuggest(r.Context(), query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeGeoError(w, err)
 		return
 	}
 
@@ -76,7 +77,7 @@ func (h *GeoHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 
 	suggestions, err := h.suggester.Suggest(r.Context(), query, count)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeGeoError(w, err)
 		return
 	}
 	if suggestions == nil {
@@ -85,4 +86,18 @@ func (h *GeoHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(suggestions)
+}
+
+// writeGeoError separates "this deployment cannot suggest addresses" from "this
+// query failed", so a missing key shows up as a server-side problem rather than
+// as the user having typed something wrong.
+func writeGeoError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrNoAddressProvider):
+		http.Error(w, "address suggestions are not configured", http.StatusServiceUnavailable)
+	case errors.Is(err, service.ErrGeocoderBusy):
+		http.Error(w, "address provider is busy, try again", http.StatusTooManyRequests)
+	default:
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	}
 }

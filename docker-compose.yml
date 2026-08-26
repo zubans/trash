@@ -53,6 +53,9 @@ services:
       RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
       UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
       ACCEPT_RADIUS_KM: ${ACCEPT_RADIUS_KM:-0.5}
+      # Address suggestions. Without it /geo/suggest answers 503 and nobody can
+      # finish registration, so it is required rather than defaulted.
+      DADATA_API_KEY: ${DADATA_API_KEY:?DADATA_API_KEY is required}
       SMTP_HOST: ${SMTP_HOST:-mailserver}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-system@moya-usluga.ru}
