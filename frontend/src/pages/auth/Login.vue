@@ -472,7 +472,11 @@ export default defineComponent({
       firstName.value = ''
       patronymic.value = ''
       pickedAddress.value = null
-      focusSubmitButton()
+      nextTick(() => {
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        if (document.documentElement) document.documentElement.scrollTop = 0
+        if (document.body) document.body.scrollTop = 0
+      })
     })
 
 
@@ -629,11 +633,13 @@ export default defineComponent({
   line-height: 1.5;
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 20px;
+  justify-content: flex-start;
+  padding: 24px 16px 40px 16px;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @keyframes orbDrift1 {
@@ -665,6 +671,7 @@ export default defineComponent({
 .auth-card {
   width: 100%;
   max-width: 440px;
+  margin: auto 0;
   background: var(--surface-card);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
