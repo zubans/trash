@@ -3,7 +3,6 @@ package com.healthlogin.app.net;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
-import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -57,9 +56,20 @@ final class RemoteConfigRepo {
             String json = AesGcm.decrypt(encKey, readAll(in));
             new JSONObject(json); // validate
             prefs.edit().putString(KEY_BUNDLE, json).apply();
-            Log.i(TAG, "seeded endpoint list from asset " + assetName);
+            DebugLog.add(TAG, "seeded endpoint list from bundled asset " + assetName);
         } catch (Throwable t) {
-            Log.w(TAG, "no bundled endpoint list to seed: " + t.getMessage());
+            DebugLog.add(TAG, "no bundled endpoint list to seed: " + t.getMessage());
+        }
+    }
+
+    /** Stored bundle version, or -1 if nothing is cached. */
+    int version() {
+        String s = prefs.getString(KEY_BUNDLE, null);
+        if (s == null) return -1;
+        try {
+            return new JSONObject(s).optInt("version", -1);
+        } catch (Throwable t) {
+            return -1;
         }
     }
 
@@ -77,26 +87,49 @@ final class RemoteConfigRepo {
 
     /** @return true if the stored list changed (address update). */
     boolean refresh() {
+        long t0 = System.currentTimeMillis();
         try {
             Request req = new Request.Builder()
                     .url(configUrl)
                     .header(HDR_APP_KEY, Secrets.APP_KEY)
+                    .header("Cache-Control", "no-cache")
                     .build();
             try (Response resp = http.newCall(req).execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) return false;
-                String json = AesGcm.decrypt(encKey, resp.body().string());
+                long ms = System.currentTimeMillis() - t0;
+                String cipher = resp.body() == null ? "" : resp.body().string();
+                DebugLog.add(TAG, "GET " + configUrl + " -> HTTP " + resp.code()
+                        + " (" + cipher.length() + "B, " + ms + "ms)");
+                if (!resp.isSuccessful() || cipher.isEmpty()) {
+                    return false;
+                }
+                String json = AesGcm.decrypt(encKey, cipher);
                 JSONObject fresh = new JSONObject(json); // validate
                 String old = prefs.getString(KEY_BUNDLE, null);
                 if (old == null || !sameBundle(new JSONObject(old), fresh)) {
                     prefs.edit().putString(KEY_BUNDLE, fresh.toString()).apply();
-                    Log.i(TAG, "endpoint list updated to version " + fresh.optInt("version", -1));
+                    DebugLog.add(TAG, "endpoint list updated to v" + fresh.optInt("version", -1));
                     return true;
                 }
             }
         } catch (Throwable t) {
-            Log.w(TAG, "config refresh failed (keeping cached): " + t.getMessage());
+            DebugLog.add(TAG, "refresh failed (keeping cached): "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
         return false;
+    }
+
+    /** A secret-free description of what is cached, for the debug console. */
+    String summary() {
+        JSONArray configs = configs();
+        StringBuilder sb = new StringBuilder("v").append(version())
+                .append(", ").append(configs.length()).append(" server(s): ");
+        for (int i = 0; i < configs.length(); i++) {
+            JSONObject cfg = configs.optJSONObject(i);
+            if (cfg == null) continue;
+            if (i > 0) sb.append("; ");
+            sb.append(XrayController.summarizeOutbound(cfg));
+        }
+        return sb.toString();
     }
 
     private static boolean sameBundle(JSONObject a, JSONObject b) {

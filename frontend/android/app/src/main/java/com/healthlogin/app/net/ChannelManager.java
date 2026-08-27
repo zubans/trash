@@ -1,7 +1,6 @@
 package com.healthlogin.app.net;
 
 import android.content.Context;
-import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -25,10 +24,11 @@ import okhttp3.Response;
  *       keep it, else we try each server in the list, giving up on one after 5s
  *       and moving to the next.</li>
  * </ol>
- * All of this is invisible to the WebView/UI.
+ * Every decision and every probe request/response is written to {@link DebugLog}
+ * so the debug console can show exactly why the proxy path did or did not connect.
  */
 public final class ChannelManager {
-    private static final String TAG = "VlessChannelManager";
+    private static final String TAG = "channel";
     private static final long PERIOD_MINUTES = 10;
     private static final long PROBE_TIMEOUT_SEC = 5;
 
@@ -66,6 +66,10 @@ public final class ChannelManager {
                 .proxy(channel.socksProxy())
                 .callTimeout(PROBE_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .build();
+
+        DebugLog.add(TAG, "manager init: apiHost=" + cfg.apiHost + " health=" + healthUrl
+                + " config=" + cfg.configUrl + " socks=127.0.0.1:" + socksPort
+                + " libXray=" + (xray.available() ? "loaded" : "MISSING"));
     }
 
     /** Install the channel and start the 10-minute evaluation loop. Idempotent. */
@@ -75,55 +79,109 @@ public final class ChannelManager {
         INSTANCE = new ChannelManager(ctx, cfg);
         INSTANCE.exec.scheduleWithFixedDelay(
                 INSTANCE::safeEvaluate, 0, PERIOD_MINUTES, TimeUnit.MINUTES);
-        Log.i(TAG, "channel manager started (default DIRECT)");
+        DebugLog.add(TAG, "manager started (default DIRECT)");
     }
 
     private void safeEvaluate() {
-        try { evaluate(); } catch (Throwable t) { Log.e(TAG, "evaluate crashed", t); }
+        try { evaluate(); } catch (Throwable t) {
+            DebugLog.add(TAG, "evaluate crashed: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
     }
 
     private void evaluate() {
-        repo.refresh(); // learn address changes for this and future cycles
+        DebugLog.add(TAG, "---- evaluate (current=" + (channel.isProxy()
+                ? "PROXY:" + channel.activeRemark() : "DIRECT") + ") ----");
+
+        boolean changed = repo.refresh();
+        DebugLog.add(TAG, "config " + (changed ? "updated" : "unchanged") + ": " + repo.summary());
 
         // 1) Default: try direct.
-        if (healthOk(directClient)) {
-            if (channel.isProxy()) Log.i(TAG, "direct restored -> DIRECT");
+        if (healthOk(directClient, "direct")) {
+            if (channel.isProxy()) DebugLog.add(TAG, "direct restored -> DIRECT");
             xray.stop();
             channel.setDirect();
             return;
         }
+        DebugLog.add(TAG, "direct is down -> trying proxy fallback");
 
-        if (!xray.available()) { channel.setDirect(); return; }
+        if (!xray.available()) {
+            DebugLog.add(TAG, "libXray missing -> staying DIRECT (drop in app/libs/*.aar)");
+            channel.setDirect();
+            return;
+        }
 
-        // 2) Direct is dead. Keep the current server if it is still up (no blip).
-        if (channel.isProxy() && xray.isRunning() && healthOk(proxyClient)) {
+        // 2) Direct is dead. Keep the current server if it still answers.
+        if (channel.isProxy() && xray.isRunning() && healthOk(proxyClient, "proxy(current)")) {
+            DebugLog.add(TAG, "kept current server " + channel.activeRemark());
             return;
         }
 
         // 3) Try each server in priority order; 5s each, then next.
         JSONArray configs = repo.configs();
+        DebugLog.add(TAG, "iterating " + configs.length() + " server(s)");
         for (int i = 0; i < configs.length(); i++) {
             JSONObject cfg = configs.optJSONObject(i);
             if (cfg == null) continue;
             String remark = cfg.optString("remarks", "server-" + i);
-            if (xray.startWith(cfg, socksPort) && healthOk(proxyClient)) {
-                channel.setProxy(remark);
-                Log.i(TAG, "channel=PROXY via " + remark);
-                return;
+            boolean started = xray.startWith(cfg, socksPort);
+            if (started) {
+                boolean ok = healthOk(proxyClient, "proxy(" + remark + ")");
+                xray.drainXrayLog();
+                if (ok) {
+                    channel.setProxy(remark);
+                    DebugLog.add(TAG, "SELECTED PROXY via " + remark);
+                    return;
+                }
             }
             xray.stop();
         }
 
         // 4) Nothing worked — stay direct and let requests fail as if backend down.
         channel.setDirect();
-        Log.w(TAG, "no channel available; staying DIRECT");
+        DebugLog.add(TAG, "no channel available; staying DIRECT");
     }
 
-    private boolean healthOk(OkHttpClient client) {
-        try (Response r = client.newCall(new Request.Builder().url(healthUrl).build()).execute()) {
+    /** Run the health request and record the full request/response line. */
+    private boolean healthOk(OkHttpClient client, String via) {
+        long t0 = System.currentTimeMillis();
+        Request req = new Request.Builder().url(healthUrl).header("Cache-Control", "no-cache").build();
+        try (Response r = client.newCall(req).execute()) {
+            long ms = System.currentTimeMillis() - t0;
+            DebugLog.add("probe", via + " GET " + healthUrl + " -> HTTP " + r.code()
+                    + " " + r.message() + " (" + ms + "ms)");
             return r.isSuccessful();
         } catch (Throwable t) {
+            long ms = System.currentTimeMillis() - t0;
+            DebugLog.add("probe", via + " GET " + healthUrl + " -> ERROR "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage() + " (" + ms + "ms)");
             return false;
+        }
+    }
+
+    // --- debug surface for VpnDebugPlugin ---
+
+    /** A JSON snapshot of the live channel state and what is stored. */
+    public static JSONObject debugState() {
+        JSONObject o = new JSONObject();
+        try {
+            VlessChannel c = VlessChannel.get();
+            o.put("mode", c.isProxy() ? "PROXY" : "DIRECT");
+            o.put("activeRemark", c.activeRemark() == null ? "" : c.activeRemark());
+            o.put("socksPort", c.socksPort());
+            if (INSTANCE != null) {
+                o.put("healthUrl", INSTANCE.healthUrl);
+                o.put("libXray", INSTANCE.xray.available() ? "loaded" : "missing");
+                o.put("stored", INSTANCE.repo.summary());
+            }
+        } catch (Throwable ignored) { }
+        return o;
+    }
+
+    /** Force an out-of-cycle re-evaluation (used by the debug console button). */
+    public static void triggerReevaluate() {
+        if (INSTANCE != null) {
+            DebugLog.add(TAG, "manual re-evaluate requested");
+            INSTANCE.exec.execute(INSTANCE::safeEvaluate);
         }
     }
 }

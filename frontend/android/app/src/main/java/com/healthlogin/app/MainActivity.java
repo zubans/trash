@@ -8,6 +8,7 @@ import com.healthlogin.app.net.NetConfig;
 import com.healthlogin.app.net.VlessChannel;
 import com.healthlogin.app.plugins.NativeWebSocketPlugin;
 import com.healthlogin.app.plugins.UpdatePlugin;
+import com.healthlogin.app.plugins.VpnDebugPlugin;
 
 import java.net.ProxySelector;
 
@@ -16,6 +17,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(UpdatePlugin.class);
         registerPlugin(NativeWebSocketPlugin.class);
+        registerPlugin(VpnDebugPlugin.class);
 
         // Install the process-wide proxy selector BEFORE the WebView/Capacitor
         // issue any request, so Capacitor's HttpURLConnection-based HTTP plugin

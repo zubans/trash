@@ -36,11 +36,12 @@ final class LibXrayBridge {
         for (String name : CLASS_CANDIDATES) {
             try {
                 LibXrayBridge b = new LibXrayBridge(Class.forName(name));
-                Log.i(TAG, "libXray bound: " + name + " (core " + b.version() + ")");
+                DebugLog.add(TAG, "bound " + name + " (core " + b.version() + ")");
                 return b;
             } catch (Throwable ignored) { }
         }
-        Log.w(TAG, "libXray AAR not found on classpath; staying DIRECT-only");
+        DebugLog.add(TAG, "AAR not found on classpath — proxy disabled; drop the release "
+                + "LibXray.aar into app/libs/");
         return null;
     }
 
