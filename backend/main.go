@@ -128,6 +128,13 @@ func main() {
 	auctionWorker := worker.NewAuctionWorker(db, orderService)
 	auctionWorker.Start(1 * time.Minute)
 
+	// Orders whose Nominatim lookup failed at creation (or that predate
+	// coordinate capture) carry no pickup coordinates and are invisible on the
+	// executor map. This backfills them from the same OSM geocoder, off the
+	// request path and rate-limited by the geocoder's own 1/s slot.
+	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, geocoder)
+	geocodeWorker.Start(1 * time.Minute)
+
 	// The only thing that closes an expired shift: one periodic scan, which also
 	// picks up shifts that were running when the process restarted.
 	shiftWorker := worker.NewShiftWorker(shiftService)

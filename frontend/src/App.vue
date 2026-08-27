@@ -81,4 +81,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+.leaflet-control-attribution {
+  display: none !important;
+}
 </style>

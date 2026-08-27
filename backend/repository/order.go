@@ -57,6 +57,12 @@ type OrderRepository interface {
 	FindAllByExecutor(executorID uuid.UUID) ([]Order, error)
 	FindByCustomer(customerID uuid.UUID) ([]Order, error)
 	GetPendingOrders() ([]*Order, error)
+	// GetOrdersMissingCoordinates returns searching orders that have an address
+	// but no pickup coordinates, so a background job can geocode them.
+	GetOrdersMissingCoordinates(limit int) ([]*Order, error)
+	// SetPickupCoordinates fills in an order's pickup coordinates after a
+	// deferred geocode. It touches only the two columns and nothing else.
+	SetPickupCoordinates(orderID uuid.UUID, lat, lon float64) error
 	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
 	// Mutating operations take a Querier so the caller can run them inside its
 	// own transaction; pass nil to run on the connection pool. They return
@@ -242,6 +248,45 @@ func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 		orders = append(orders, &o)
 	}
 	return orders, rows.Err()
+}
+
+// GetOrdersMissingCoordinates returns up to limit searching orders that have a
+// non-empty address but no stored pickup coordinates. The executor map only
+// plots orders that already carry coordinates, so these would otherwise stay
+// invisible until re-geocoded.
+func (r *orderRepo) GetOrdersMissingCoordinates(limit int) ([]*Order, error) {
+	rows, err := r.db.Query(
+		`SELECT `+orderColumns+` FROM orders o
+		 WHERE o.status = $1
+		   AND (o.pickup_lat IS NULL OR o.pickup_lon IS NULL)
+		   AND o.address IS NOT NULL AND o.address <> ''
+		 ORDER BY o.created_at
+		 LIMIT $2`,
+		OrderStatusSearching, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := []*Order{}
+	for rows.Next() {
+		o, err := scanOrderRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, &o)
+	}
+	return orders, rows.Err()
+}
+
+// SetPickupCoordinates writes just the pickup coordinates for an order.
+func (r *orderRepo) SetPickupCoordinates(orderID uuid.UUID, lat, lon float64) error {
+	_, err := r.db.Exec(
+		`UPDATE orders SET pickup_lat = $2, pickup_lon = $3 WHERE id = $1`,
+		orderID, lat, lon,
+	)
+	return err
 }
 
 // FindNearbyOrders returns searching orders with pickup coordinates within radiusMeters of (lat, lon).

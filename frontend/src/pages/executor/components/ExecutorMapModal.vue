@@ -74,6 +74,17 @@ export default defineComponent({
 
     const selectedOrder = ref<any>(null)
     const accepting = ref(false)
+    // Authoritative position last confirmed by the server. The marker and both
+    // zone circles are always anchored here — never directly to the props, which
+    // can be stale — so an on-screen drag is measured against the same origin the
+    // backend uses when it decides "within circle" vs "district change".
+    const serverLat = ref(props.currentLat)
+    const serverLon = ref(props.currentLon)
+    // Guards against overlapping set-location requests. Without it a single
+    // gesture can fire both `dragend` and a trailing map `click`; the second
+    // request lands inside the 0.5 km circle of the just-moved point and comes
+    // back rejected as a within-circle move, even though the real move was far.
+    let moving = false
     let map: L.Map | null = null
     let markersLayer: L.LayerGroup | null = null
     let userMarker: L.Marker | null = null
@@ -104,7 +115,7 @@ export default defineComponent({
         }
 
         // Initialize Leaflet map with initial center and default zoom 14 (~2.5km radius view)
-        map = L.map(container).setView([props.currentLat, props.currentLon], 14)
+        map = L.map(container).setView([serverLat.value, serverLon.value], 14)
 
         // Tile layer attached immediately
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -113,7 +124,7 @@ export default defineComponent({
         }).addTo(map)
 
         // 10km Outer Circle
-        zone50kmCircle = L.circle([props.currentLat, props.currentLon], {
+        zone50kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 10000,
           color: '#6366f1',
           weight: 1,
@@ -123,7 +134,7 @@ export default defineComponent({
         }).addTo(map)
 
         // 0.5km (500m) Accept Circle
-        zone2kmCircle = L.circle([props.currentLat, props.currentLon], {
+        zone2kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 500,
           color: '#10b981',
           weight: 2,
@@ -139,7 +150,7 @@ export default defineComponent({
           iconAnchor: [16, 16],
         })
 
-        userMarker = L.marker([props.currentLat, props.currentLon], {
+        userMarker = L.marker([serverLat.value, serverLon.value], {
           draggable: true,
           icon: userIcon,
         }).addTo(map)
@@ -166,7 +177,7 @@ export default defineComponent({
           if (!map) return
           map.invalidateSize()
           const viewRadius = 2500
-          const viewBounds = L.circle([props.currentLat, props.currentLon], { radius: viewRadius }).getBounds()
+          const viewBounds = L.circle([serverLat.value, serverLon.value], { radius: viewRadius }).getBounds()
           map.fitBounds(viewBounds, { animate: false })
         }
 
@@ -176,7 +187,23 @@ export default defineComponent({
       })
     }
 
+    // Snap the marker and both zone circles to a single point, and remember it
+    // as the authoritative server position. Every outcome routes through here so
+    // the map never drifts away from what the backend has stored.
+    const anchorTo = (lat: number, lon: number) => {
+      serverLat.value = lat
+      serverLon.value = lon
+      if (userMarker) userMarker.setLatLng([lat, lon])
+      if (zone2kmCircle) zone2kmCircle.setLatLng([lat, lon])
+      if (zone50kmCircle) zone50kmCircle.setLatLng([lat, lon])
+    }
+
     const handleManualLocationChange = async (lat: number, lon: number) => {
+      // Drop the gesture if a request is already in flight: a drag can emit both
+      // `dragend` and a trailing map `click`, and letting the second one through
+      // is exactly what produced the spurious "within circle" rejection.
+      if (moving) return
+      moving = true
       try {
         const res = await api.post('/executor/set-location', {
           lat,
@@ -184,21 +211,19 @@ export default defineComponent({
           is_manual: true,
         })
         if (res.data && res.data.success) {
-          emit('location-changed', { lat, lon })
-          if (zone2kmCircle) zone2kmCircle.setLatLng([lat, lon])
-          if (zone50kmCircle) zone50kmCircle.setLatLng([lat, lon])
+          anchorTo(res.data.lat ?? lat, res.data.lon ?? lon)
+          emit('location-changed', { lat: serverLat.value, lon: serverLon.value })
           fetchMapOrders()
         } else if (res.data && !res.data.success) {
           alert(res.data.message || 'Ручное перемещение отклонено')
-          if (userMarker && res.data.lat && res.data.lon) {
-            userMarker.setLatLng([res.data.lat, res.data.lon])
-          }
+          // The server echoes the position it kept; realign everything to it.
+          anchorTo(res.data.lat ?? serverLat.value, res.data.lon ?? serverLon.value)
         }
       } catch (err: any) {
         alert(err.response?.data?.message || err.response?.data || 'Ошибка изменения метки (10 мин кулдаун)')
-        if (userMarker) {
-          userMarker.setLatLng([props.currentLat, props.currentLon])
-        }
+        anchorTo(serverLat.value, serverLon.value)
+      } finally {
+        moving = false
       }
     }
 
@@ -341,6 +366,10 @@ export default defineComponent({
 </style>
 
 <style>
+.leaflet-control-attribution {
+  display: none !important;
+}
+
 /* Leaflet Custom Marker Pins */
 .user-pin-pulse {
   width: 32px; height: 32px; border-radius: 50%;

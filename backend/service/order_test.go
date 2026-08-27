@@ -80,6 +80,31 @@ func (m *mockOrderRepo) GetPendingOrders() ([]*repository.Order, error) {
 	return pending, nil
 }
 
+func (m *mockOrderRepo) GetOrdersMissingCoordinates(limit int) ([]*repository.Order, error) {
+	var missing []*repository.Order
+	for _, o := range m.orders {
+		if o.Status == "SEARCHING" && (o.PickupLat == nil || o.PickupLon == nil) &&
+			o.Address != nil && *o.Address != "" {
+			missing = append(missing, o)
+			if len(missing) >= limit {
+				break
+			}
+		}
+	}
+	return missing, nil
+}
+
+func (m *mockOrderRepo) SetPickupCoordinates(orderID uuid.UUID, lat, lon float64) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			o.PickupLat = &lat
+			o.PickupLon = &lon
+			return nil
+		}
+	}
+	return nil
+}
+
 func (m *mockOrderRepo) AssignOrder(orderID uuid.UUID, executorID uuid.UUID) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
