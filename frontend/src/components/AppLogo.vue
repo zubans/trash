@@ -55,6 +55,13 @@ export default defineComponent({
 }
 
 .text-block {
+  /* Optical alignment of the wordmark against the SVG "М" stem.
+     Grouped here so the offsets are tunable in one place. */
+  --top-offset-x: -9px;
+  --top-offset-y: 12px;
+  --bottom-offset-x: -18px;
+  --bottom-offset-y: -4px;
+
   display: flex;
   flex-direction: column;
   line-height: 1;
@@ -65,14 +72,17 @@ export default defineComponent({
   font-weight: 800;
   color: #0f172a;
   letter-spacing: -0.5px;
-  margin-left: 1px;
+  margin-top: var(--top-offset-y);
+  margin-left: var(--top-offset-x);
 }
 
 .text-bottom {
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 700;
   color: #5c60f5;
   letter-spacing: 0.3px;
+  margin-top: var(--bottom-offset-y);
+  margin-left: var(--bottom-offset-x);
 }
 
 .logo-container.compact .text-top {
