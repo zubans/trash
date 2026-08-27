@@ -1,10 +1,15 @@
 <template>
   <div class="admin-support-chats">
-    <div class="telegram-container">
-      <!-- Left Sidebar: User Chat List -->
-      <div :class="['chat-sidebar', { 'mobile-hidden': selectedChat }]">
-        <div class="sidebar-header">
-          <h2 class="sidebar-title">Диалоги с клиентами</h2>
+    <!-- Header -->
+    <div class="chat-page-header">
+      <h1 class="page-title">Диалоги с клиентами</h1>
+    </div>
+
+    <!-- Chat Application Container -->
+    <div class="chat-container">
+      <!-- Left Sidebar: Contacts List -->
+      <div :class="['chat-contacts', { 'mobile-hidden': selectedChat }]">
+        <div class="contacts-header">
           <div class="search-box">
             <i class="ph ph-magnifying-glass"></i>
             <input
@@ -15,9 +20,10 @@
           </div>
         </div>
 
-        <div class="chat-list">
+        <div class="contacts-list">
           <div v-if="loading" class="empty-state">
-            <div class="spinner-sm"></div> Загрузка чатов...
+            <div class="spinner-sm mb-2"></div>
+            <span>Загрузка чатов...</span>
           </div>
           <div v-else-if="filteredChats.length === 0" class="empty-state">
             Чатов не найдено
@@ -25,23 +31,27 @@
           <div
             v-for="c in filteredChats"
             :key="c.chat_id"
-            :class="['chat-item', { active: selectedChat && selectedChat.chat_id === c.chat_id }]"
+            :class="['contact-item', { active: selectedChat && selectedChat.chat_id === c.chat_id }]"
             @click="selectChat(c)"
           >
-            <div class="avatar" :class="getAvatarClass(c.role)">
+            <div class="c-avatar" :class="getAvatarClass(c.role)">
               {{ getInitials(c) }}
             </div>
-            <div class="chat-info">
-              <div class="chat-top-row">
-                <span class="user-fullname" :title="c.full_name">{{ c.full_name }}</span>
-                <span v-if="c.last_time" class="chat-time">{{ formatTime(c.last_time) }}</span>
+            <div class="c-info">
+              <div class="c-top-row">
+                <span class="c-name" :title="c.full_name">{{ c.full_name }}</span>
+                <span v-if="c.last_time" class="c-time">{{ formatTime(c.last_time) }}</span>
               </div>
-              <div class="chat-sub-row">
-                <span class="user-phone"><i class="ph-fill ph-phone me-1"></i>{{ c.phone }}</span>
-                <span class="role-badge" :class="c.role.toLowerCase()">{{ c.role }}</span>
+              <div class="c-mid-row">
+                <span class="c-role" :class="c.role.toLowerCase()">{{ c.role }}</span>
+                <span class="c-phone">
+                  <i class="ph-fill ph-phone"></i> {{ c.phone }}
+                </span>
               </div>
-              <div class="chat-bottom-row">
-                <span class="last-msg-text">{{ c.last_message || 'Нет сообщений' }}</span>
+              <div class="c-bottom-row">
+                <div class="c-msg" :class="{ 'has-unread': c.unread_count > 0 }">
+                  {{ c.last_message || 'Нет сообщений' }}
+                </div>
                 <span v-if="c.unread_count > 0" class="unread-badge">{{ c.unread_count }}</span>
               </div>
             </div>
@@ -49,73 +59,111 @@
         </div>
       </div>
 
-      <!-- Right Panel: Active Dialogue -->
+      <!-- Right Area: Active Chat -->
       <div :class="['chat-main', { 'mobile-hidden': !selectedChat }]">
         <template v-if="selectedChat">
-          <!-- Chat Header -->
-          <div class="main-header">
-            <button type="button" class="btn-back-chat" title="К списку чатов" @click="selectedChat = null">
+          <!-- Active User Header -->
+          <div class="chat-header">
+            <button
+              type="button"
+              class="btn-back-chat"
+              title="К списку чатов"
+              @click="selectedChat = null"
+            >
               <i class="ph-bold ph-arrow-left"></i>
             </button>
-            <div class="user-meta-header">
-              <div class="avatar" :class="getAvatarClass(selectedChat.role)">
+
+            <div class="chat-user-info">
+              <div class="c-avatar header-avatar" :class="getAvatarClass(selectedChat.role)">
                 {{ getInitials(selectedChat) }}
               </div>
-              <div>
-                <div class="header-name">{{ selectedChat.full_name }}</div>
-                <div class="header-details">
-                  <span><i class="ph-fill ph-phone me-1"></i>{{ selectedChat.phone }}</span>
-                  <span class="role-badge ms-2" :class="selectedChat.role.toLowerCase()">{{ selectedChat.role }}</span>
-                  <span v-if="selectedChat.is_banned" class="ban-badge ms-2">
-                    <i class="ph-bold ph-prohibit me-1"></i>
-                    {{ formatBanText(selectedChat.banned_until) }}
+              <div class="chat-user-text">
+                <div class="chat-user-name">{{ selectedChat.full_name }}</div>
+                <div class="chat-user-meta">
+                  <span class="c-role" :class="selectedChat.role.toLowerCase()">{{ selectedChat.role }}</span>
+                  <span class="c-phone-meta">
+                    <i class="ph-fill ph-phone"></i> {{ selectedChat.phone }}
+                  </span>
+                  <span v-if="selectedChat.is_banned" class="ban-badge">
+                    <i class="ph-bold ph-prohibit"></i> {{ formatBanText(selectedChat.banned_until) }}
                   </span>
                 </div>
               </div>
             </div>
 
-            <!-- Ban Controls -->
-            <div class="header-ban-actions">
-              <template v-if="selectedChat.is_banned">
-                <button type="button" class="btn-ban-action btn-unban" title="Снять блокировку" @click="unbanChat(selectedChat)">
-                  <i class="ph-bold ph-lock-key-open me-1"></i> Разбанить
-                </button>
-              </template>
-              <template v-else>
-                <span class="ban-label me-1">Бан:</span>
-                <button type="button" class="btn-ban-action" title="Заблокировать на 10 минут" @click="banChat(selectedChat, '10m')">
-                  10 мин
-                </button>
-                <button type="button" class="btn-ban-action" title="Заблокировать на 1 час" @click="banChat(selectedChat, '1h')">
-                  1 час
-                </button>
-                <button type="button" class="btn-ban-action btn-ban-forever" title="Заблокировать навсегда" @click="banChat(selectedChat, 'forever')">
-                  Навсегда
-                </button>
-              </template>
+            <!-- Kebab Menu for Actions (Ban / Unban) -->
+            <div class="dropdown-wrapper">
+              <button
+                type="button"
+                class="btn-ghost"
+                title="Управление пользователем"
+                @click.stop="dropdownOpen = !dropdownOpen"
+              >
+                <i class="ph-bold ph-dots-three-vertical"></i>
+              </button>
+
+              <div v-if="dropdownOpen" class="dropdown-menu" @click.stop>
+                <template v-if="selectedChat.is_banned">
+                  <div class="dropdown-label">{{ formatBanText(selectedChat.banned_until) }}</div>
+                  <button
+                    type="button"
+                    class="dropdown-item"
+                    @click="unbanChat(selectedChat); dropdownOpen = false"
+                  >
+                    <i class="ph-bold ph-lock-key-open"></i> Разбанить
+                  </button>
+                </template>
+                <template v-else>
+                  <div class="dropdown-label">Управление доступом</div>
+                  <button
+                    type="button"
+                    class="dropdown-item danger"
+                    @click="banChat(selectedChat, '10m'); dropdownOpen = false"
+                  >
+                    <i class="ph-bold ph-clock-countdown"></i> Бан на 10 минут
+                  </button>
+                  <button
+                    type="button"
+                    class="dropdown-item danger"
+                    @click="banChat(selectedChat, '1h'); dropdownOpen = false"
+                  >
+                    <i class="ph-bold ph-hourglass-high"></i> Бан на 1 час
+                  </button>
+                  <button
+                    type="button"
+                    class="dropdown-item danger"
+                    @click="banChat(selectedChat, 'forever'); dropdownOpen = false"
+                  >
+                    <i class="ph-bold ph-prohibit"></i> Заблокировать навсегда
+                  </button>
+                </template>
+              </div>
             </div>
           </div>
 
           <!-- Messages Scroll Area -->
-          <div ref="messagesContainerRef" class="messages-area">
-            <div v-if="messagesLoading" class="empty-state">
-              <div class="spinner-sm"></div> Загрузка сообщений...
+          <div ref="messagesContainerRef" class="chat-history">
+            <div v-if="messagesLoading" class="empty-history-state">
+              <div class="spinner-sm mb-2"></div>
+              <span>Загрузка сообщений...</span>
             </div>
-            <div v-else-if="messages.length === 0" class="empty-state">
-              История сообщений пуста. Напишите сообщение первыми.
+            <div v-else-if="messages.length === 0" class="empty-history-state">
+              <i class="ph-fill ph-chat-teardrop-text empty-icon"></i>
+              <p>История сообщений пуста. Напишите сообщение первыми.</p>
             </div>
             <template v-else>
               <div
                 v-for="msg in messages"
                 :key="msg.id"
-                :class="['msg-wrapper', msg.sender_id === currentUserId ? 'out' : 'in']"
+                :class="['msg-row', msg.sender_id === currentUserId ? 'out' : 'in']"
               >
                 <div class="msg-bubble">
-                  <div class="msg-sender-name">
-                    {{ msg.sender_id === currentUserId ? 'Администратор' : selectedChat.full_name }}
+                  <div class="msg-sender-title">
+                    {{ msg.sender_id === currentUserId ? 'Поддержка' : selectedChat.full_name }}
                   </div>
+
                   <!-- Media attachment -->
-                  <div v-if="msg.file_url" class="attachment-box mb-2">
+                  <div v-if="msg.file_url" class="msg-img-box mb-2">
                     <img
                       v-if="msg.file_type === 'image'"
                       :src="resolveUrl(msg.file_url)"
@@ -127,37 +175,49 @@
                       <i class="ph-fill ph-file-text me-1"></i> {{ msg.file_name || 'Скачать файл' }}
                     </a>
                   </div>
-                  <div class="msg-text">{{ msg.text }}</div>
-                  <div class="msg-meta">
-                    <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
-                    <i v-if="msg.sender_id === currentUserId" class="ph-bold ph-check msg-status"></i>
+
+                  <div class="msg-text-content">{{ msg.text }}</div>
+
+                  <div class="msg-time">
+                    <span>{{ formatTime(msg.created_at) }}</span>
+                    <i v-if="msg.sender_id === currentUserId" class="ph-bold ph-check-double status-check"></i>
                   </div>
                 </div>
               </div>
             </template>
           </div>
 
-          <!-- Input Footer -->
-          <div class="main-footer">
+          <!-- Input Area -->
+          <div class="chat-input-area">
             <input
               type="file"
               ref="fileInputRef"
               style="display: none"
               @change="handleFileUpload"
             />
-            <button type="button" class="btn-attach" title="Прикрепить файл" @click="triggerFileInput">
+            <button
+              type="button"
+              class="btn-attach"
+              title="Прикрепить файл"
+              @click="triggerFileInput"
+            >
               <i class="ph-bold ph-paperclip"></i>
             </button>
             <input
               v-model="inputText"
               type="text"
-              class="chat-input"
+              class="input-field"
               placeholder="Напишите сообщение..."
               @keyup.enter="sendMessage"
             />
-            <button type="button" class="btn-send" :disabled="!inputText.trim() && !uploading" @click="sendMessage">
-              <span v-if="uploading" class="spinner-sm"></span>
-              <i v-else class="ph-bold ph-paper-plane-tilt"></i>
+            <button
+              type="button"
+              class="btn-send"
+              :disabled="(!inputText.trim() && !uploading) || selectedChat.is_banned"
+              @click="sendMessage"
+            >
+              <div v-if="uploading" class="spinner-sm light"></div>
+              <i v-else class="ph-fill ph-paper-plane-right"></i>
             </button>
           </div>
         </template>
@@ -165,7 +225,7 @@
         <div v-else class="no-chat-selected">
           <i class="ph-fill ph-chats-teardrop font-size-huge"></i>
           <h3>Выберите диалог слева</h3>
-          <p>Полноценный клиент поддержки пользователей в стиле Telegram</p>
+          <p>Центр поддержки пользователей в реальном времени</p>
         </div>
       </div>
     </div>
@@ -190,23 +250,28 @@ export default defineComponent({
   setup() {
     const authStore = useAuthStore()
     const currentUserId = computed(() => authStore.userID)
-    
+
     const chats = ref<any[]>([])
     const selectedChat = ref<any>(null)
     const messages = ref<any[]>([])
     const searchQuery = ref('')
     const inputText = ref('')
-    
+
     const loading = ref(false)
     const messagesLoading = ref(false)
     const uploading = ref(false)
+    const dropdownOpen = ref(false)
     const messagesContainerRef = ref<any>(null)
     const fileInputRef = ref<HTMLInputElement | null>(null)
-    
+
     const showImageModal = ref(false)
     const previewUrl = ref('')
 
     let pollInterval: any = null
+
+    const closeDropdown = () => {
+      dropdownOpen.value = false
+    }
 
     const fetchChats = async () => {
       try {
@@ -232,6 +297,7 @@ export default defineComponent({
     const selectChat = async (chat: any) => {
       selectedChat.value = chat
       messagesLoading.value = true
+      dropdownOpen.value = false
       try {
         const res = await api.get(`/support/chats/${chat.chat_id}/messages`)
         messages.value = res.data || []
@@ -311,13 +377,17 @@ export default defineComponent({
     }
 
     const getAvatarClass = (role: string) => {
-      return role === 'EXECUTOR' ? 'avatar-executor' : 'avatar-customer'
+      return (role || '').toUpperCase() === 'EXECUTOR' ? 'executor' : 'customer'
     }
 
     const formatTime = (iso: string) => {
       if (!iso) return ''
       const d = new Date(iso)
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const now = new Date()
+      if (d.toDateString() === now.toDateString()) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+      return d.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
     }
 
     const resolveUrl = (url: string) => resolveFileUrl(url)
@@ -367,6 +437,7 @@ export default defineComponent({
 
     onMounted(() => {
       fetchChats()
+      window.addEventListener('click', closeDropdown)
       pollInterval = setInterval(() => {
         fetchChats()
         if (selectedChat.value) {
@@ -380,6 +451,7 @@ export default defineComponent({
     })
 
     onUnmounted(() => {
+      window.removeEventListener('click', closeDropdown)
       if (pollInterval) clearInterval(pollInterval)
     })
 
@@ -393,6 +465,7 @@ export default defineComponent({
       loading,
       messagesLoading,
       uploading,
+      dropdownOpen,
       messagesContainerRef,
       fileInputRef,
       currentUserId,
@@ -417,120 +490,154 @@ export default defineComponent({
 
 <style scoped>
 .admin-support-chats {
-  height: calc(100vh - 120px);
+  height: calc(100vh - 135px);
   display: flex;
   flex-direction: column;
+  gap: 16px;
+  font-family: 'Outfit', sans-serif;
+  color: #0f172a;
 }
 
-.telegram-container {
-  display: flex;
-  height: 100%;
-  background: var(--surface-card, #ffffff);
-  border-radius: 20px;
-  box-shadow: var(--shadow-card, 0 10px 30px rgba(0, 0, 0, 0.05));
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-}
-
-/* Left Sidebar */
-.chat-sidebar {
-  width: 380px;
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
-  display: flex;
-  flex-direction: column;
-  background: #f8fafc;
-}
-
-.sidebar-header {
-  padding: 20px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: #ffffff;
-}
-
-.sidebar-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-title, #0f172a);
-  margin-bottom: 12px;
-}
-
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.search-box i {
-  position: absolute;
-  left: 14px;
-  color: #94a3b8;
-  font-size: 16px;
-}
-
-.search-box input {
-  width: 100%;
-  padding: 10px 14px 10px 38px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: #f1f5f9;
-  font-size: 13px;
-  outline: none;
-}
-
-.chat-list {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.chat-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.chat-item:hover {
-  background: #eef2ff;
-}
-
-.chat-item.active {
-  background: #e0e7ff;
-  border-left: 4px solid #5c60f5;
-}
-
-.avatar {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 15px;
-  color: #ffffff;
+.chat-page-header {
   flex-shrink: 0;
 }
 
-.avatar-customer { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
-.avatar-executor { background: linear-gradient(135deg, #10b981, #047857); }
+.page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.5px;
+}
 
-.chat-info {
+/* Chat Application Container */
+.chat-container {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+/* Left Sidebar: Contacts */
+.chat-contacts {
+  width: 360px;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  flex-shrink: 0;
+}
+
+.contacts-header {
+  padding: 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.search-box i {
+  color: #64748b;
+  font-size: 18px;
+}
+
+.search-box input {
+  border: none;
+  background: transparent;
+  outline: none;
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.contacts-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Contact Item */
+.contact-item {
+  display: flex;
+  gap: 14px;
+  padding: 16px 20px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.02);
+  transition: all 0.2s ease-in-out;
+  position: relative;
+}
+
+.contact-item:hover {
+  background: #f8fafc;
+}
+
+.contact-item.active {
+  background: #eef2ff;
+}
+
+.contact-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #5c60f5;
+}
+
+.c-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.c-avatar.customer {
+  background: #eff6ff;
+  color: #3b82f6;
+}
+
+.c-avatar.executor {
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.c-info {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
+  gap: 4px;
 }
 
-.chat-top-row {
+.c-top-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2px;
+  align-items: flex-start;
 }
 
-.user-fullname {
-  font-size: 14px;
+.c-name {
+  font-size: 15px;
   font-weight: 700;
   color: #0f172a;
   white-space: nowrap;
@@ -538,46 +645,66 @@ export default defineComponent({
   text-overflow: ellipsis;
 }
 
-.chat-time {
-  font-size: 11px;
-  color: #94a3b8;
+.c-time {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.chat-sub-row {
+.c-mid-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  gap: 8px;
 }
 
-.user-phone {
+.c-phone {
+  font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.role-badge {
+.c-role {
   font-size: 10px;
   font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.role-badge.customer { background: #dbeafe; color: #1e40af; }
-.role-badge.executor { background: #fef3c7; color: #d97706; }
+.c-role.customer {
+  background: #eff6ff;
+  color: #3b82f6;
+}
 
-.chat-bottom-row {
+.c-role.executor {
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.c-bottom-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-top: 2px;
 }
 
-.last-msg-text {
-  font-size: 12px;
+.c-msg {
+  font-size: 13px;
   color: #64748b;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+}
+
+.c-msg.has-unread {
+  color: #5c60f5;
+  font-weight: 600;
 }
 
 .unread-badge {
@@ -590,150 +717,331 @@ export default defineComponent({
   margin-left: 8px;
 }
 
-/* Right Main Panel */
+/* Right Main Area */
 .chat-main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: #f8fafc;
 }
 
-.main-header {
-  padding: 16px 24px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+/* Chat Header */
+.chat-header {
   background: #ffffff;
+  padding: 16px 28px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.user-meta-header {
+.chat-user-info {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 
-.header-name {
-  font-size: 16px;
+.header-avatar {
+  width: 52px;
+  height: 52px;
+  font-size: 18px;
+}
+
+.chat-user-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-user-name {
+  font-size: 18px;
   font-weight: 700;
   color: #0f172a;
+  line-height: 1.1;
 }
 
-.header-details {
+.chat-user-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.c-phone-meta {
+  font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   color: #64748b;
   display: flex;
   align-items: center;
+  gap: 4px;
 }
 
-.messages-area {
-  flex: 1;
-  padding: 24px;
-  overflow-y: auto;
+.ban-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ef4444;
+  background: #fef2f2;
+  padding: 2px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Dropdown Menu for Actions */
+.dropdown-wrapper {
+  position: relative;
+}
+
+.btn-ghost {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-ghost:hover {
   background: #f1f5f9;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  color: #0f172a;
 }
 
-.msg-wrapper {
+.dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 10px 40px -10px rgba(15, 23, 42, 0.15), 0 1px 3px rgba(15, 23, 42, 0.05);
+  min-width: 230px;
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
-.msg-wrapper.out { align-items: flex-end; }
-.msg-wrapper.in { align-items: flex-start; }
+.dropdown-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px 4px 12px;
+}
+
+.dropdown-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  text-align: left;
+  width: 100%;
+}
+
+.dropdown-item i {
+  font-size: 18px;
+  color: #64748b;
+  transition: all 0.2s ease-in-out;
+}
+
+.dropdown-item:hover {
+  background: #f8fafc;
+  color: #5c60f5;
+}
+
+.dropdown-item.danger {
+  color: #ef4444;
+}
+
+.dropdown-item.danger i {
+  color: #ef4444;
+}
+
+.dropdown-item.danger:hover {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
+/* Chat History Area */
+.chat-history {
+  flex: 1;
+  padding: 28px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.msg-row {
+  display: flex;
+  width: 100%;
+}
+
+.msg-row.in {
+  justify-content: flex-start;
+}
+
+.msg-row.out {
+  justify-content: flex-end;
+}
 
 .msg-bubble {
   max-width: 65%;
-  padding: 12px 16px;
-  border-radius: 16px;
+  padding: 14px 18px;
+  font-size: 15px;
+  line-height: 1.5;
   position: relative;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
-.msg-wrapper.out .msg-bubble {
-  background: #5c60f5;
-  color: #ffffff;
-  border-bottom-right-radius: 4px;
-}
-
-.msg-wrapper.in .msg-bubble {
-  background: #ffffff;
-  color: #0f172a;
-  border-bottom-left-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.msg-sender-name {
-  font-size: 11px;
-  font-weight: 700;
-  margin-bottom: 4px;
-  opacity: 0.8;
-}
-
-.msg-text {
-  font-size: 14px;
-  line-height: 1.4;
   word-break: break-word;
 }
 
-.msg-meta {
+.msg-row.in .msg-bubble {
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 20px 20px 20px 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.msg-row.out .msg-bubble {
+  background: #5c60f5;
+  color: #ffffff;
+  border-radius: 20px 20px 4px 20px;
+  box-shadow: 0 4px 16px rgba(92, 96, 245, 0.25);
+}
+
+.msg-sender-title {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  opacity: 0.85;
+}
+
+.msg-text-content {
+  line-height: 1.45;
+}
+
+.msg-time {
+  font-size: 11px;
+  opacity: 0.75;
+  margin-top: 6px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  margin-top: 4px;
-  font-size: 10px;
-  opacity: 0.7;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+}
+
+.status-check {
+  font-size: 12px;
 }
 
 .chat-img-thumb {
   max-width: 100%;
-  max-height: 200px;
-  border-radius: 8px;
+  max-height: 220px;
+  border-radius: 12px;
   cursor: pointer;
+  object-fit: cover;
 }
 
-.main-footer {
-  padding: 16px 24px;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
-  display: flex;
+.file-download-link {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+}
+
+/* Chat Input Area */
+.chat-input-area {
   background: #ffffff;
+  padding: 16px 28px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  gap: 14px;
+  align-items: center;
 }
 
 .btn-attach {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: #f8fafc;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #ffffff;
   color: #64748b;
-  font-size: 20px;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  transition: all 0.2s ease-in-out;
 }
 
-.chat-input {
-  flex: 1;
-  padding: 12px 18px;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+.btn-attach:hover {
   background: #f8fafc;
+  color: #0f172a;
+}
+
+.input-field {
+  flex: 1;
+  background: #f1f5f9;
+  border-radius: 16px;
+  padding: 14px 20px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 15px;
+  color: #0f172a;
   outline: none;
-  font-size: 14px;
+  transition: all 0.2s ease-in-out;
+}
+
+.input-field:focus {
+  background: #ffffff;
+  border-color: #5c60f5;
+  box-shadow: 0 0 0 4px rgba(92, 96, 245, 0.1);
+}
+
+.input-field::placeholder {
+  color: #94a3b8;
 }
 
 .btn-send {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border-radius: 14px;
   border: none;
   background: #5c60f5;
   color: #ffffff;
-  font-size: 18px;
-  cursor: pointer;
+  font-size: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 4px 12px rgba(92, 96, 245, 0.2);
+}
+
+.btn-send:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(92, 96, 245, 0.3);
 }
 
 .btn-send:disabled {
@@ -741,7 +1049,9 @@ export default defineComponent({
   cursor: not-allowed;
 }
 
-.no-chat-selected {
+/* Empty & Loading States */
+.no-chat-selected,
+.empty-history-state {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -749,17 +1059,48 @@ export default defineComponent({
   justify-content: center;
   color: #94a3b8;
   gap: 12px;
+  text-align: center;
+  padding: 32px;
 }
 
-.font-size-huge { font-size: 64px; }
-.empty-state { text-align: center; color: #94a3b8; padding: 32px; font-size: 14px; }
+.font-size-huge {
+  font-size: 64px;
+  color: #cbd5e1;
+}
+
+.empty-state {
+  text-align: center;
+  color: #94a3b8;
+  padding: 32px;
+  font-size: 14px;
+}
+
+.spinner-sm {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(92, 96, 245, 0.2);
+  border-top-color: #5c60f5;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.spinner-sm.light {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .btn-back-chat {
   display: none;
   background: #f1f5f9;
   border: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
   align-items: center;
   justify-content: center;
   font-size: 18px;
@@ -769,14 +1110,71 @@ export default defineComponent({
   flex-shrink: 0;
 }
 
+/* Image Preview Modal */
+.img-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.img-modal-card {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.full-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  object-fit: contain;
+}
+
+.btn-close-modal {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: none;
+  color: #0f172a;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 1024px) {
+  .admin-support-chats {
+    height: calc(100vh - 110px);
+  }
+  .chat-contacts {
+    width: 300px;
+  }
+}
+
 @media (max-width: 768px) {
   .admin-support-chats {
-    height: calc(100vh - 100px);
+    height: calc(100vh - 90px);
   }
-  .telegram-container {
+  .chat-container {
     flex-direction: column;
   }
-  .chat-sidebar {
+  .chat-contacts {
     width: 100% !important;
     height: 100%;
   }
@@ -784,22 +1182,25 @@ export default defineComponent({
     width: 100% !important;
     height: 100%;
   }
-  .chat-sidebar.mobile-hidden,
+  .chat-contacts.mobile-hidden,
   .chat-main.mobile-hidden {
     display: none !important;
   }
   .btn-back-chat {
     display: flex;
   }
-  .user-meta-header {
+  .msg-bubble {
+    max-width: 85%;
+  }
+  .chat-header {
+    padding: 12px 16px;
+  }
+  .chat-history {
+    padding: 16px;
+  }
+  .chat-input-area {
+    padding: 12px 16px;
     gap: 8px;
-  }
-  .header-name {
-    font-size: 14px;
-  }
-  .header-details {
-    font-size: 11px;
-    flex-wrap: wrap;
   }
 }
 </style>

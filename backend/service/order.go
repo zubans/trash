@@ -154,7 +154,9 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 	if variant == nil || !variant.IsVariant() {
 		return nil, errors.New("invalid service variant")
 	}
-	if !variant.IsActive {
+	// A retired service keeps resolving for the orders already placed on it,
+	// but no new order may be created for it.
+	if !variant.IsOrderable() {
 		return nil, errors.New("service variant is not available")
 	}
 	if variant.IsAuction {
@@ -553,12 +555,17 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 		return nil, errors.New("photo must be uploaded through the app")
 	}
 
+	// GetNodeByCode only sees live nodes, so a retired construction variant
+	// reads as a missing one rather than as a database error.
 	variant, err := s.catalogRepo.GetNodeByCode("trash_construction")
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if variant == nil {
+	if variant == nil || variant.IsDeleted() {
 		return nil, errors.New("construction variant not found")
+	}
+	if !variant.IsActive {
+		return nil, errors.New("service variant is not available")
 	}
 
 	var commentPtr *string

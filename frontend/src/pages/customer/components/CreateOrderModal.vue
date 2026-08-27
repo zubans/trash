@@ -21,60 +21,89 @@
       </div>
 
       <form @submit.prevent="$emit('submitOrder')">
-        <!-- ШАГ 1: Овальные кнопки (Категория) -->
+        <!-- Каталог. Категории и услуги живут на одном уровне и показываются
+             вместе: категория раскрывает вложенный уровень, услуга выбирается
+             и показывает цену. -->
         <div class="form-section">
-          <div class="section-label">1. Категория</div>
-          <div class="style-oval-group">
-            <label v-for="cat in categoryOptions" :key="cat.value" class="style-oval-label">
-              <input
-                type="radio"
-                name="category"
-                class="custom-radio-input"
-                :value="cat.value"
-                :checked="categoryIdProxy === cat.value"
-                @change="categoryIdProxy = cat.value"
-              />
-              <div class="style-oval-btn">
-                <i :class="getCategoryIcon(cat.label)"></i> {{ cat.label }}
-              </div>
-            </label>
+          <div class="catalog-head">
+            <div class="section-label">{{ catalogPath.length ? 'Выберите услугу' : 'Категория' }}</div>
+            <button
+              v-if="catalogPath.length"
+              type="button"
+              class="btn-level-back"
+              @click="$emit('goLevel', catalogPath.length - 2)"
+            >
+              <i class="ph-bold ph-arrow-left"></i> Назад
+            </button>
           </div>
-        </div>
 
-        <!-- ШАГ 2: Прямоугольные кнопки (Детали) -->
-        <div v-if="subCategoryOptions && subCategoryOptions.length > 0" class="form-section">
-          <div class="section-label">2. Детали</div>
-          <div class="style-rect-group">
-            <label v-for="sub in subCategoryOptions" :key="sub.value" class="style-rect-label">
-              <input
-                type="radio"
-                name="subcategory"
-                class="custom-radio-input"
-                :value="sub.value"
-                :checked="subCategoryIdProxy === sub.value"
-                @change="subCategoryIdProxy = sub.value"
-              />
-              <div class="style-rect-btn">{{ sub.label }}</div>
-            </label>
+          <div v-if="catalogPath.length" class="catalog-breadcrumbs">
+            <button type="button" class="crumb" @click="$emit('goLevel', -1)">Все услуги</button>
+            <template v-for="(crumb, idx) in catalogPath" :key="crumb.id">
+              <i class="ph-bold ph-caret-right crumb-sep"></i>
+              <button
+                type="button"
+                class="crumb"
+                :class="{ current: idx === catalogPath.length - 1 }"
+                @click="$emit('goLevel', idx)"
+              >
+                {{ crumb.label }}
+              </button>
+            </template>
           </div>
-        </div>
 
-        <!-- ШАГ 3: Список с радиобатонами (Вид услуги) -->
-        <div v-if="variantOptions && variantOptions.length > 0" class="form-section">
-          <div class="section-label">3. Вид услуги</div>
-          <div class="style-list-group">
-            <label v-for="variant in variantOptions" :key="variant.value" class="style-list-label">
+          <div v-if="catalogLoading" class="catalog-state">
+            <span class="spinner-dark"></span> Загрузка каталога...
+          </div>
+          <div v-else-if="catalogItems.length === 0" class="catalog-state">
+            В этом разделе пока нет доступных услуг
+          </div>
+          <div v-else class="style-list-group">
+            <button
+              v-for="cat in catalogCategories"
+              :key="cat.id"
+              type="button"
+              class="catalog-category-row"
+              @click="$emit('openNode', cat)"
+            >
+              <span class="cat-icon"><i :class="getCategoryIcon(cat.label)"></i></span>
+              <span class="cat-text">
+                <span class="cat-title">{{ cat.label }}</span>
+                <span v-if="cat.description" class="cat-desc">{{ cat.description }}</span>
+              </span>
+              <i class="ph-bold ph-caret-right cat-chevron"></i>
+            </button>
+
+            <!-- Аукционные услуги заказываются по фото через отдельный поток,
+                 которого в приложении пока нет: показываем, но не даём выбрать,
+                 чтобы кнопка «Заказать» не упиралась в отказ бэкенда. -->
+            <label
+              v-for="variant in catalogVariants"
+              :key="variant.id"
+              class="style-list-label"
+              :class="{ disabled: variant.is_auction }"
+            >
               <input
                 type="radio"
                 name="service_variant"
                 class="custom-radio-input"
-                :value="variant.value"
-                :checked="variantIdProxy === variant.value"
-                @change="variantIdProxy = variant.value"
+                :value="variant.id"
+                :disabled="variant.is_auction"
+                :checked="selectedVariantId === variant.id"
+                @change="$emit('openNode', variant)"
               />
               <div class="style-list-row">
-                <span>{{ variant.label }}</span>
-                <div class="radio-circle"></div>
+                <span class="variant-text">
+                  <span class="variant-title">{{ variant.label }}</span>
+                  <span v-if="variant.is_auction" class="variant-desc">Заказ по фото — скоро в приложении</span>
+                  <span v-else-if="variant.description" class="variant-desc">{{ variant.description }}</span>
+                </span>
+                <span class="variant-right">
+                  <span class="variant-price">
+                    {{ variant.is_auction ? 'Аукцион' : formatPrice(variant.base_price) }}
+                  </span>
+                  <span v-if="!variant.is_auction" class="radio-circle"></span>
+                </span>
               </div>
             </label>
           </div>
@@ -147,12 +176,12 @@ export default defineComponent({
     orderLat: { type: Number as PropType<number | null>, default: null },
     orderLon: { type: Number as PropType<number | null>, default: null },
     geocodeError: { type: String, default: '' },
-    selectedCategoryId: { type: String as PropType<string | null>, default: null },
-    selectedSubCategoryId: { type: String as PropType<string | null>, default: null },
     selectedVariantId: { type: String as PropType<string | null>, default: null },
-    categoryOptions: { type: Array as () => any[], default: () => [] },
-    subCategoryOptions: { type: Array as () => any[], default: () => [] },
-    variantOptions: { type: Array as () => any[], default: () => [] },
+    // One level of the catalog: categories and services mixed, in the order the
+    // backend returns them. catalogPath is the breadcrumb of opened categories.
+    catalogItems: { type: Array as () => any[], default: () => [] },
+    catalogPath: { type: Array as () => any[], default: () => [] },
+    catalogLoading: { type: Boolean, default: false },
     isAuctionSelected: { type: Boolean, default: false },
     isUrgent: { type: Boolean, default: false },
     orderComment: { type: String, default: '' },
@@ -162,11 +191,12 @@ export default defineComponent({
   },
   emits: [
     'update:modelValue',
-    'update:selectedCategoryId',
-    'update:selectedSubCategoryId',
-    'update:selectedVariantId',
     'update:isUrgent',
     'update:orderComment',
+    // openNode: a category to descend into or a service to select.
+    // goLevel: index in catalogPath to jump back to (-1 = root).
+    'openNode',
+    'goLevel',
     'submitOrder',
   ],
   setup(props, { emit }) {
@@ -175,20 +205,19 @@ export default defineComponent({
       set: (val) => emit('update:modelValue', val),
     })
 
-    const categoryIdProxy = computed({
-      get: () => props.selectedCategoryId || '',
-      set: (val) => emit('update:selectedCategoryId', val),
-    })
+    const catalogCategories = computed(() =>
+      props.catalogItems.filter((item: any) => item.node_type === 'CATEGORY')
+    )
 
-    const subCategoryIdProxy = computed({
-      get: () => props.selectedSubCategoryId || '',
-      set: (val) => emit('update:selectedSubCategoryId', val),
-    })
+    const catalogVariants = computed(() =>
+      props.catalogItems.filter((item: any) => item.node_type === 'VARIANT')
+    )
 
-    const variantIdProxy = computed({
-      get: () => props.selectedVariantId || '',
-      set: (val) => emit('update:selectedVariantId', val),
-    })
+    const formatPrice = (value: number | string | null | undefined) => {
+      const num = Number(value)
+      if (!isFinite(num)) return '—'
+      return `${num.toFixed(0)} ${props.currencySymbol}`
+    }
 
     const getCategoryIcon = (label: string) => {
       const lower = (label || '').toLowerCase()
@@ -212,9 +241,9 @@ export default defineComponent({
 
     return {
       show,
-      categoryIdProxy,
-      subCategoryIdProxy,
-      variantIdProxy,
+      catalogCategories,
+      catalogVariants,
+      formatPrice,
       getCategoryIcon,
     }
   },
@@ -474,6 +503,11 @@ export default defineComponent({
   cursor: pointer;
 }
 
+.style-list-label.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .style-list-row {
   display: flex;
   align-items: center;
@@ -521,6 +555,169 @@ export default defineComponent({
 
 .custom-radio-input:checked + .style-list-row .radio-circle::after {
   transform: scale(1);
+}
+
+/* =========================================
+   КАТАЛОГ: категории и услуги на одном уровне
+   ========================================= */
+.catalog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.btn-level-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5c60f5;
+  cursor: pointer;
+}
+
+.catalog-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.crumb {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.crumb:hover { color: #5c60f5; }
+
+.crumb.current {
+  color: #0f172a;
+  cursor: default;
+}
+
+.crumb-sep {
+  font-size: 10px;
+  color: #cbd5e1;
+}
+
+.catalog-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 14px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.catalog-category-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.catalog-category-row:hover {
+  border-color: #5c60f5;
+  background: rgba(92, 96, 245, 0.02);
+}
+
+.cat-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: #5c60f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.cat-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cat-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cat-desc,
+.variant-desc {
+  font-size: 11px;
+  font-weight: 400;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.cat-chevron {
+  font-size: 12px;
+  color: #cbd5e1;
+  flex-shrink: 0;
+}
+
+.variant-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.variant-title {
+  font-size: 14px;
+}
+
+.variant-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.variant-price {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.spinner-dark {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(100, 116, 139, 0.25);
+  border-top-color: #64748b;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 /* --- Footer (Action Bar) --- */

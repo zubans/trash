@@ -114,11 +114,20 @@ CREATE TABLE IF NOT EXISTS service_nodes (
     sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMP WITH TIME ZONE NULL,          -- миграция 033
     CONSTRAINT chk_variant_has_price
         CHECK (node_type != 'VARIANT' OR base_price IS NOT NULL),
     CONSTRAINT chk_category_no_price
-        CHECK (node_type != 'CATEGORY' OR base_price IS NULL)
+        CHECK (node_type != 'CATEGORY' OR base_price IS NULL),
+    CONSTRAINT chk_deleted_node_inactive                -- миграция 033
+        CHECK (deleted_at IS NULL OR is_active = FALSE)
 );
+
+-- Миграция 033 снимает UNIQUE с code и заменяет его частичным индексом:
+-- код уникален только среди живых узлов, поэтому после удаления его можно
+-- занять заново.
+CREATE UNIQUE INDEX idx_service_nodes_code_live
+    ON service_nodes (code) WHERE deleted_at IS NULL;
 ```
 
 Поля:
@@ -137,6 +146,15 @@ CREATE TABLE IF NOT EXISTS service_nodes (
 | `sort_order` | INT | Порядок сортировки на одном уровне |
 | `created_at` | TIMESTAMPTZ | Дата создания |
 | `updated_at` | TIMESTAMPTZ | Дата обновления |
+| `deleted_at` | TIMESTAMPTZ | Дата мягкого удаления. NULL — узел живой |
+
+Удаление мягкое, потому что `orders.service_variant_id` ссылается на
+`service_nodes` всё время жизни истории заказов: физическое удаление либо
+упало бы на внешнем ключе, либо унесло бы историю. Узел с `deleted_at`
+одновременно принудительно выключен (`is_active = FALSE`), поэтому старые
+запросы вида `is_active = TRUE` уже его не видят, а каталог дополнительно
+фильтрует по `deleted_at IS NULL`. Путь узла в `service_node_paths`
+сохраняется — заказ на удалённую услугу по-прежнему показывает её категорию.
 
 #### `service_node_paths`
 
@@ -847,17 +865,31 @@ WHERE sn.is_auction = TRUE
 | GET | `/admin/service-nodes/:id` | Детали узла |
 | POST | `/admin/service-nodes` | Создать узел |
 | PUT | `/admin/service-nodes/:id` | Обновить узел |
-| DELETE | `/admin/service-nodes/:id` | Удалить узел |
+| DELETE | `/admin/service-nodes/:id` | Мягко удалить узел (строка остаётся, заказы сохраняются) |
+| POST | `/admin/service-nodes/:id/restore` | Восстановить удалённый узел (возвращается выключенным) |
+
+`GET /admin/service-nodes` по умолчанию не отдаёт удалённые узлы; чтобы увидеть
+их в дереве, нужен параметр `?include_deleted=true`.
+
+Ответ `DELETE` содержит `{"message": ..., "soft": true, "had_orders": bool}` —
+`had_orders` говорит админке, что за услугой осталась история заказов.
 
 ### 5.10 Валидация в админских эндпоинтах
 
 - `code` уникален, совпадает с `^[a-z0-9_]+$`.
 - `node_type` не меняется после создания.
 - `VARIANT` может быть только листом: у него не должно быть дочерних узлов.
-- `CATEGORY` не может иметь `base_price`.
+- `CATEGORY` не может иметь `base_price`; `base_price: 0` от общей формы
+  трактуется как «цены нет», а не как конфликт.
+- `node_type` и `code` на обновлении берутся из сохранённого узла, а не из тела
+  запроса: клиент их не присылает, потому что менять их нельзя.
 - Нельзя назначить родителем сам узел или любого из его потомков (защита от циклов).
-- Нельзя удалить узел, если у него есть дочерние узлы.
-- Нельзя удалить вид, если есть заказы с `service_variant_id = :id`.
+- Нельзя удалить узел, если у него есть живые (не удалённые) дочерние узлы —
+  дерево удаляется от листьев к корню.
+- Вид с заказами удалить можно: удаление мягкое, строка остаётся на месте, и
+  `orders.service_variant_id` продолжает разрешаться.
+- Удалённый узел нельзя редактировать и нельзя назначить родителем — сначала
+  восстановление, потом правки.
 - При удалении категории удаление каскадом не используется — запрет реализуется в приложении.
 - `name` должен содержать хотя бы ключ по умолчанию (`ru`) и может содержать дополнительные языки (например, `en`).
 - Для аукционного варианта `base_price` должен быть `0` (или `NULL`, если изменить констрейнт `chk_variant_has_price`).

@@ -13,6 +13,9 @@ export interface ServiceNode {
   sort_order: number
   requires_verification?: boolean
   min_age?: number
+  // Set when the node was retired. The catalog never returns deleted nodes to
+  // the app; the admin panel asks for them explicitly.
+  deleted_at?: string | null
 }
 
 function normalizeArray<T>(data: unknown): T[] {

@@ -328,6 +328,7 @@ func newMockCatalogRepo() *mockCatalogRepo {
 func (m *mockCatalogRepo) CreateNode(node *repository.ServiceNode) error { return nil }
 func (m *mockCatalogRepo) UpdateNode(node *repository.ServiceNode) error { return nil }
 func (m *mockCatalogRepo) DeleteNode(id uuid.UUID) error                 { return nil }
+func (m *mockCatalogRepo) RestoreNode(id uuid.UUID) error                { return nil }
 func (m *mockCatalogRepo) GetNodeByID(id uuid.UUID) (*repository.ServiceNode, error) {
 	n, ok := m.nodes[id]
 	if !ok {
@@ -343,10 +344,10 @@ func (m *mockCatalogRepo) GetNodeByCode(code string) (*repository.ServiceNode, e
 	}
 	return nil, nil
 }
-func (m *mockCatalogRepo) GetRootCategories(activeOnly bool) ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetRootCategories(filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
-func (m *mockCatalogRepo) GetChildren(parentID uuid.UUID, activeOnly bool) ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetChildren(parentID uuid.UUID, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
 func (m *mockCatalogRepo) GetDescendants(ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {

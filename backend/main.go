@@ -325,6 +325,7 @@ func main() {
 			r.Post("/admin/service-nodes", sch.AdminCreateNode)
 			r.Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
 			r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
+			r.Post("/admin/service-nodes/{id}/restore", sch.AdminRestoreNode)
 			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
 			r.Post("/admin/broadcast-email", ah.SendBroadcastEmailHandler)
 		})

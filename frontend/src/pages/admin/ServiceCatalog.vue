@@ -9,9 +9,15 @@
         </h1>
         <div class="page-subtitle">Управление категориями и вариантами оказываемых услуг</div>
       </div>
-      <button type="button" class="btn-primary" @click="openCreateModal(null)">
-        <i class="ph-bold ph-plus"></i> Добавить категорию
-      </button>
+      <div class="header-actions">
+        <label class="show-deleted">
+          <input v-model="showDeleted" type="checkbox" @change="fetchTree" />
+          <span>Показывать удалённые</span>
+        </label>
+        <button type="button" class="btn-primary" @click="openCreateModal(null)">
+          <i class="ph-bold ph-plus"></i> Добавить категорию
+        </button>
+      </div>
     </div>
 
     <!-- Alert Messages -->
@@ -52,6 +58,7 @@
           @create="openCreateModal"
           @edit="openEditModal"
           @delete="confirmDelete"
+          @restore="restoreNode"
         />
       </div>
     </div>
@@ -77,6 +84,7 @@ import {
   createServiceNode,
   updateServiceNode,
   deleteServiceNode,
+  restoreServiceNode,
 } from '../../api/admin-services'
 import ServiceNodeTree from './ServiceNodeTree.vue'
 import ServiceNodeForm from './ServiceNodeForm.vue'
@@ -97,6 +105,7 @@ export default defineComponent({
     const defaultParentId = ref<string | null>(null)
     const successMsg = ref('')
     const errorMsg = ref('')
+    const showDeleted = ref(false)
 
     const flatten = (items: TreeItem[]): ServiceNode[] => {
       const out: ServiceNode[] = []
@@ -107,9 +116,10 @@ export default defineComponent({
       return out
     }
 
+    // A deleted category is listed in the tree but cannot take new children.
     const parentOptions = computed(() =>
       flatten(tree.value)
-        .filter((n) => n.node_type === 'CATEGORY')
+        .filter((n) => n.node_type === 'CATEGORY' && !n.deleted_at)
         .map((n) => ({
           label: n.name['ru'] || n.code,
           value: n.id,
@@ -119,7 +129,7 @@ export default defineComponent({
     const fetchTree = async () => {
       loading.value = true
       try {
-        tree.value = await getAdminServiceNodes()
+        tree.value = await getAdminServiceNodes(showDeleted.value)
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Не удалось загрузить каталог'
       } finally {
@@ -156,18 +166,41 @@ export default defineComponent({
       }
     }
 
+    // Deletion is soft on the backend: the element leaves the catalog, the
+    // orders placed for it keep their service, and it can be restored.
     const confirmDelete = async (node: ServiceNode) => {
-      if (!confirm(`Вы действительно хотите удалить "${node.name['ru'] || node.code}"?`)) {
+      const title = node.name['ru'] || node.code
+      if (
+        !confirm(
+          `Удалить "${title}"?\n\nЭлемент будет скрыт из приложения. ` +
+            'История заказов сохранится, элемент можно восстановить.'
+        )
+      ) {
         return
       }
       successMsg.value = ''
       errorMsg.value = ''
       try {
-        await deleteServiceNode(node.id)
-        successMsg.value = 'Элемент успешно удален'
+        const result = await deleteServiceNode(node.id)
+        successMsg.value = result?.had_orders
+          ? 'Элемент скрыт из каталога. Ранее созданные заказы сохранены.'
+          : 'Элемент удален из каталога'
         await fetchTree()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка при удалении'
+      }
+    }
+
+    const restoreNode = async (node: ServiceNode) => {
+      successMsg.value = ''
+      errorMsg.value = ''
+      try {
+        await restoreServiceNode(node.id)
+        successMsg.value =
+          'Элемент восстановлен. Включите «Активно в приложении», чтобы он снова появился у пользователей.'
+        await fetchTree()
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Ошибка при восстановлении'
       }
     }
 
@@ -182,10 +215,13 @@ export default defineComponent({
       parentOptions,
       successMsg,
       errorMsg,
+      showDeleted,
+      fetchTree,
       openCreateModal,
       openEditModal,
       saveNode,
       confirmDelete,
+      restoreNode,
     }
   },
 })
@@ -226,6 +262,30 @@ export default defineComponent({
   font-weight: 400;
   color: #64748b;
   margin-top: 4px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.show-deleted {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.show-deleted input {
+  width: 16px;
+  height: 16px;
+  accent-color: #5c60f5;
+  cursor: pointer;
 }
 
 .btn-primary {
@@ -359,6 +419,12 @@ export default defineComponent({
     flex-direction: column;
     align-items: flex-start;
     gap: 16px;
+  }
+  .header-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
   }
   .btn-primary {
     width: 100%;

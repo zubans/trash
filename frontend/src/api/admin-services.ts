@@ -23,8 +23,18 @@ export interface UpdateServiceNodeRequest {
   sort_order?: number
 }
 
-export async function getAdminServiceNodes(): Promise<Array<{ node: ServiceNode; children: any[] }>> {
-  const response = await api.get('/admin/service-nodes')
+export interface DeleteServiceNodeResult {
+  message: string
+  soft: boolean
+  had_orders: boolean
+}
+
+export async function getAdminServiceNodes(
+  includeDeleted = false
+): Promise<Array<{ node: ServiceNode; children: any[] }>> {
+  const response = await api.get('/admin/service-nodes', {
+    params: includeDeleted ? { include_deleted: 'true' } : undefined,
+  })
   return response.data
 }
 
@@ -43,6 +53,14 @@ export async function updateServiceNode(nodeId: string, payload: UpdateServiceNo
   return response.data
 }
 
-export async function deleteServiceNode(nodeId: string): Promise<void> {
-  await api.delete(`/admin/service-nodes/${nodeId}`)
+// Deletion is soft: the node is retired, orders placed for it keep their
+// service, and restoreServiceNode brings it back (switched off).
+export async function deleteServiceNode(nodeId: string): Promise<DeleteServiceNodeResult> {
+  const response = await api.delete(`/admin/service-nodes/${nodeId}`)
+  return response.data
+}
+
+export async function restoreServiceNode(nodeId: string): Promise<ServiceNode> {
+  const response = await api.post(`/admin/service-nodes/${nodeId}/restore`)
+  return response.data
 }

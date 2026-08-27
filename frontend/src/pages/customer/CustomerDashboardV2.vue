@@ -327,22 +327,22 @@
       <!-- Create Order Modal -->
       <CreateOrderModal
         v-model="showCreateOrderModal"
-        v-model:selected-category-id="selectedCategoryId"
-        v-model:selected-sub-category-id="selectedSubCategoryId"
-        v-model:selected-variant-id="selectedVariantId"
         v-model:is-urgent="isUrgent"
         v-model:order-comment="orderComment"
         :order-address="orderAddress"
         :order-lat="orderLat"
         :order-lon="orderLon"
         :geocode-error="geocodeError"
-        :category-options="categoryOptions"
-        :sub-category-options="subCategoryOptions"
-        :variant-options="variantOptions"
+        :selected-variant-id="selectedVariantId"
+        :catalog-items="catalogItemOptions"
+        :catalog-path="catalogPathOptions"
+        :catalog-loading="catalogLoading"
         :is-auction-selected="isAuctionSelected"
         :selected-price="selectedPrice"
         :currency-symbol="currencySymbol"
         :creating-order="creatingOrder"
+        @open-node="openCatalogNode"
+        @go-level="goToCatalogLevel"
         @submit-order="submitOrder"
       />
 
@@ -528,10 +528,13 @@ export default defineComponent({
 
     // Catalog & Order Create
     const serviceCategories = ref<ServiceNode[]>([])
-    const subCategories = ref<ServiceNode[]>([])
-    const serviceVariants = ref<ServiceNode[]>([])
-    const selectedCategoryId = ref<string | null>(null)
-    const selectedSubCategoryId = ref<string | null>(null)
+    // The catalog is a tree of arbitrary depth in which a category and a service
+    // can sit side by side, so the picker walks it one level at a time instead
+    // of assuming category -> subcategory -> service. catalogItems holds the
+    // level currently on screen, catalogPath the categories opened to reach it.
+    const catalogItems = ref<ServiceNode[]>([])
+    const catalogPath = ref<ServiceNode[]>([])
+    const catalogLoading = ref(false)
     const selectedVariantId = ref<string | null>(null)
     const isUrgent = ref(false)
     const isAsap = ref(false)
@@ -557,7 +560,7 @@ export default defineComponent({
     })
 
     const selectedVariant = computed(() =>
-      serviceVariants.value.find((v) => v.id === selectedVariantId.value)
+      catalogItems.value.find((v) => v.id === selectedVariantId.value)
     )
 
     const isAuctionSelected = computed(() => !!selectedVariant.value?.is_auction)
@@ -567,17 +570,64 @@ export default defineComponent({
       return node.name['ru'] || node.name['en'] || node.code || ''
     }
 
-    const categoryOptions = computed(() =>
-      serviceCategories.value.map((c) => ({ label: localizedName(c), value: c.id }))
+    const localizedDescription = (node?: ServiceNode) => {
+      if (!node || !node.description) return ''
+      return node.description['ru'] || node.description['en'] || ''
+    }
+
+    const catalogItemOptions = computed(() =>
+      catalogItems.value.map((node) => ({
+        id: node.id,
+        label: localizedName(node),
+        description: localizedDescription(node),
+        node_type: node.node_type,
+        base_price: node.base_price,
+        is_auction: node.is_auction,
+      }))
     )
 
-    const subCategoryOptions = computed(() =>
-      subCategories.value.map((c) => ({ label: localizedName(c), value: c.id }))
+    const catalogPathOptions = computed(() =>
+      catalogPath.value.map((node) => ({ id: node.id, label: localizedName(node) }))
     )
 
-    const variantOptions = computed(() =>
-      serviceVariants.value.map((v) => ({ label: localizedName(v), value: v.id }))
-    )
+    // Loads the children of a category, or the root level when id is null.
+    const loadCatalogLevel = async (id: string | null) => {
+      catalogLoading.value = true
+      try {
+        catalogItems.value = id ? await getServiceCategoryChildren(id) : await getServiceCategories()
+      } catch (err) {
+        console.error('Failed to load catalog level:', err)
+        catalogItems.value = []
+      } finally {
+        catalogLoading.value = false
+      }
+    }
+
+    // A category descends one level; a service is simply picked.
+    const openCatalogNode = async (item: { id: string; node_type: string }) => {
+      if (item.node_type === 'VARIANT') {
+        selectedVariantId.value = item.id
+        return
+      }
+      const node = catalogItems.value.find((n) => n.id === item.id)
+      if (!node) return
+      selectedVariantId.value = null
+      catalogPath.value = [...catalogPath.value, node]
+      await loadCatalogLevel(node.id)
+    }
+
+    // index -1 is the root level; anything else keeps the breadcrumb up to it.
+    const goToCatalogLevel = async (index: number) => {
+      selectedVariantId.value = null
+      if (index < 0) {
+        catalogPath.value = []
+        await loadCatalogLevel(null)
+        return
+      }
+      catalogPath.value = catalogPath.value.slice(0, index + 1)
+      const current = catalogPath.value[catalogPath.value.length - 1]
+      await loadCatalogLevel(current ? current.id : null)
+    }
 
     const selectedPrice = computed(() => {
       const variant = selectedVariant.value
@@ -679,20 +729,17 @@ export default defineComponent({
       orderLat.value = null
       orderLon.value = null
       geocodeError.value = ''
-      selectedCategoryId.value = null
-      selectedSubCategoryId.value = null
       selectedVariantId.value = null
-      subCategories.value = []
-      serviceVariants.value = []
+      catalogPath.value = []
+      catalogItems.value = []
       isUrgent.value = false
       isAsap.value = false
       orderComment.value = ''
       showCreateOrderModal.value = true
-      try {
-        serviceCategories.value = await getServiceCategories()
-      } catch (err) {
-        console.error('Failed to load categories:', err)
-      }
+      await loadCatalogLevel(null)
+      // The root level doubles as the lookup the order history uses to resolve
+      // a variant's parent category.
+      serviceCategories.value = catalogItems.value.filter((n) => n.node_type === 'CATEGORY')
       await geocodeAddress()
     }
 
@@ -1308,36 +1355,6 @@ export default defineComponent({
       router.push('/login')
     }
 
-    watch(selectedCategoryId, async (id) => {
-      selectedSubCategoryId.value = null
-      selectedVariantId.value = null
-      serviceVariants.value = []
-      if (!id) {
-        subCategories.value = []
-        return
-      }
-      const children = await getServiceCategoryChildren(id)
-      const categories = children.filter((c) => c.node_type === 'CATEGORY')
-      const variants = children.filter((c) => c.node_type === 'VARIANT')
-      if (categories.length > 0) {
-        subCategories.value = categories
-      } else {
-        subCategories.value = []
-        serviceVariants.value = variants
-      }
-    })
-
-    watch(selectedSubCategoryId, async (id) => {
-      selectedVariantId.value = null
-      if (!id) {
-        serviceVariants.value = []
-        return
-      }
-      const children = await getServiceCategoryChildren(id)
-      const variants = children.filter((c) => c.node_type === 'VARIANT')
-      serviceVariants.value = variants
-    })
-
     watch(selectedVariantId, () => {
       isUrgent.value = false
       isAsap.value = false
@@ -1396,8 +1413,6 @@ export default defineComponent({
       topUpAmount,
       submitting,
       creatingOrder,
-      selectedCategoryId,
-      selectedSubCategoryId,
       selectedVariantId,
       isUrgent,
       isAsap,
@@ -1406,9 +1421,11 @@ export default defineComponent({
       orderLat,
       orderLon,
       geocodeError,
-      categoryOptions,
-      subCategoryOptions,
-      variantOptions,
+      catalogItemOptions,
+      catalogPathOptions,
+      catalogLoading,
+      openCatalogNode,
+      goToCatalogLevel,
       isAuctionSelected,
       selectedPrice,
 

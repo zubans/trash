@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ func NewServiceCatalogHandler(catalogRepo repository.ServiceCatalogRepository) *
 
 // ListRootCategories handles GET /service-categories.
 func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *http.Request) {
-	nodes, err := h.catalogRepo.GetRootCategories(true)
+	nodes, err := h.catalogRepo.GetRootCategories(repository.FilterActive)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -40,7 +41,7 @@ func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "invalid category id", http.StatusBadRequest)
 		return
 	}
-	nodes, err := h.catalogRepo.GetChildren(id, true)
+	nodes, err := h.catalogRepo.GetChildren(id, repository.FilterActive)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -102,25 +103,28 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// AdminListNodes handles GET /admin/service-nodes.
+// AdminListNodes handles GET /admin/service-nodes. Retired nodes are left out
+// unless the caller asks for them with include_deleted=true.
 func (h *ServiceCatalogHandler) AdminListNodes(w http.ResponseWriter, r *http.Request) {
-	roots, err := h.catalogRepo.GetRootCategories(false)
+	filter := repository.ServiceNodeFilter{IncludeDeleted: queryBool(r, "include_deleted")}
+
+	roots, err := h.catalogRepo.GetRootCategories(filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	result := make([]map[string]interface{}, 0, len(roots))
 	for _, root := range roots {
-		result = append(result, h.buildTree(root))
+		result = append(result, h.buildTree(root, filter))
 	}
 	writeJSON(w, result)
 }
 
-func (h *ServiceCatalogHandler) buildTree(node *repository.ServiceNode) map[string]interface{} {
-	children, _ := h.catalogRepo.GetChildren(node.ID, false)
+func (h *ServiceCatalogHandler) buildTree(node *repository.ServiceNode, filter repository.ServiceNodeFilter) map[string]interface{} {
+	children, _ := h.catalogRepo.GetChildren(node.ID, filter)
 	childTrees := make([]map[string]interface{}, 0, len(children))
 	for _, child := range children {
-		childTrees = append(childTrees, h.buildTree(child))
+		childTrees = append(childTrees, h.buildTree(child, filter))
 	}
 	return map[string]interface{}{
 		"node":     node,
@@ -137,7 +141,7 @@ func (h *ServiceCatalogHandler) AdminGetNode(w http.ResponseWriter, r *http.Requ
 	}
 	node, err := h.catalogRepo.GetNodeByID(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if isNotFound(err) {
 			http.Error(w, "node not found", http.StatusNotFound)
 			return
 		}
@@ -166,7 +170,7 @@ func (h *ServiceCatalogHandler) AdminCreateNode(w http.ResponseWriter, r *http.R
 	}
 
 	if err := h.catalogRepo.CreateNode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeCatalogError(w, err)
 		return
 	}
 
@@ -189,6 +193,30 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 	}
 	req.ID = id
 
+	// code and node_type are immutable, so clients do not send them on update.
+	// Validating the request against its own empty node_type used to reject
+	// every variant edit with "CATEGORY cannot have base_price"; the rules
+	// apply to the stored node.
+	existing, err := h.catalogRepo.GetNodeByID(id)
+	if err != nil {
+		if isNotFound(err) {
+			http.Error(w, "node not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if existing == nil {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	if existing.IsDeleted() {
+		http.Error(w, "node is deleted: restore it before editing", http.StatusConflict)
+		return
+	}
+	req.NodeType = existing.NodeType
+	req.Code = existing.Code
+
 	if err := h.validateNode(&req, false); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -200,14 +228,16 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 	}
 
 	if err := h.catalogRepo.UpdateNode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeCatalogError(w, err)
 		return
 	}
 
 	writeJSON(w, req)
 }
 
-// AdminDeleteNode handles DELETE /admin/service-nodes/:id.
+// AdminDeleteNode handles DELETE /admin/service-nodes/:id. The node is retired,
+// not removed: orders placed for it keep their service, and the node can be
+// restored later.
 func (h *ServiceCatalogHandler) AdminDeleteNode(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -215,12 +245,65 @@ func (h *ServiceCatalogHandler) AdminDeleteNode(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Read before deleting: the answer would not change afterwards, but the
+	// admin panel wants to say that order history is being kept.
+	hadOrders, _ := h.catalogRepo.HasOrders(id)
+
 	if err := h.catalogRepo.DeleteNode(id); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeCatalogError(w, err)
 		return
 	}
 
-	writeJSON(w, map[string]string{"message": "node deleted successfully"})
+	writeJSON(w, map[string]interface{}{
+		"message":    "node deleted successfully",
+		"soft":       true,
+		"had_orders": hadOrders,
+	})
+}
+
+// AdminRestoreNode handles POST /admin/service-nodes/:id/restore. The node comes
+// back switched off so that it is re-published deliberately.
+func (h *ServiceCatalogHandler) AdminRestoreNode(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUIDParam(r, "id")
+	if err != nil {
+		http.Error(w, "invalid node id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.catalogRepo.RestoreNode(id); err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	node, err := h.catalogRepo.GetNodeByID(id)
+	if err != nil {
+		writeJSON(w, map[string]string{"message": "node restored successfully"})
+		return
+	}
+	writeJSON(w, node)
+}
+
+// writeCatalogError maps repository errors to status codes so the admin panel
+// can tell a conflict from a bug.
+func writeCatalogError(w http.ResponseWriter, err error) {
+	switch {
+	case isNotFound(err):
+		http.Error(w, "node not found", http.StatusNotFound)
+	case errors.Is(err, repository.ErrServiceNodeDeleted),
+		errors.Is(err, repository.ErrServiceNodeNotDeleted),
+		errors.Is(err, repository.ErrServiceNodeHasChildren),
+		errors.Is(err, repository.ErrServiceNodeCodeTaken),
+		errors.Is(err, repository.ErrServiceNodeParentDeleted):
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// isNotFound covers the repository calls that still surface a missing row as
+// sql.ErrNoRows.
+func isNotFound(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrServiceNodeNotFound)
 }
 
 var codeRegexp = regexp.MustCompile(`^[a-z0-9_]+$`)
@@ -238,6 +321,10 @@ func (h *ServiceCatalogHandler) validateParent(parentID *uuid.UUID) error {
 	}
 	if parent.NodeType != repository.ServiceNodeTypeCategory {
 		return errors.New("parent must be a category")
+	}
+	// A node under a deleted category would be unreachable from the catalog.
+	if parent.IsDeleted() {
+		return errors.New("parent category is deleted")
 	}
 	return nil
 }
@@ -267,12 +354,28 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 			return errors.New("auction variant base_price must be 0")
 		}
 	} else {
+		// A client that keeps one form for both node types sends base_price: 0
+		// for a category. That is "no price", not a conflicting price.
+		if node.BasePrice != nil && node.BasePrice.IsZero() {
+			node.BasePrice = nil
+		}
 		if node.BasePrice != nil {
 			return errors.New("CATEGORY cannot have base_price")
 		}
 	}
 
 	return nil
+}
+
+// queryBool reads a boolean query parameter in the spellings a browser query
+// string tends to carry.
+func queryBool(r *http.Request, name string) bool {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get(name))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseUUIDParam(r *http.Request, name string) (uuid.UUID, error) {

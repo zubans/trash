@@ -6,7 +6,7 @@
       class="tree-node"
       :class="{ collapsed: isCollapsed(item.node.id) }"
     >
-      <div class="node-row">
+      <div class="node-row" :class="{ deleted: isDeleted(item.node) }">
         <!-- Drag Handle -->
         <i class="ph-bold ph-dots-six-vertical drag-handle" title="Перетащить"></i>
 
@@ -37,7 +37,12 @@
             <i class="ph-fill ph-gavel"></i> Аукцион
           </div>
 
+          <div v-if="isDeleted(item.node)" class="badge-deleted" title="Удалено: скрыто из приложения, история заказов сохранена">
+            <i class="ph-fill ph-archive"></i> Удалено
+          </div>
+
           <div
+            v-else
             class="status-dot"
             :class="{ inactive: !item.node.is_active }"
             :title="item.node.is_active ? 'Активен' : 'Отключен'"
@@ -51,31 +56,43 @@
 
         <!-- Node Actions -->
         <div class="node-actions">
+          <!-- A deleted node is restored before it can be edited again. -->
           <button
-            v-if="item.node.node_type === 'CATEGORY'"
+            v-if="isDeleted(item.node)"
             type="button"
-            class="btn-action add"
-            title="Добавить подэлемент"
-            @click.stop="$emit('create', item.node.id)"
+            class="btn-action restore"
+            title="Восстановить"
+            @click.stop="$emit('restore', item.node)"
           >
-            <i class="ph-bold ph-plus"></i>
+            <i class="ph-bold ph-arrow-counter-clockwise"></i>
           </button>
-          <button
-            type="button"
-            class="btn-action"
-            title="Редактировать"
-            @click.stop="$emit('edit', item.node)"
-          >
-            <i class="ph-bold ph-pencil-simple"></i>
-          </button>
-          <button
-            type="button"
-            class="btn-action delete"
-            title="Удалить"
-            @click.stop="$emit('delete', item.node)"
-          >
-            <i class="ph-bold ph-trash"></i>
-          </button>
+          <template v-else>
+            <button
+              v-if="item.node.node_type === 'CATEGORY'"
+              type="button"
+              class="btn-action add"
+              title="Добавить подэлемент"
+              @click.stop="$emit('create', item.node.id)"
+            >
+              <i class="ph-bold ph-plus"></i>
+            </button>
+            <button
+              type="button"
+              class="btn-action"
+              title="Редактировать"
+              @click.stop="$emit('edit', item.node)"
+            >
+              <i class="ph-bold ph-pencil-simple"></i>
+            </button>
+            <button
+              type="button"
+              class="btn-action delete"
+              title="Удалить"
+              @click.stop="$emit('delete', item.node)"
+            >
+              <i class="ph-bold ph-trash"></i>
+            </button>
+          </template>
         </div>
       </div>
 
@@ -86,6 +103,7 @@
           @create="$emit('create', $event)"
           @edit="$emit('edit', $event)"
           @delete="$emit('delete', $event)"
+          @restore="$emit('restore', $event)"
         />
       </div>
     </div>
@@ -103,7 +121,7 @@ export default defineComponent({
       required: true,
     },
   },
-  emits: ['create', 'edit', 'delete'],
+  emits: ['create', 'edit', 'delete', 'restore'],
   setup() {
     const collapsedMap = ref<Record<string, boolean>>({})
 
@@ -112,6 +130,8 @@ export default defineComponent({
     const toggleNode = (id: string) => {
       collapsedMap.value[id] = !collapsedMap.value[id]
     }
+
+    const isDeleted = (node: { deleted_at?: string | null }) => !!node.deleted_at
 
     const formatPrice = (val: number | string | null | undefined) => {
       if (val === null || val === undefined || val === '') return '—'
@@ -123,6 +143,7 @@ export default defineComponent({
     return {
       isCollapsed,
       toggleNode,
+      isDeleted,
       formatPrice,
     }
   },
@@ -276,6 +297,31 @@ export default defineComponent({
   box-shadow: 0 0 0 2px #f1f5f9;
 }
 
+.badge-deleted {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-row.deleted .node-title,
+.node-row.deleted .node-price {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.node-row.deleted .node-icon {
+  color: #cbd5e1;
+}
+
 .badge-auction {
   font-size: 10px;
   font-weight: 700;
@@ -340,6 +386,11 @@ export default defineComponent({
 
 .btn-action.add:hover {
   color: #5c60f5;
+}
+
+.btn-action.restore:hover {
+  color: #0ea5e9;
+  background: #f0f9ff;
 }
 
 .btn-action.delete:hover {
