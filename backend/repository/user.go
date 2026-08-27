@@ -25,6 +25,7 @@ type User struct {
 	BirthDate              *time.Time   `json:"birth_date,omitempty"`
 	PendingEmail           string       `json:"pending_email,omitempty"`
 	EmailVerified          bool         `json:"email_verified"`
+	Verified               bool         `json:"is_verified"`
 	EmailVerificationToken string       `json:"-"`
 	EmailTokenExpiresAt    *time.Time   `json:"-"`
 	PasswordResetCode      string       `json:"-"`
@@ -48,8 +49,13 @@ func (u *User) GetAge() int {
 	return age
 }
 
+// IsVerified reports whether an admin has manually verified this user. It is
+// deliberately independent of EmailVerified: confirming an email proves address
+// ownership, not that the account is trusted. Every eligibility gate — customer
+// order visibility and service variants that set requires_verification — reads
+// this single flag.
 func (u *User) IsVerified() bool {
-	return u.Status == "VERIFIED" || u.EmailVerified
+	return u.Verified
 }
 
 // CustomerProfile holds customer-specific profile data.
@@ -69,6 +75,7 @@ type UserRepository interface {
 	FindByID(id uuid.UUID) (*User, error)
 	UpdateStatus(id uuid.UUID, status string) error
 	UpdateRole(id uuid.UUID, role string) error
+	UpdateVerified(id uuid.UUID, verified bool) error
 	UpdateBalance(id uuid.UUID, balance money.Amount) error
 	UpdateLastGeo(id uuid.UUID, lastGeo string) error
 	CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
@@ -99,14 +106,14 @@ func (r *repo) FindByPhone(phone string) (*User, error) {
 	var resetExp, birthDate sql.NullTime
 	cleanDigits := regexp.MustCompile(`[^0-9]`).ReplaceAllString(phone, "")
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
 		 FROM users
 		 WHERE phone = $1
 		    OR ($2 != '' AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $2)
 		 ORDER BY created_at ASC LIMIT 1`,
 		phone,
 		cleanDigits,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +134,9 @@ func (r *repo) FindByEmail(email string) (*User, error) {
 	var em, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
 		email,
-	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -150,9 +157,9 @@ func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
 	var email, tok, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
 		token,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -173,9 +180,9 @@ func (r *repo) FindByID(id uuid.UUID) (*User, error) {
 	var email, pendingEmail, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRow(
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -199,9 +206,9 @@ func (r *repo) Create(user *User) error {
 		user.ID = id
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, pending_email, email_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.PendingEmail, user.EmailVerified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
+		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
 	)
 	return err
 }
@@ -339,6 +346,13 @@ func (r *repo) UpdateStatus(id uuid.UUID, status string) error {
 
 func (r *repo) UpdateRole(id uuid.UUID, role string) error {
 	_, err := r.db.Exec(`UPDATE users SET role = $1 WHERE id = $2`, role, id)
+	return err
+}
+
+// UpdateVerified sets the manual verification flag. This is the only writer of
+// users.is_verified; it is reached exclusively through the admin endpoint.
+func (r *repo) UpdateVerified(id uuid.UUID, verified bool) error {
+	_, err := r.db.Exec(`UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
 	return err
 }
 

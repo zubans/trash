@@ -300,6 +300,7 @@ func main() {
 			r.Get("/admin/geo-alerts", egh.GetGeoAlerts)
 			r.Get("/admin/users", ah.GetUsersHandler)
 			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
+			r.Post("/admin/users/{id}/verified", ah.UpdateUserVerifiedHandler)
 			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
 			r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
 			r.Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)

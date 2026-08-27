@@ -63,6 +63,13 @@ func (m *mockUserRepository) UpdateRole(id uuid.UUID, role string) error {
 	return nil
 }
 
+func (m *mockUserRepository) UpdateVerified(id uuid.UUID, verified bool) error {
+	if u, ok := m.users[id]; ok {
+		u.Verified = verified
+	}
+	return nil
+}
+
 func (m *mockUserRepository) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	if u, ok := m.users[id]; ok {
 		u.Balance = balance

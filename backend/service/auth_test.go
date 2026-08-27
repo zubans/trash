@@ -70,6 +70,16 @@ func (m *mockRepo) UpdateStatus(id uuid.UUID, status string) error {
 	return sql.ErrNoRows
 }
 
+func (m *mockRepo) UpdateVerified(id uuid.UUID, verified bool) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Verified = verified
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
 func (m *mockRepo) UpdateRole(id uuid.UUID, role string) error {
 	for _, u := range m.users {
 		if u.ID == id {

@@ -71,6 +71,16 @@ func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error {
 	return sql.ErrNoRows
 }
 
+func (m *mockUserRepo) UpdateVerified(id uuid.UUID, verified bool) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Verified = verified
+			return nil
+		}
+	}
+	return sql.ErrNoRows
+}
+
 func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	for _, u := range m.users {
 		if u.ID == id {

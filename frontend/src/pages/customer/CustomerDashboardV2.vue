@@ -4,8 +4,7 @@
       <!-- Шапка -->
       <header class="header">
         <div class="logo">
-          <img src="../../assets/app_logo.png" alt="Logo" class="app-logo-icon" />
-          <span>Моя услуга</span>
+          <AppLogo />
         </div>
         <div class="header-controls">
           <button type="button" class="btn-support-header position-relative" title="Поддержка" @click="openSupportChat">
@@ -428,6 +427,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import AppLogo from '../../components/AppLogo.vue'
 import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
@@ -443,6 +443,7 @@ export default defineComponent({
   components: {
     UpdateBanner,
     LanguageSwitcher,
+    AppLogo,
     OrderDetailsModal,
     CreateOrderModal,
     CustomerProfileModal,

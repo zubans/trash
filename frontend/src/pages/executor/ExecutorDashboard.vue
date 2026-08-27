@@ -4,8 +4,7 @@
       <!-- Шапка -->
       <header class="header">
         <div class="logo">
-          <img src="../../assets/app_logo.png" alt="Logo" class="app-logo-icon" />
-          <span>Моя услуга</span>
+          <AppLogo />
         </div>
         <div class="header-controls">
           <button type="button" class="btn-support-header position-relative" title="Поддержка" @click="openSupportChat">
@@ -617,6 +616,7 @@ import { Geolocation } from '@capacitor/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import AppLogo from '../../components/AppLogo.vue'
 import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
@@ -632,6 +632,7 @@ export default defineComponent({
   components: {
     UpdateBanner,
     LanguageSwitcher,
+    AppLogo,
     ExecutorMapModal,
     ExecutorProfileModal,
     OrderDetailsModal,

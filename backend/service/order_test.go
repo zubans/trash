@@ -454,10 +454,11 @@ func (m *mockUserRepo) Create(user *repository.User) error                 { ret
 func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error) {
 	// A verified adult user: eligibility rules are exercised separately.
 	birth := time.Now().AddDate(-30, 0, 0)
-	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", EmailVerified: true, BirthDate: &birth}, nil
+	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", Verified: true, BirthDate: &birth}, nil
 }
 func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error         { return nil }
 func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error             { return nil }
+func (m *mockUserRepo) UpdateVerified(id uuid.UUID, verified bool) error       { return nil }
 func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error { return nil }
 func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 	m.lastGeo[id] = lastGeo

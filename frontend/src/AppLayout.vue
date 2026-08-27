@@ -10,16 +10,7 @@
     <!-- Premium Sidebar -->
     <aside :class="['sidebar', { 'minimized': sidebarMinimized }]">
       <div class="logo">
-        <div class="logo-container opt-1">
-          <svg class="logo-svg" viewBox="0 0 40 40" fill="none">
-            <path d="M 6 35 V 17 C 6 9, 15 9, 20 18 C 25 9, 32 9, 32 17 V 23" stroke="#5c60f5" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path>
-            <circle cx="19" cy="27" r="4.5" fill="#10b981"></circle>
-          </svg>
-          <div v-if="!sidebarMinimized || isMobile" class="text-block">
-            <div class="text-top">оя</div>
-            <div class="text-bottom">услуга</div>
-          </div>
-        </div>
+        <AppLogo :hide-text="sidebarMinimized && !isMobile" />
       </div>
 
       <div v-if="!sidebarMinimized || isMobile" class="nav-section">Управление</div>
@@ -132,10 +123,11 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
+import AppLogo from './components/AppLogo.vue'
 
 export default defineComponent({
   name: 'AppLayout',
-  components: { LanguageSwitcher },
+  components: { LanguageSwitcher, AppLogo },
   setup() {
     const router = useRouter()
     const route = useRoute()

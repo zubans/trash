@@ -67,9 +67,13 @@
 
         <div class="cell-address" :title="u.address || '-'">{{ u.address || '-' }}</div>
 
-        <div>
+        <div class="cell-status">
           <span class="status-pill" :class="u.status === 'ACTIVE' ? 'success' : 'danger'">
             {{ u.status }}
+          </span>
+          <span class="verify-chip" :class="u.is_verified ? 'verified' : 'unverified'">
+            <i :class="u.is_verified ? 'ph-fill ph-seal-check' : 'ph ph-seal'"></i>
+            {{ u.is_verified ? 'Верифицирован' : 'Не верифицирован' }}
           </span>
         </div>
 
@@ -105,6 +109,11 @@
               </button>
               <button class="dropdown-item" @click="openAddressModal(u)">
                 <i class="ph-bold ph-map-pin"></i> Редактировать адрес
+              </button>
+              <div class="menu-divider"></div>
+              <button class="dropdown-item" @click="toggleUserVerified(u)">
+                <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
+                {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
               </button>
               <div class="menu-divider"></div>
               <button
@@ -333,6 +342,17 @@ export default defineComponent({
       }
     }
 
+    const toggleUserVerified = async (user: any) => {
+      const newVerified = !user.is_verified
+      try {
+        await api.post(`/admin/users/${user.id}/verified`, { verified: newVerified })
+        user.is_verified = newVerified
+      } catch (err: any) {
+        alert(err.response?.data || 'Ошибка обновления верификации')
+        console.error(err)
+      }
+    }
+
     const showRoleModal = ref(false)
     const selectedUser = ref<any>(null)
     const newRole = ref<{ text: string; value: string } | string>('CUSTOMER')
@@ -515,6 +535,7 @@ export default defineComponent({
       debouncedFetch,
       clearFilters,
       toggleUserStatus,
+      toggleUserVerified,
       formatDate,
       showRoleModal,
       showTopUpModal,
@@ -772,6 +793,38 @@ export default defineComponent({
 
 .status-pill.danger {
   color: #ef4444;
+}
+
+.cell-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.verify-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.verify-chip i {
+  font-size: 13px;
+}
+
+.verify-chip.verified {
+  color: #10b981;
+  background: #ecfdf5;
+}
+
+.verify-chip.unverified {
+  color: #94a3b8;
+  background: #f1f5f9;
 }
 
 /* Actions & Kebab Dropdown */

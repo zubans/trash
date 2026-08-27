@@ -122,7 +122,7 @@ func TestCreateOrderRejectsOverdraft(t *testing.T) {
 // TestAcceptRejectsIneligibleExecutor verifies that the age and verification
 // rules are enforced when an order is taken, not only when it is listed.
 func TestAcceptRejectsIneligibleExecutor(t *testing.T) {
-	minor := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "ACTIVE", EmailVerified: true}
+	minor := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "ACTIVE", Verified: true}
 	birth := time.Now().AddDate(-16, 0, 0)
 	minor.BirthDate = &birth
 
@@ -138,12 +138,12 @@ func TestAcceptRejectsIneligibleExecutor(t *testing.T) {
 		t.Error("expected an unverified executor to be rejected")
 	}
 
-	verified := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "ACTIVE", EmailVerified: true, BirthDate: &adult}
+	verified := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "ACTIVE", Verified: true, BirthDate: &adult}
 	if err := canExecutorTakeOrder(verified, restricted); err != nil {
 		t.Errorf("expected a verified adult to be accepted, got %v", err)
 	}
 
-	banned := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "BANNED", EmailVerified: true, BirthDate: &adult}
+	banned := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "BANNED", Verified: true, BirthDate: &adult}
 	if err := canExecutorTakeOrder(banned, nil); err == nil {
 		t.Error("expected a banned executor to be rejected")
 	}

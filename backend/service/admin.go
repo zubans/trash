@@ -223,6 +223,21 @@ func (s *AdminService) UpdateUserStatus(userID, adminID uuid.UUID, status string
 	return nil
 }
 
+// SetUserVerified toggles the manual verification flag on a user. This is the
+// admin "verified" checkbox: it is the only thing that makes IsVerified() true,
+// which in turn gates customer order visibility and services that require a
+// verified account.
+func (s *AdminService) SetUserVerified(userID, adminID uuid.UUID, verified bool) error {
+	if _, err := s.userRepo.FindByID(userID); err != nil {
+		return errors.New("user not found")
+	}
+	if err := s.userRepo.UpdateVerified(userID, verified); err != nil {
+		return err
+	}
+	log.Printf("[AUDIT] admin %s set verified of user %s to %t", adminID, userID, verified)
+	return nil
+}
+
 // UpdateUserRole updates a user's role. Role changes take effect on the next
 // request because authorization reads the role from the database.
 func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) error {

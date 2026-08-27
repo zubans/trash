@@ -117,6 +117,14 @@ func (s *MatchingService) MatchOrders() error {
 
 	// 4. Match each order
 	for _, order := range orders {
+		// Assign orders only from verified customers, mirroring the manual
+		// order feeds ("показ заказов только от верифицированных пользователей").
+		if s.userRepo != nil {
+			if customer, err := s.userRepo.FindByID(order.CustomerID); err == nil && customer != nil && !customer.IsVerified() {
+				continue
+			}
+		}
+
 		// Prefer order pickup coordinates; fall back to customer profile last_geo.
 		var lat, lon float64
 		hasCoords := false
