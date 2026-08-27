@@ -122,10 +122,10 @@ func main() {
 	matchingService.StartMatchingWorker(5 * time.Second)
 
 	// Start background workers
-	slaWorker := worker.NewSLAWorker(db, orderService, chatService)
+	slaWorker := worker.NewSLAWorker(db, orderService, chatService, ledger)
 	slaWorker.Start(30 * time.Second)
 
-	auctionWorker := worker.NewAuctionWorker(db)
+	auctionWorker := worker.NewAuctionWorker(db, orderService)
 	auctionWorker.Start(1 * time.Minute)
 
 	// The only thing that closes an expired shift: one periodic scan, which also

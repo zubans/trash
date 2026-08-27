@@ -284,7 +284,22 @@ func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.
 		return errors.New("cannot top up an admin balance")
 	}
 
-	return s.adminRepo.TopUpUserBalance(userID, adminID, amount)
+	// Through the ledger, like every other movement of money. The previous
+	// implementation credited the balance and wrote a transaction row with raw
+	// SQL, touching no system account: the user's own history still added up,
+	// which is why the per-user reconciliation kept passing, while the platform
+	// books drifted a little further open with every top-up.
+	if s.ledger == nil {
+		return errors.New("ledger is not configured")
+	}
+	if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+		return s.ledger.Deposit(tx, userID, amount, &adminID)
+	}); err != nil {
+		return err
+	}
+
+	log.Printf("[AUDIT] admin %s credited %s to user %s", adminID, amount, userID)
+	return nil
 }
 
 // page normalises a requested page size. Admin listings used to return whole

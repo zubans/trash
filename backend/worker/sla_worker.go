@@ -9,6 +9,7 @@ import (
 
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
+	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -17,14 +18,18 @@ type SLAWorker struct {
 	db           *sql.DB
 	orderService *service.OrderService
 	chatService  *service.ChatService
+	ledger       *service.Ledger
 }
 
-// NewSLAWorker creates a new SLAWorker.
-func NewSLAWorker(db *sql.DB, orderService *service.OrderService, chatService *service.ChatService) *SLAWorker {
+// NewSLAWorker creates a new SLAWorker. The ledger is required: the downgrade
+// refunds part of the hold, and a refund that does not come out of the escrow
+// account is exactly the one-sided movement the ledger exists to prevent.
+func NewSLAWorker(db *sql.DB, orderService *service.OrderService, chatService *service.ChatService, ledger *service.Ledger) *SLAWorker {
 	return &SLAWorker{
 		db:           db,
 		orderService: orderService,
 		chatService:  chatService,
+		ledger:       ledger,
 	}
 }
 
@@ -130,18 +135,15 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 		return nil
 	}
 
-	// 3. Issue refund if applicable
+	// 3. Issue refund if applicable.
+	//
+	// Out of escrow, through the ledger. The hold is reduced to basePrice just
+	// above, so escrow must give up exactly the difference; the raw UPDATE this
+	// replaces credited the customer and left escrow holding money that no
+	// order claimed any more, which is one of the ways the platform books came
+	// to differ from the sum of user balances.
 	if refund.IsPositive() {
-		_, err = tx.Exec(`UPDATE users SET balance = balance + $1 WHERE id = $2`, refund, o.CustomerID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(`
-			INSERT INTO transactions (user_id, order_id, type, amount, created_at)
-			VALUES ($1, $2, 'REFUND', $3, now())`,
-			o.CustomerID, o.ID, refund)
-		if err != nil {
+		if err := w.ledger.Release(tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
 			return err
 		}
 	}

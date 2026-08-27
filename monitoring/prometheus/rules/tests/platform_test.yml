@@ -1,0 +1,187 @@
+# Unit tests for the alert rules, run by `promtool test rules`.
+#
+# These exist because a rule that fires when it should not is not a cosmetic
+# problem: it is how an alert channel becomes something nobody reads. Both
+# negative cases below are alerts that actually reached the chat and were wrong.
+rule_files:
+  - ../platform.yml
+
+evaluation_interval: 1m
+
+tests:
+  # ReconcileWorker runs once every 24 hours. A single 15-minute staleness
+  # threshold across every worker fired on it about twenty minutes after each
+  # restart and then stayed firing forever.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_worker_last_success_timestamp_seconds{worker="reconcile"}'
+        values: '0x180'
+      - series: 'up{job="backend"}'
+        values: '1x180'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: BackgroundWorkerStalled
+        exp_alerts: []
+
+  # A worker that really is on a short timer must still be caught.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_worker_last_success_timestamp_seconds{worker="matching"}'
+        values: '0x180'
+      - series: 'up{job="backend"}'
+        values: '1x180'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackgroundWorkerStalled
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              worker: matching
+            exp_annotations:
+              summary: "Фоновый обработчик matching не отрабатывал 15 минут"
+              description: "Процесс жив, но проход не завершался успешно. matching — заказы не назначаются; shift_autoclose — смены не закрываются; sla — срочные заказы не понижаются; auction — просроченные аукционы не отменяются."
+
+  # Two failures out of twenty-one is 9.5%, and at this volume it is noise.
+  # Roughly 4 requests a minute, of which one in ten fails.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_http_requests_total{status="200", route="/api/health"}'
+        values: '0+4x60'
+      - series: 'healthlogin_http_requests_total{status="503", route="/api/app/endpoints"}'
+        values: '0+0.4x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: HighServerErrorRate
+        exp_alerts: []
+
+  # The same failure ratio at real traffic is a page: ~60 requests a minute.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_http_requests_total{status="200", route="/api/orders"}'
+        values: '0+54x60'
+      - series: 'healthlogin_http_requests_total{status="500", route="/api/orders"}'
+        values: '0+6x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HighServerErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "Более 5% запросов отвечают 5xx"
+              description: "Текущая доля: 10%. Смотрите разбивку по маршрутам на дашборде Backend."
+
+  # Low traffic must not mean invisible errors. The same quiet 503s that are
+  # deliberately not a page still have to surface as a ticket.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_http_requests_total{status="200", route="/api/health"}'
+        values: '0+4x120'
+      - series: 'healthlogin_http_requests_total{status="503", route="/api/app/endpoints"}'
+        values: '0+0.4x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: ServerErrorsAtLowTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "Стабильные 5xx на низком трафике"
+              description: "Ошибок мало в абсолютных числах, поэтому это не page — но они не прекращаются полчаса. Разбивка по маршрутам на дашборде Backend."
+
+  # A clean service must stay silent on both.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_http_requests_total{status="200", route="/api/orders"}'
+        values: '0+60x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: HighServerErrorRate
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: ServerErrorsAtLowTraffic
+        exp_alerts: []
+
+  # A reconciliation pass that never completed leaves reconcile_ok at its zero
+  # default and the timestamp at zero. Zero on that gauge is a specific, loud
+  # claim — "the books do not balance" — and it must not be made about a pass
+  # that did not run. This paged about missing money that was never missing.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_reconcile_ok'
+        values: '0x120'
+      - series: 'healthlogin_reconcile_last_run_timestamp_seconds'
+        values: '0x120'
+      - series: 'healthlogin_reconcile_failures_total'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: LedgerDrift
+        exp_alerts: []
+      # Nor may the staleness rule fire on it: time() minus zero is thirty-odd
+      # years, which would greet every fresh deployment.
+      - eval_time: 60m
+        alertname: ReconciliationNotRunning
+        exp_alerts: []
+      # It must not pass silently either — a pass that cannot run means the
+      # books are simply unverified, and exactly one rule should say so.
+      - eval_time: 90m
+        alertname: ReconciliationFailing
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "Сверка балансов не может отработать"
+              description: "Проход завершается ошибкой, поэтому расхождений не видно — не потому, что их нет, а потому, что их никто не искал. Смотрите логи бэкенда: [ReconcileWorker] reconciliation failed."
+
+  # Real drift, found by a pass that did complete, must still page.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_reconcile_ok'
+        values: '0x120'
+      - series: 'healthlogin_reconcile_last_run_timestamp_seconds'
+        values: '600x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: LedgerDrift
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "Сверка балансов нашла расхождение"
+              description: "Баланс разошёлся с журналом транзакций. Не правьте баланс — ищите операцию, которая его сдвинула: /admin/finances/reconciliation."
+
+  # 80G free on a 914G volume is 8.7% — the percentage rule paged on it while
+  # there was more room than the database will ever need.
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4", mountpoint="/"}'
+        values: '85899345920x240'   # 80 GiB
+      - series: 'node_filesystem_size_bytes{fstype="ext4", mountpoint="/"}'
+        values: '981283015168x240'  # 914 GiB
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: HostDiskFillingUp
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: HostDiskLow
+        exp_alerts: []
+
+  # Genuinely out of room: 8 GiB left, regardless of how large the volume is.
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4", mountpoint="/"}'
+        values: '8589934592x240'
+      - series: 'node_filesystem_size_bytes{fstype="ext4", mountpoint="/"}'
+        values: '981283015168x240'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: HostDiskFillingUp
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              fstype: ext4
+              mountpoint: "/"
+            exp_annotations:
+              summary: "На / осталось меньше 10 ГБ"
+              description: "Свободно 8GiB. Полный диск останавливает PostgreSQL и загрузку вложений. Кандидаты на чистку: releases/, uploads/, docker builder prune, docker image prune."

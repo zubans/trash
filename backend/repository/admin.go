@@ -80,7 +80,6 @@ type AdminRepository interface {
 	SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error
 	HasPendingWithdrawal(userID uuid.UUID) (bool, error)
 	CountAdmins() (int, error)
-	TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error
 	GetTransactions(limit, offset int) ([]*Transaction, error)
 	GetActiveShifts() ([]*AdminShift, error)
 	GetActiveOrders(limit, offset int) ([]*AdminOrder, error)
@@ -344,30 +343,6 @@ func (r *adminRepo) CountAdmins() (int, error) {
 	var count int
 	err := r.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
 	return count, err
-}
-
-func (r *adminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Update user balance
-	_, err = tx.Exec(`UPDATE users SET balance = balance + $1 WHERE id = $2`, amount, userID)
-	if err != nil {
-		return err
-	}
-
-	// Log the transaction
-	_, err = tx.Exec(`
-		INSERT INTO transactions (user_id, type, amount, admin_id, created_at)
-		VALUES ($1, 'TOP_UP', $2, $3, now())`, userID, amount, adminID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
 }
 
 func (r *adminRepo) GetTransactions(limit, offset int) ([]*Transaction, error) {

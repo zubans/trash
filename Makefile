@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check probe-once
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check probe-once check-endpoints-file
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -173,8 +173,47 @@ setup-smtp-creds:
 		echo "SMTP credentials synchronized for $$SMTP_USER."; \
 	fi
 
+# vless-endpoints.json is gitignored and placed by hand, and it is bind-mounted
+# into the backend. Docker creates a *directory* when a bind mount's source file
+# is missing, and a directory there makes every /app/endpoints request answer
+# 503 — silently, and self-perpetuating, because each recreate remakes it.
+#
+# So the file is guaranteed to exist as a file before anything mounts it:
+#
+#   - An empty directory is removed. It is Docker's own artefact and holds
+#     nothing, so there is nothing to lose; rmdir refuses on anything else,
+#     which is exactly the safety wanted here. It is owned by root, but
+#     removing a directory entry needs write permission on the *parent*, not
+#     ownership of the entry, so this works without sudo.
+#   - A directory with contents is a hard stop. That is not the Docker
+#     artefact, and deleting data is not a build target's decision.
+#   - A missing file becomes a valid empty list, so Docker cannot put a
+#     directory there again. The fallback channel is then genuinely without
+#     servers, and says so through VlessEndpointListEmpty rather than by
+#     corrupting the mount.
+check-endpoints-file:
+	@if [ -d vless-endpoints.json ]; then \
+		if rmdir vless-endpoints.json 2>/dev/null; then \
+			echo "NOTICE: removed the empty directory Docker had created in place of"; \
+			echo "        vless-endpoints.json. Nothing was lost — it held no data."; \
+		else \
+			echo "ERROR: vless-endpoints.json is a directory and it is not empty."; \
+			echo "Docker creates one when a bind mount's source file is missing, but this"; \
+			echo "one has contents, so it is not simply that. Look before removing it:"; \
+			echo "    ls -la vless-endpoints.json"; \
+			echo "Until this is a readable file, /api/app/endpoints answers 503."; \
+			exit 1; \
+		fi; \
+	fi
+	@if [ ! -f vless-endpoints.json ]; then \
+		echo '{"version":1,"configs":[]}' > vless-endpoints.json; \
+		echo "WARNING: vless-endpoints.json was missing; created an empty list so Docker cannot"; \
+		echo "         mount a directory in its place. The mobile fallback channel has no servers"; \
+		echo "         until the real list is put there (see vless-endpoints.example.json)."; \
+	fi
+
 # Start backend, frontend and database via Docker Compose
-start:
+start: check-endpoints-file
 	@echo "Starting backend, frontend and database..."
 	$(call compose,up -d --build)
 	@$(MAKE) setup-smtp-creds || true
@@ -183,7 +222,7 @@ start:
 	@echo "  Frontend: https://localhost:8443"
 
 # Start backend with Delve remote debugger, frontend and database via Docker Compose
-start-debug:
+start-debug: check-endpoints-file
 	@echo "Starting backend with Delve debugger, frontend and database..."
 	$(call compose,-f docker-compose.debug.yml up -d --build)
 	@echo "Debug services started."
@@ -217,8 +256,13 @@ register-release:
 		echo "healthlogin-app.apk not found, skipping release registration."; \
 	fi
 
-# Restart all running services
-restart: stop start register-release
+# Restart all running services.
+#
+# The endpoint-file check is listed first on purpose. `start` depends on it too,
+# but by then `stop` has already torn the stack down — a broken bind mount would
+# take the whole application offline and then refuse to bring it back. Failing
+# here leaves the running containers untouched.
+restart: check-endpoints-file stop start register-release
 	@echo "Services restarted."
 
 # Show logs from all services
@@ -286,12 +330,21 @@ monitoring-reload:
 
 # Validate the rule files before they are deployed. A rule with a typo is
 # silently never evaluated, which is the worst failure mode monitoring has.
+# Expanded on the host: the prometheus image has no shell to glob with, and a
+# literal wildcard would be passed straight through to promtool.
+RULE_TESTS = $(patsubst monitoring/prometheus/%,/etc/prometheus/%,$(wildcard monitoring/prometheus/rules/tests/*.yml))
+
 monitoring-check:
 	@echo "Checking Prometheus configuration and alert rules..."
 	docker run --rm \
 		-v $(PWD)/monitoring/prometheus:/etc/prometheus:ro \
 		--entrypoint promtool prom/prometheus:v3.1.0 \
 		check config /etc/prometheus/prometheus.yml
+	@echo "Running alert rule unit tests..."
+	docker run --rm \
+		-v $(PWD)/monitoring/prometheus:/etc/prometheus:ro \
+		--entrypoint promtool prom/prometheus:v3.1.0 \
+		test rules $(RULE_TESTS)
 	@echo "Configuration and rules are valid."
 
 # Run one VLESS probe pass in the foreground and print the resulting metrics.

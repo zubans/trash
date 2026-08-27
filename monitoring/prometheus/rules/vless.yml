@@ -78,8 +78,13 @@ groups:
           summary: "Список endpoint'ов не отдаётся или не расшифровывается"
           description: "Проверьте APP_ENDPOINTS_KEY / APP_ENDPOINTS_ENC_KEY на сервере и то, что vless-endpoints.json смонтирован и читается."
 
+      # Aggregated to a single label-free series on purpose. The two metrics
+      # come from two different scrape targets, so the unaggregated form
+      # produced two alerts with different instance and service labels — and
+      # the grouping then delivered the same news twice, once "backend:9091"
+      # and once "vlessprobe:9102". One empty list is one problem.
       - alert: VlessEndpointListEmpty
-        expr: vless_config_count == 0 or healthlogin_app_endpoints_configs == 0
+        expr: max(vless_config_count) == 0 or max(healthlogin_app_endpoints_configs) == 0
         for: 10m
         labels:
           severity: page

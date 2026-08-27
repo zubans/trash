@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -41,7 +42,40 @@ func NewAppEndpointsHandler(filePath, appKey, encKeyHex string) *AppEndpointsHan
 	if key, err := hex.DecodeString(encKeyHex); err == nil && len(key) == 32 {
 		h.encKey = key
 	}
+	// Publish what the list holds at startup rather than waiting for the first
+	// client. The gauge reads zero until something sets it, so reporting it
+	// only on a served request made "no app has polled yet" indistinguishable
+	// from "the list is empty" — and the second is an outage of the fallback
+	// channel. Reading the file once here makes the metric describe the file
+	// rather than the traffic.
+	h.publishListStats(nil)
+	h.logListState()
 	return h
+}
+
+// logListState says at startup whether the endpoint list can actually be read.
+//
+// Without this the only symptom of a broken list is a 503 per request, which
+// looks like an application fault and says nothing about the cause. The
+// directory case gets its own message because it is not a typo but a Docker
+// behaviour: a bind mount whose source file does not exist is created as a
+// directory, and since the same path is mounted read-only into this container,
+// every request then fails for a reason that is invisible from in here.
+func (h *AppEndpointsHandler) logListState() {
+	if h.appKey == "" || len(h.encKey) != 32 {
+		log.Printf("[app-endpoints] WARNING: keys are not configured — /app/endpoints will answer 503 and the mobile fallback channel is unavailable")
+		return
+	}
+
+	info, err := os.Stat(h.filePath)
+	switch {
+	case err != nil:
+		log.Printf("[app-endpoints] WARNING: %s cannot be read (%v) — /app/endpoints will answer 503 and the mobile fallback channel is unavailable", h.filePath, err)
+	case info.IsDir():
+		log.Printf("[app-endpoints] WARNING: %s is a directory, not a file. Docker creates one when a bind mount's source file is missing; remove it on the host, put the real list there and recreate the container.", h.filePath)
+	default:
+		log.Printf("[app-endpoints] endpoint list loaded from %s", h.filePath)
+	}
 }
 
 // Serve handles GET /app/endpoints.
@@ -103,11 +137,22 @@ func (h *AppEndpointsHandler) encrypt(plaintext []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(out), nil
 }
 
-// publishListStats reports what is actually in the list the client just got.
-// A list that parses but carries no configs answers 200 and still leaves the
-// app with nowhere to fall back to, so the count is worth a gauge of its own;
-// an unparseable file reports zero for the same reason.
+// publishListStats reports what is actually in the list. A list that parses but
+// carries no configs answers 200 and still leaves the app with nowhere to fall
+// back to, so the count is worth a gauge of its own; an unparseable or
+// unreadable file reports zero for the same reason.
+//
+// Pass the bytes already in hand when serving a request, or nil to have the
+// file read here — which is what startup does.
 func (h *AppEndpointsHandler) publishListStats(plaintext []byte) {
+	if plaintext == nil {
+		var err error
+		if plaintext, err = os.ReadFile(h.filePath); err != nil {
+			metrics.AppEndpointsFile(0, time.Time{})
+			return
+		}
+	}
+
 	var doc struct {
 		Configs []json.RawMessage `json:"configs"`
 	}

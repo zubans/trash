@@ -8,16 +8,18 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/metrics"
+	"healthlogin/backend/service"
 )
 
 // AuctionWorker automatically cancels auction orders that remain unmatched for 7 days.
 type AuctionWorker struct {
-	db *sql.DB
+	db           *sql.DB
+	orderService *service.OrderService
 }
 
 // NewAuctionWorker creates a new AuctionWorker.
-func NewAuctionWorker(db *sql.DB) *AuctionWorker {
-	return &AuctionWorker{db: db}
+func NewAuctionWorker(db *sql.DB, orderService *service.OrderService) *AuctionWorker {
+	return &AuctionWorker{db: db, orderService: orderService}
 }
 
 // Start runs the worker loop periodically.
@@ -34,15 +36,13 @@ func (w *AuctionWorker) Start(interval time.Duration) {
 }
 
 type expiredAuction struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	HoldAmount float64
+	ID uuid.UUID
 }
 
 // CheckExpiredAuctions selects and cancels expired auction orders.
 func (w *AuctionWorker) CheckExpiredAuctions() error {
 	query := `
-		SELECT o.id, o.customer_id, o.hold_amount 
+		SELECT o.id
 		FROM orders o
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE o.status = 'SEARCHING' 
@@ -58,7 +58,7 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	var list []expiredAuction
 	for rows.Next() {
 		var a expiredAuction
-		err := rows.Scan(&a.ID, &a.CustomerID, &a.HoldAmount)
+		err := rows.Scan(&a.ID)
 		if err != nil {
 			return err
 		}
@@ -66,7 +66,14 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	}
 
 	for _, a := range list {
-		err := w.cancelAuction(a)
+		// OrderService.CancelOrder is the one path that cancels an order
+		// correctly: it locks the row, releases the hold out of the escrow
+		// account, zeroes hold_amount and only then sets the status. This
+		// worker used to do its own version in raw SQL, which credited the
+		// customer without ever debiting escrow and left hold_amount standing —
+		// one-sided movements that opened the platform books and left every
+		// cancelled auction looking like it still held money.
+		err := w.orderService.CancelOrder(a.ID)
 		if err != nil {
 			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", a.ID, err)
 		} else {
@@ -75,36 +82,4 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	}
 
 	return nil
-}
-
-func (w *AuctionWorker) cancelAuction(a expiredAuction) error {
-	tx, err := w.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// 1. Set status to CANCELED
-	_, err = tx.Exec(`UPDATE orders SET status = 'CANCELED' WHERE id = $1`, a.ID)
-	if err != nil {
-		return err
-	}
-
-	// 2. Refund client if holdAmount > 0
-	if a.HoldAmount > 0 {
-		_, err = tx.Exec(`UPDATE users SET balance = balance + $1 WHERE id = $2`, a.HoldAmount, a.CustomerID)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.Exec(`
-			INSERT INTO transactions (user_id, order_id, type, amount, created_at)
-			VALUES ($1, $2, 'REFUND', $3, now())`,
-			a.CustomerID, a.ID, a.HoldAmount)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
 }

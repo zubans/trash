@@ -15,6 +15,7 @@ package metrics
 
 import (
 	"database/sql"
+	"math"
 	"strconv"
 	"time"
 
@@ -137,7 +138,7 @@ var (
 	reconcileOK = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: Namespace,
 		Name:      "reconcile_ok",
-		Help:      "1 when the last reconciliation pass found no drift, 0 otherwise.",
+		Help:      "1 when the last reconciliation pass found no drift, 0 when it found drift, NaN before any pass has completed.",
 	})
 
 	reconcileLastRun = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -261,6 +262,15 @@ var (
 )
 
 func init() {
+	// A gauge starts at zero, and for reconcile_ok zero is a specific, loud
+	// claim: the books do not balance. Until a pass has actually completed
+	// there is no such evidence — a pass that failed to run proves nothing —
+	// so the starting value is NaN, which no comparison matches. Without this,
+	// a reconciliation that errored on its first attempt paged somebody about
+	// missing money that was never missing, and an alert channel that cries
+	// wolf about money is worse than no alert channel at all.
+	reconcileOK.Set(math.NaN())
+
 	Registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),

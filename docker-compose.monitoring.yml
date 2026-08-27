@@ -26,10 +26,13 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      # 30 days covers "was this happening last month too?" without letting the
-      # series database grow unbounded on a single-server deployment.
-      - --storage.tsdb.retention.time=30d
-      - --storage.tsdb.retention.size=8GB
+      # Sized for the disk this actually shares, not for what would be nice.
+      # The first version reserved 8GB on a host that was already under 10%
+      # free — monitoring that fills the disk takes the database down with it,
+      # which is a worse outcome than a shorter history. Two weeks still answers
+      # "was this happening last week too?"; raise it only after checking df.
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
       - --web.enable-lifecycle
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -95,13 +98,17 @@ services:
       PROBE_ENDPOINTS_URL: ${PROBE_ENDPOINTS_URL:-https://moya-usluga.ru/api/app/endpoints}
       PROBE_APP_KEY: ${APP_ENDPOINTS_KEY:?APP_ENDPOINTS_KEY is required}
       PROBE_ENC_KEY: ${APP_ENDPOINTS_ENC_KEY:?APP_ENDPOINTS_ENC_KEY is required}
-      # Used only when the URL above cannot be read.
-      PROBE_ENDPOINTS_FILE: /app/vless-endpoints.json
       PROBE_TARGET_URL: ${PROBE_TARGET_URL:-https://moya-usluga.ru/health}
       PROBE_INTERVAL: ${PROBE_INTERVAL:-2m}
       PROBE_TIMEOUT: ${PROBE_TIMEOUT:-20s}
-    volumes:
-      - ./vless-endpoints.json:/app/vless-endpoints.json:ro
+    # No bind mount of vless-endpoints.json here, deliberately. The prober only
+    # falls back to the file when the URL or the keys are missing, and both are
+    # required above, so the mount was unreachable code — while carrying a real
+    # hazard: that file is gitignored and placed by hand, and Docker silently
+    # creates a *directory* in place of a missing bind-mount source. The backend
+    # mounts the same path, so an absent file would turn into a directory that
+    # makes every /app/endpoints request answer 503.
+    # PROBE_ENDPOINTS_FILE stays supported for running the prober by hand.
     expose:
       - "9102"
 

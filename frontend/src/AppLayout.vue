@@ -48,6 +48,11 @@
           <span v-if="!sidebarMinimized || isMobile">{{ $t('app.transactions') }}</span>
         </router-link>
 
+        <router-link to="/admin/reconciliation" class="nav-item" :class="{ active: currentRouteName === 'admin-reconciliation' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-scales"></i>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.reconciliation') }}</span>
+        </router-link>
+
         <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
           <i class="ph ph-megaphone"></i>
           <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>

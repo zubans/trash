@@ -140,7 +140,7 @@ openssl rand -hex 32                                  # APP_ENDPOINTS_ENC_KEY
 ## 5. Что нужно сделать при выкатке
 
 1. Сгенерировать свежую пару ключей и прописать её в `.env` на сервере и в `Secrets.java`.
-2. Положить `vless-endpoints.json` рядом с `docker-compose.yml` (он монтируется read-only).
+2. Положить `vless-endpoints.json` рядом с `docker-compose.yml` (он монтируется read-only). **Файл должен существовать до первого запуска контейнеров:** Docker на месте отсутствующего источника bind-mount создаёт каталог, после чего `/api/app/endpoints` навсегда отвечает `503`, и каждый пересоздаваемый контейнер делает этот каталог заново. `make start` теперь это проверяет и не даёт стартовать поверх каталога.
 3. Пересоздать зашифрованный seed-ассет `vless-endpoints.enc` тем же ключом.
 4. Положить `LibXray.aar` в `frontend/android/app/libs/` перед сборкой APK.
 

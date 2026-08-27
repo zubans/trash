@@ -51,6 +51,15 @@ inhibit_rules:
       - alertname =~ "VlessFallbackChannelDegraded|VlessEndpointDown|VlessTunnelBroken"
     equal: ['environment']
 
+  # A list that cannot be fetched also reads as an empty list, because the
+  # prober has nothing to count. Both fired together on the first real incident;
+  # the fetch failure is the one worth reading, and the emptiness is its shadow.
+  - source_matchers:
+      - alertname = "VlessEndpointListUnavailable"
+    target_matchers:
+      - alertname = "VlessEndpointListEmpty"
+    equal: ['environment']
+
 receivers:
   - name: telegram
     telegram_configs:

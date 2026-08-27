@@ -54,6 +54,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/TransactionHistory.vue'),
       },
       {
+        path: 'reconciliation',
+        name: 'admin-reconciliation',
+        component: () => import('../pages/admin/FinancialReconciliation.vue'),
+      },
+      {
         path: 'settings',
         name: 'admin-settings',
         component: () => import('../pages/admin/SystemSettings.vue'),

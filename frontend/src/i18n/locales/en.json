@@ -38,7 +38,8 @@
     "serviceCatalog": "Service Catalog",
     "updateAvailable": "Update available",
     "installUpdate": "Install",
-    "updateRequired": "Update required"
+    "updateRequired": "Update required",
+    "reconciliation": "Reconciliation"
   },
   "users": {
     "title": "User Management",
@@ -390,5 +391,34 @@
   },
   "vuestic": {
     "noOptions": "No options available"
+  },
+  "reconciliation": {
+    "title": "Financial reconciliation",
+    "refresh": "Refresh",
+    "balanced": "The books close",
+    "drifted": "Drift found",
+    "explainer": "Every user balance plus every platform account must sum to zero: each movement of money has two sides. A non-zero difference means a one-sided operation happened somewhere — fix the operation that moved it, not the balance.",
+    "userTotal": "Held by users",
+    "accountTotal": "Held by platform accounts",
+    "difference": "Difference",
+    "accounts": "System accounts",
+    "accountCode": "Account",
+    "accountName": "Purpose",
+    "accountBalance": "Balance",
+    "escrow": "Escrow vs live orders",
+    "escrowHeld": "Held on the account",
+    "liveOrderSum": "Sum of live orders",
+    "escrowDrift": "Drift",
+    "discrepancies": "Balances that disagree with the ledger",
+    "userPhone": "Phone",
+    "storedBalance": "Stored balance",
+    "ledgerSum": "Ledger sum",
+    "holdAnomalies": "Orders with a stuck hold",
+    "orderId": "Order",
+    "orderStatus": "Status",
+    "holdAmount": "Hold",
+    "reason": "Reason",
+    "unknownTypes": "Transaction types outside the sign convention",
+    "loadFailed": "Could not load the reconciliation"
   }
 }

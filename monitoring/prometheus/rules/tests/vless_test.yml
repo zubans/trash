@@ -1,0 +1,108 @@
+# Unit tests for the VLESS fallback channel rules.
+#
+# The asymmetry is the whole design and is asserted here: one dead endpoint is a
+# ticket, because the app simply walks the list, while zero usable endpoints is
+# a page, because a blocked client then has nowhere left to go.
+rule_files:
+  - ../vless.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Two of three endpoints working: degraded, never a page.
+  - interval: 1m
+    input_series:
+      - series: 'vless_endpoints_total'
+        values: '3x120'
+      - series: 'vless_endpoints_usable'
+        values: '2x120'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: VlessFallbackChannelDown
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: VlessFallbackChannelDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: "Часть VLESS-endpoint'ов недоступна (2 из 3)"
+              description: "Канал ещё работает за счёт оставшихся серверов. Запас на исходе — почините или замените выпавшие."
+
+  # Nothing left to fall back to: page.
+  - interval: 1m
+    input_series:
+      - series: 'vless_endpoints_total'
+        values: '3x120'
+      - series: 'vless_endpoints_usable'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: VlessFallbackChannelDown
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "Ни один VLESS-endpoint не работает"
+              description: "Резервный канал приложения не работает целиком. Клиенты, у которых заблокирован прямой путь до API, не могут пользоваться приложением вообще."
+
+  # A healthy channel is silent on every rule in the group.
+  - interval: 1m
+    input_series:
+      - series: 'vless_endpoints_total'
+        values: '3x120'
+      - series: 'vless_endpoints_usable'
+        values: '3x120'
+      - series: 'vless_config_count'
+        values: '3x120'
+      - series: 'vless_config_fetch_up'
+        values: '1x120'
+      - series: 'healthlogin_app_endpoints_configs'
+        values: '3x120'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: VlessFallbackChannelDown
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: VlessFallbackChannelDegraded
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: VlessEndpointListEmpty
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: VlessEndpointListUnavailable
+        exp_alerts: []
+
+  # A backend that has served no endpoint list yet, with a perfectly good file
+  # on disk. The configs gauge is now written at startup, so this must stay
+  # silent — it used to read zero and fire.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_app_endpoints_configs'
+        values: '3x120'
+      - series: 'vless_config_count'
+        values: '3x120'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: VlessEndpointListEmpty
+        exp_alerts: []
+
+  # The empty-list rule reads two metrics scraped from two different targets.
+  # Unaggregated it produced two alerts with different instance labels, and the
+  # chat received the same news twice — once from backend:9091 and once from
+  # vlessprobe:9102. One empty list must be exactly one alert.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_app_endpoints_configs{instance="backend:9091", service="backend"}'
+        values: '0x120'
+      - series: 'vless_config_count{instance="vlessprobe:9102", service="vpn_fallback"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: VlessEndpointListEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "Список endpoint'ов пуст"
+              description: "Худший случай: запрос отвечает 200, а падать клиенту некуда. Скорее всего файл перезаписали пустым или сломали JSON."

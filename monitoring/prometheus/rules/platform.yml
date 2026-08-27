@@ -46,16 +46,38 @@ groups:
 
   - name: application
     rules:
+      # The volume floor is not decoration. This platform serves a handful of
+      # requests a minute at night, where two failures out of twenty-one is
+      # already 9.5% — a ratio alone would page somebody for noise, and a
+      # channel that pages for noise stops being read. Below ~6 requests a
+      # minute the ratio means nothing; a real outage at that volume is caught
+      # by BackendDown and PublicEndpointDown instead.
       - alert: HighServerErrorRate
         expr: |
           sum(rate(healthlogin_http_requests_total{status=~"5.."}[5m]))
             / sum(rate(healthlogin_http_requests_total[5m])) > 0.05
+          and
+          sum(rate(healthlogin_http_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: page
         annotations:
           summary: "Более 5% запросов отвечают 5xx"
           description: "Текущая доля: {{ $value | humanizePercentage }}. Смотрите разбивку по маршрутам на дашборде Backend."
+
+      # Low traffic must not mean invisible errors, only quieter ones: the same
+      # failures still surface here, as a ticket, without a volume floor.
+      - alert: ServerErrorsAtLowTraffic
+        expr: |
+          sum(rate(healthlogin_http_requests_total{status=~"5.."}[15m])) > 0
+          and
+          sum(rate(healthlogin_http_requests_total[5m])) <= 0.1
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Стабильные 5xx на низком трафике"
+          description: "Ошибок мало в абсолютных числах, поэтому это не page — но они не прекращаются полчаса. Разбивка по маршрутам на дашборде Backend."
 
       - alert: SlowAPI
         expr: |
@@ -101,16 +123,24 @@ groups:
           summary: "Системная почта не уходит ({{ $labels.kind }})"
           description: "Письма подтверждения и коды сброса пароля не доставляются. Пользователь этого не видит — он видит, что код «не пришёл»."
 
+      # Only the workers that run on a short timer. Their intervals are 5s
+      # (matching), 30s (sla) and 1m (auction, shift_autoclose), so fifteen
+      # minutes of silence from any of them is real.
+      #
+      # reconcile is excluded because it runs once a day: a single threshold
+      # across every worker fired on it about twenty minutes after each restart
+      # and then never stopped. Its own staleness is covered, with the right
+      # horizon, by ReconciliationNotRunning below.
       - alert: BackgroundWorkerStalled
         expr: |
-          time() - max by (worker) (healthlogin_worker_last_success_timestamp_seconds) > 900
+          time() - max by (worker) (healthlogin_worker_last_success_timestamp_seconds{worker!="reconcile"}) > 900
           and on() up{job="backend"} == 1
         for: 5m
         labels:
           severity: ticket
         annotations:
           summary: "Фоновый обработчик {{ $labels.worker }} не отрабатывал 15 минут"
-          description: "Процесс жив, но проход не завершался успешно. Заказы могут не назначаться и смены не закрываться."
+          description: "Процесс жив, но проход не завершался успешно. matching — заказы не назначаются; shift_autoclose — смены не закрываются; sla — срочные заказы не понижаются; auction — просроченные аукционы не отменяются."
 
       - alert: OrdersQueuedWithNoExecutors
         expr: healthlogin_orders_searching > 0 and healthlogin_shifts_active == 0
@@ -126,8 +156,15 @@ groups:
       # The reconciliation pass is the one thing that can prove the books are
       # intact. A drift here is never a monitoring artefact: it is somebody's
       # money in the wrong place.
+      # The second clause is belt and braces next to the NaN starting value in
+      # the metric itself: this alert must only ever speak about a pass that
+      # actually completed. A pass that could not run is not evidence about the
+      # books, and paging on it teaches people to distrust the one alert that
+      # must never be ignored.
       - alert: LedgerDrift
-        expr: healthlogin_reconcile_ok == 0
+        expr: |
+          healthlogin_reconcile_ok == 0
+          and healthlogin_reconcile_last_run_timestamp_seconds > 0
         for: 5m
         labels:
           severity: page
@@ -135,14 +172,38 @@ groups:
           summary: "Сверка балансов нашла расхождение"
           description: "Баланс разошёлся с журналом транзакций. Не правьте баланс — ищите операцию, которая его сдвинула: /admin/finances/reconciliation."
 
+      # Guarded the same way: before the first completed pass the timestamp is
+      # zero, and "time() - 0" is thirty-odd years, which would fire this on
+      # every fresh deployment. ReconciliationFailing below covers that case.
       - alert: ReconciliationNotRunning
-        expr: time() - healthlogin_reconcile_last_run_timestamp_seconds > 172800
+        expr: |
+          time() - healthlogin_reconcile_last_run_timestamp_seconds > 172800
+          and healthlogin_reconcile_last_run_timestamp_seconds > 0
         for: 1h
         labels:
           severity: ticket
         annotations:
           summary: "Сверка балансов не проходила больше двух суток"
           description: "Она запускается раз в сутки. Отсутствие расхождений сейчас не значит ничего — их просто никто не искал."
+
+      # A pass that keeps erroring leaves every gauge above untouched, so the
+      # books look exactly as they did — which is to say, unverified. This is
+      # the only rule that notices.
+      #
+      # Stated as "has failed at least once and has never completed", not as a
+      # rate over a window: this worker runs once a day, and a 3h window would
+      # be empty almost all the time — the same mistake that made the generic
+      # worker-stall threshold fire on it forever.
+      - alert: ReconciliationFailing
+        expr: |
+          healthlogin_reconcile_failures_total > 0
+          and healthlogin_reconcile_last_run_timestamp_seconds == 0
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Сверка балансов не может отработать"
+          description: "Проход завершается ошибкой, поэтому расхождений не видно — не потому, что их нет, а потому, что их никто не искал. Смотрите логи бэкенда: [ReconcileWorker] reconciliation failed."
 
       - alert: LedgerWriteErrors
         expr: sum(rate(healthlogin_ledger_errors_total[10m])) > 0
@@ -175,16 +236,31 @@ groups:
 
   - name: resources
     rules:
+      # Absolute bytes, not a percentage. On a 914G volume ten percent is 91G —
+      # an alert that fires while there is more free space than the whole
+      # database will ever use, which is how a channel gets muted. What matters
+      # is whether there is room to write, and that is a number of gigabytes.
       - alert: HostDiskFillingUp
         expr: |
-          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
-            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.10
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} < 10 * 1024 * 1024 * 1024
         for: 30m
         labels:
           severity: page
         annotations:
-          summary: "На {{ $labels.mountpoint }} осталось меньше 10% места"
-          description: "Полный диск останавливает PostgreSQL и загрузку вложений. Кандидаты на чистку: releases/, uploads/, логи Docker."
+          summary: "На {{ $labels.mountpoint }} осталось меньше 10 ГБ"
+          description: "Свободно {{ $value | humanize1024 }}B. Полный диск останавливает PostgreSQL и загрузку вложений. Кандидаты на чистку: releases/, uploads/, docker builder prune, docker image prune."
+
+      # Early warning, so the page above is never the first anyone hears of it.
+      # A ticket at 25G leaves days of room to act rather than minutes.
+      - alert: HostDiskLow
+        expr: |
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} < 25 * 1024 * 1024 * 1024
+        for: 2h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "На {{ $labels.mountpoint }} осталось меньше 25 ГБ"
+          description: "Свободно {{ $value | humanize1024 }}B. Ещё не срочно, но пора чистить: releases/ копит APK на каждый деплой, а docker — образы и build cache."
 
       - alert: HostMemoryPressure
         expr: |
