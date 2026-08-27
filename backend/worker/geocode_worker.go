@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -10,24 +11,23 @@ import (
 )
 
 // GeocodeBackfillWorker fills pickup coordinates for searching orders that were
-// stored without them — because the OSM/Nominatim lookup failed when the order
-// was created (busy slot, upstream error, address not found), or because the
-// order predates coordinate capture.
+// stored without them — an older client that sent no coordinates and whose
+// address could not be resolved at creation, or an order that predates
+// coordinate capture.
 //
 // The executor map only plots orders that already carry coordinates
-// (mapOrdersAround skips the rest), and geocoding was deliberately removed from
-// that request path because it hammered a shared 1/s upstream. This worker is
-// where the deferred geocoding now happens: off the request path, in bounded
-// batches, using the same geocoder — which serialises at 1/s and caches hits.
+// (mapOrdersAround skips the rest), so this worker is where the deferred
+// resolution happens: off the request path, in bounded batches, through the same
+// address resolver (DaData) as everything else, with its cache absorbing repeats.
 type GeocodeBackfillWorker struct {
 	orderRepo repository.OrderRepository
-	geocoder  *service.Geocoder
+	resolver  service.AddressResolver
 	batchSize int
 }
 
 // NewGeocodeBackfillWorker creates a GeocodeBackfillWorker.
-func NewGeocodeBackfillWorker(orderRepo repository.OrderRepository, geocoder *service.Geocoder) *GeocodeBackfillWorker {
-	return &GeocodeBackfillWorker{orderRepo: orderRepo, geocoder: geocoder, batchSize: 10}
+func NewGeocodeBackfillWorker(orderRepo repository.OrderRepository, resolver service.AddressResolver) *GeocodeBackfillWorker {
+	return &GeocodeBackfillWorker{orderRepo: orderRepo, resolver: resolver, batchSize: 10}
 }
 
 // Start runs the worker loop periodically.
@@ -43,9 +43,9 @@ func (w *GeocodeBackfillWorker) Start(interval time.Duration) {
 	log.Printf("[GeocodeBackfillWorker] Background worker started every %v", interval)
 }
 
-// Run geocodes one batch of coordinate-less orders and persists the results.
+// Run resolves one batch of coordinate-less orders and persists the results.
 func (w *GeocodeBackfillWorker) Run() error {
-	if w.geocoder == nil {
+	if w.resolver == nil {
 		return nil
 	}
 
@@ -59,14 +59,15 @@ func (w *GeocodeBackfillWorker) Run() error {
 			continue
 		}
 
-		// Geocode blocks on the shared once-per-second Nominatim slot and gives
-		// up with ErrGeocoderBusy rather than queueing forever, so a full batch
-		// costs at most batchSize seconds and never stalls order creation.
-		geo, err := w.geocoder.Geocode(*o.Address)
+		// Background work, so the root is context.Background(); a per-order
+		// deadline still bounds each resolve independently of the batch.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		geo, err := w.resolver.Resolve(ctx, *o.Address)
+		cancel()
 		if err != nil {
-			// Busy / not found / upstream error: leave the order for a later
-			// tick. Only coordinates are updated, so a retry is harmless.
-			log.Printf("[GeocodeBackfillWorker] geocode failed for order %s: %v", o.ID, err)
+			// Provider busy, address not found or upstream error: leave the order
+			// for a later tick. Only coordinates are updated, so a retry is safe.
+			log.Printf("[GeocodeBackfillWorker] resolve failed for order %s: %v", o.ID, err)
 			continue
 		}
 

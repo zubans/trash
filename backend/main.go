@@ -87,12 +87,13 @@ func main() {
 	// a user balance and a system account.
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
 
-	geocoder := service.NewGeocoder(db)
-	// DaData is the only source of address suggestions. There is deliberately
-	// no fallback: the alternative had no apartment data and rejected ordinary
-	// house numbers, and silently serving that again would hide the
-	// misconfiguration behind an address entry that half works.
-	addressSuggester := service.NewAddressSuggester(service.NewDaData())
+	// DaData is the only source of address data — suggestions and coordinate
+	// resolution alike. There is deliberately no fallback: the alternative had
+	// no apartment data and rejected ordinary house numbers, and silently
+	// serving that again would hide the misconfiguration behind an address entry
+	// that half works. The cache spares the provider repeated resolves of the
+	// same address on the fallback path.
+	addressSuggester := service.NewAddressSuggester(service.NewDaData(), repository.NewGeocodeCacheRepository(db))
 	if addressSuggester.Configured() {
 		log.Printf("[address] suggestions served by DaData")
 	} else {
@@ -103,20 +104,20 @@ func main() {
 	mailer := service.NewSmtpMailSender()
 	// AuthService owns everything session related: issuing access tokens,
 	// rotating refresh tokens and blacklisting revoked access tokens.
-	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, geocoder, mailer).
+	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, addressSuggester, mailer).
 		WithSessionStorage(refreshRepo, tokenRepo)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
 		WithSessions(authService).
 		WithLedger(ledger).
 		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo)
-	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, geocoder)
+	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
-	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo, geocoder)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(5 * time.Second)
@@ -128,11 +129,11 @@ func main() {
 	auctionWorker := worker.NewAuctionWorker(db, orderService)
 	auctionWorker.Start(1 * time.Minute)
 
-	// Orders whose Nominatim lookup failed at creation (or that predate
-	// coordinate capture) carry no pickup coordinates and are invisible on the
-	// executor map. This backfills them from the same OSM geocoder, off the
-	// request path and rate-limited by the geocoder's own 1/s slot.
-	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, geocoder)
+	// Orders that carry no pickup coordinates — an older client that sent none
+	// and whose address could not be resolved at creation, or orders that
+	// predate coordinate capture — are invisible on the executor map. This
+	// backfills them through the address resolver, off the request path.
+	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, addressSuggester)
 	geocodeWorker.Start(1 * time.Minute)
 
 	// The only thing that closes an expired shift: one periodic scan, which also
@@ -164,7 +165,7 @@ func main() {
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
-	gh := handler.NewGeoHandler(geocoder, addressSuggester)
+	gh := handler.NewGeoHandler(addressSuggester)
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	aeh := handler.NewAppEndpointsHandler(
@@ -209,8 +210,8 @@ func main() {
 		r.Get("/auth/verify-email", ph.VerifyEmailHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/forgot-password", ph.ForgotPasswordHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/reset-password", ph.ResetPasswordHandler)
-		// The geocoder is a shared, rate limited upstream: unbounded anonymous
-		// access to it stalls order creation for everyone.
+		// The address provider is a paid, shared upstream: unbounded anonymous
+		// access to it burns quota and slows address entry for everyone.
 		r.With(geoLimiter.Middleware).Get("/geo/geocode", gh.Geocode)
 		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
 		r.With(geoLimiter.Middleware).Get("/geo/suggest", gh.Suggest)

@@ -83,7 +83,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := h.authService.RegisterWithCoordinates(req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.Address, req.Role, req.Lat, req.Lon)
+	user, err := h.authService.RegisterWithCoordinates(r.Context(), req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
 		metrics.AuthEvent("register", "denied")
 		if err.Error() == "user with this phone already exists" || err.Error() == "user with this email already exists" {

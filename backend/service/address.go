@@ -42,8 +42,6 @@ type Address struct {
 // Address sources.
 const (
 	SourceDaData     = "dadata"
-	SourceNominatim  = "nominatim"
-	SourceUserTyped  = "manual"
 	SourceLegacyText = "legacy"
 )
 

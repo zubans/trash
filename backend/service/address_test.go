@@ -159,7 +159,7 @@ func TestComposeHouseKeepsCorpusAndBuilding(t *testing.T) {
 // a deployment with no key must say it cannot suggest addresses rather than
 // return an empty list, which reads to a user as "your street does not exist".
 func TestSuggestionsFailLoudlyWithoutAProvider(t *testing.T) {
-	suggester := NewAddressSuggester(nil)
+	suggester := NewAddressSuggester(nil, nil)
 
 	if suggester.Configured() {
 		t.Error("a suggester with no provider must not report itself configured")

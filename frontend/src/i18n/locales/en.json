@@ -268,7 +268,6 @@
     "orderType": "Order Type",
     "errorInvalidOrderType": "Please select a service variant",
     "price": "Price",
-    "geocodeAddress": "Find coordinates",
     "selectVariantForPrice": "Select a service variant to see the price",
     "auctionPrice": "Auction: price set by executors",
     "loadCategoriesError": "Failed to load service categories.",

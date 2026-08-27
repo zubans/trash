@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"errors"
@@ -24,7 +25,7 @@ type AuthService struct {
 	repo        repository.UserRepository
 	refreshRepo repository.RefreshTokenRepository
 	tokenRepo   repository.TokenRepository
-	geocoder    GeoCoder
+	resolver    AddressResolver
 	mailer      MailSender
 	secret      []byte
 }
@@ -39,21 +40,21 @@ type JWTClaims struct {
 // NewAuthService creates an AuthService using the provided repository.
 // The JWT signing secret is read from JWT_SECRET; a development default is used
 // if the variable is not set.
-func NewAuthService(repo repository.UserRepository, geocoder GeoCoder) *AuthService {
+func NewAuthService(repo repository.UserRepository, resolver AddressResolver) *AuthService {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
 		secret = "dev-secret-change-me"
 	}
-	return NewAuthServiceWithSecret(repo, secret, geocoder, NewSmtpMailSender())
+	return NewAuthServiceWithSecret(repo, secret, resolver, NewSmtpMailSender())
 }
 
 // NewAuthServiceWithSecret creates an AuthService with an explicit JWT secret.
 // Useful for tests and for environments where the secret is injected directly.
-func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, geocoder GeoCoder, mailer MailSender) *AuthService {
+func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, resolver AddressResolver, mailer MailSender) *AuthService {
 	if mailer == nil {
 		mailer = NewSmtpMailSender()
 	}
-	return &AuthService{repo: repo, geocoder: geocoder, mailer: mailer, secret: []byte(secret)}
+	return &AuthService{repo: repo, resolver: resolver, mailer: mailer, secret: []byte(secret)}
 }
 
 // WithSessionStorage attaches the stores that back session handling: refresh
@@ -114,12 +115,12 @@ func validRegistrationRole(role string) bool {
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // Register creates a new user with the given phone, email, password, pickup address and role.
-func (s *AuthService) Register(phone, email, password, lastName, firstName, patronymic, address, role string) (*repository.User, error) {
-	return s.RegisterWithCoordinates(phone, email, password, lastName, firstName, patronymic, address, role, nil, nil)
+func (s *AuthService) Register(ctx context.Context, phone, email, password, lastName, firstName, patronymic, address, role string) (*repository.User, error) {
+	return s.RegisterWithCoordinates(ctx, phone, email, password, lastName, firstName, patronymic, address, role, nil, nil)
 }
 
 // RegisterWithCoordinates creates a new user with email, phone, password and address.
-func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, firstName, patronymic, address, role string, lat, lon *float64) (*repository.User, error) {
+func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email, password, lastName, firstName, patronymic, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
@@ -208,9 +209,11 @@ func (s *AuthService) RegisterWithCoordinates(phone, email, password, lastName, 
 	var lastGeo string
 	if lat != nil && lon != nil {
 		lastGeo = formatGeo(*lat, *lon)
-	} else if s.geocoder != nil {
-		geo, err := s.geocoder.Geocode(normalizedAddress)
-		if err == nil && geo != nil {
+	} else if s.resolver != nil {
+		// No coordinates from the client: resolve the typed address once so the
+		// executor's starting location is set. Best-effort — a failure leaves
+		// lastGeo empty rather than blocking registration.
+		if geo, err := s.resolver.Resolve(ctx, normalizedAddress); err == nil && geo != nil {
 			lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
 		}
 	}

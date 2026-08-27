@@ -14,9 +14,6 @@
         <div class="address-icon"><i class="ph-fill ph-map-pin"></i></div>
         <div class="address-text">
           {{ orderAddress || 'Адрес не указан' }}
-          <div v-if="geocodeError" class="text-danger text-xs mt-1">
-            {{ geocodeError }}
-          </div>
         </div>
       </div>
 
@@ -170,12 +167,11 @@ export default defineComponent({
     modelValue: { type: Boolean, required: true },
     orderAddress: { type: String, default: '' },
     // Declared nullable because that is what the dashboard passes: these are
-    // refs that start as null until a category is picked or an address is
-    // geocoded. Typing them as plain String/Number made every binding a type
-    // error, which nothing was checking.
+    // refs that start as null until a category is picked or the saved address's
+    // coordinates are applied. Typing them as plain String/Number made every
+    // binding a type error, which nothing was checking.
     orderLat: { type: Number as PropType<number | null>, default: null },
     orderLon: { type: Number as PropType<number | null>, default: null },
-    geocodeError: { type: String, default: '' },
     selectedVariantId: { type: String as PropType<string | null>, default: null },
     // One level of the catalog: categories and services mixed, in the order the
     // backend returns them. catalogPath is the breadcrumb of opened categories.

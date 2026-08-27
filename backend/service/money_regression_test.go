@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestCancelAssignedOrderRefundsOnce(t *testing.T) {
 
 	customerID := uuid.New()
 	lat, lon := 55.75, 37.61
-	order, err := srv.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
 	if err != nil {
 		t.Fatalf("unexpected error creating order: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 	customerID := uuid.New()
 	executorID := uuid.New()
 	lat, lon := 55.75, 37.61
-	order, err := srv.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
 	if err != nil {
 		t.Fatalf("unexpected error creating order: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestCreateOrderRejectsOverdraft(t *testing.T) {
 	txRepo.balances = map[uuid.UUID]money.Amount{customerID: money.FromRubles(50.0)} // variant costs 100
 
 	lat, lon := 55.75, 37.61
-	if _, err := srv.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon); err == nil {
+	if _, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon); err == nil {
 		t.Fatal("expected order creation to fail on insufficient balance")
 	}
 
@@ -406,7 +407,7 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 	}
 
 	lat, lon := 55.75, 37.61
-	order, err := orders.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -435,7 +436,7 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 	}
 
 	// A fine is collected, not destroyed.
-	second, err := orders.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 2", &lat, &lon)
+	second, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 2", &lat, &lon)
 	if err != nil {
 		t.Fatalf("create second order: %v", err)
 	}

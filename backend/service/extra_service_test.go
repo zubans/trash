@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -208,7 +209,7 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 
 	custID := uuid.New()
 	execID := uuid.New()
-	order, _ := srv.CreateOrder(custID, standardVariantID, false, false, "", nil, nil)
+	order, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
 
 	// Accept
 	err := srv.Accept(order.ID, execID)
@@ -226,7 +227,7 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 	}
 
 	// RejectAssignedOrder (verify 50% penalty fine transaction)
-	order2, _ := srv.CreateOrder(custID, standardVariantID, false, false, "", nil, nil)
+	order2, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
 	_ = srv.Accept(order2.ID, execID)
 	err = srv.RejectAssignedOrder(order2.ID, execID)
 	if err != nil {
@@ -266,8 +267,7 @@ func (m *mockExecutorGeoRepo) GetGeoAlerts(status string, limit, offset int) ([]
 func TestExecutorGeoService(t *testing.T) {
 	geoRepo := &mockExecutorGeoRepo{}
 	orderRepo := &mockOrderRepo{}
-	geocoder := NewGeocoder(nil)
-	srv := NewExecutorGeoService(geoRepo, orderRepo, geocoder)
+	srv := NewExecutorGeoService(geoRepo, orderRepo)
 
 	execID := uuid.New()
 
@@ -451,7 +451,7 @@ func TestOrderService_Aliases(t *testing.T) {
 	custID := uuid.New()
 	execID := uuid.New()
 	lat, lon := 55.75, 37.61
-	order, err := srv.Create(custID, CreateOrderRequest{
+	order, err := srv.Create(context.Background(), custID, CreateOrderRequest{
 		ServiceVariantID: standardVariantID,
 		IsUrgent:         false,
 		IsAsap:           false,
@@ -472,7 +472,7 @@ func TestOrderService_Aliases(t *testing.T) {
 	}
 
 	// Cancel alias
-	order2, _ := srv.Create(custID, CreateOrderRequest{ServiceVariantID: standardVariantID})
+	order2, _ := srv.Create(context.Background(), custID, CreateOrderRequest{ServiceVariantID: standardVariantID})
 	err = srv.Cancel(custID, order2.ID)
 	if err != nil {
 		t.Errorf("unexpected error in Cancel alias: %v", err)

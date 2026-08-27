@@ -14,16 +14,14 @@ import (
 type ExecutorGeoService struct {
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
-	geocoder  *Geocoder
 	// In-memory cache & mutex lock for fast cooldown checks
 	cooldownMap sync.Map
 }
 
-func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo repository.OrderRepository, geocoder *Geocoder) *ExecutorGeoService {
+func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo repository.OrderRepository) *ExecutorGeoService {
 	return &ExecutorGeoService{
 		geoRepo:   geoRepo,
 		orderRepo: orderRepo,
-		geocoder:  geocoder,
 	}
 }
 
@@ -207,9 +205,9 @@ func (s *ExecutorGeoService) mapOrdersAround(executorID uuid.UUID, lat, lon floa
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
-		// Only orders that already carry coordinates are considered. Geocoding
-		// here used to run inside the loop against a globally rate limited
-		// upstream, so one map request could stall the geocoder for everyone.
+		// Only orders that already carry coordinates are considered. Resolving
+		// them here would put a network call inside the loop; coordinate capture
+		// at order creation and the backfill worker fill them instead.
 		if o.PickupLat == nil || o.PickupLon == nil {
 			continue
 		}

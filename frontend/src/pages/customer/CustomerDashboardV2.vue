@@ -334,7 +334,6 @@
         :order-address="orderAddress"
         :order-lat="orderLat"
         :order-lon="orderLon"
-        :geocode-error="geocodeError"
         :selected-variant-id="selectedVariantId"
         :catalog-items="catalogItemOptions"
         :catalog-path="catalogPathOptions"
@@ -546,8 +545,6 @@ export default defineComponent({
     const orderAddress = ref(defaultAddress.value)
     const orderLat = ref<number | null>(null)
     const orderLon = ref<number | null>(null)
-    const geocoding = ref(false)
-    const geocodeError = ref('')
 
     const activeOrders = computed(() => {
       return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED', 'EXECUTED'].includes(o.status))
@@ -659,7 +656,18 @@ export default defineComponent({
         const response = await api.get('/customer/profile')
         if (response.data) {
           if (response.data.phone) phone.value = response.data.phone
-          if (response.data.address) {
+          // The profile returns saved addresses with the coordinates they were
+          // picked with (from the address provider). Keep the full objects so an
+          // order sends the stored lat/lon; rebuilding them as { address } here
+          // dropped the coordinates and produced orders with no
+          // pickup_lat/pickup_lon.
+          const addrs = Array.isArray(response.data.addresses) ? response.data.addresses : []
+          if (addrs.length) {
+            customerAddresses.value = addrs
+            const def = addrs.find((a: any) => a.is_default) || addrs[0]
+            defaultAddress.value = def.address
+            orderAddress.value = def.address
+          } else if (response.data.address) {
             defaultAddress.value = response.data.address
             orderAddress.value = response.data.address
             customerAddresses.value = [{ address: response.data.address }]
@@ -670,32 +678,15 @@ export default defineComponent({
       }
     }
 
-    const geocodeAddress = async () => {
-      geocodeError.value = ''
-
-      // A saved address now carries the coordinates it was chosen with, so the
-      // common case needs no lookup at all. Only addresses stored before that
-      // — and typed-in ones — still have to be resolved.
+    // Coordinates for the order come from the saved address the customer picked:
+    // DaData returns them with the suggestion, and they are kept on the address
+    // through the profile. A legacy address without them leaves the pair null —
+    // the backend then resolves the coordinates from the address line at order
+    // creation, so the client makes no separate geocoding round trip.
+    const applyStoredCoordinates = () => {
       const saved = customerAddresses.value.find((a: any) => a.address === orderAddress.value)
-      if (saved && saved.lat != null && saved.lon != null) {
-        orderLat.value = saved.lat
-        orderLon.value = saved.lon
-        return
-      }
-
-      geocoding.value = true
-      orderLat.value = null
-      orderLon.value = null
-      try {
-        const response = await api.get('/geo/geocode', { params: { q: orderAddress.value } })
-        orderLat.value = response.data.lat
-        orderLon.value = response.data.lon
-        orderAddress.value = response.data.address || orderAddress.value
-      } catch (err: any) {
-        geocodeError.value = err.response?.data || 'Не удалось геокодировать адрес'
-      } finally {
-        geocoding.value = false
-      }
+      orderLat.value = saved && saved.lat != null ? saved.lat : null
+      orderLon.value = saved && saved.lon != null ? saved.lon : null
     }
 
     const fetchReviewsForHistory = async () => {
@@ -730,9 +721,7 @@ export default defineComponent({
 
     const openCreateOrderModal = async () => {
       orderAddress.value = defaultAddress.value
-      orderLat.value = null
-      orderLon.value = null
-      geocodeError.value = ''
+      applyStoredCoordinates()
       selectedVariantId.value = null
       catalogPath.value = []
       catalogItems.value = []
@@ -744,7 +733,6 @@ export default defineComponent({
       // The root level doubles as the lookup the order history uses to resolve
       // a variant's parent category.
       serviceCategories.value = catalogItems.value.filter((n) => n.node_type === 'CATEGORY')
-      await geocodeAddress()
     }
 
     const submitOrder = async () => {
@@ -1431,7 +1419,6 @@ export default defineComponent({
       orderAddress,
       orderLat,
       orderLon,
-      geocodeError,
       catalogItemOptions,
       catalogPathOptions,
       catalogLoading,

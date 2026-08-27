@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestCancellingSearchingOrderDrainsEscrowAndHold(t *testing.T) {
 	opening := booksTotal(txRepo, accounts)
 
 	lat, lon := 55.75, 37.61
-	order, err := orders.CreateOrder(customerID, standardVariantID, false, false,
+	order, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false,
 		"Россия, Москва, Тверская улица, д. 3", &lat, &lon)
 	if err != nil {
 		t.Fatalf("create order: %v", err)
@@ -160,7 +161,7 @@ func TestExpiredAuctionSweepWillNotCancelAClaimedOrder(t *testing.T) {
 
 	customerID := uuid.New()
 	lat, lon := 55.75, 37.61
-	order, err := orders.CreateOrder(customerID, standardVariantID, false, false,
+	order, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false,
 		"Россия, Москва, Тверская улица, д. 4", &lat, &lon)
 	if err != nil {
 		t.Fatalf("create order: %v", err)

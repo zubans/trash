@@ -35,9 +35,14 @@ const daDataSuggestURL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/s
 // ErrNoAddressProvider is returned when no suggestion provider is configured.
 var ErrNoAddressProvider = errors.New("address suggestions are not configured")
 
+// ErrAddressProviderBusy reports that the provider rate-limited the request, so
+// the caller should back off and retry rather than treat it as "not found".
+var ErrAddressProviderBusy = errors.New("address provider is busy, try again")
+
 // NewDaData builds a suggester from DADATA_API_KEY. It returns nil when the key
-// is absent, which is what lets the caller fall back to the old provider
-// instead of failing to start.
+// is absent so the process still starts; address entry and resolution then
+// report ErrNoAddressProvider until the key is set, rather than the whole
+// service failing to boot.
 func NewDaData() *DaData {
 	key := strings.TrimSpace(os.Getenv("DADATA_API_KEY"))
 	if key == "" {
@@ -132,7 +137,7 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 		// logs and, through the handler, in a client's error message.
 		return nil, errors.New("address provider rejected the credentials")
 	case http.StatusTooManyRequests:
-		return nil, ErrGeocoderBusy
+		return nil, ErrAddressProviderBusy
 	default:
 		return nil, fmt.Errorf("address provider returned status %d", resp.StatusCode)
 	}

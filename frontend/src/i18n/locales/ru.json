@@ -270,7 +270,6 @@
     "orderType": "Тип заказа",
     "errorInvalidOrderType": "Выберите вид услуги",
     "price": "Цена",
-    "geocodeAddress": "Найти координаты",
     "selectVariantForPrice": "Выберите вид услуги для расчёта цены",
     "auctionPrice": "Аукцион: цена определяется исполнителями",
     "loadCategoriesError": "Не удалось загрузить категории услуг.",

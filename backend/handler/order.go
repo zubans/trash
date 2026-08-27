@@ -65,7 +65,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := h.orderService.Create(user.ID, req)
+	order, err := h.orderService.Create(r.Context(), user.ID, req)
 	if err != nil {
 		writeOrderError(w, err)
 		return

@@ -47,7 +47,7 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	order, err := h.orderService.CreateConstructionOrder(user.ID, req.PhotoURL, req.Address, req.Comment, req.Lat, req.Lon)
+	order, err := h.orderService.CreateConstructionOrder(r.Context(), user.ID, req.PhotoURL, req.Address, req.Comment, req.Lat, req.Lon)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

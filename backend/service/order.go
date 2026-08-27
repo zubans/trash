@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -26,12 +27,12 @@ type OrderService struct {
 	shiftRepo    repository.ShiftRepository
 	chatRepo     repository.ChatRepository
 	catalogRepo  repository.ServiceCatalogRepository
-	geocoder     *Geocoder
+	resolver     AddressResolver
 }
 
 // NewOrderService creates an OrderService.
-func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, geocoder *Geocoder) *OrderService {
-	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, geocoder: geocoder}
+func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, resolver AddressResolver) *OrderService {
+	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, resolver: resolver}
 }
 
 // CreateOrderRequest contains the data needed to create an order.
@@ -133,8 +134,8 @@ func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAs
 }
 
 // CreateOrder creates a standard order and holds customer balance.
-func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, lat, lon *float64) (*repository.Order, error) {
-	return s.CreateOrderWithComment(customerID, serviceVariantID, isUrgent, isAsap, address, "", lat, lon)
+func (s *OrderService) CreateOrder(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, lat, lon *float64) (*repository.Order, error) {
+	return s.CreateOrderWithComment(ctx, customerID, serviceVariantID, isUrgent, isAsap, address, "", lat, lon)
 }
 
 // CreateOrderWithComment creates a standard order with optional comment and
@@ -142,7 +143,7 @@ func (s *OrderService) CreateOrder(customerID uuid.UUID, serviceVariantID uuid.U
 // entry all happen in one transaction: the debit is guarded by the balance so
 // concurrent requests cannot spend the same money twice, and a failure at any
 // step leaves neither an order nor a hold behind.
-func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, comment string, lat, lon *float64) (*repository.Order, error) {
+func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, comment string, lat, lon *float64) (*repository.Order, error) {
 	if isUrgent && isAsap {
 		return nil, errors.New("cannot set both urgent and asap flags")
 	}
@@ -206,9 +207,11 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 	if lat != nil && lon != nil {
 		order.PickupLat = lat
 		order.PickupLon = lon
-	} else if s.geocoder != nil && address != "" {
-		geo, err := s.geocoder.Geocode(address)
-		if err == nil {
+	} else if s.resolver != nil && address != "" {
+		// No coordinates from the client (an older build, or a typed line):
+		// resolve them once here so the order is matchable. A picked suggestion
+		// carries its own and never reaches this branch.
+		if geo, err := s.resolver.Resolve(ctx, address); err == nil {
 			order.PickupLat = &geo.Lat
 			order.PickupLon = &geo.Lon
 		}
@@ -251,8 +254,8 @@ func (s *OrderService) CreateOrderWithComment(customerID uuid.UUID, serviceVaria
 }
 
 // Create creates a new order for a customer (alias compatible with handler).
-func (s *OrderService) Create(customerID uuid.UUID, req CreateOrderRequest) (*repository.Order, error) {
-	return s.CreateOrderWithComment(customerID, req.ServiceVariantID, req.IsUrgent, false, req.Address, req.Comment, req.Lat, req.Lon)
+func (s *OrderService) Create(ctx context.Context, customerID uuid.UUID, req CreateOrderRequest) (*repository.Order, error) {
+	return s.CreateOrderWithComment(ctx, customerID, req.ServiceVariantID, req.IsUrgent, false, req.Address, req.Comment, req.Lat, req.Lon)
 }
 
 // Accept allows an executor to take an order from the queue. Every restriction
@@ -594,7 +597,7 @@ func (s *OrderService) Cancel(customerID, orderID uuid.UUID) error {
 }
 
 // CreateConstructionOrder creates a construction waste auction order.
-func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, address, comment string, lat, lon *float64) (*repository.Order, error) {
+func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID uuid.UUID, photoURL, address, comment string, lat, lon *float64) (*repository.Order, error) {
 	photoURL = strings.TrimSpace(photoURL)
 	if photoURL == "" {
 		return nil, errors.New("photo URL is required")
@@ -643,9 +646,11 @@ func (s *OrderService) CreateConstructionOrder(customerID uuid.UUID, photoURL, a
 	if lat != nil && lon != nil {
 		order.PickupLat = lat
 		order.PickupLon = lon
-	} else if s.geocoder != nil && address != "" {
-		geo, err := s.geocoder.Geocode(address)
-		if err == nil {
+	} else if s.resolver != nil && address != "" {
+		// No coordinates from the client (an older build, or a typed line):
+		// resolve them once here so the order is matchable. A picked suggestion
+		// carries its own and never reaches this branch.
+		if geo, err := s.resolver.Resolve(ctx, address); err == nil {
 			order.PickupLat = &geo.Lat
 			order.PickupLon = &geo.Lon
 		}

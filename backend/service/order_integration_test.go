@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -89,7 +90,7 @@ func TestCreateOrderIntegration(t *testing.T) {
 	customerID, variantID := seedCustomer(t, db, money.FromRubles(5000))
 
 	lat, lon := 55.7558, 37.6173
-	order, err := srv.CreateOrder(customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.CreateOrder(context.Background(), customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
 	if err != nil {
 		t.Fatalf("creating an order must not fail: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestCreateOrderRollsBackOnInsufficientFunds(t *testing.T) {
 	customerID, variantID := seedCustomer(t, db, money.FromRubles(1))
 
 	lat, lon := 55.7558, 37.6173
-	if _, err := srv.CreateOrder(customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon); err == nil {
+	if _, err := srv.CreateOrder(context.Background(), customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon); err == nil {
 		t.Fatal("expected the order to be refused for insufficient funds")
 	}
 

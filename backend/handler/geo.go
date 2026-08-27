@@ -11,16 +11,17 @@ import (
 
 // GeoHandler exposes geocoding endpoints.
 type GeoHandler struct {
-	geocoder  *service.Geocoder
 	suggester *service.AddressSuggester
 }
 
 // NewGeoHandler creates a GeoHandler.
-func NewGeoHandler(geocoder *service.Geocoder, suggester *service.AddressSuggester) *GeoHandler {
-	return &GeoHandler{geocoder: geocoder, suggester: suggester}
+func NewGeoHandler(suggester *service.AddressSuggester) *GeoHandler {
+	return &GeoHandler{suggester: suggester}
 }
 
-// Geocode handles GET /geo/geocode?q=address.
+// Geocode handles GET /geo/geocode?q=address. It is the resolve path kept for
+// installed clients that still send a free-form line; new clients pick a
+// suggestion that already carries coordinates and never call this.
 func (h *GeoHandler) Geocode(w http.ResponseWriter, r *http.Request) {
 	address := r.URL.Query().Get("q")
 	if address == "" {
@@ -28,9 +29,9 @@ func (h *GeoHandler) Geocode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.geocoder.Geocode(address)
+	result, err := h.suggester.Resolve(r.Context(), address)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeGeoError(w, err)
 		return
 	}
 
@@ -95,7 +96,7 @@ func writeGeoError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrNoAddressProvider):
 		http.Error(w, "address suggestions are not configured", http.StatusServiceUnavailable)
-	case errors.Is(err, service.ErrGeocoderBusy):
+	case errors.Is(err, service.ErrAddressProviderBusy):
 		http.Error(w, "address provider is busy, try again", http.StatusTooManyRequests)
 	default:
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)

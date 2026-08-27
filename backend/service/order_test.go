@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -618,7 +619,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 
 	customerID := uuid.New()
 	lat, lon := 55.7558, 37.6173
-	order, err := srv.CreateOrder(customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
 	// last_geo is parsed as "lat,lon" by the matching worker, so only
 	// coordinates may be written into it — never the address string.
 	if userRepo.lastGeo[customerID] != formatGeo(lat, lon) {
@@ -641,7 +642,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 func TestOrderService_CreateOrder_BothUrgencyFlagsRejected(t *testing.T) {
 	catalog := newMockCatalogRepo()
 	srv := NewOrderService(&mockOrderRepo{}, testLedger(), &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
-	_, err := srv.CreateOrder(uuid.New(), standardVariantID, true, true, "addr", nil, nil)
+	_, err := srv.CreateOrder(context.Background(), uuid.New(), standardVariantID, true, true, "addr", nil, nil)
 	if err == nil {
 		t.Error("expected error when both urgency flags are set")
 	}
@@ -654,7 +655,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	srv := NewOrderService(orderRepo, testLedger(), setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	order, _ := srv.CreateOrder(customerID, standardVariantID, false, false, "", nil, nil)
+	order, _ := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "", nil, nil)
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(order.ID, executorID)
 	_ = orderRepo.Execute(nil, order.ID)
@@ -669,7 +670,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 		t.Errorf("expected error double confirming")
 	}
 
-	order2, _ := srv.CreateOrder(customerID, largeVariantID, false, false, "", nil, nil)
+	order2, _ := srv.CreateOrder(context.Background(), customerID, largeVariantID, false, false, "", nil, nil)
 	err = srv.CancelOrder(order2.ID)
 	if err != nil {
 		t.Errorf("expected success canceling order, got err: %v", err)
@@ -682,21 +683,21 @@ func TestOrderService_CreateConstructionOrder(t *testing.T) {
 	srv := NewOrderService(orderRepo, testLedger(), nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	_, err := srv.CreateConstructionOrder(customerID, "", "", "", nil, nil)
+	_, err := srv.CreateConstructionOrder(context.Background(), customerID, "", "", "", nil, nil)
 	if err == nil {
 		t.Error("expected error creating construction order without photo URL")
 	}
 
 	// Only paths produced by our own upload endpoint are accepted; an arbitrary
 	// URL would end up rendered in the admin panel.
-	if _, err := srv.CreateConstructionOrder(customerID, "http://somephoto.jpg", "55.75,37.61", "", nil, nil); err == nil {
+	if _, err := srv.CreateConstructionOrder(context.Background(), customerID, "http://somephoto.jpg", "55.75,37.61", "", nil, nil); err == nil {
 		t.Error("expected an external photo URL to be refused")
 	}
-	if _, err := srv.CreateConstructionOrder(customerID, "/uploads/../../etc/passwd", "55.75,37.61", "", nil, nil); err == nil {
+	if _, err := srv.CreateConstructionOrder(context.Background(), customerID, "/uploads/../../etc/passwd", "55.75,37.61", "", nil, nil); err == nil {
 		t.Error("expected a traversing photo path to be refused")
 	}
 
-	order, err := srv.CreateConstructionOrder(customerID, "/uploads/chat/photo.jpg", "55.75,37.61", "", nil, nil)
+	order, err := srv.CreateConstructionOrder(context.Background(), customerID, "/uploads/chat/photo.jpg", "55.75,37.61", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating construction order: %v", err)
 	}
@@ -714,7 +715,7 @@ func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 	srv := NewOrderService(orderRepo, testLedger(), &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	order, _ := srv.CreateOrder(customerID, standardVariantID, false, true, "", nil, nil)
+	order, _ := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, true, "", nil, nil)
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(order.ID, executorID)
 
