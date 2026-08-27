@@ -288,6 +288,7 @@ func main() {
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
 			r.Post("/executor/set-location", egh.SetLocation)
+			r.Get("/executor/location", egh.GetLocation)
 			r.Get("/executor/map-orders", egh.GetMapOrders)
 			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
 			r.Get("/executor/history", sh.GetExecutorHistoryHandler)

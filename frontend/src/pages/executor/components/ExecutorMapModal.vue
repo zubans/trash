@@ -93,6 +93,25 @@ export default defineComponent({
 
     const mapOrders = ref<any[]>([])
 
+    // Pull the authoritative stored position from the backend. This is what the
+    // marker and both zone circles must anchor to, because the server decides
+    // "within circle" vs "district change" against exactly this point. Props
+    // (device GPS / dashboard's last_geo) are only a fallback for an executor
+    // who has no stored location yet.
+    const fetchServerLocation = async (): Promise<boolean> => {
+      try {
+        const res = await api.get('/executor/location')
+        if (res.data && res.data.has_location && res.data.lat != null && res.data.lon != null) {
+          serverLat.value = res.data.lat
+          serverLon.value = res.data.lon
+          return true
+        }
+      } catch (err) {
+        console.error('Failed to fetch executor location:', err)
+      }
+      return false
+    }
+
     const fetchMapOrders = async () => {
       try {
         const res = await api.get('/executor/map-orders', {
@@ -268,10 +287,18 @@ export default defineComponent({
       }
     }
 
-    watch(show, (val) => {
-      if (val) {
-        initMap()
+    watch(show, async (val) => {
+      if (!val) return
+      // Resolve the center from the server every time the modal opens, so it
+      // always reflects the last confirmed position instead of whatever props
+      // happened to hold when this component was first mounted. Fall back to the
+      // props only when the backend has no stored location yet.
+      const hasServer = await fetchServerLocation()
+      if (!hasServer) {
+        serverLat.value = props.currentLat
+        serverLon.value = props.currentLon
       }
+      initMap()
     }, { immediate: true })
 
     return {

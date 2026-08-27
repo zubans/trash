@@ -155,6 +155,29 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 	}, nil
 }
 
+// LocationResponse reports the executor's authoritative stored position. It is
+// the single source of truth the map UI centers on, so the client never has to
+// guess from a possibly stale device fix.
+type LocationResponse struct {
+	HasLocation bool     `json:"has_location"`
+	Lat         *float64 `json:"lat,omitempty"`
+	Lon         *float64 `json:"lon,omitempty"`
+}
+
+// GetLocation returns the executor's own stored coordinates. Like GetMapOrders,
+// the position comes from the database and is scoped to the caller, so it can
+// never be used to read another executor's whereabouts.
+func (s *ExecutorGeoService) GetLocation(executorID uuid.UUID) (*LocationResponse, error) {
+	lat, lon, _, err := s.geoRepo.GetExecutorLocation(executorID)
+	if err != nil {
+		return nil, err
+	}
+	if lat == nil || lon == nil {
+		return &LocationResponse{HasLocation: false}, nil
+	}
+	return &LocationResponse{HasLocation: true, Lat: lat, Lon: lon}, nil
+}
+
 // GetMapOrders returns searching orders around the executor's own stored
 // position. The position deliberately comes from the database rather than from
 // request parameters: with client supplied coordinates any account could sweep

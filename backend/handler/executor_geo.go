@@ -44,6 +44,25 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Scoped to the authenticated executor: the location belongs to user.ID and
+	// cannot be requested for anyone else.
+	resp, err := h.geoService.GetLocation(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
