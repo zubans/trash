@@ -144,3 +144,50 @@ func TestPartialRefundOutOfEscrowKeepsBooksClosed(t *testing.T) {
 		t.Errorf("partial refund changed the books total: %s, expected %s", got, opening)
 	}
 }
+
+// An auction holds no money until a bid is accepted — the request is published
+// without a price, and accepting a bid is what moves the money into escrow and
+// the order into ASSIGNED. The seven-day sweep therefore cancels orders that
+// hold nothing, and it must keep its hands off one that was claimed between the
+// scan and the cancel: that order belongs to the executor who won it.
+func TestExpiredAuctionSweepWillNotCancelAClaimedOrder(t *testing.T) {
+	txRepo := &mockTransactionRepo{}
+	accounts := newMockAccounts()
+	orderRepo := &mockOrderRepo{}
+	settings := &orderMockSettingsRepo{settings: map[string]string{}}
+	orders := NewOrderService(orderRepo, NewLedger(txRepo, accounts), settings,
+		newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+
+	customerID := uuid.New()
+	lat, lon := 55.75, 37.61
+	order, err := orders.CreateOrder(customerID, standardVariantID, false, false,
+		"Россия, Москва, Тверская улица, д. 4", &lat, &lon)
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	// A bid is accepted just as the sweep is about to reach this order.
+	if err := orderRepo.AssignOrder(order.ID, uuid.New()); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+
+	if err := orders.CancelUnclaimedAuction(order.ID); err == nil {
+		t.Fatal("the sweep cancelled an order that had already been claimed")
+	}
+
+	claimed, err := orderRepo.GetOrderByID(order.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if claimed.Status != repository.OrderStatusAssigned {
+		t.Errorf("order status is %s, expected it to stay ASSIGNED", claimed.Status)
+	}
+	if claimed.HoldAmount != order.HoldAmount {
+		t.Errorf("hold changed to %s, expected it to stay %s", claimed.HoldAmount, order.HoldAmount)
+	}
+	// A customer cancelling the same order is still allowed: only the sweep is
+	// restricted.
+	if err := orders.CancelOrder(order.ID); err != nil {
+		t.Errorf("an ordinary cancel must still work: %v", err)
+	}
+}

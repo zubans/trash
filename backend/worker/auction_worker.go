@@ -66,14 +66,16 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	}
 
 	for _, a := range list {
-		// OrderService.CancelOrder is the one path that cancels an order
-		// correctly: it locks the row, releases the hold out of the escrow
-		// account, zeroes hold_amount and only then sets the status. This
-		// worker used to do its own version in raw SQL, which credited the
-		// customer without ever debiting escrow and left hold_amount standing —
-		// one-sided movements that opened the platform books and left every
-		// cancelled auction looking like it still held money.
-		err := w.orderService.CancelOrder(a.ID)
+		// One correct cancel path, under a row lock, instead of this worker's
+		// own raw SQL — which credited the customer without ever debiting
+		// escrow and left hold_amount standing.
+		//
+		// CancelUnclaimedAuction rather than CancelOrder: an auction holds no
+		// money until a bid is accepted, and accepting one is exactly what
+		// moves it to ASSIGNED. A request that reached ASSIGNED between the
+		// scan above and this line has been claimed and is no longer expired
+		// business — it belongs to the executor who won it.
+		err := w.orderService.CancelUnclaimedAuction(a.ID)
 		if err != nil {
 			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", a.ID, err)
 		} else {

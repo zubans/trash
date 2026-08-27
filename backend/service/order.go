@@ -477,12 +477,38 @@ func (s *OrderService) Confirm(customerID, orderID uuid.UUID) error {
 // refund and the status change share one transaction and one row lock, and the
 // hold is zeroed, so a repeated or concurrent cancel cannot pay out again.
 func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
+	return s.cancel(orderID, repository.OrderStatusSearching, repository.OrderStatusAssigned)
+}
+
+// CancelUnclaimedAuction cancels an auction request that expired without anyone
+// winning it. Unlike CancelOrder it refuses an order that has already reached
+// ASSIGNED.
+//
+// The distinction matters because of a race the seven-day sweep would otherwise
+// lose: the worker selects the expired requests, and a customer can accept a
+// bid on one of them before the worker gets to it. Accepting a bid is what puts
+// an auction into ASSIGNED and moves the money into escrow, so cancelling it
+// then would take a job away from an executor who had just won it, refund a
+// customer who had just committed, and do both because of a scan that started
+// moments earlier. Only "nobody claimed this" is a reason to cancel here.
+func (s *OrderService) CancelUnclaimedAuction(orderID uuid.UUID) error {
+	return s.cancel(orderID, repository.OrderStatusSearching)
+}
+
+func (s *OrderService) cancel(orderID uuid.UUID, allowed ...repository.OrderStatus) error {
 	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
 		}
-		if order.Status != repository.OrderStatusSearching && order.Status != repository.OrderStatusAssigned {
+		permitted := false
+		for _, status := range allowed {
+			if order.Status == status {
+				permitted = true
+				break
+			}
+		}
+		if !permitted {
 			return errors.New("order cannot be canceled")
 		}
 

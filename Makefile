@@ -362,6 +362,22 @@ clean:
 	rm -f frontend/android/app/build/outputs/apk/release/app-release-aligned.apk
 	rm -f frontend/android/app/build.gradle.bak
 
+# The monitoring stack is a second overlay in the same Compose project, so any
+# command that passes only docker-compose.yml sees its containers as "orphans"
+# and says so on every run. They are not orphans — they are deliberately there,
+# and Compose has no way to be told that.
+#
+# The warning is worth silencing rather than living with: it fires on every
+# start, restart and release registration, and a warning that always fires is
+# one nobody reads.
+#
+# NEVER act on what that warning suggests. `docker compose --remove-orphans`
+# with only the base file DELETES the entire monitoring stack — Prometheus data,
+# Grafana dashboards, Alertmanager silences. Verified: a plain `down` with the
+# base file leaves the monitoring containers running, so the application can be
+# stopped and restarted safely; only --remove-orphans is destructive here.
+export COMPOSE_IGNORE_ORPHANS = true
+
 # Helper: use docker compose if available, fall back to docker-compose
 define compose
 $(if $(shell docker compose version >/dev/null 2>&1 && echo ok),docker compose $(1),docker-compose $(1))
