@@ -1,13 +1,16 @@
 <template>
   <div class="service-catalog-page">
-    <!-- Top Header -->
-    <div class="catalog-header mb-4">
+    <!-- Header -->
+    <div class="page-header">
       <div>
-        <h1 class="page-title">Каталог услуг</h1>
-        <p class="page-subtitle">Управление категориями и вариантами оказываемых услуг</p>
+        <h1 class="page-title">
+          <i class="ph-fill ph-list-dashes" style="color: #5c60f5;"></i>
+          Каталог услуг
+        </h1>
+        <div class="page-subtitle">Управление категориями и вариантами оказываемых услуг</div>
       </div>
-      <button type="button" class="btn-create-root" @click="openCreateModal(null)">
-        <i class="ph-bold ph-plus me-1"></i> Добавить категорию
+      <button type="button" class="btn-primary" @click="openCreateModal(null)">
+        <i class="ph-bold ph-plus"></i> Добавить категорию
       </button>
     </div>
 
@@ -24,30 +27,33 @@
       <button type="button" class="btn-dismiss" @click="errorMsg = ''"><i class="ph ph-x"></i></button>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="loading-state py-5">
-      <div class="spinner"></div>
-      <span>Загрузка каталога...</span>
-    </div>
-
-    <!-- Tree View -->
-    <div v-else class="tree-container">
-      <div v-if="tree.length === 0" class="empty-tree-state">
-        <i class="ph-fill ph-folders empty-icon"></i>
-        <h3>Каталог пуст</h3>
-        <p>Создайте первую категорию, чтобы сформировать список услуг</p>
-        <button type="button" class="btn-create-root mt-2" @click="openCreateModal(null)">
-          <i class="ph-bold ph-plus me-1"></i> Создать категорию
-        </button>
+    <!-- Main Catalog Card -->
+    <div class="catalog-card">
+      <!-- Loading State -->
+      <div v-if="loading" class="loading-state py-5">
+        <div class="spinner"></div>
+        <span>Загрузка каталога...</span>
       </div>
 
-      <service-node-tree
-        v-else
-        :nodes="tree"
-        @create="openCreateModal"
-        @edit="openEditModal"
-        @delete="confirmDelete"
-      />
+      <!-- Tree View -->
+      <div v-else class="tree-container">
+        <div v-if="tree.length === 0" class="empty-tree-state">
+          <i class="ph-fill ph-folders empty-icon"></i>
+          <h3>Каталог пуст</h3>
+          <p>Создайте первую категорию, чтобы сформировать список услуг</p>
+          <button type="button" class="btn-primary mt-3" @click="openCreateModal(null)">
+            <i class="ph-bold ph-plus"></i> Создать категорию
+          </button>
+        </div>
+
+        <service-node-tree
+          v-else
+          :nodes="tree"
+          @create="openCreateModal"
+          @edit="openEditModal"
+          @delete="confirmDelete"
+        />
+      </div>
     </div>
 
     <!-- Custom Form Modal Overlay -->
@@ -187,50 +193,78 @@ export default defineComponent({
 
 <style scoped>
 .service-catalog-page {
-  padding: 24px;
+  padding: 8px 0;
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: 'Outfit', sans-serif;
+  color: #0f172a;
 }
 
-.catalog-header {
+/* Header */
+.page-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  max-width: 1200px;
+  margin-inline: auto;
 }
 
 .page-title {
-  font-size: 24px;
-  font-weight: 800;
+  font-size: 28px;
+  font-weight: 700;
   color: #0f172a;
-  margin: 0;
   letter-spacing: -0.5px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
 }
 
 .page-subtitle {
   font-size: 14px;
+  font-weight: 400;
   color: #64748b;
-  margin: 4px 0 0 0;
+  margin-top: 4px;
 }
 
-.btn-create-root {
+.btn-primary {
   background: #5c60f5;
   color: #ffffff;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 12px;
   font-size: 14px;
   font-weight: 600;
-  padding: 10px 20px;
-  border-radius: 12px;
-  border: none;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  cursor: pointer;
+  gap: 8px;
   box-shadow: 0 4px 12px rgba(92, 96, 245, 0.2);
-  transition: all 0.2s ease;
+  transition: all 0.2s ease-in-out;
 }
 
-.btn-create-root:hover {
-  background: #4f52e6;
-  box-shadow: 0 6px 16px rgba(92, 96, 245, 0.3);
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(92, 96, 245, 0.3);
 }
 
+/* Catalog Card */
+.catalog-card {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.04);
+  padding: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.tree-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Alert Messages */
 .catalog-alert {
   display: flex;
   align-items: center;
@@ -295,7 +329,7 @@ export default defineComponent({
   padding: 48px 24px;
   background: #ffffff;
   border-radius: 20px;
-  border: 1px solid #e2e8f0;
+  border: 1px dashed #cbd5e1;
 }
 
 .empty-icon {
@@ -321,18 +355,19 @@ export default defineComponent({
 }
 
 @media (max-width: 768px) {
-  .catalog-header {
+  .page-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 12px;
+    gap: 16px;
   }
-  .btn-create-root {
+  .btn-primary {
     width: 100%;
     justify-content: center;
   }
-  .service-catalog {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  .catalog-card {
+    padding: 16px;
+    border-radius: 16px;
   }
 }
 </style>
+

@@ -300,7 +300,7 @@ reconcile:
 # is passed explicitly whenever it exists; values in the later file win.
 MONITORING_ENV = $(if $(wildcard .env),--env-file .env) $(if $(wildcard .env.monitoring),--env-file .env.monitoring)
 MONITORING_COMPOSE = $(MONITORING_ENV) -f docker-compose.yml -f docker-compose.monitoring.yml
-MONITORING_SERVICES = prometheus alertmanager grafana vlessprobe node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter
+MONITORING_SERVICES = prometheus alertmanager grafana vlessprobe opsbot node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter
 
 # --no-deps keeps this from starting or recreating db and frontend: the
 # application deploy may be running at the same time, and two processes bringing
@@ -320,7 +320,7 @@ monitoring-down:
 	$(call compose,$(MONITORING_COMPOSE) rm -f $(MONITORING_SERVICES))
 
 monitoring-logs:
-	$(call compose,$(MONITORING_COMPOSE) logs -f prometheus alertmanager grafana vlessprobe)
+	$(call compose,$(MONITORING_COMPOSE) logs -f prometheus alertmanager grafana vlessprobe opsbot)
 
 # Reload Prometheus after editing rules, without dropping the series database.
 monitoring-reload:

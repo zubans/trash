@@ -419,6 +419,8 @@
     "holdAmount": "Hold",
     "reason": "Reason",
     "unknownTypes": "Transaction types outside the sign convention",
-    "loadFailed": "Could not load the reconciliation"
+    "loadFailed": "Could not load the reconciliation",
+    "run": "Run reconciliation",
+    "runNote": "Every run recomputes everything server-side and republishes the metrics, so forcing it here settles the alert instead of waiting for the nightly pass."
   }
 }

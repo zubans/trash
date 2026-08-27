@@ -7,9 +7,11 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/metrics"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -138,7 +140,29 @@ func (s *AdminService) Reconcile(tolerance money.Amount) (*repository.Reconcilia
 	if tolerance.IsNegative() {
 		tolerance = money.Zero
 	}
-	return s.reconcileRepo.Reconcile(tolerance)
+
+	started := time.Now()
+	report, err := s.reconcileRepo.Reconcile(tolerance)
+	metrics.WorkerRun("reconcile", time.Since(started), err)
+	if err != nil {
+		metrics.ReconcileFailed()
+		return nil, err
+	}
+
+	// A pass run on demand publishes its result exactly like the nightly one.
+	// Without this, forcing a reconciliation from the admin panel or from the
+	// ops bot would show a green report on screen while the alert kept firing
+	// on yesterday's gauge — the two would disagree about the same money, and
+	// the screen would be the one people believed.
+	metrics.ReconcileReport(
+		report.OK(),
+		len(report.Discrepancies),
+		len(report.HoldAnomalies),
+		len(report.UnknownTypes),
+		report.Books.Difference.Rubles(),
+		report.Books.EscrowDrift.Rubles(),
+	)
+	return report, nil
 }
 
 // WithSessions lets the service end a user's sessions when their access is

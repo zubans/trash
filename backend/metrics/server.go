@@ -18,12 +18,13 @@ import (
 // application middleware chain.
 //
 // Passing an empty addr disables the listener.
-func Serve(addr string) {
+func Serve(addr string, ops OpsHandlers) {
 	if addr == "" {
 		return
 	}
 
 	mux := http.NewServeMux()
+	ops.register(mux)
 	mux.Handle("/metrics", promhttp.HandlerFor(Registry, promhttp.HandlerOpts{
 		// A broken collector must not take the scrape endpoint down with it:
 		// report what can be reported and log the rest.

@@ -112,6 +112,39 @@ services:
     expose:
       - "9102"
 
+  # Operational commands over Telegram: force a reconciliation, read the
+  # headline metrics, restart the stack.
+  #
+  # It listens on nothing — it polls Telegram outbound — so it has no inbound
+  # attack surface. It does hold the Docker socket, which is root on the host,
+  # and that is precisely why it is a separate service rather than a goroutine
+  # inside the backend: the backend faces the internet and this must not.
+  opsbot:
+    build:
+      context: .
+      dockerfile: monitoring/opsbot/Dockerfile
+    container_name: healthlogin_opsbot
+    restart: unless-stopped
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      # The allowlist. Without at least one chat id the bot refuses to start
+      # rather than take commands from whoever finds it.
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID is required}
+      OPSBOT_ALLOWED_CHATS: ${OPSBOT_ALLOWED_CHATS:-}
+      OPSBOT_ALLOWED_USERS: ${OPSBOT_ALLOWED_USERS:-}
+      # Shared with the backend; gates /internal/* on the metrics listener.
+      OPS_KEY: ${OPS_KEY:?OPS_KEY is required and must match the backend}
+      OPSBOT_PROJECT_DIR: /project
+      OPSBOT_CONFIRM_WINDOW: ${OPSBOT_CONFIRM_WINDOW:-2m}
+      OPSBOT_RESTART_TIMEOUT: ${OPSBOT_RESTART_TIMEOUT:-10m}
+    volumes:
+      # Read-write because `make restart` runs the endpoint-file preflight,
+      # which may have to create vless-endpoints.json.
+      - .:/project
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - backend
+
   node-exporter:
     image: prom/node-exporter:v1.8.2
     container_name: healthlogin_node_exporter

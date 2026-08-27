@@ -1,52 +1,52 @@
 <template>
-  <div class="node-tree-wrap">
-    <div v-for="item in nodes" :key="item.node.id" class="node-card mb-3">
-      <!-- Node Header Row -->
-      <div class="node-main-row">
-        <div class="node-info">
-          <!-- Icon -->
-          <div class="node-icon-box" :class="item.node.node_type === 'CATEGORY' ? 'is-cat' : 'is-var'">
-            <i :class="item.node.node_type === 'CATEGORY' ? 'ph-fill ph-folder' : 'ph-fill ph-tag'"></i>
+  <div class="tree-nodes-list">
+    <div
+      v-for="item in nodes"
+      :key="item.node.id"
+      class="tree-node"
+      :class="{ collapsed: isCollapsed(item.node.id) }"
+    >
+      <div class="node-row">
+        <!-- Drag Handle -->
+        <i class="ph-bold ph-dots-six-vertical drag-handle" title="Перетащить"></i>
+
+        <!-- Chevron (Expand/Collapse) -->
+        <i
+          class="ph-bold ph-caret-down chevron"
+          :class="{ hidden: !item.children || item.children.length === 0 }"
+          @click.stop="toggleNode(item.node.id)"
+        ></i>
+
+        <!-- Node Icon -->
+        <i
+          v-if="item.node.node_type === 'CATEGORY'"
+          class="ph-fill node-icon cat"
+          :class="isCollapsed(item.node.id) ? 'ph-folder' : 'ph-folder-notch-open'"
+        ></i>
+        <i
+          v-else
+          class="ph-fill ph-tag node-icon var"
+        ></i>
+
+        <!-- Node Content -->
+        <div class="node-content">
+          <span class="node-title">{{ item.node.name['ru'] || item.node.code }}</span>
+          <span class="node-code">{{ item.node.code }}</span>
+
+          <div v-if="item.node.is_auction" class="badge-auction">
+            <i class="ph-fill ph-gavel"></i> Аукцион
           </div>
 
-          <div>
-            <div class="node-title-row">
-              <span class="node-name">{{ item.node.name['ru'] || item.node.code }}</span>
-              <span class="node-code">({{ item.node.code }})</span>
-              <span v-if="item.node.name['en']" class="node-name-en">{{ item.node.name['en'] }}</span>
-            </div>
+          <div
+            class="status-dot"
+            :class="{ inactive: !item.node.is_active }"
+            :title="item.node.is_active ? 'Активен' : 'Отключен'"
+          ></div>
+        </div>
 
-            <div class="node-meta-row">
-              <span class="badge-type" :class="item.node.node_type === 'CATEGORY' ? 'cat' : 'var'">
-                {{ item.node.node_type === 'CATEGORY' ? 'Категория' : 'Вариант' }}
-              </span>
-
-              <span v-if="item.node.base_price" class="badge-meta price-badge">
-                <i class="ph-bold ph-currency-rub me-1"></i> {{ item.node.base_price }} ₽
-              </span>
-
-              <span v-if="item.node.is_auction" class="badge-meta auction-badge">
-                <i class="ph-bold ph-gavel me-1"></i> Аукцион
-              </span>
-
-              <span v-if="item.node.is_active" class="badge-meta active-badge">
-                <i class="ph-fill ph-check-circle me-1"></i> Активен
-              </span>
-              <span v-else class="badge-meta inactive-badge">
-                <i class="ph-bold ph-prohibit me-1"></i> Отключен
-              </span>
-
-              <span v-if="item.node.requires_verification" class="badge-meta verified-badge">
-                <i class="ph-bold ph-shield-check me-1"></i> Только верифицированные
-              </span>
-
-              <span v-if="item.node.min_age && item.node.min_age > 0" class="badge-meta age-badge">
-                <i class="ph-bold ph-user-check me-1"></i> {{ item.node.min_age }}+
-              </span>
-
-              <span class="sort-order-text">Сортировка: {{ item.node.sort_order || 1 }}</span>
-            </div>
-          </div>
+        <!-- Price (For Variants / Right Aligned) -->
+        <div v-if="item.node.node_type === 'VARIANT'" class="node-price">
+          {{ item.node.is_auction ? '—' : formatPrice(item.node.base_price) }}
         </div>
 
         <!-- Node Actions -->
@@ -54,35 +54,33 @@
           <button
             v-if="item.node.node_type === 'CATEGORY'"
             type="button"
-            class="btn-node-act add-child"
-            title="Добавить в подкатегорию"
-            @click="$emit('create', item.node.id)"
+            class="btn-action add"
+            title="Добавить подэлемент"
+            @click.stop="$emit('create', item.node.id)"
           >
-            <i class="ph-bold ph-plus me-1"></i> Добавить подэлемент
+            <i class="ph-bold ph-plus"></i>
           </button>
-
           <button
             type="button"
-            class="btn-node-act edit"
+            class="btn-action"
             title="Редактировать"
-            @click="$emit('edit', item.node)"
+            @click.stop="$emit('edit', item.node)"
           >
-            <i class="ph-bold ph-pencil me-1"></i> Изменить
+            <i class="ph-bold ph-pencil-simple"></i>
           </button>
-
           <button
             type="button"
-            class="btn-node-act delete"
+            class="btn-action delete"
             title="Удалить"
-            @click="$emit('delete', item.node)"
+            @click.stop="$emit('delete', item.node)"
           >
             <i class="ph-bold ph-trash"></i>
           </button>
         </div>
       </div>
 
-      <!-- Nested Children -->
-      <div v-if="item.children && item.children.length > 0" class="node-children-wrap">
+      <!-- Children -->
+      <div v-if="item.children && item.children.length > 0" class="tree-children">
         <service-node-tree
           :nodes="item.children"
           @create="$emit('create', $event)"
@@ -95,7 +93,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent } from 'vue'
+import { defineComponent, ref } from 'vue'
 
 export default defineComponent({
   name: 'ServiceNodeTree',
@@ -106,215 +104,259 @@ export default defineComponent({
     },
   },
   emits: ['create', 'edit', 'delete'],
+  setup() {
+    const collapsedMap = ref<Record<string, boolean>>({})
+
+    const isCollapsed = (id: string) => !!collapsedMap.value[id]
+
+    const toggleNode = (id: string) => {
+      collapsedMap.value[id] = !collapsedMap.value[id]
+    }
+
+    const formatPrice = (val: number | string | null | undefined) => {
+      if (val === null || val === undefined || val === '') return '—'
+      const num = typeof val === 'number' ? val : parseFloat(String(val))
+      if (isNaN(num)) return `${val} ₽`
+      return `${num.toFixed(2)} ₽`
+    }
+
+    return {
+      isCollapsed,
+      toggleNode,
+      formatPrice,
+    }
+  },
 })
 </script>
 
 <style scoped>
-.node-tree-wrap {
-  width: 100%;
+.tree-nodes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.node-card {
-  background: #ffffff;
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
-  overflow: hidden;
-  transition: all 0.2s ease;
+.tree-node {
+  display: flex;
+  flex-direction: column;
 }
 
-.node-card:hover {
-  border-color: #cbd5e1;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.07);
+/* Tree Children */
+.tree-children {
+  margin-left: 22px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.node-main-row {
+.tree-node.collapsed > .tree-children {
+  display: none;
+}
+
+.tree-node.collapsed > .node-row .chevron {
+  transform: rotate(-90deg);
+}
+
+/* Node Row */
+.node-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  gap: 16px;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+  position: relative;
 }
 
-.node-info {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+.node-row:hover {
+  background: #f8fafc;
 }
 
-.node-icon-box {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* Drag Handle */
+.drag-handle {
+  color: #cbd5e1;
   font-size: 20px;
-  flex-shrink: 0;
+  cursor: grab;
+  opacity: 0;
+  transition: all 0.2s ease-in-out;
+  margin-left: -8px;
 }
 
-.node-icon-box.is-cat {
-  background: rgba(99, 102, 241, 0.1);
-  color: #6366f1;
-}
-
-.node-icon-box.is-var {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-.node-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.node-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.node-code {
-  font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.node-row:hover .drag-handle {
+  opacity: 1;
   color: #64748b;
 }
 
-.node-name-en {
-  font-size: 13px;
-  color: #94a3b8;
-  font-style: italic;
+.drag-handle:active {
+  cursor: grabbing;
 }
 
-.node-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  flex-wrap: wrap;
-}
-
-.badge-type {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.badge-type.cat {
-  background: #e0e7ff;
-  color: #3730a3;
-}
-
-.badge-type.var {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.badge-meta {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.price-badge {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.auction-badge {
-  background: #fae8ff;
-  color: #86198f;
-}
-
-.active-badge {
-  background: #ecfdf5;
-  color: #10b981;
-}
-
-.inactive-badge {
-  background: #fef2f2;
-  color: #ef4444;
-}
-
-.sort-order-text {
-  font-size: 11px;
-  color: #94a3b8;
-}
-
-.verified-badge {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.age-badge {
-  background: #fff7ed;
-  color: #c2410c;
-}
-
-/* Actions */
-.node-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.btn-node-act {
-  padding: 7px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #475569;
+/* Chevron */
+.chevron {
+  color: #64748b;
+  font-size: 14px;
   cursor: pointer;
-  display: inline-flex;
+  transition: transform 0.2s ease;
+  width: 20px;
+  height: 20px;
+  display: flex;
   align-items: center;
-  transition: all 0.2s ease;
+  justify-content: center;
+  border-radius: 4px;
 }
 
-.btn-node-act:hover {
-  background: #f8fafc;
+.chevron:hover {
+  background: rgba(0, 0, 0, 0.05);
   color: #0f172a;
 }
 
-.btn-node-act.add-child {
-  background: rgba(99, 102, 241, 0.08);
-  color: #6366f1;
-  border-color: rgba(99, 102, 241, 0.2);
+.chevron.hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.btn-node-act.add-child:hover {
-  background: #6366f1;
-  color: #ffffff;
+/* Node Icon */
+.node-icon {
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
 }
 
-.btn-node-act.edit:hover {
-  background: #f59e0b;
-  color: #ffffff;
-  border-color: #f59e0b;
+.node-icon.cat {
+  color: #60a5fa;
 }
 
-.btn-node-act.delete:hover {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #ef4444;
+.node-icon.var {
+  color: #10b981;
+  font-size: 18px;
 }
 
-.node-children-wrap {
-  padding-left: 28px;
+/* Node Content */
+.node-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.node-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.node-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #64748b;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* Status & Badges */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 2px #ecfdf5;
+  flex-shrink: 0;
+}
+
+.status-dot.inactive {
+  background: #cbd5e1;
+  box-shadow: 0 0 0 2px #f1f5f9;
+}
+
+.badge-auction {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f59e0b;
+  background: #fffbeb;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Price */
+.node-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-left: auto;
   padding-right: 16px;
-  padding-bottom: 16px;
-  border-top: 1px solid #f1f5f9;
-  background: #fafbfd;
-  padding-top: 14px;
+  flex-shrink: 0;
+}
+
+/* Contextual Actions */
+.node-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transform: translateX(10px);
+  transition: all 0.2s ease-in-out;
+}
+
+.node-row:hover .node-actions {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.btn-action {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-action:hover {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.btn-action.add:hover {
+  color: #5c60f5;
+}
+
+.btn-action.delete:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+@media (max-width: 640px) {
+  .node-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .node-actions {
+    opacity: 1;
+    transform: none;
+    margin-left: auto;
+  }
 }
 </style>
+

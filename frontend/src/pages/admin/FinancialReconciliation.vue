@@ -16,7 +16,7 @@
           @click="fetchReport"
         >
           <i class="ph-bold ph-arrows-clockwise" :class="{ 'spin': loading }"></i>
-          <span>{{ $t('reconciliation.refresh') }}</span>
+          <span>{{ $t('reconciliation.run') }}</span>
         </button>
       </div>
     </div>
@@ -56,6 +56,7 @@
         <!-- Human Explainer Text -->
         <div class="alert-text">
           {{ $t('reconciliation.explainer') }}
+          <div class="alert-note">{{ $t('reconciliation.runNote') }}</div>
         </div>
       </div>
     </div>
@@ -589,7 +590,12 @@ export default defineComponent({
   border-color: rgba(16, 185, 129, 0.15);
 }
 
-.alert-card.danger .alert-text { font-size: 14px; color: #7f1d1d; line-height: 1.5; }
+.alert-card.danger .alert-note {
+  margin-top: 0.5rem;
+  opacity: 0.85;
+}
+
+.alert-text { font-size: 14px; color: #7f1d1d; line-height: 1.5; }
 .alert-card.success .alert-text { font-size: 14px; color: #047857; line-height: 1.5; }
 
 /* Bento Grid Metrics */

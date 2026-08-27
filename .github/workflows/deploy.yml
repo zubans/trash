@@ -288,7 +288,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GRAFANA_ADMIN_USER,GRAFANA_ADMIN_PASSWORD,GRAFANA_ROOT_URL,PROBE_ENDPOINTS_URL,PROBE_TARGET_URL,PROBE_INTERVAL
+          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GRAFANA_ADMIN_USER,GRAFANA_ADMIN_PASSWORD,GRAFANA_ROOT_URL,PROBE_ENDPOINTS_URL,PROBE_TARGET_URL,PROBE_INTERVAL,OPS_KEY,OPSBOT_ALLOWED_CHATS,OPSBOT_ALLOWED_USERS
           script: |
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
@@ -309,7 +309,7 @@ jobs:
             # rewrites .env wholesale, and appending to it would lose these on
             # the next run — or, worse, half-lose them mid-race.
             echo "Writing .env.monitoring from GitHub Secrets..."
-            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\nGRAFANA_ADMIN_USER=%s\nGRAFANA_ADMIN_PASSWORD=%s\nGRAFANA_ROOT_URL=%s\nPROBE_ENDPOINTS_URL=%s\nPROBE_TARGET_URL=%s\nPROBE_INTERVAL=%s\n" \
+            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\nGRAFANA_ADMIN_USER=%s\nGRAFANA_ADMIN_PASSWORD=%s\nGRAFANA_ROOT_URL=%s\nPROBE_ENDPOINTS_URL=%s\nPROBE_TARGET_URL=%s\nPROBE_INTERVAL=%s\nOPS_KEY=%s\nOPSBOT_ALLOWED_CHATS=%s\nOPSBOT_ALLOWED_USERS=%s\n" \
               "${TELEGRAM_BOT_TOKEN}" \
               "${TELEGRAM_CHAT_ID}" \
               "${GRAFANA_ADMIN_USER:-admin}" \
@@ -317,7 +317,10 @@ jobs:
               "${GRAFANA_ROOT_URL:-http://localhost:3000}" \
               "${PROBE_ENDPOINTS_URL:-https://moya-usluga.ru/api/app/endpoints}" \
               "${PROBE_TARGET_URL:-https://moya-usluga.ru/health}" \
-              "${PROBE_INTERVAL:-2m}" > .env.monitoring
+              "${PROBE_INTERVAL:-2m}" \
+              "${OPS_KEY}" \
+              "${OPSBOT_ALLOWED_CHATS:-}" \
+              "${OPSBOT_ALLOWED_USERS:-}" > .env.monitoring
             chmod 600 .env.monitoring
 
             # Rules are validated before they are applied. Prometheus starts
@@ -349,3 +352,6 @@ jobs:
           PROBE_ENDPOINTS_URL: ${{ vars.PROBE_ENDPOINTS_URL }}
           PROBE_TARGET_URL: ${{ vars.PROBE_TARGET_URL }}
           PROBE_INTERVAL: ${{ vars.PROBE_INTERVAL }}
+          OPS_KEY: ${{ secrets.OPS_KEY }}
+          OPSBOT_ALLOWED_CHATS: ${{ vars.OPSBOT_ALLOWED_CHATS }}
+          OPSBOT_ALLOWED_USERS: ${{ vars.OPSBOT_ALLOWED_USERS }}

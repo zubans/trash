@@ -73,6 +73,9 @@ services:
       # compose network — it is never published to the host and nginx does not
       # proxy it. Set to an empty value to turn metrics off entirely.
       METRICS_ADDR: ${METRICS_ADDR:-:9091}
+      # Gates the /internal/* routes on the metrics listener, used by the ops
+      # bot to force a reconciliation. Unset means those routes do not exist.
+      OPS_KEY: ${OPS_KEY:-}
       # Surfaces in healthlogin_build_info so a dashboard can answer "which
       # build is actually running right now?".
       APP_VERSION: ${BACKEND_TAG:-dev}

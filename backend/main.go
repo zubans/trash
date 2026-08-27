@@ -356,7 +356,14 @@ func main() {
 	// Prometheus scrape target. Bound to the compose network only: nginx never
 	// proxies it and the port is not published to the host. Set METRICS_ADDR to
 	// an empty value to turn the listener off.
-	metrics.Serve(getEnv("METRICS_ADDR", ":9091"))
+	metrics.Serve(getEnv("METRICS_ADDR", ":9091"), metrics.OpsHandlers{
+		// Shared with the ops bot, which is the only thing that calls this.
+		// Unset means the routes are not registered at all.
+		Secret: os.Getenv("OPS_KEY"),
+		Reconcile: func() (any, error) {
+			return adminService.Reconcile(money.FromRubles(0.01))
+		},
+	})
 
 	// Register pprof handlers for debugging (only exposed locally)
 	go func() {

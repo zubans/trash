@@ -71,8 +71,19 @@ DECLARE
     gap_after     NUMERIC;
     unmapped      INT;
     rows_found    INT;
+    ledger_rows   INT;
     correction_ok BOOLEAN;
 BEGIN
+    -- Before anything else: can the ledger era be located at all? If no entry
+    -- has ever recorded a counterparty the boundary is NULL and the search
+    -- below returns nothing — which reads as "no one-sided entries" when the
+    -- truth would be the opposite, that every entry is one-sided. Those two
+    -- findings must never produce the same message.
+    SELECT count(*) INTO ledger_rows FROM transactions WHERE counterparty IS NOT NULL;
+    IF ledger_rows = 0 THEN
+        RAISE EXCEPTION 'no transaction has ever recorded a counterparty, so the ledger era cannot be located; this script cannot tell a clean history from a wholly one-sided one and refuses to act';
+    END IF;
+
     SELECT COALESCE((SELECT SUM(balance) FROM users), 0)
          + COALESCE((SELECT SUM(balance) FROM system_accounts), 0)
       INTO gap_before;

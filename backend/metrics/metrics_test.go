@@ -39,7 +39,7 @@ func TestRegistryGathers(t *testing.T) {
 	}
 
 	// An empty address disables the listener; it must return, not panic.
-	Serve("")
+	Serve("", OpsHandlers{})
 
 	body := renderForTest(t)
 	for _, want := range []string{
