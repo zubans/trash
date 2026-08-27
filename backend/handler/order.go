@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/middleware"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
@@ -112,6 +113,38 @@ func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Confirm(user.ID, orderID); err != nil {
+		writeOrderError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// TipOrder handles POST /customer/orders/{id}/tip. The customer tips the
+// executor of a completed order; the amount arrives in rubles and is charged
+// from the customer's balance.
+func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Amount money.Amount `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.orderService.TipOrder(user.ID, orderID, req.Amount); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -269,6 +302,9 @@ func (h *OrderHandler) CreateOrderHandler(w http.ResponseWriter, r *http.Request
 }
 func (h *OrderHandler) ConfirmOrderHandler(w http.ResponseWriter, r *http.Request) {
 	h.ConfirmOrder(w, r)
+}
+func (h *OrderHandler) TipOrderHandler(w http.ResponseWriter, r *http.Request) {
+	h.TipOrder(w, r)
 }
 func (h *OrderHandler) CancelOrderHandler(w http.ResponseWriter, r *http.Request) {
 	h.CancelOrder(w, r)

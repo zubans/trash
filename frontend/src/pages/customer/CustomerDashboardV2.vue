@@ -321,6 +321,9 @@
         v-model="showReviewModal"
         :order-id="reviewTargetOrderId"
         role="CUSTOMER"
+        :order-amount="reviewTargetOrderAmount"
+        :balance="balance ?? 0"
+        :currency-symbol="currencySymbol"
         @reviewed="onReviewSubmitted"
       />
 
@@ -808,19 +811,26 @@ export default defineComponent({
 
     const showReviewModal = ref(false)
     const reviewTargetOrderId = ref('')
+    // The order's paid amount feeds the 5% / 10% tip presets in the modal.
+    const reviewTargetOrderAmount = ref(0)
 
     const openReviewModal = (order: any) => {
       reviewTargetOrderId.value = order.id
+      reviewTargetOrderAmount.value = Number(order.final_amount ?? order.hold_amount ?? 0)
       showOrderDetailsModal.value = false
       showReviewModal.value = true
     }
 
-    const onReviewSubmitted = () => {
-      successMsg.value = 'Спасибо за отзыв!'
+    const onReviewSubmitted = (payload?: { tipped?: boolean }) => {
+      successMsg.value = payload?.tipped ? 'Спасибо за отзыв и чаевые!' : 'Спасибо за отзыв!'
       if (reviewTargetOrderId.value) {
         delete orderReviewsMap.value[reviewTargetOrderId.value]
       }
       fetchReviewsForHistory()
+      // A tip changes the balance, so refresh the profile alongside the reviews.
+      if (payload?.tipped) {
+        fetchProfile()
+      }
     }
 
     const openOrderDetails = (order: any) => {
@@ -1451,6 +1461,7 @@ export default defineComponent({
       uploadingChatFile,
       showReviewModal,
       reviewTargetOrderId,
+      reviewTargetOrderAmount,
       openReviewModal,
       onReviewSubmitted,
       showImagePreviewModal,

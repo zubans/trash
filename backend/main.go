@@ -229,6 +229,7 @@ func main() {
 			r.Post("/customer/orders", oh.CreateOrderHandler)
 			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
 			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
+			r.Post("/customer/orders/{id}/tip", oh.TipOrderHandler)
 			r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
 			r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
 			r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)

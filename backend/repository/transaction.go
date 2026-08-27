@@ -26,6 +26,11 @@ const (
 	// paid out. Together they mirror HOLD/PAYMENT on the order side.
 	TransactionTypeWithdrawalHold TransactionType = "WITHDRAWAL_HOLD"
 	TransactionTypeWithdrawalPaid TransactionType = "WITHDRAWAL_PAID"
+	// TransactionTypeTip debits a customer who tips the executor after a
+	// completed order; TransactionTypeTipReward credits the executor. The tip
+	// passes through ESCROW in one transaction, so the pair nets to zero there.
+	TransactionTypeTip       TransactionType = "TIP"
+	TransactionTypeTipReward TransactionType = "TIP_REWARD"
 )
 
 // ledgerSigns declares how each transaction type moves a user's balance. This is
@@ -48,6 +53,10 @@ var ledgerSigns = map[TransactionType]int{
 	TransactionTypeWithdrawalHold: -1,
 	TransactionTypePayment:        0,
 	TransactionTypeWithdrawalPaid: 0,
+	// A tip debits the customer and credits the executor by the same amount, in
+	// one transaction through ESCROW.
+	TransactionTypeTip:       -1,
+	TransactionTypeTipReward: +1,
 }
 
 // LedgerSign reports how a transaction type moves the balance, and whether the
@@ -79,6 +88,10 @@ type TransactionRepository interface {
 	Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amount) error
 	CreateTransaction(tx *sql.Tx, t *Transaction) error
 	GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error)
+	// HasTip reports whether the customer already tipped this order, so a tip is
+	// charged at most once. Runs inside the caller's transaction so the check
+	// and the write are one atomic step.
+	HasTip(q Querier, orderID uuid.UUID) (bool, error)
 	RunInTx(fn func(*sql.Tx) error) error
 }
 
@@ -155,6 +168,25 @@ func (r *transactionRepo) CreateTransaction(tx *sql.Tx, t *Transaction) error {
 	}
 	_, err := r.db.Exec(query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
 	return err
+}
+
+// HasTip checks for an existing TIP entry on the order. The customer's debit is
+// the TIP row; TIP_REWARD sits on the executor, so one type is enough to look
+// for.
+func (r *transactionRepo) HasTip(q Querier, orderID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.querierAny(q).QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM transactions WHERE order_id = $1 AND type = $2)`,
+		orderID, TransactionTypeTip,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (r *transactionRepo) querierAny(q Querier) Querier {
+	if q != nil {
+		return q
+	}
+	return r.db
 }
 
 func (r *transactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error) {

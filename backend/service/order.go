@@ -463,6 +463,57 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 	return err
 }
 
+// maxTipAmount is a fat-finger ceiling on a single tip. The balance check is
+// the real limit; this only stops an obviously mistaken amount from being
+// charged before the customer notices.
+var maxTipAmount = money.FromRubles(100_000)
+
+// TipOrder lets a customer tip the executor of a completed order. The tip moves
+// from the customer's balance to the executor's, at most once per order: the
+// once-only guard and the charge share one transaction and one row lock, so a
+// duplicate request cannot charge twice. Returns an insufficient-balance error
+// when the customer cannot cover the tip.
+func (s *OrderService) TipOrder(customerID, orderID uuid.UUID, amount money.Amount) error {
+	if !amount.IsPositive() {
+		return errors.New("tip amount must be positive")
+	}
+	if amount > maxTipAmount {
+		return errors.New("tip amount is too large")
+	}
+
+	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.CustomerID != customerID {
+			return errors.New("forbidden")
+		}
+		if order.Status != repository.OrderStatusCompleted {
+			return errors.New("tips can only be sent for completed orders")
+		}
+		if order.ExecutorID == nil {
+			return errors.New("order has no executor")
+		}
+
+		tipped, err := s.ledger.HasTip(tx, orderID)
+		if err != nil {
+			return err
+		}
+		if tipped {
+			return errors.New("this order has already been tipped")
+		}
+
+		return s.ledger.Tip(tx, customerID, *order.ExecutorID, amount, &order.ID)
+	})
+	// ErrInsufficientFunds is passed through so the handler renders it as the
+	// same "недостаточно средств" / 422 as an order hold does.
+	if err == nil {
+		metrics.OrderEvent("tipped")
+	}
+	return err
+}
+
 // Confirm completes an order for a specific customer (alias compatible with handler).
 func (s *OrderService) Confirm(customerID, orderID uuid.UUID) error {
 	order, err := s.orderRepo.GetOrderByID(orderID)

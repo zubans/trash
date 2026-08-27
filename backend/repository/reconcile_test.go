@@ -26,6 +26,8 @@ var allTransactionTypes = []TransactionType{
 	TransactionTypeWithdrawal,
 	TransactionTypeWithdrawalHold,
 	TransactionTypeWithdrawalPaid,
+	TransactionTypeTip,
+	TransactionTypeTipReward,
 }
 
 func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
@@ -45,14 +47,16 @@ func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
 func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 	cases := map[TransactionType]int{
 		// Money arriving.
-		TransactionTypeTopUp:  +1,
-		TransactionTypeReward: +1,
-		TransactionTypeRefund: +1,
+		TransactionTypeTopUp:     +1,
+		TransactionTypeReward:    +1,
+		TransactionTypeRefund:    +1,
+		TransactionTypeTipReward: +1,
 		// Money leaving.
 		TransactionTypeHold:           -1,
 		TransactionTypeFine:           -1,
 		TransactionTypeWithdrawal:     -1,
 		TransactionTypeWithdrawalHold: -1,
+		TransactionTypeTip:            -1,
 		// Recorded, but moves nothing: the customer's money already left the
 		// balance when the hold was taken, and PAYMENT marks that hold as spent.
 		TransactionTypePayment:        0,

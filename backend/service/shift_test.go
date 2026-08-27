@@ -239,6 +239,10 @@ func (m *mockShiftTransactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]
 	return nil, nil
 }
 
+func (m *mockShiftTransactionRepo) HasTip(q repository.Querier, orderID uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 	repo := &mockShiftRepo{}
 	centerLat := 55.7558

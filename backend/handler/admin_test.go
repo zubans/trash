@@ -417,6 +417,10 @@ func (m *mockLedgerTxRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*reposit
 	return nil, nil
 }
 
+func (m *mockLedgerTxRepo) HasTip(q repository.Querier, orderID uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (m *mockLedgerTxRepo) RunInTx(fn func(*sql.Tx) error) error { return fn(nil) }
 
 type mockLedgerAccounts struct{}

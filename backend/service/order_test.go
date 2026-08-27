@@ -537,6 +537,15 @@ func (m *mockTransactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*repo
 	return nil, nil
 }
 
+func (m *mockTransactionRepo) HasTip(q repository.Querier, orderID uuid.UUID) (bool, error) {
+	for _, t := range m.txs {
+		if t.OrderID != nil && *t.OrderID == orderID && t.Type == string(repository.TransactionTypeTip) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *mockTransactionRepo) RunInTx(fn func(*sql.Tx) error) error {
 	return fn(nil)
 }
@@ -821,3 +830,103 @@ func testLedger() *Ledger {
 }
 
 func (m *mockUserRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error { return nil }
+
+// TestOrderService_TipOrder covers the tip flow: money moves from the customer
+// to the executor, exactly once, and only for a completed order.
+func TestOrderService_TipOrder(t *testing.T) {
+	customerID := uuid.New()
+	executorID := uuid.New()
+	orderID := uuid.New()
+
+	txRepo := &mockTransactionRepo{balances: map[uuid.UUID]money.Amount{
+		customerID: money.FromRubles(1000),
+		executorID: money.FromRubles(0),
+	}}
+	ledger, _ := newTestLedger(txRepo)
+
+	orderRepo := &mockOrderRepo{orders: []*repository.Order{{
+		ID:         orderID,
+		CustomerID: customerID,
+		ExecutorID: &executorID,
+		Status:     repository.OrderStatusCompleted,
+	}}}
+
+	srv := NewOrderService(orderRepo, ledger, &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+
+	tip := money.FromRubles(150)
+	if err := srv.TipOrder(customerID, orderID, tip); err != nil {
+		t.Fatalf("tip failed: %v", err)
+	}
+	if got := txRepo.balance(customerID); got != money.FromRubles(850) {
+		t.Errorf("customer balance: expected 850, got %s", got)
+	}
+	if got := txRepo.balance(executorID); got != money.FromRubles(150) {
+		t.Errorf("executor balance: expected 150, got %s", got)
+	}
+
+	// A second tip on the same order is refused, and nothing moves.
+	if err := srv.TipOrder(customerID, orderID, tip); err == nil {
+		t.Fatal("expected a second tip to be rejected")
+	}
+	if got := txRepo.balance(customerID); got != money.FromRubles(850) {
+		t.Errorf("customer balance changed after a rejected tip: %s", got)
+	}
+}
+
+func TestOrderService_TipOrder_Rejections(t *testing.T) {
+	customerID := uuid.New()
+	executorID := uuid.New()
+
+	makeService := func(order *repository.Order, balance money.Amount) *OrderService {
+		txRepo := &mockTransactionRepo{balances: map[uuid.UUID]money.Amount{customerID: balance}}
+		ledger, _ := newTestLedger(txRepo)
+		orderRepo := &mockOrderRepo{orders: []*repository.Order{order}}
+		return NewOrderService(orderRepo, ledger, &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+	}
+
+	completed := func() *repository.Order {
+		return &repository.Order{ID: uuid.New(), CustomerID: customerID, ExecutorID: &executorID, Status: repository.OrderStatusCompleted}
+	}
+
+	t.Run("non-positive amount", func(t *testing.T) {
+		o := completed()
+		srv := makeService(o, money.FromRubles(1000))
+		if err := srv.TipOrder(customerID, o.ID, money.Zero); err == nil {
+			t.Fatal("expected a zero tip to be rejected")
+		}
+	})
+
+	t.Run("not the customer", func(t *testing.T) {
+		o := completed()
+		srv := makeService(o, money.FromRubles(1000))
+		if err := srv.TipOrder(uuid.New(), o.ID, money.FromRubles(50)); err == nil {
+			t.Fatal("expected a tip from a stranger to be rejected")
+		}
+	})
+
+	t.Run("order not completed", func(t *testing.T) {
+		o := completed()
+		o.Status = repository.OrderStatusAssigned
+		srv := makeService(o, money.FromRubles(1000))
+		if err := srv.TipOrder(customerID, o.ID, money.FromRubles(50)); err == nil {
+			t.Fatal("expected a tip on an unfinished order to be rejected")
+		}
+	})
+
+	t.Run("insufficient balance", func(t *testing.T) {
+		o := completed()
+		srv := makeService(o, money.FromRubles(10))
+		err := srv.TipOrder(customerID, o.ID, money.FromRubles(50))
+		if !errors.Is(err, repository.ErrInsufficientFunds) {
+			t.Fatalf("expected insufficient funds, got %v", err)
+		}
+	})
+
+	t.Run("above the ceiling", func(t *testing.T) {
+		o := completed()
+		srv := makeService(o, money.FromRubles(1_000_000))
+		if err := srv.TipOrder(customerID, o.ID, money.FromRubles(200_000)); err == nil {
+			t.Fatal("expected an oversized tip to be rejected")
+		}
+	})
+}

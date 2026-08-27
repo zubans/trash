@@ -24,6 +24,12 @@ export async function submitOrderReview(orderId: string, payload: { rating: numb
   return response.data
 }
 
+// sendOrderTip charges a tip to the executor of a completed order. The amount
+// is in rubles; the backend moves it from the customer's balance.
+export async function sendOrderTip(orderId: string, amount: number): Promise<void> {
+  await api.post(`/customer/orders/${orderId}/tip`, { amount })
+}
+
 export async function checkMyOrderReview(orderId: string): Promise<{ has_reviewed: boolean; review?: OrderReview }> {
   const response = await api.get(`/orders/${orderId}/reviews/mine`)
   return response.data

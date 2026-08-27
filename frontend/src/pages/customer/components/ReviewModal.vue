@@ -58,6 +58,44 @@
           ></textarea>
         </div>
 
+        <!-- Tips (only the customer tips the executor) -->
+        <div v-if="showTips" class="tips-section">
+          <div class="tips-label">
+            <i class="ph-fill ph-hand-coins"></i> Чаевые исполнителю
+          </div>
+          <div class="tips-options">
+            <button
+              v-for="opt in tipOptions"
+              :key="opt.key"
+              type="button"
+              :class="['tip-pill', { active: tipChoice === opt.key }]"
+              @click="tipChoice = opt.key"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+
+          <div v-if="tipChoice === 'custom'" class="tip-custom">
+            <input
+              v-model="customTipInput"
+              type="number"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              class="tip-custom-input"
+              placeholder="Сумма"
+            />
+            <span class="tip-currency">{{ currencySymbol }}</span>
+          </div>
+
+          <div v-if="tipAmount > 0" class="tip-summary">
+            Будет списано с баланса: <strong>{{ tipAmount }} {{ currencySymbol }}</strong>
+          </div>
+          <div v-if="tipExceedsBalance" class="tip-warning">
+            Недостаточно средств на балансе для этих чаевых
+          </div>
+        </div>
+
         <div v-if="errorText" class="error-banner">
           {{ errorText }}
         </div>
@@ -67,12 +105,13 @@
         <button
           type="button"
           class="btn-submit-review"
-          :disabled="selectedRating === 0 || submitting"
+          :disabled="selectedRating === 0 || submitting || tipExceedsBalance"
           @click="submit"
         >
           <span v-if="submitting" class="spinner-sm"></span>
           <template v-else>
-            Отправить отзыв <i class="ph-bold ph-paper-plane-tilt"></i>
+            {{ tipAmount > 0 ? 'Отправить отзыв и чаевые' : 'Отправить отзыв' }}
+            <i class="ph-bold ph-paper-plane-tilt"></i>
           </template>
         </button>
       </div>
@@ -81,8 +120,8 @@
 </template>
 
 <script lang="ts">
-import {defineComponent, ref, computed} from 'vue'
-import { submitOrderReview } from '../../../api/review'
+import {defineComponent, ref, computed, watch} from 'vue'
+import { submitOrderReview, sendOrderTip } from '../../../api/review'
 
 export default defineComponent({
   name: 'ReviewModal',
@@ -90,6 +129,11 @@ export default defineComponent({
     modelValue: { type: Boolean, required: true },
     orderId: { type: String, required: true },
     role: { type: String, default: 'CUSTOMER' },
+    // The paid amount of the order, used to compute the 5% / 10% presets.
+    orderAmount: { type: Number, default: 0 },
+    // The customer's current balance, to warn before a tip that would bounce.
+    balance: { type: Number, default: 0 },
+    currencySymbol: { type: String, default: '₽' },
   },
   emits: ['update:modelValue', 'reviewed'],
   setup(props, { emit }) {
@@ -106,6 +150,52 @@ export default defineComponent({
     const comment = ref('')
     const submitting = ref(false)
     const errorText = ref('')
+
+    // --- Tips ---
+    // Only a customer tips the executor; an executor reviewing a customer sees
+    // no tip block.
+    const showTips = computed(() => props.role === 'CUSTOMER')
+    type TipKey = 'none' | 'p5' | 'p10' | 'custom'
+    const tipChoice = ref<TipKey>('none')
+    const customTipInput = ref('')
+
+    // Percentages round to a whole ruble so the charged amount matches the label.
+    const percentTip = (percent: number) => Math.max(0, Math.round((props.orderAmount * percent) / 100))
+
+    const tipOptions = computed<Array<{ key: TipKey; label: string }>>(() => [
+      { key: 'none', label: 'Без чаевых' },
+      { key: 'p5', label: props.orderAmount > 0 ? `5% · ${percentTip(5)} ${props.currencySymbol}` : '5%' },
+      { key: 'p10', label: props.orderAmount > 0 ? `10% · ${percentTip(10)} ${props.currencySymbol}` : '10%' },
+      { key: 'custom', label: 'Своя сумма' },
+    ])
+
+    const tipAmount = computed(() => {
+      switch (tipChoice.value) {
+        case 'p5':
+          return percentTip(5)
+        case 'p10':
+          return percentTip(10)
+        case 'custom': {
+          const value = Math.floor(Number(customTipInput.value))
+          return isFinite(value) && value > 0 ? value : 0
+        }
+        default:
+          return 0
+      }
+    })
+
+    const tipExceedsBalance = computed(() => tipAmount.value > 0 && tipAmount.value > props.balance)
+
+    // Reset the tip selector each time the modal opens for a new order.
+    watch(
+      () => props.modelValue,
+      (open) => {
+        if (open) {
+          tipChoice.value = 'none'
+          customTipInput.value = ''
+        }
+      }
+    )
 
     const ratingLabels: Record<number, string> = {
       1: 'Ужасно',
@@ -133,16 +223,28 @@ export default defineComponent({
 
     const submit = async () => {
       if (selectedRating.value === 0 || submitting.value) return
+      if (tipExceedsBalance.value) {
+        errorText.value = 'Недостаточно средств на балансе для этих чаевых'
+        return
+      }
       submitting.value = true
       errorText.value = ''
 
+      const tip = tipAmount.value
+
       try {
+        // The tip goes first: it is the part that can fail on balance, and a
+        // rejected tip should not leave the review already sent under it.
+        if (tip > 0) {
+          await sendOrderTip(props.orderId, tip)
+        }
+
         await submitOrderReview(props.orderId, {
           rating: selectedRating.value,
           tags: selectedTags.value,
           comment: comment.value.trim(),
         })
-        emit('reviewed')
+        emit('reviewed', { tipped: tip > 0 })
         show.value = false
       } catch (err: any) {
         errorText.value = err.response?.data || 'Ошибка отправки отзыва'
@@ -163,6 +265,12 @@ export default defineComponent({
       availableTags,
       toggleTag,
       submit,
+      showTips,
+      tipChoice,
+      customTipInput,
+      tipOptions,
+      tipAmount,
+      tipExceedsBalance,
     }
   },
 })
@@ -326,6 +434,109 @@ export default defineComponent({
   border-radius: 12px;
   font-size: 13px;
   margin-bottom: 16px;
+}
+
+/* --- Tips --- */
+.tips-section {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 16px;
+}
+
+.tips-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 12px;
+}
+
+.tips-label i {
+  color: #f59e0b;
+  font-size: 16px;
+}
+
+.tips-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.tip-pill {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.tip-pill:hover {
+  border-color: #cbd5e1;
+}
+
+.tip-pill.active {
+  background: #eef2ff;
+  border-color: #6366f1;
+  color: #4f46e5;
+}
+
+.tip-custom {
+  position: relative;
+  margin-top: 10px;
+}
+
+.tip-custom-input {
+  width: 100%;
+  padding: 12px 36px 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  background: #ffffff;
+  transition: all 0.15s ease;
+}
+
+.tip-custom-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.tip-currency {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  font-weight: 600;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.tip-summary {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.tip-summary strong {
+  color: #0f172a;
+}
+
+.tip-warning {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ef4444;
 }
 
 .btn-submit-review {

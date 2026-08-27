@@ -47,6 +47,12 @@ func (l *Ledger) History(userID uuid.UUID) ([]*repository.Transaction, error) {
 	return l.transactions.GetTransactionsByUserID(userID)
 }
 
+// HasTip reports whether an order was already tipped. Called inside the tip
+// transaction so the guard and the charge commit together.
+func (l *Ledger) HasTip(tx *sql.Tx, orderID uuid.UUID) (bool, error) {
+	return l.transactions.HasTip(tx, orderID)
+}
+
 // entry describes one side of a movement as it is recorded in the log.
 type entry struct {
 	UserID  uuid.UUID
@@ -154,4 +160,19 @@ func (l *Ledger) Settle(tx *sql.Tx, from, to string, userID uuid.UUID, amount mo
 // when the hold was taken.
 func (l *Ledger) Note(tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
 	return l.record(tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
+}
+
+// Tip moves a tip from a customer to an executor. The money passes through
+// ESCROW in the caller's transaction — debited from the customer only if the
+// balance covers it, then released to the executor — so it never exists outside
+// an account and reconciliation stays balanced. Returns
+// repository.ErrInsufficientFunds when the customer cannot cover the tip.
+func (l *Ledger) Tip(tx *sql.Tx, customerID, executorID uuid.UUID, amount money.Amount, orderID *uuid.UUID) error {
+	if !amount.IsPositive() {
+		return nil
+	}
+	if err := l.Reserve(tx, customerID, repository.AccountEscrow, amount, repository.TransactionTypeTip, orderID); err != nil {
+		return err
+	}
+	return l.Release(tx, repository.AccountEscrow, executorID, amount, repository.TransactionTypeTipReward, orderID, nil)
 }

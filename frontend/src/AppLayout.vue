@@ -10,10 +10,15 @@
     <!-- Premium Sidebar -->
     <aside :class="['sidebar', { 'minimized': sidebarMinimized }]">
       <div class="logo">
-        <i class="ph-fill ph-planet"></i>
-        <div v-if="!sidebarMinimized || isMobile" class="logo-text">
-          <div class="brand">TRASH</div>
-          <div class="sub">ADMIN PANEL</div>
+        <div class="logo-container opt-1">
+          <svg class="logo-svg" viewBox="0 0 40 40" fill="none">
+            <path d="M 6 35 V 17 C 6 9, 15 9, 20 18 C 25 9, 32 9, 32 17 V 23" stroke="#5c60f5" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="19" cy="27" r="4.5" fill="#10b981"></circle>
+          </svg>
+          <div v-if="!sidebarMinimized || isMobile" class="text-block">
+            <div class="text-top">оя</div>
+            <div class="text-bottom">услуга</div>
+          </div>
         </div>
       </div>
 
@@ -269,29 +274,43 @@ export default defineComponent({
 .logo {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 18px;
-  font-weight: 700;
+  margin-bottom: 32px;
+  padding: 0 4px;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.logo-svg {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.text-block {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.text-top {
+  font-size: 17px;
+  font-weight: 800;
   color: #0f172a;
   letter-spacing: -0.5px;
-  margin-bottom: 32px;
-  padding: 0 8px;
+  margin-left: 1px;
 }
 
-.logo i {
+.text-bottom {
+  font-size: 13px;
+  font-weight: 700;
   color: #5c60f5;
-  font-size: 28px;
-}
-
-.logo-text .brand {
-  font-weight: 800;
-  line-height: 1.1;
-}
-
-.logo-text .sub {
-  font-size: 11px;
-  color: #64748b;
-  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .nav-section {
