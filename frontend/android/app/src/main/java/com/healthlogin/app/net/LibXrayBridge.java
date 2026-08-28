@@ -1,7 +1,6 @@
 package com.healthlogin.app.net;
 
 import android.util.Base64;
-import android.util.Log;
 
 import org.json.JSONObject;
 
@@ -9,122 +8,117 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Thin, reflection-based wrapper over the prebuilt libXray AAR (XTLS/libXray).
+ * Wrapper over the prebuilt libXray AAR (XTLS/libXray).
  *
- * <p>Reflection is deliberate: libXray's exported symbol names and signatures
- * drift between releases, and the gomobile class name depends on the build. By
- * probing for the known variants we bind to whatever the dropped-in AAR actually
- * exposes — and, crucially, if the AAR is missing the app still runs, it just
- * never leaves DIRECT mode. Only {@code run}/{@code stop} are required here;
- * per-server probing is done with OkHttp in {@link ChannelManager}.
+ * <p>This build exposes a single native entry point — {@code libXray.LibXray.invoke(String)} —
+ * rather than one exported function per command. The contract is:
+ * <pre>
+ *   invoke( base64( {"name":"&lt;fn&gt;","data": base64(&lt;paramsJSON&gt;)} ) )
+ *     -&gt; {"success":bool, "data": base64(&lt;resultJSON&gt;), "error":"..."}
+ * </pre>
+ * Commands used here: {@code RunXrayFromJSON} (datDir, configJSON, maxMemory),
+ * {@code StopXray}, {@code XrayVersion} (result: coreVersion).
  *
- * <p>Verify against your release. Class is usually {@code libXray.LibXray};
- * {@code runXray} takes {@code base64(JSON{datDir,configPath,maxMemory})} and
- * returns {@code base64(JSON{success,err})}; {@code stopXray()} takes no args.
+ * <p>Reflection is used only to locate {@code invoke}; if the AAR is absent the
+ * app still runs and stays DIRECT.
  */
 final class LibXrayBridge {
     private static final String TAG = "LibXrayBridge";
-    private static final String[] CLASS_CANDIDATES = {
-            "libXray.LibXray", "libXray.Libxray", "libv2ray.Libv2ray", "go.libXray.LibXray"
-    };
 
-    private final Class<?> cls;
+    private final Method invoke; // static String invoke(String)
 
-    private LibXrayBridge(Class<?> cls) { this.cls = cls; }
+    private LibXrayBridge(Method invoke) {
+        this.invoke = invoke;
+    }
 
     static LibXrayBridge tryLoad() {
-        for (String name : CLASS_CANDIDATES) {
-            try {
-                LibXrayBridge b = new LibXrayBridge(Class.forName(name));
-                DebugLog.add(TAG, "bound " + name + " (core " + b.version() + ")");
-                return b;
-            } catch (Throwable ignored) { }
-        }
-        DebugLog.add(TAG, "AAR not found on classpath — proxy disabled; drop the release "
-                + "LibXray.aar into app/libs/");
-        return null;
-    }
-
-    String version() {
-        Object r = invoke0("xrayVersion", "XrayVersion");
-        return r == null ? "?" : String.valueOf(r);
-    }
-
-    /** Start an Xray instance from a config file. @return true on success. */
-    boolean run(String datDir, String configPath, String configJson) {
-        // New API: runXray(base64(JSON)) -> base64(CallResponse)
         try {
-            String req = new JSONObject()
+            Class<?> cls = Class.forName("libXray.LibXray");
+            Method m = cls.getMethod("invoke", String.class);
+            LibXrayBridge b = new LibXrayBridge(m);
+            DebugLog.add(TAG, "bound libXray.LibXray.invoke (core " + b.version() + ")");
+            return b;
+        } catch (Throwable t) {
+            DebugLog.add(TAG, "libXray bind failed (" + t.getClass().getSimpleName() + ": "
+                    + t.getMessage() + ") — proxy disabled");
+            return null;
+        }
+    }
+
+    /** libXray core version, or "?". */
+    String version() {
+        String r = call("XrayVersion", "{}");
+        if (r == null) return "?";
+        try {
+            JSONObject o = new JSONObject(r);
+            String v = o.optString("coreVersion", o.optString("version", ""));
+            return v.isEmpty() ? "?" : v;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /** Start the core from an inline config JSON. @return true on success. */
+    boolean run(String datDir, String configJson) {
+        try {
+            String params = new JSONObject()
                     .put("datDir", datDir)
-                    .put("configPath", configPath)
+                    .put("configJSON", configJson)
                     .put("maxMemory", 0L)
                     .toString();
-            String b64 = Base64.encodeToString(req.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
-            String out = invoke1(b64, "runXray", "RunXray");
-            if (out != null) return isSuccess(out);
+            return call("RunXrayFromJSON", params) != null;
         } catch (Throwable t) {
-            Log.w(TAG, "runXray(base64) unavailable, trying legacy", t);
+            DebugLog.add(TAG, "run marshal failed: " + t.getMessage());
+            return false;
         }
-        // Legacy API: runXrayFromJSON(datDir, configJson) -> "" on success
-        try {
-            Method m = cls.getMethod("runXrayFromJSON", String.class, String.class);
-            Object r = m.invoke(null, datDir, configJson);
-            return isSuccess(r == null ? "" : String.valueOf(r));
-        } catch (NoSuchMethodException ignored) {
-        } catch (Throwable t) {
-            Log.w(TAG, "runXrayFromJSON failed", t);
-        }
-        Log.e(TAG, "no known run* method on " + cls.getName());
-        return false;
     }
 
     void stop() {
-        if (invoke0("stopXray", "StopXray") == null) {
-            Log.w(TAG, "no known stop method on " + cls.getName());
-        }
+        call("StopXray", "{}");
     }
 
-    // --- reflection helpers ---
+    // --- invoke plumbing ---
 
-    private Object invoke0(String... names) {
-        for (String n : names) {
-            try { return orTrue(cls.getMethod(n).invoke(null)); }
-            catch (NoSuchMethodException ignored) { }
-            catch (Throwable t) { Log.w(TAG, n + " threw", t); }
-        }
-        return null;
-    }
-
-    private String invoke1(String arg, String... names) {
-        for (String n : names) {
-            try {
-                Object r = cls.getMethod(n, String.class).invoke(null, arg);
-                return r == null ? "" : String.valueOf(r);
-            } catch (NoSuchMethodException ignored) {
-            } catch (Throwable t) { Log.w(TAG, n + " threw", t); }
-        }
-        return null;
-    }
-
-    /** Void methods return null from invoke; normalise to a non-null marker. */
-    private static Object orTrue(Object r) { return r == null ? Boolean.TRUE : r; }
-
-    private static boolean isSuccess(String out) {
-        if (out == null) return false;
-        String json = out.trim();
-        // Response may be base64-wrapped.
+    /**
+     * Runs one command through invoke. @return the decoded result JSON on success
+     * (possibly empty string), or null on failure (logged).
+     */
+    private String call(String name, String paramsJson) {
         try {
-            String dec = new String(Base64.decode(out, Base64.DEFAULT), StandardCharsets.UTF_8).trim();
-            if (dec.startsWith("{")) json = dec;
-        } catch (Throwable ignored) { }
-        if (json.isEmpty()) return true; // legacy "" == ok
+            JSONObject req = new JSONObject()
+                    .put("name", name)
+                    .put("data", b64(paramsJson == null ? "{}" : paramsJson));
+            String out = (String) invoke.invoke(null, b64(req.toString()));
+            if (out == null) {
+                DebugLog.add(TAG, name + ": null response");
+                return null;
+            }
+            JSONObject resp = new JSONObject(asJson(out));
+            if (!resp.optBoolean("success", false)) {
+                String err = resp.optString("error", resp.optString("err", "unknown"));
+                DebugLog.add(TAG, name + " failed: " + err);
+                return null;
+            }
+            String data = resp.optString("data", "");
+            return data.isEmpty() ? "" : asJson(data);
+        } catch (Throwable t) {
+            DebugLog.add(TAG, name + " invoke threw: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            return null;
+        }
+    }
+
+    private static String b64(String s) {
+        return Base64.encodeToString(s.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    }
+
+    /** Return s as a JSON string: raw if it already looks like JSON, else base64-decoded. */
+    private static String asJson(String s) {
+        String t = s.trim();
+        if (t.startsWith("{") || t.startsWith("[")) return t;
         try {
-            JSONObject o = new JSONObject(json);
-            if (o.has("success")) return o.optBoolean("success", false);
-            if (o.has("err"))     return o.optString("err", "").isEmpty();
-            if (o.has("error"))   return o.optString("error", "").isEmpty();
-            if (o.has("code"))    return o.optInt("code", -1) == 0;
-        } catch (Throwable ignored) { }
-        return false;
+            return new String(Base64.decode(s, Base64.DEFAULT), StandardCharsets.UTF_8);
+        } catch (Throwable e) {
+            return t;
+        }
     }
 }

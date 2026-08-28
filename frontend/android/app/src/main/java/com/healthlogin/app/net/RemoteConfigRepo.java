@@ -29,7 +29,11 @@ final class RemoteConfigRepo {
     private static final String TAG = "VlessConfigRepo";
     private static final String PREFS = "vless_prefs";
     private static final String KEY_BUNDLE = "bundle_json";
+    private static final String KEY_SCHEMA = "schema_version";
     private static final String HDR_APP_KEY = "X-App-Key";
+    // Bump when the cache contract changes. SCHEMA 2 drops the list that older
+    // builds seeded from a bundled asset, so no install carries a baked-in list.
+    private static final int SCHEMA = 2;
 
     private final SharedPreferences prefs;
     private final OkHttpClient http;
@@ -44,6 +48,13 @@ final class RemoteConfigRepo {
         this.http = new OkHttpClient.Builder()
                 .callTimeout(10, TimeUnit.SECONDS)
                 .build();
+
+        // One-time purge: an install upgraded from a build that seeded a bundled
+        // list still holds it here. Drop it so the list is only ever the server's.
+        if (prefs.getInt(KEY_SCHEMA, 1) < SCHEMA) {
+            prefs.edit().remove(KEY_BUNDLE).putInt(KEY_SCHEMA, SCHEMA).apply();
+            DebugLog.add(TAG, "cleared stale cached endpoint list (seed removed); list is now server-only");
+        }
     }
 
     /** Stored bundle version, or -1 if nothing is cached. */

@@ -16,8 +16,8 @@ import java.net.Socket;
 
 /**
  * Owns the single libXray instance: normalises a full Xray config (rewrites the
- * inbound to our fixed local SOCKS, forces a resolver, turns on logging), writes
- * it to a file, starts the core and waits for the SOCKS port to accept
+ * inbound to our fixed local SOCKS, forces a resolver, turns on logging), starts
+ * the core from that inline JSON and waits for the SOCKS port to accept
  * connections before it is used. One instance per process — every start() stops
  * the previous one.
  */
@@ -60,9 +60,7 @@ final class XrayController {
         try {
             String json = normalize(cfg, socksPort);
             DebugLog.add(TAG, "starting " + summarizeOutbound(cfg) + " (core " + lib.version() + ")");
-            File f = new File(ctx.getCacheDir(), "xray_live.json");
-            write(f, json);
-            boolean started = lib.run(datDir, f.getAbsolutePath(), json);
+            boolean started = lib.run(datDir, json);
             drainXrayLog();
             if (!started) {
                 DebugLog.add(TAG, "libXray.run() returned failure");
@@ -200,12 +198,6 @@ final class XrayController {
             } catch (Throwable ignored) {
                 // Not bundled — fine; our configs use no geo routing rules.
             }
-        }
-    }
-
-    private static void write(File f, String content) throws Exception {
-        try (OutputStream os = new FileOutputStream(f)) {
-            os.write(content.getBytes("UTF-8"));
         }
     }
 
