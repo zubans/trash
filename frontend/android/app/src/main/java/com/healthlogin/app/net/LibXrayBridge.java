@@ -47,7 +47,7 @@ final class LibXrayBridge {
 
     /** libXray core version, or "?". Best-effort — only used for logging. */
     String version() {
-        String r = call("getCoreVersion", "{}");
+        String r = call("GetCoreVersion", "{}");
         if (r == null) return "?";
         try {
             JSONObject o = new JSONObject(r);
@@ -66,7 +66,7 @@ final class LibXrayBridge {
                     .put("configJSON", configJson)
                     .put("maxMemory", 0L)
                     .toString();
-            return call("runXrayFromJson", params) != null;
+            return call("RunXrayFromJSON", params) != null;
         } catch (Throwable t) {
             DebugLog.add(TAG, "run marshal failed: " + t.getMessage());
             return false;
@@ -74,7 +74,7 @@ final class LibXrayBridge {
     }
 
     void stop() {
-        call("stopXray", "{}");
+        call("StopXray", "{}");
     }
 
     // --- invoke plumbing ---
@@ -86,12 +86,13 @@ final class LibXrayBridge {
     private String call(String name, String paramsJson) {
         try {
             // Wire format (from libXray invoke.go): the invoke argument is RAW JSON
-            // of {apiVersion,name,data}; the inner "data" is base64 of the specific
-            // request JSON (the handler base64-decodes it). The response is
+            // of {apiVersion, method, data}; the dispatch key is the "method" field
+            // (not "name" — that gave "unknown method"), and "data" is base64 of the
+            // specific request JSON (the handler base64-decodes it). The response is
             // {success, data(base64), error}.
             JSONObject req = new JSONObject()
                     .put("apiVersion", 1)
-                    .put("name", name)
+                    .put("method", name)
                     .put("data", b64(paramsJson == null ? "{}" : paramsJson));
             String out = (String) invoke.invoke(null, req.toString());
             if (out == null) {
