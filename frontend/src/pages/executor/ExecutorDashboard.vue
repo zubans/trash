@@ -1000,8 +1000,12 @@ export default defineComponent({
 
     const fetchAvailableOrders = async () => {
       try {
+        // The server anchors the search to the executor's stored working
+        // position; lat/lon are sent only as a fallback. `radius` (not
+        // `radius_meters`) is the name the backend reads — otherwise it silently
+        // falls back to a 2 km default.
         const res = await api.get('/executor/orders/nearby', {
-          params: { lat: currentLat.value, lon: currentLon.value, radius_meters: 5000 },
+          params: { lat: currentLat.value, lon: currentLon.value, radius: 5000 },
         })
         availableOrders.value = res.data || []
       } catch (err) {

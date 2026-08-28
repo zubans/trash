@@ -112,7 +112,8 @@ func main() {
 		WithLedger(ledger).
 		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo)
-	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester)
+	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
+		WithExecutorGeo(executorGeoRepo)
 	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo)

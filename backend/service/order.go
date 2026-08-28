@@ -28,11 +28,24 @@ type OrderService struct {
 	chatRepo     repository.ChatRepository
 	catalogRepo  repository.ServiceCatalogRepository
 	resolver     AddressResolver
+	// Optional. When wired, the nearby list is anchored to the executor's own
+	// stored working position instead of client supplied coordinates — the same
+	// point the map and the accept-radius check use — so the list can never
+	// diverge from what the executor can actually take.
+	executorGeoRepo repository.ExecutorGeoRepository
 }
 
 // NewOrderService creates an OrderService.
 func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, resolver AddressResolver) *OrderService {
 	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, resolver: resolver}
+}
+
+// WithExecutorGeo wires the executor location store so the nearby list is
+// resolved from the server-side stored position rather than trusting request
+// coordinates.
+func (s *OrderService) WithExecutorGeo(geoRepo repository.ExecutorGeoRepository) *OrderService {
+	s.executorGeoRepo = geoRepo
+	return s
 }
 
 // CreateOrderRequest contains the data needed to create an order.
@@ -748,6 +761,23 @@ func (s *OrderService) FindNearbyOrders(ctx context.Context, lat, lon float64, r
 
 // FindNearbyOrdersForExecutor returns searching standard/large orders near the given coordinates filtered for an executor.
 func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+	// Anchor the search to the executor's authoritative stored position, the
+	// same point the map and the accept-radius check use. Client coordinates
+	// (device GPS, which may be absent or default to a base location) are only a
+	// fallback when the store is not wired, keeping the list from diverging from
+	// what the executor can actually accept.
+	if s.executorGeoRepo != nil {
+		storedLat, storedLon, _, err := s.executorGeoRepo.GetExecutorLocation(ctx, executorID)
+		if err != nil {
+			return nil, err
+		}
+		if storedLat == nil || storedLon == nil {
+			// No working position set yet: nothing is acceptable, so nothing is listed.
+			return []*repository.Order{}, nil
+		}
+		lat, lon = *storedLat, *storedLon
+	}
+
 	executor, _ := s.userRepo.FindByID(ctx, executorID)
 	executorAge := 0
 	executorVerified := false
