@@ -7,7 +7,7 @@
     >
       <div class="force-update-dialog">
         <div class="force-update-logo-wrapper mb-3">
-          <AppLogo />
+          <AppLogo :hide-text="true" />
         </div>
         <h5 class="mb-2">
           {{ $t('app.updateRequired') }}
@@ -49,7 +49,7 @@
     >
       <div class="banner-content">
         <div class="banner-icon">
-          <AppLogo :compact="true" />
+          <AppLogo :hide-text="true" :compact="true" />
         </div>
         <div class="banner-text-box">
           <div class="banner-title">
@@ -184,17 +184,17 @@ export default defineComponent({
 }
 
 .banner-icon {
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  color: #ffffff;
+  background: #ffffff;
+  border: 1px solid rgba(92, 96, 245, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  padding: 4px;
 }
 
 .banner-text-box {
