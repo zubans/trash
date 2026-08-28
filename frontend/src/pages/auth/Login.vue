@@ -1,209 +1,303 @@
 <template>
-  <div class="login-wrapper">
-    <!-- Floating Orbs Background -->
-    <div class="bg-orb orb-1"></div>
-    <div class="bg-orb orb-2"></div>
+  <div class="split-layout">
+    <!-- MOBILE HEADER (visible on screen width <= 900px) -->
+    <header class="app-header">
+      <AppLogo />
+      <div class="mobile-lang-switch">
+        <LanguageSwitcher />
+      </div>
+    </header>
 
-    <!-- Auth Card -->
-    <div class="auth-card">
-      <!-- Header with Tab Control & Language Switcher -->
-      <div class="card-header">
-        <div class="tabs-container">
-          <div
-            :class="['tab', { active: mode === 'login' }]"
-            @click="mode = 'login'"
-          >
-            {{ $t('login.signIn') }}
-          </div>
-          <div
-            :class="['tab', { active: mode === 'register' }]"
-            @click="mode = 'register'"
-          >
-            {{ $t('login.register') }}
-          </div>
-        </div>
-
-        <div class="lang-btn-wrapper">
-          <LanguageSwitcher />
-        </div>
+    <!-- LEFT SIDE: Branding Presentation (visible on screen width > 900px) -->
+    <div class="layout-left">
+      <!-- Scaled Logo Wrapper -->
+      <div class="logo-wrapper">
+        <AppLogo />
       </div>
 
-      <!-- Title -->
-      <h1>
-        {{ mode === 'login' ? $t('login.welcomeBack') : $t('login.createAccount') }}
-      </h1>
-
-      <!-- Alerts -->
-      <transition name="fade">
-        <div v-if="error" class="custom-alert error-alert mb-4">
-          <i class="ph ph-warning-circle alert-icon"></i>
-          <span class="alert-text" style="white-space: pre-wrap;">{{ error }}</span>
-        </div>
-      </transition>
-
-      <transition name="fade">
-        <div v-if="message" class="custom-alert success-alert mb-4">
-          <i class="ph ph-check-circle alert-icon"></i>
-          <span class="alert-text">{{ message }}</span>
-        </div>
-      </transition>
-
-      <!-- Form -->
-      <form @submit.prevent="handleSubmit">
-        <!-- Phone Input -->
-        <div class="form-group mb-3">
-          <label class="form-label">{{ $t('login.phone') }}</label>
-          <div class="input-wrapper">
-            <input
-              v-model="displayPhone"
-              type="tel"
-              placeholder="+7 (999) 999-99-99"
-              class="form-input"
-              required
-              @input="onPhoneInput"
-              @keydown="onPhoneKeydown"
-            />
-            <i class="ph ph-phone input-icon"></i>
-          </div>
-        </div>
-
-        <!-- Password Input -->
-        <div class="form-group mb-3">
-          <label class="form-label">{{ $t('login.password') }}</label>
-          <div class="input-wrapper">
-            <input
-              v-model="password"
-              type="password"
-              placeholder="••••••••"
-              class="form-input"
-              required
-            />
-            <i class="ph ph-lock-key input-icon"></i>
-          </div>
-        </div>
-
-        <!-- Registration Role Select -->
-        <div v-if="mode === 'register'" class="form-group mb-3">
-          <label class="form-label">{{ $t('login.role') }}</label>
-          <div class="input-wrapper">
-            <select v-model="role" class="form-input custom-select" required>
-              <option value="CUSTOMER">{{ $t('roles.customer') }}</option>
-              <option value="EXECUTOR">{{ $t('roles.executor') }}</option>
-            </select>
-            <i class="ph ph-user input-icon"></i>
-          </div>
-        </div>
-
-        <!-- FIO Inputs for Registration -->
-        <div v-if="mode === 'register'" class="form-group mb-3">
-          <label class="form-label">Фамилия</label>
-          <div class="input-wrapper">
-            <input
-              v-model="lastName"
-              type="text"
-              placeholder="Иванов"
-              class="form-input"
-              required
-            />
-            <i class="ph ph-user-card input-icon"></i>
-          </div>
-        </div>
-
-        <div v-if="mode === 'register'" class="form-group mb-3">
-          <label class="form-label">Имя</label>
-          <div class="input-wrapper">
-            <input
-              v-model="firstName"
-              type="text"
-              placeholder="Иван"
-              class="form-input"
-              required
-            />
-            <i class="ph ph-user-card input-icon"></i>
-          </div>
-        </div>
-
-        <div v-if="mode === 'register'" class="form-group mb-3">
-          <label class="form-label">Отчество</label>
-          <div class="input-wrapper">
-            <input
-              v-model="patronymic"
-              type="text"
-              placeholder="Иванович"
-              class="form-input"
-              required
-            />
-            <i class="ph ph-user-card input-icon"></i>
-          </div>
-        </div>
-
-        <!-- Address, with the flat inside the same field -->
-        <div v-if="mode === 'register'" class="form-group mb-3">
-          <AddressAutocomplete
-            v-model="pickedAddress"
-            :label="role === 'CUSTOMER' ? $t('login.pickupAddress') : 'Базовый адрес (откуда искать заказы)'"
-            :placeholder="$t('login.pickupAddressPlaceholder')"
-            :hint="$t('login.addressHint')"
-            :flat-placeholder="$t('login.flatNumberPlaceholder')"
-            :needs-flat="role === 'CUSTOMER'"
-          />
-        </div>
-
-        <!-- Email Input for Registration -->
-        <div v-if="mode === 'register'" class="form-group mb-3">
-          <label class="form-label">Email</label>
-          <div class="input-wrapper">
-            <input
-              v-model="email"
-              type="email"
-              placeholder="example@domain.com"
-              class="form-input"
-              required
-            />
-            <i class="ph ph-envelope input-icon"></i>
-          </div>
-        </div>
-
-        <!-- Forgot Password Link (for login mode) -->
-        <a v-if="mode === 'login'" href="#" class="forgot-link" @click.prevent="openForgotModal">
-          Забыли пароль?
-        </a>
-
-        <!-- Submit Button -->
-        <button ref="submitBtnRef" type="submit" class="submit-btn" :disabled="loading">
-          <span v-if="loading" class="spinner"></span>
-          <template v-else>
-            {{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}
-            <i class="ph-bold ph-arrow-right"></i>
+      <div class="brand-content">
+        <h1>
+          <template v-if="mode === 'register'">
+            Начни работать<br />и зарабатывать
           </template>
-        </button>
-      </form>
+          <template v-else>
+            Твои помощники<br />тут
+          </template>
+        </h1>
+        <p>
+          <template v-if="mode === 'register'">
+            Присоединяйтесь к платформе. Находите заказы поблизости, управляйте своим временем и получайте стабильный доход без комиссий посредников.
+          </template>
+          <template v-else>
+            Управляйте своими заказами, отслеживайте статус исполнения и находите надежных исполнителей в вашем городе.
+          </template>
+        </p>
+      </div>
+
+      <div><!-- Spacer for vertical alignment --></div>
     </div>
 
-    <!-- Forgot/Reset Password Modal -->
+    <!-- RIGHT SIDE: Form Container -->
+    <div class="layout-right">
+      <div class="form-container" :class="{ 'is-register': mode === 'register' }">
+        <!-- Form Header (Tabs & Lang Switcher for Desktop) -->
+        <div class="form-header">
+          <div class="auth-tabs">
+            <button
+              type="button"
+              :class="['tab-btn', { active: mode === 'login' }]"
+              @click="mode = 'login'"
+            >
+              {{ $t('login.signIn') }}
+            </button>
+            <button
+              type="button"
+              :class="['tab-btn', { active: mode === 'register' }]"
+              @click="mode = 'register'"
+            >
+              {{ $t('login.register') }}
+            </button>
+          </div>
+
+          <div class="desktop-lang-switch">
+            <LanguageSwitcher />
+          </div>
+        </div>
+
+        <!-- Form Title -->
+        <h2 class="form-title">
+          {{ mode === 'login' ? $t('login.welcomeBack') : $t('login.createAccount') }}
+        </h2>
+
+        <!-- Alerts -->
+        <transition name="fade">
+          <div v-if="error" class="custom-alert error-alert mb-4">
+            <i class="ph-bold ph-warning-circle alert-icon"></i>
+            <span class="alert-text" style="white-space: pre-wrap;">{{ error }}</span>
+          </div>
+        </transition>
+
+        <transition name="fade">
+          <div v-if="message" class="custom-alert success-alert mb-4">
+            <i class="ph-bold ph-check-circle alert-icon"></i>
+            <span class="alert-text">{{ message }}</span>
+          </div>
+        </transition>
+
+        <!-- Form -->
+        <form @submit.prevent="handleSubmit">
+          <!-- LOGIN MODE FIELDS -->
+          <div v-if="mode === 'login'" class="form-fields">
+            <div class="input-group">
+              <label class="input-label">{{ $t('login.phone') }}</label>
+              <div class="input-wrapper">
+                <i class="ph-bold ph-phone input-icon"></i>
+                <input
+                  v-model="displayPhone"
+                  type="tel"
+                  placeholder="+7 (999) 999-99-99"
+                  class="form-input"
+                  required
+                  @input="onPhoneInput"
+                  @keydown="onPhoneKeydown"
+                />
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label class="input-label">{{ $t('login.password') }}</label>
+              <div class="input-wrapper">
+                <i class="ph-bold ph-lock-key input-icon"></i>
+                <input
+                  v-model="password"
+                  type="password"
+                  placeholder="••••••••"
+                  class="form-input"
+                  required
+                />
+              </div>
+            </div>
+
+            <a href="#" class="forgot-link" @click.prevent="openForgotModal">
+              Забыли пароль?
+            </a>
+
+            <!-- Desktop inline submit button -->
+            <div class="desktop-submit-wrap">
+              <button ref="submitBtnRef" type="submit" class="btn-submit" :disabled="loading">
+                <span v-if="loading" class="spinner"></span>
+                <template v-else>
+                  {{ $t('login.signInBtn') }} <i class="ph-bold ph-arrow-right"></i>
+                </template>
+              </button>
+            </div>
+          </div>
+
+          <!-- REGISTRATION MODE FIELDS -->
+          <div v-else class="form-grid">
+            <div class="input-group">
+              <label class="input-label">{{ $t('login.phone') }}</label>
+              <div class="input-wrapper">
+                <i class="ph-bold ph-phone input-icon"></i>
+                <input
+                  v-model="displayPhone"
+                  type="tel"
+                  placeholder="+7 (999) 999-99-99"
+                  class="form-input"
+                  required
+                  @input="onPhoneInput"
+                  @keydown="onPhoneKeydown"
+                />
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label class="input-label">{{ $t('login.password') }}</label>
+              <div class="input-wrapper">
+                <i class="ph-bold ph-lock-key input-icon"></i>
+                <input
+                  v-model="password"
+                  type="password"
+                  placeholder="••••••••"
+                  class="form-input"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="divider col-span-2 mobile-only"></div>
+
+            <div class="input-group col-span-2">
+              <label class="input-label">Кем вы хотите быть?</label>
+              <div class="role-selector">
+                <label class="role-card">
+                  <input type="radio" name="role" value="CUSTOMER" v-model="role" />
+                  <div class="role-option">
+                    <i class="ph-bold ph-briefcase"></i>
+                    <span>Заказчик</span>
+                  </div>
+                </label>
+                <label class="role-card">
+                  <input type="radio" name="role" value="EXECUTOR" v-model="role" />
+                  <div class="role-option">
+                    <i class="ph-bold ph-wrench"></i>
+                    <span>Исполнитель</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="divider col-span-2 mobile-only"></div>
+
+            <div class="input-group">
+              <label class="input-label">Фамилия</label>
+              <input
+                v-model="lastName"
+                type="text"
+                class="form-input no-icon"
+                placeholder="Иванов"
+                required
+              />
+            </div>
+
+            <div class="input-group">
+              <label class="input-label">Имя</label>
+              <input
+                v-model="firstName"
+                type="text"
+                class="form-input no-icon"
+                placeholder="Иван"
+                required
+              />
+            </div>
+
+            <div class="input-group col-span-2">
+              <label class="input-label">Отчество</label>
+              <input
+                v-model="patronymic"
+                type="text"
+                class="form-input no-icon"
+                placeholder="Иванович"
+                required
+              />
+            </div>
+
+            <div class="divider col-span-2 mobile-only"></div>
+
+            <div class="input-group col-span-2">
+              <AddressAutocomplete
+                v-model="pickedAddress"
+                :label="role === 'CUSTOMER' ? $t('login.pickupAddress') : 'Базовый адрес (откуда искать заказы)'"
+                :placeholder="$t('login.pickupAddressPlaceholder')"
+                :hint="$t('login.addressHint')"
+                :flat-placeholder="$t('login.flatNumberPlaceholder')"
+                :needs-flat="role === 'CUSTOMER'"
+              />
+            </div>
+
+            <div class="input-group col-span-2">
+              <label class="input-label">Email</label>
+              <div class="input-wrapper">
+                <i class="ph-bold ph-envelope-simple input-icon"></i>
+                <input
+                  v-model="email"
+                  type="email"
+                  class="form-input"
+                  placeholder="example@domain.com"
+                  required
+                />
+              </div>
+            </div>
+
+            <!-- Desktop inline submit button -->
+            <div class="desktop-submit-wrap col-span-2">
+              <button ref="submitBtnRef" type="submit" class="btn-submit" :disabled="loading">
+                <span v-if="loading" class="spinner"></span>
+                <template v-else>
+                  {{ $t('login.signUpBtn') }} <i class="ph-bold ph-arrow-right"></i>
+                </template>
+              </button>
+            </div>
+          </div>
+
+          <!-- Floating Bottom Action Bar for Mobile -->
+          <div class="bottom-action-bar">
+            <button type="submit" class="btn-submit" :disabled="loading">
+              <span v-if="loading" class="spinner"></span>
+              <template v-else>
+                {{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}
+                <i class="ph-bold ph-arrow-right"></i>
+              </template>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Forgot / Reset Password Modal -->
     <div v-if="showForgotModal" class="forgot-modal-overlay" @click.self="showForgotModal = false">
       <div class="forgot-modal-card">
         <div class="forgot-modal-header">
           <div class="forgot-modal-title">Сброс пароля</div>
           <button type="button" class="btn-close-forgot" @click="showForgotModal = false">
-            <i class="ph ph-x"></i>
+            <i class="ph-bold ph-x"></i>
           </button>
         </div>
 
         <!-- Step 1: Request Code -->
         <form v-if="resetStep === 1" @submit.prevent="requestResetCode">
-          <p class="forgot-desc">Введите ваш Email, чтобы получить 6-значный код восстановления.</p>
-          <div class="form-group mb-3">
-            <label class="form-label">Email</label>
+          <p class="forgot-desc">Введите ваш Email, чтобы получить код восстановления.</p>
+          <div class="input-group mb-3">
+            <label class="input-label">Email</label>
             <div class="input-wrapper">
+              <i class="ph-bold ph-envelope-simple input-icon"></i>
               <input v-model="resetEmail" type="email" class="form-input" placeholder="example@domain.com" required />
-              <i class="ph ph-envelope input-icon"></i>
             </div>
           </div>
           <div v-if="resetError" class="custom-alert error-alert mb-3">
             <span class="alert-text">{{ resetError }}</span>
           </div>
-          <button type="submit" class="submit-btn" :disabled="resetLoading">
+          <button type="submit" class="btn-submit" :disabled="resetLoading">
             <span v-if="resetLoading" class="spinner"></span>
             <template v-else>Получить код <i class="ph-bold ph-paper-plane-tilt"></i></template>
           </button>
@@ -213,31 +307,31 @@
         <form v-else @submit.prevent="resetPasswordWithCode">
           <p class="forgot-desc">Код восстановления отправлен на <strong>{{ resetEmail }}</strong>.</p>
           <div v-if="resetSuccessMsg" class="custom-alert success-alert mb-3">
-            <i class="ph-fill ph-check-circle me-1"></i>
+            <i class="ph-bold ph-check-circle me-1"></i>
             <span class="alert-text">{{ resetSuccessMsg }}</span>
           </div>
-          <div class="form-group mb-3">
-            <label class="form-label">8-значный код из Email</label>
+          <div class="input-group mb-3">
+            <label class="input-label">8-значный код из Email</label>
             <div class="input-wrapper">
+              <i class="ph-bold ph-key input-icon"></i>
               <input v-model="resetCode" type="text" class="form-input" placeholder="12345678" maxlength="8" required />
-              <i class="ph ph-key input-icon"></i>
             </div>
           </div>
-          <div class="form-group mb-3">
-            <label class="form-label">Новый пароль</label>
+          <div class="input-group mb-3">
+            <label class="input-label">Новый пароль</label>
             <div class="input-wrapper">
+              <i class="ph-bold ph-lock-key input-icon"></i>
               <input v-model="newPassword" type="password" class="form-input" placeholder="••••••••" required />
-              <i class="ph ph-lock-key input-icon"></i>
             </div>
           </div>
           <div v-if="resetError" class="custom-alert error-alert mb-3">
             <span class="alert-text">{{ resetError }}</span>
           </div>
-          <button type="submit" class="submit-btn mb-2" :disabled="resetLoading">
+          <button type="submit" class="btn-submit mb-2" :disabled="resetLoading">
             <span v-if="resetLoading" class="spinner"></span>
             <template v-else>Сохранить новый пароль <i class="ph-bold ph-check"></i></template>
           </button>
-          <div class="resend-row text-center">
+          <div class="resend-row text-center mt-2">
             <button
               type="button"
               class="btn-link-resend"
@@ -262,6 +356,7 @@ import { useAuthStore } from '../../stores/auth-store'
 import api, { formatApiError } from '../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import AppLogo from '../../components/AppLogo.vue'
 import { formatPhoneMask, cleanPhoneDigits } from '../../utils/phoneMask'
 
 function parseJwt(token: string) {
@@ -282,7 +377,7 @@ function parseJwt(token: string) {
 
 export default defineComponent({
   name: 'Login',
-  components: { LanguageSwitcher, AddressAutocomplete },
+  components: { LanguageSwitcher, AddressAutocomplete, AppLogo },
   setup() {
     const router = useRouter()
     const route = useRoute()
@@ -300,12 +395,10 @@ export default defineComponent({
         const start = target.selectionStart ?? 0
         const end = target.selectionEnd ?? 0
 
-        // If user pressed Backspace with cursor right after a formatting character (space, dash, paren), delete preceding digit
         if (start === end && start > 0) {
           const charBefore = target.value[start - 1]
           if (/\D/.test(charBefore)) {
             e.preventDefault()
-            // find nearest digit index before cursor
             let newEnd = start - 1
             while (newEnd > 0 && /\D/.test(target.value[newEnd - 1])) {
               newEnd--
@@ -336,11 +429,9 @@ export default defineComponent({
       displayPhone.value = formatted
       phone.value = cleanPhoneDigits(formatted)
 
-      // Maintain cursor position if input was made in the middle
       if (target.value.length > selectionPos) {
         nextTick(() => {
           let pos = selectionPos
-          // Adjust position if mask added characters
           if (formatted.length > oldVal.length && pos < formatted.length) {
             pos += (formatted.length - target.value.length)
           }
@@ -348,15 +439,13 @@ export default defineComponent({
         })
       }
     }
+
     const email = ref('')
     const password = ref('')
     const lastName = ref('')
     const firstName = ref('')
     const patronymic = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
-    // The whole address, as the register spells it: parts, coordinates and the
-    // flat together. Null until something is actually chosen from the list,
-    // which is also what stops a half-typed street from being submitted.
     const pickedAddress = ref<StructuredAddress | null>(null)
     const error = ref('')
     const message = ref('')
@@ -479,9 +568,6 @@ export default defineComponent({
       })
     })
 
-
-
-
     const handleSubmit = async () => {
       error.value = ''
       message.value = ''
@@ -528,9 +614,6 @@ export default defineComponent({
             error.value = t('login.addressNotChosen')
             return
           }
-          // The parts go over the wire, not a line to be parsed back. That is
-          // what lets an address like "12 к. 1" through, and it carries the
-          // coordinates the dispatcher matches on.
           payload.address = chosen.value
           payload.region = chosen.region
           payload.city = chosen.city
@@ -598,180 +681,240 @@ export default defineComponent({
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap');
 
-.login-wrapper {
-  --bg-base: #f8f9fa;
-  --surface-card: rgba(255, 255, 255, 0.7);
-  --surface-input: rgba(255, 255, 255, 0.6);
+.split-layout {
+  --brand-primary: #5c60f5; 
+  --brand-light: #eef2ff;
+  --success-main: #10b981; 
   
-  --text-title: #0f172a;
-  --text-body: #334155;
-  --text-muted: #8b98a5;
+  --text-main: #0f172a; 
+  --text-muted: #64748b;
   
-  --accent-main: #6366f1;
-  --accent-glow: rgba(99, 102, 241, 0.4);
+  --bg-left: #f8fafc;
+  --bg-right: #ffffff;
   
-  --rad-sm: 12px;
-  --rad-md: 20px;
-  --rad-lg: 32px;
-  
-  --shadow-float: 0 20px 50px -10px rgba(15, 23, 42, 0.1), 
-                  0 1px 3px rgba(15, 23, 42, 0.05),
-                  inset 0 1px 0 rgba(255,255,255,1);
-  
-  --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  --rad-sm: 8px;
+  --rad-md: 12px;
+  --rad-lg: 24px;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.02);
+  --shadow-card: 0 12px 40px rgba(15, 23, 42, 0.06);
+  --shadow-bottom: 0 -4px 24px rgba(15, 23, 42, 0.06);
+  --transition: all 0.2s ease;
 
-  font-family: 'Outfit', sans-serif;
-  background-color: var(--bg-base);
-  background-image: 
-      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(236, 72, 153, 0.08) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.12) 0px, transparent 50%);
-  background-attachment: fixed;
-  color: var(--text-body);
-  line-height: 1.5;
+  font-family: 'Nunito', sans-serif;
+  color: var(--text-main);
   min-height: 100vh;
+  width: 100%;
+  display: flex;
+  background: var(--bg-right);
+  position: relative;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* --- App Header (Mobile) --- */
+.app-header {
+  display: none;
+}
+
+/* --- Layout Left (Presentation) --- */
+.layout-left {
+  flex: 1;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+  padding: 60px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 24px 16px 40px 16px;
+  justify-content: space-between;
   position: relative;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
+  border-right: 1px solid rgba(0, 0, 0, 0.03);
 }
 
-@keyframes orbDrift1 {
-  0%, 100% { transform: translate(0, 0) scale(1) rotate(0deg); }
-  50% { transform: translate(40px, -40px) scale(1.1) rotate(20deg); }
-}
-@keyframes orbDrift2 {
-  0%, 100% { transform: translate(0, 0) scale(1) rotate(0deg); }
-  50% { transform: translate(-40px, 40px) scale(1.2) rotate(-20deg); }
-}
-
-.bg-orb {
+.layout-left::before {
+  content: '';
   position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(92, 96, 245, 0.08) 0%, transparent 70%);
   border-radius: 50%;
-  filter: blur(80px);
-  z-index: 0;
-}
-.orb-1 {
-  top: 20%; left: 30%; width: 300px; height: 300px;
-  background: rgba(99, 102, 241, 0.3);
-  animation: orbDrift1 14s ease-in-out infinite;
-}
-.orb-2 {
-  bottom: 20%; right: 30%; width: 350px; height: 350px;
-  background: rgba(236, 72, 153, 0.2);
-  animation: orbDrift2 18s ease-in-out infinite;
+  pointer-events: none;
 }
 
-.auth-card {
+.layout-left::after {
+  content: '';
+  position: absolute;
+  bottom: -10%;
+  right: -10%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.06) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.logo-wrapper {
+  z-index: 1;
+  transform: scale(1.6);
+  transform-origin: left top;
+  margin-bottom: 60px;
+  height: 40px;
+}
+
+.brand-content {
+  z-index: 1;
+  max-width: 520px;
+  margin-bottom: 10vh;
+}
+
+.brand-content h1 {
+  font-size: 48px;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-bottom: 20px;
+  color: var(--text-main);
+  letter-spacing: -1px;
+}
+
+.brand-content p {
+  font-size: 18px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* --- Layout Right (Form) --- */
+.layout-right {
+  flex: 1;
+  max-width: 720px;
+  background: var(--bg-right);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.form-container {
   width: 100%;
   max-width: 440px;
-  margin: auto 0;
-  background: var(--surface-card);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-radius: var(--rad-lg);
-  padding: 40px;
-  box-shadow: var(--shadow-float);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  position: relative;
-  z-index: 1;
+  transition: max-width 0.3s ease;
 }
 
-.card-header {
+.form-container.is-register {
+  max-width: 540px;
+}
+
+/* Form Header (Tabs & Lang) */
+.form-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
-.tabs-container {
+.auth-tabs {
   display: flex;
-  background: rgba(15, 23, 42, 0.04);
+  background: #f1f5f9;
   padding: 4px;
   border-radius: 99px;
-  flex: 1;
-  margin-right: 16px;
 }
 
-.tab {
-  flex: 1;
-  text-align: center;
-  padding: 10px 16px;
+.tab-btn {
+  padding: 8px 24px;
+  border: none;
+  background: transparent;
   border-radius: 99px;
-  font-size: 15px;
-  font-weight: 600;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text-muted);
   cursor: pointer;
   transition: var(--transition);
 }
 
-.tab.active {
+.tab-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-btn.active {
   background: #ffffff;
-  color: var(--text-title);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
 }
 
-.lang-btn-wrapper {
+.desktop-lang-switch {
   display: flex;
-  align-items: center;
 }
 
-h1 {
+.form-title {
   font-size: 32px;
-  font-weight: 700;
-  color: var(--text-title);
+  font-weight: 800;
+  color: var(--text-main);
+  margin-bottom: 32px;
   letter-spacing: -0.5px;
-  margin-bottom: 28px;
-  text-align: center;
 }
 
+/* --- Alerts --- */
 .custom-alert {
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: var(--rad-md);
   font-size: 14px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-bottom: 24px;
 }
+
 .error-alert {
   background: rgba(239, 68, 68, 0.1);
   color: #dc2626;
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
+
 .success-alert {
   background: #ecfdf5;
   color: #059669;
   border: 1px solid #a7f3d0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
 }
+
 .alert-icon {
   font-size: 20px;
+  flex-shrink: 0;
 }
 
-.form-group {
-  margin-bottom: 20px;
+/* --- Forms & Inputs --- */
+.form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.form-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.col-span-2 {
+  grid-column: span 2;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input-label {
+  font-size: 11px;
+  font-weight: 800;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 8px;
-  padding-left: 4px;
 }
 
 .input-wrapper {
@@ -783,133 +926,220 @@ h1 {
 .input-icon {
   position: absolute;
   left: 16px;
-  font-size: 20px;
   color: var(--text-muted);
-  transition: var(--transition);
+  font-size: 18px;
   pointer-events: none;
+  transition: var(--transition);
 }
 
 .form-input {
   width: 100%;
-  padding: 16px 16px 16px 48px;
-  border-radius: 16px;
-  background: var(--surface-input);
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  padding: 14px 16px 14px 44px;
+  background: #f8fafc;
+  border: 1px solid transparent;
+  border-radius: var(--rad-md);
   font-family: inherit;
-  font-size: 16px;
-  color: var(--text-title);
+  font-size: 15px;
   font-weight: 500;
+  color: var(--text-main);
   transition: var(--transition);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
-}
-
-.custom-select {
-  appearance: none;
-  cursor: pointer;
+  outline: none;
 }
 
 .form-input:focus {
-  outline: none;
-  border-color: var(--accent-main);
   background: #ffffff;
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1), inset 0 2px 4px rgba(0,0,0,0.01);
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 4px rgba(92, 96, 245, 0.1);
 }
 
-.form-input:focus ~ .input-icon,
-.form-input:not(:placeholder-shown) ~ .input-icon {
-  color: var(--accent-main);
+.form-input:focus ~ .input-icon {
+  color: var(--brand-primary);
 }
 
 .form-input::placeholder {
   color: #94a3b8;
-  font-weight: 400;
 }
 
-.suggestions-dropdown {
-  background: #ffffff;
-  border: 1px solid var(--rad-sm);
-  border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-  margin-top: 4px;
-  max-height: 180px;
-  overflow-y: auto;
-  position: absolute;
+.no-icon {
+  padding-left: 16px;
+}
+
+/* Address Autocomplete Deep Styling */
+:deep(.address-label) {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+:deep(.address-input) {
   width: 100%;
-  z-index: 20;
-}
-
-.suggestion-item {
-  padding: 10px 14px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.suggestion-item:hover {
-  background: #f1f5f9;
-}
-
-.forgot-link {
-  display: block;
-  text-align: right;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent-main);
-  text-decoration: none;
-  margin-top: 12px;
-  margin-bottom: 28px;
+  padding: 14px 16px 14px 44px;
+  background: #f8fafc;
+  border: 1px solid transparent;
+  border-radius: var(--rad-md);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-main);
   transition: var(--transition);
+  outline: none;
 }
 
-.forgot-link:hover {
-  color: #4f46e5;
-  text-decoration: underline;
+:deep(.address-input:focus) {
+  background: #ffffff;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 4px rgba(92, 96, 245, 0.1);
 }
 
-.submit-btn {
-  width: 100%;
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: white;
-  border: none;
-  padding: 18px;
-  border-radius: 16px;
+:deep(.address-icon) {
+  position: absolute;
+  left: 16px;
+  color: var(--text-muted);
   font-size: 18px;
-  font-weight: 600;
+  pointer-events: none;
+}
+
+:deep(.address-hint) {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Role Selector Radio Cards */
+.role-selector {
+  display: flex;
+  gap: 12px;
+}
+
+.role-card {
+  flex: 1;
+  cursor: pointer;
+}
+
+.role-card input[type='radio'] {
+  display: none;
+}
+
+.role-option {
+  padding: 14px;
+  border-radius: var(--rad-md);
+  border: 2px solid #f1f5f9;
+  background: #ffffff;
+  transition: var(--transition);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  cursor: pointer;
-  box-shadow: 0 10px 24px -6px var(--accent-glow);
+  gap: 8px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.role-option i {
+  font-size: 20px;
+}
+
+.role-card:hover .role-option {
+  border-color: #cbd5e1;
+  color: var(--text-main);
+}
+
+.role-card input[type='radio']:checked + .role-option {
+  border-color: var(--brand-primary);
+  background: var(--brand-light);
+  color: var(--brand-primary);
+}
+
+/* Forgot Password Link */
+.forgot-link {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--brand-primary);
+  text-decoration: none;
+  align-self: flex-end;
   transition: var(--transition);
+  margin-top: -4px;
 }
 
-.submit-btn:hover {
+.forgot-link:hover {
+  color: #4338ca;
+  text-decoration: underline;
+}
+
+/* Submit Button */
+.btn-submit {
+  width: 100%;
+  padding: 16px;
+  background: var(--brand-primary);
+  color: white;
+  border: none;
+  border-radius: var(--rad-md);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(92, 96, 245, 0.2);
+}
+
+.btn-submit:hover {
   transform: translateY(-2px);
-  box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
+  box-shadow: 0 8px 20px rgba(92, 96, 245, 0.3);
 }
 
-.submit-btn:disabled {
+.btn-submit:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+  transform: none;
+}
+
+.desktop-submit-wrap {
+  margin-top: 12px;
+}
+
+.bottom-action-bar {
+  display: none;
+}
+
+.mobile-only {
+  display: none;
+}
+
+.divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.04);
+  margin: 4px 0;
 }
 
 .spinner {
-  width: 22px;
-  height: 22px;
-  border: 3px solid rgba(255,255,255,0.3);
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
   border-top-color: #ffffff;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
+/* --- Forgot Password Modal --- */
 .forgot-modal-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: rgba(15, 23, 42, 0.4);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -922,17 +1152,14 @@ h1 {
 }
 
 .forgot-modal-card {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: #ffffff;
   border-radius: var(--rad-lg);
   width: 100%;
-  max-width: 420px;
-  box-shadow: var(--shadow-float);
+  max-width: 440px;
+  box-shadow: var(--shadow-card);
   padding: 32px;
   position: relative;
-  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .forgot-modal-header {
@@ -944,14 +1171,14 @@ h1 {
 
 .forgot-modal-title {
   font-size: 22px;
-  font-weight: 700;
-  color: var(--text-title);
+  font-weight: 800;
+  color: var(--text-main);
   letter-spacing: -0.5px;
 }
 
 .forgot-desc {
   font-size: 14px;
-  color: var(--text-body);
+  color: var(--text-muted);
   margin-bottom: 20px;
   line-height: 1.5;
 }
@@ -960,8 +1187,8 @@ h1 {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.8);
-  background: rgba(255,255,255,0.5);
+  border: none;
+  background: #f1f5f9;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -972,34 +1199,132 @@ h1 {
 }
 
 .btn-close-forgot:hover {
-  background: #f1f5f9;
-  color: #0f172a;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  transform: rotate(90deg);
+  background: #e2e8f0;
+  color: var(--text-main);
 }
 
 .btn-link-resend {
   background: none;
   border: none;
-  color: #6366f1;
+  color: var(--brand-primary);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   padding: 4px 8px;
 }
 
 .btn-link-resend:disabled {
-  color: #94a3b8;
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 
-@media (max-width: 480px) {
-  .auth-card {
-    padding: 32px 24px;
-    border-radius: 28px;
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- MOBILE RESPONSIVE MEDIA QUERIES --- */
+@media (max-width: 900px) {
+  .split-layout {
+    flex-direction: column;
+    min-height: 100vh;
   }
-  h1 {
+
+  .layout-left {
+    display: none;
+  }
+
+  .app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #ffffff;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  }
+
+  .mobile-lang-switch {
+    display: flex;
+  }
+
+  .desktop-lang-switch {
+    display: none;
+  }
+
+  .layout-right {
+    max-width: 100%;
+    padding: 24px 20px 120px 20px; /* Padding at bottom for sticky action bar */
+    align-items: flex-start;
+  }
+
+  .form-container,
+  .form-container.is-register {
+    max-width: 100%;
+  }
+
+  .form-header {
+    margin-bottom: 24px;
+  }
+
+  .auth-tabs {
+    width: 100%;
+  }
+
+  .tab-btn {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+  }
+
+  .form-title {
     font-size: 28px;
+    margin-bottom: 24px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .col-span-2 {
+    grid-column: span 1;
+  }
+
+  .mobile-only {
+    display: block;
+  }
+
+  .desktop-submit-wrap {
+    display: none;
+  }
+
+  .bottom-action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 16px 20px 32px 20px;
+    border-top: 1px solid rgba(0, 0, 0, 0.04);
+    box-shadow: var(--shadow-bottom);
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+  }
+
+  .bottom-action-bar .btn-submit {
+    max-width: 480px;
+    padding: 18px;
   }
 }
 </style>

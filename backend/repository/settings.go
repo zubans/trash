@@ -1,13 +1,14 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 )
 
 // SettingsRepository defines database operations for system settings.
 type SettingsRepository interface {
-	GetSettings() (map[string]string, error)
-	UpdateSettings(settings map[string]string) error
+	GetSettings(ctx context.Context) (map[string]string, error)
+	UpdateSettings(ctx context.Context, settings map[string]string) error
 }
 
 type settingsRepo struct {
@@ -19,8 +20,8 @@ func NewSettingsRepository(db *sql.DB) SettingsRepository {
 	return &settingsRepo{db: db}
 }
 
-func (r *settingsRepo) GetSettings() (map[string]string, error) {
-	rows, err := r.db.Query(`SELECT key, value FROM system_settings`)
+func (r *settingsRepo) GetSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT key, value FROM system_settings`)
 	if err != nil {
 		return nil, err
 	}
@@ -38,8 +39,8 @@ func (r *settingsRepo) GetSettings() (map[string]string, error) {
 	return settings, nil
 }
 
-func (r *settingsRepo) UpdateSettings(settings map[string]string) error {
-	tx, err := r.db.Begin()
+func (r *settingsRepo) UpdateSettings(ctx context.Context, settings map[string]string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -52,7 +53,7 @@ func (r *settingsRepo) UpdateSettings(settings map[string]string) error {
 		DO UPDATE SET value = EXCLUDED.value`
 
 	for k, v := range settings {
-		_, err := tx.Exec(query, k, v)
+		_, err := tx.ExecContext(ctx, query, k, v)
 		if err != nil {
 			return err
 		}

@@ -90,7 +90,7 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.Cancel(user.ID, orderID); err != nil {
+	if err := h.orderService.Cancel(r.Context(), user.ID, orderID); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -112,7 +112,7 @@ func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.Confirm(user.ID, orderID); err != nil {
+	if err := h.orderService.Confirm(r.Context(), user.ID, orderID); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -144,7 +144,7 @@ func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.TipOrder(user.ID, orderID, req.Amount); err != nil {
+	if err := h.orderService.TipOrder(r.Context(), user.ID, orderID, req.Amount); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -166,7 +166,7 @@ func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.Accept(orderID, user.ID); err != nil {
+	if err := h.orderService.Accept(r.Context(), orderID, user.ID); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -188,7 +188,7 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.RejectAssignedOrder(orderID, user.ID); err != nil {
+	if err := h.orderService.RejectAssignedOrder(r.Context(), orderID, user.ID); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -210,7 +210,7 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.ExecuteOrder(orderID, user.ID); err != nil {
+	if err := h.orderService.ExecuteOrder(r.Context(), orderID, user.ID); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -226,7 +226,7 @@ func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	orders, err := h.orderService.ListAssigned(user.ID)
+	orders, err := h.orderService.ListAssigned(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -244,7 +244,7 @@ func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	orders, err := h.orderService.ListByCustomer(user.ID)
+	orders, err := h.orderService.ListByCustomer(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -268,7 +268,7 @@ func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	orders, err := h.orderService.FindNearbyOrdersForExecutor(user.ID, lat, lon, radius)
+	orders, err := h.orderService.FindNearbyOrdersForExecutor(r.Context(), user.ID, lat, lon, radius)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

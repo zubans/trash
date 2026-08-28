@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ type mockBidRepo struct {
 	bids []*repository.Bid
 }
 
-func (m *mockBidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
+func (m *mockBidRepo) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
 	b := &repository.Bid{
 		ID:           uuid.New(),
 		OrderID:      orderID,
@@ -28,7 +29,7 @@ func (m *mockBidRepo) CreateBid(orderID, executorID uuid.UUID, offeredPrice mone
 	return b, nil
 }
 
-func (m *mockBidRepo) GetBidsForOrder(orderID uuid.UUID) ([]*repository.Bid, error) {
+func (m *mockBidRepo) GetBidsForOrder(ctx context.Context, orderID uuid.UUID) ([]*repository.Bid, error) {
 	var list []*repository.Bid
 	for _, b := range m.bids {
 		if b.OrderID == orderID {
@@ -38,7 +39,7 @@ func (m *mockBidRepo) GetBidsForOrder(orderID uuid.UUID) ([]*repository.Bid, err
 	return list, nil
 }
 
-func (m *mockBidRepo) LockBidForUpdate(q repository.Querier, bidID uuid.UUID) (*repository.Bid, error) {
+func (m *mockBidRepo) LockBidForUpdate(ctx context.Context, q repository.Querier, bidID uuid.UUID) (*repository.Bid, error) {
 	for _, b := range m.bids {
 		if b.ID == bidID {
 			return b, nil
@@ -47,7 +48,7 @@ func (m *mockBidRepo) LockBidForUpdate(q repository.Querier, bidID uuid.UUID) (*
 	return nil, errors.New("bid not found")
 }
 
-func (m *mockBidRepo) SetBidStatus(q repository.Querier, bidID uuid.UUID, status string) error {
+func (m *mockBidRepo) SetBidStatus(ctx context.Context, q repository.Querier, bidID uuid.UUID, status string) error {
 	for _, b := range m.bids {
 		if b.ID == bidID {
 			// Mirrors the guarded UPDATE: only a pending bid can be decided.
@@ -61,7 +62,7 @@ func (m *mockBidRepo) SetBidStatus(q repository.Querier, bidID uuid.UUID, status
 	return repository.ErrConflict
 }
 
-func (m *mockBidRepo) RejectOtherBids(q repository.Querier, orderID, exceptBidID uuid.UUID) error {
+func (m *mockBidRepo) RejectOtherBids(ctx context.Context, q repository.Querier, orderID, exceptBidID uuid.UUID) error {
 	for _, b := range m.bids {
 		if b.OrderID == orderID && b.ID != exceptBidID && b.Status == "PENDING" {
 			b.Status = "REJECTED"
@@ -91,14 +92,14 @@ func TestBidService_CreateBid(t *testing.T) {
 	orderID := order.ID
 
 	// Case 1: No active shift (should fail)
-	_, err := srv.CreateBid(orderID, executorID, money.FromRubles(350.00))
+	_, err := srv.CreateBid(context.Background(), orderID, executorID, money.FromRubles(350.00))
 	if err == nil {
 		t.Error("expected error placing bid without active shift")
 	}
 
 	// Case 2: Active shift (should succeed)
-	_, _ = shiftRepo.StartShift(executorID, 1) // Start active shift in mock
-	bid, err := srv.CreateBid(orderID, executorID, money.FromRubles(350.00))
+	_, _ = shiftRepo.StartShift(context.Background(), executorID, 1) // Start active shift in mock
+	bid, err := srv.CreateBid(context.Background(), orderID, executorID, money.FromRubles(350.00))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,13 +109,13 @@ func TestBidService_CreateBid(t *testing.T) {
 	}
 
 	// Case 3: Invalid price (should fail)
-	_, err = srv.CreateBid(orderID, executorID, money.FromRubles(-10.0))
+	_, err = srv.CreateBid(context.Background(), orderID, executorID, money.FromRubles(-10.0))
 	if err == nil {
 		t.Error("expected error placing bid with negative price")
 	}
 
 	// Case 4: bidding on your own order is refused.
-	_, err = srv.CreateBid(orderID, order.CustomerID, 350.00)
+	_, err = srv.CreateBid(context.Background(), orderID, order.CustomerID, 350.00)
 	if err == nil {
 		t.Error("expected error placing bid on own order")
 	}

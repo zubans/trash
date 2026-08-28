@@ -33,7 +33,7 @@ func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	search := r.URL.Query().Get("search")
 
-	users, total, err := h.adminService.GetUsers(page, limit, role, status, search)
+	users, total, err := h.adminService.GetUsers(r.Context(), page, limit, role, status, search)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -75,7 +75,7 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.adminService.UpdateUserStatus(userID, admin.ID, req.Status); err != nil {
+	if err := h.adminService.UpdateUserStatus(r.Context(), userID, admin.ID, req.Status); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -107,7 +107,7 @@ func (h *AdminHandler) UpdateUserVerifiedHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := h.adminService.SetUserVerified(userID, admin.ID, req.Verified); err != nil {
+	if err := h.adminService.SetUserVerified(r.Context(), userID, admin.ID, req.Verified); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -139,7 +139,7 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.adminService.UpdateUserRole(userID, admin.ID, req.Role); err != nil {
+	if err := h.adminService.UpdateUserRole(r.Context(), userID, admin.ID, req.Role); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -165,7 +165,7 @@ func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := h.adminService.UpdateUserAddress(userID, req.Address); err != nil {
+	if err := h.adminService.UpdateUserAddress(r.Context(), userID, req.Address); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -193,7 +193,7 @@ func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.adminService.UpdateUserName(userID, req.LastName, req.FirstName, req.Patronymic); err != nil {
+	if err := h.adminService.UpdateUserName(r.Context(), userID, req.LastName, req.FirstName, req.Patronymic); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -225,7 +225,7 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.adminService.TopUpUserBalance(userID, adminUser.ID, req.Amount); err != nil {
+	if err := h.adminService.TopUpUserBalance(r.Context(), userID, adminUser.ID, req.Amount); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -244,7 +244,8 @@ func pageParams(r *http.Request) (int, int) {
 
 // GetTopUpRequestsHandler lists manual balance top-up requests.
 func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	reqs, err := h.adminService.GetTopUpRequests(pageParams(r))
+	limit, offset := pageParams(r)
+	reqs, err := h.adminService.GetTopUpRequests(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -269,7 +270,7 @@ func (h *AdminHandler) ApproveTopUpRequestsHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := h.adminService.ApproveTopUpRequest(reqID, adminUser.ID); err != nil {
+	if err := h.adminService.ApproveTopUpRequest(r.Context(), reqID, adminUser.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -293,7 +294,7 @@ func (h *AdminHandler) RejectTopUpRequestsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	if err := h.adminService.RejectTopUpRequest(reqID, adminUser.ID); err != nil {
+	if err := h.adminService.RejectTopUpRequest(r.Context(), reqID, adminUser.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -318,7 +319,7 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	wReq, err := h.adminService.CreateWithdrawalRequest(user.ID, req.Amount)
+	wReq, err := h.adminService.CreateWithdrawalRequest(r.Context(), user.ID, req.Amount)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -331,7 +332,8 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 
 // GetWithdrawalRequestsHandler lists all manual balance withdrawal requests.
 func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	reqs, err := h.adminService.GetWithdrawalRequests(pageParams(r))
+	limit, offset := pageParams(r)
+	reqs, err := h.adminService.GetWithdrawalRequests(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -356,7 +358,7 @@ func (h *AdminHandler) ApproveWithdrawalRequestsHandler(w http.ResponseWriter, r
 		return
 	}
 
-	if err := h.adminService.ApproveWithdrawalRequest(reqID, adminUser.ID); err != nil {
+	if err := h.adminService.ApproveWithdrawalRequest(r.Context(), reqID, adminUser.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -380,7 +382,7 @@ func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := h.adminService.RejectWithdrawalRequest(reqID, adminUser.ID); err != nil {
+	if err := h.adminService.RejectWithdrawalRequest(r.Context(), reqID, adminUser.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -402,7 +404,7 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 		tolerance = parsed
 	}
 
-	report, err := h.adminService.Reconcile(tolerance)
+	report, err := h.adminService.Reconcile(r.Context(), tolerance)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -424,7 +426,8 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 
 // GetTransactionsHandler retrieves audit logs of transactions.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	txs, err := h.adminService.GetTransactions(pageParams(r))
+	limit, offset := pageParams(r)
+	txs, err := h.adminService.GetTransactions(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -436,7 +439,7 @@ func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Req
 
 // GetPublicSettingsHandler returns public system settings (e.g. currency).
 func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.adminService.GetSettings()
+	settings, err := h.adminService.GetSettings(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -456,7 +459,7 @@ func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.R
 
 // GetSettingsHandler retrieves system settings.
 func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.adminService.GetSettings()
+	settings, err := h.adminService.GetSettings(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -474,7 +477,7 @@ func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.adminService.UpdateSettings(req); err != nil {
+	if err := h.adminService.UpdateSettings(r.Context(), req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -499,7 +502,7 @@ func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	topupReq, err := h.adminService.CreateTopUpRequest(user.ID, req.Amount)
+	topupReq, err := h.adminService.CreateTopUpRequest(r.Context(), user.ID, req.Amount)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -518,7 +521,7 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	profile, err := h.adminService.GetProfile(user.ID)
+	profile, err := h.adminService.GetProfile(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -559,7 +562,7 @@ func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	addresses, err := h.adminService.AddAddress(user.ID, req.toAddress())
+	addresses, err := h.adminService.AddAddress(r.Context(), user.ID, req.toAddress())
 	writeAddresses(w, addresses, err)
 }
 
@@ -581,7 +584,7 @@ func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "invalid address id", http.StatusBadRequest)
 			return
 		}
-		current, listErr := h.adminService.ListAddresses(user.ID)
+		current, listErr := h.adminService.ListAddresses(r.Context(), user.ID)
 		if listErr != nil {
 			http.Error(w, listErr.Error(), http.StatusInternalServerError)
 			return
@@ -593,7 +596,7 @@ func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Reque
 		addressID = current[index].ID
 	}
 
-	addresses, err := h.adminService.DeleteAddress(user.ID, addressID)
+	addresses, err := h.adminService.DeleteAddress(r.Context(), user.ID, addressID)
 	writeAddresses(w, addresses, err)
 }
 
@@ -619,16 +622,16 @@ func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.R
 		err       error
 	)
 	if id, parseErr := uuid.Parse(req.ID); parseErr == nil {
-		addresses, err = h.adminService.SetDefaultAddress(user.ID, id)
+		addresses, err = h.adminService.SetDefaultAddress(r.Context(), user.ID, id)
 	} else {
-		addresses, err = h.adminService.SetDefaultAddressByValue(user.ID, req.Address)
+		addresses, err = h.adminService.SetDefaultAddressByValue(r.Context(), user.ID, req.Address)
 	}
 	writeAddresses(w, addresses, err)
 }
 
 // GetActiveShiftsHandler lists all active executor shifts.
 func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Request) {
-	shifts, err := h.adminService.GetActiveShifts()
+	shifts, err := h.adminService.GetActiveShifts(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -639,7 +642,8 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 
 // GetActiveOrdersHandler lists active customer orders (searching or assigned).
 func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.adminService.GetActiveOrders(pageParams(r))
+	limit, offset := pageParams(r)
+	orders, err := h.adminService.GetActiveOrders(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -650,7 +654,8 @@ func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Req
 
 // GetCompletedOrdersHandler lists completed customer orders.
 func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.adminService.GetCompletedOrders(pageParams(r))
+	limit, offset := pageParams(r)
+	orders, err := h.adminService.GetCompletedOrders(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -667,7 +672,7 @@ func (h *AdminHandler) SendBroadcastEmailHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	res, err := h.adminService.SendBroadcastEmail(req)
+	res, err := h.adminService.SendBroadcastEmail(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

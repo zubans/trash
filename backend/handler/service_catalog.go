@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -26,7 +27,7 @@ func NewServiceCatalogHandler(catalogRepo repository.ServiceCatalogRepository) *
 
 // ListRootCategories handles GET /service-categories.
 func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *http.Request) {
-	nodes, err := h.catalogRepo.GetRootCategories(repository.FilterActive)
+	nodes, err := h.catalogRepo.GetRootCategories(r.Context(), repository.FilterActive)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -41,7 +42,7 @@ func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "invalid category id", http.StatusBadRequest)
 		return
 	}
-	nodes, err := h.catalogRepo.GetChildren(id, repository.FilterActive)
+	nodes, err := h.catalogRepo.GetChildren(r.Context(), id, repository.FilterActive)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -56,7 +57,7 @@ func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *h
 		http.Error(w, "invalid category id", http.StatusBadRequest)
 		return
 	}
-	nodes, err := h.catalogRepo.GetDescendants(id, nil)
+	nodes, err := h.catalogRepo.GetDescendants(r.Context(), id, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -73,7 +74,7 @@ func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *h
 
 // ListVariants handles GET /service-variants.
 func (h *ServiceCatalogHandler) ListVariants(w http.ResponseWriter, r *http.Request) {
-	nodes, err := h.catalogRepo.GetActiveVariants()
+	nodes, err := h.catalogRepo.GetActiveVariants(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -88,7 +89,7 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid variant id", http.StatusBadRequest)
 		return
 	}
-	variant, path, err := h.catalogRepo.GetVariantWithCategory(id)
+	variant, path, err := h.catalogRepo.GetVariantWithCategory(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "variant not found", http.StatusNotFound)
@@ -108,23 +109,23 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 func (h *ServiceCatalogHandler) AdminListNodes(w http.ResponseWriter, r *http.Request) {
 	filter := repository.ServiceNodeFilter{IncludeDeleted: queryBool(r, "include_deleted")}
 
-	roots, err := h.catalogRepo.GetRootCategories(filter)
+	roots, err := h.catalogRepo.GetRootCategories(r.Context(), filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	result := make([]map[string]interface{}, 0, len(roots))
 	for _, root := range roots {
-		result = append(result, h.buildTree(root, filter))
+		result = append(result, h.buildTree(r.Context(), root, filter))
 	}
 	writeJSON(w, result)
 }
 
-func (h *ServiceCatalogHandler) buildTree(node *repository.ServiceNode, filter repository.ServiceNodeFilter) map[string]interface{} {
-	children, _ := h.catalogRepo.GetChildren(node.ID, filter)
+func (h *ServiceCatalogHandler) buildTree(ctx context.Context, node *repository.ServiceNode, filter repository.ServiceNodeFilter) map[string]interface{} {
+	children, _ := h.catalogRepo.GetChildren(ctx, node.ID, filter)
 	childTrees := make([]map[string]interface{}, 0, len(children))
 	for _, child := range children {
-		childTrees = append(childTrees, h.buildTree(child, filter))
+		childTrees = append(childTrees, h.buildTree(ctx, child, filter))
 	}
 	return map[string]interface{}{
 		"node":     node,
@@ -139,7 +140,7 @@ func (h *ServiceCatalogHandler) AdminGetNode(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "invalid node id", http.StatusBadRequest)
 		return
 	}
-	node, err := h.catalogRepo.GetNodeByID(id)
+	node, err := h.catalogRepo.GetNodeByID(r.Context(), id)
 	if err != nil {
 		if isNotFound(err) {
 			http.Error(w, "node not found", http.StatusNotFound)
@@ -164,12 +165,12 @@ func (h *ServiceCatalogHandler) AdminCreateNode(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := h.validateParent(req.ParentID); err != nil {
+	if err := h.validateParent(r.Context(), req.ParentID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := h.catalogRepo.CreateNode(&req); err != nil {
+	if err := h.catalogRepo.CreateNode(r.Context(), &req); err != nil {
 		writeCatalogError(w, err)
 		return
 	}
@@ -197,7 +198,7 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 	// Validating the request against its own empty node_type used to reject
 	// every variant edit with "CATEGORY cannot have base_price"; the rules
 	// apply to the stored node.
-	existing, err := h.catalogRepo.GetNodeByID(id)
+	existing, err := h.catalogRepo.GetNodeByID(r.Context(), id)
 	if err != nil {
 		if isNotFound(err) {
 			http.Error(w, "node not found", http.StatusNotFound)
@@ -222,12 +223,12 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := h.validateParent(req.ParentID); err != nil {
+	if err := h.validateParent(r.Context(), req.ParentID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := h.catalogRepo.UpdateNode(&req); err != nil {
+	if err := h.catalogRepo.UpdateNode(r.Context(), &req); err != nil {
 		writeCatalogError(w, err)
 		return
 	}
@@ -247,9 +248,9 @@ func (h *ServiceCatalogHandler) AdminDeleteNode(w http.ResponseWriter, r *http.R
 
 	// Read before deleting: the answer would not change afterwards, but the
 	// admin panel wants to say that order history is being kept.
-	hadOrders, _ := h.catalogRepo.HasOrders(id)
+	hadOrders, _ := h.catalogRepo.HasOrders(r.Context(), id)
 
-	if err := h.catalogRepo.DeleteNode(id); err != nil {
+	if err := h.catalogRepo.DeleteNode(r.Context(), id); err != nil {
 		writeCatalogError(w, err)
 		return
 	}
@@ -270,12 +271,12 @@ func (h *ServiceCatalogHandler) AdminRestoreNode(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := h.catalogRepo.RestoreNode(id); err != nil {
+	if err := h.catalogRepo.RestoreNode(r.Context(), id); err != nil {
 		writeCatalogError(w, err)
 		return
 	}
 
-	node, err := h.catalogRepo.GetNodeByID(id)
+	node, err := h.catalogRepo.GetNodeByID(r.Context(), id)
 	if err != nil {
 		writeJSON(w, map[string]string{"message": "node restored successfully"})
 		return
@@ -308,11 +309,11 @@ func isNotFound(err error) bool {
 
 var codeRegexp = regexp.MustCompile(`^[a-z0-9_]+$`)
 
-func (h *ServiceCatalogHandler) validateParent(parentID *uuid.UUID) error {
+func (h *ServiceCatalogHandler) validateParent(ctx context.Context, parentID *uuid.UUID) error {
 	if parentID == nil {
 		return nil
 	}
-	parent, err := h.catalogRepo.GetNodeByID(*parentID)
+	parent, err := h.catalogRepo.GetNodeByID(ctx, *parentID)
 	if err != nil {
 		return errors.New("parent not found")
 	}

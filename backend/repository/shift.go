@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"time"
 
@@ -42,24 +43,24 @@ type GPSLog struct {
 
 // ShiftRepository defines storage operations for shifts and GPS logs.
 type ShiftRepository interface {
-	Create(shift *Shift) error
-	GetActiveShift(executorID uuid.UUID) (*Shift, error)
-	GetShiftByID(shiftID uuid.UUID) (*Shift, error)
-	GetActiveShifts() ([]*Shift, error)
-	End(shiftID uuid.UUID) error
-	Penalize(shiftID uuid.UUID, fine money.Amount) error
+	Create(ctx context.Context, shift *Shift) error
+	GetActiveShift(ctx context.Context, executorID uuid.UUID) (*Shift, error)
+	GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*Shift, error)
+	GetActiveShifts(ctx context.Context) ([]*Shift, error)
+	End(ctx context.Context, shiftID uuid.UUID) error
+	Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error
 
 	// EarlyEnd terminates a shift before its planned end time, records the
 	// penalty amount and marks the shift as PENALIZED.
-	EarlyEnd(shiftID uuid.UUID, fine money.Amount) error
+	EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error
 
 	// GetLastShiftByExecutor returns the most recent shift for an executor,
 	// regardless of status (active, completed or penalized).
-	GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error)
+	GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error)
 
-	StartShift(executorID uuid.UUID, durationHours int) (*Shift, error)
-	AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error
-	GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error)
+	StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*Shift, error)
+	AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error
+	GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error)
 }
 
 // shiftRepo implements ShiftRepository using *sql.DB.
@@ -88,8 +89,8 @@ func scanShiftRows(rows *sql.Rows) (Shift, error) {
 	return s, err
 }
 
-func (r *shiftRepo) Create(shift *Shift) error {
-	_, err := r.db.Exec(
+func (r *shiftRepo) Create(ctx context.Context, shift *Shift) error {
+	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO shifts (id, executor_id, duration_hours, started_at, planned_end_at, status, fine_amount)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		shift.ID, shift.ExecutorID, shift.DurationHours, shift.StartedAt, shift.PlannedEndAt, shift.Status, shift.FineAmount,
@@ -98,8 +99,8 @@ func (r *shiftRepo) Create(shift *Shift) error {
 }
 
 // findActiveByExecutor is the implementation behind GetActiveShift.
-func (r *shiftRepo) findActiveByExecutor(executorID uuid.UUID) (*Shift, error) {
-	row := r.db.QueryRow(
+func (r *shiftRepo) findActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
+	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
 		 FROM shifts WHERE executor_id = $1 AND status = $2`,
 		executorID, ShiftStatusActive,
@@ -111,12 +112,12 @@ func (r *shiftRepo) findActiveByExecutor(executorID uuid.UUID) (*Shift, error) {
 	return &s, nil
 }
 
-func (r *shiftRepo) GetActiveShift(executorID uuid.UUID) (*Shift, error) {
-	return r.findActiveByExecutor(executorID)
+func (r *shiftRepo) GetActiveShift(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
+	return r.findActiveByExecutor(ctx, executorID)
 }
 
-func (r *shiftRepo) GetShiftByID(shiftID uuid.UUID) (*Shift, error) {
-	row := r.db.QueryRow(
+func (r *shiftRepo) GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*Shift, error) {
+	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
 		 FROM shifts WHERE id = $1`,
 		shiftID,
@@ -128,8 +129,8 @@ func (r *shiftRepo) GetShiftByID(shiftID uuid.UUID) (*Shift, error) {
 	return &s, nil
 }
 
-func (r *shiftRepo) GetActiveShifts() ([]*Shift, error) {
-	rows, err := r.db.Query(
+func (r *shiftRepo) GetActiveShifts(ctx context.Context) ([]*Shift, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
 		 FROM shifts WHERE status = $1`,
 		ShiftStatusActive,
@@ -150,16 +151,16 @@ func (r *shiftRepo) GetActiveShifts() ([]*Shift, error) {
 	return shifts, rows.Err()
 }
 
-func (r *shiftRepo) End(shiftID uuid.UUID) error {
-	_, err := r.db.Exec(
+func (r *shiftRepo) End(ctx context.Context, shiftID uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE shifts SET status = $1, actual_end_at = now() WHERE id = $2`,
 		ShiftStatusCompleted, shiftID,
 	)
 	return err
 }
 
-func (r *shiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error {
-	_, err := r.db.Exec(
+func (r *shiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE shifts SET status = $1, fine_amount = fine_amount + $2 WHERE id = $3`,
 		ShiftStatusPenalized, fine, shiftID,
 	)
@@ -167,8 +168,8 @@ func (r *shiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error {
 }
 
 // EarlyEnd terminates a shift before its planned end time and records the fine.
-func (r *shiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error {
-	_, err := r.db.Exec(
+func (r *shiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE shifts SET status = $1, actual_end_at = now(), fine_amount = fine_amount + $2 WHERE id = $3`,
 		ShiftStatusPenalized, fine, shiftID,
 	)
@@ -177,8 +178,8 @@ func (r *shiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error {
 
 // GetLastShiftByExecutor returns the most recent shift for an executor,
 // regardless of status.
-func (r *shiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error) {
-	row := r.db.QueryRow(
+func (r *shiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
+	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
 		 FROM shifts WHERE executor_id = $1
 		 ORDER BY started_at DESC
@@ -192,8 +193,8 @@ func (r *shiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*Shift, error)
 	return &s, nil
 }
 
-func (r *shiftRepo) saveGPSLog(log *GPSLog) error {
-	_, err := r.db.Exec(
+func (r *shiftRepo) saveGPSLog(ctx context.Context, log *GPSLog) error {
+	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO shift_gps_logs (id, shift_id, latitude, longitude, is_inside, recorded_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		log.ID, log.ShiftID, log.Latitude, log.Longitude, log.IsInside, log.RecordedAt,
@@ -202,7 +203,7 @@ func (r *shiftRepo) saveGPSLog(log *GPSLog) error {
 }
 
 // StartShift creates and persists a new active shift.
-func (r *shiftRepo) StartShift(executorID uuid.UUID, durationHours int) (*Shift, error) {
+func (r *shiftRepo) StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*Shift, error) {
 	now := time.Now()
 	shift := &Shift{
 		ID:            uuid.New(),
@@ -212,14 +213,14 @@ func (r *shiftRepo) StartShift(executorID uuid.UUID, durationHours int) (*Shift,
 		PlannedEndAt:  now.Add(time.Duration(durationHours) * time.Hour),
 		Status:        ShiftStatusActive,
 	}
-	if err := r.Create(shift); err != nil {
+	if err := r.Create(ctx, shift); err != nil {
 		return nil, err
 	}
 	return shift, nil
 }
 
 // AddGPSLog records a coordinate and whether it was inside the geozone.
-func (r *shiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error {
+func (r *shiftRepo) AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error {
 	log := &GPSLog{
 		ID:         uuid.New(),
 		ShiftID:    shiftID,
@@ -228,12 +229,12 @@ func (r *shiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool
 		IsInside:   isInside,
 		RecordedAt: time.Now(),
 	}
-	return r.saveGPSLog(log)
+	return r.saveGPSLog(ctx, log)
 }
 
 // GetLastGPSLogs returns recent inside/outside flags for a shift.
-func (r *shiftRepo) GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error) {
-	rows, err := r.db.Query(
+func (r *shiftRepo) GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT is_inside FROM shift_gps_logs WHERE shift_id = $1 ORDER BY recorded_at DESC LIMIT $2`,
 		shiftID, count,
 	)

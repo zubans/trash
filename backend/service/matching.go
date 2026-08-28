@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"strconv"
@@ -34,11 +35,11 @@ func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo reposito
 }
 
 // StartMatchingWorker starts a background loop that runs matching periodically.
-func (s *MatchingService) StartMatchingWorker(interval time.Duration) {
+func (s *MatchingService) StartMatchingWorker(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := metrics.TrackWorker("matching", s.MatchOrders); err != nil {
+			if err := metrics.TrackWorker("matching", func() error { return s.MatchOrders(ctx) }); err != nil {
 				log.Printf("[MatchingWorker] Error: %v", err)
 			}
 		}
@@ -48,15 +49,15 @@ func (s *MatchingService) StartMatchingWorker(interval time.Duration) {
 
 // executorEligible re-uses the shared executor/variant rules so automatic
 // matching cannot hand out an order that the executor is not allowed to take.
-func (s *MatchingService) executorEligible(executorID, variantID uuid.UUID) bool {
+func (s *MatchingService) executorEligible(ctx context.Context, executorID, variantID uuid.UUID) bool {
 	if s.userRepo == nil || s.catalogRepo == nil {
 		return true
 	}
-	executor, err := s.userRepo.FindByID(executorID)
+	executor, err := s.userRepo.FindByID(ctx, executorID)
 	if err != nil {
 		return false
 	}
-	variant, err := s.catalogRepo.GetNodeByID(variantID)
+	variant, err := s.catalogRepo.GetNodeByID(ctx, variantID)
 	if err != nil {
 		return false
 	}
@@ -64,9 +65,9 @@ func (s *MatchingService) executorEligible(executorID, variantID uuid.UUID) bool
 }
 
 // MatchOrders executes the matching cycle.
-func (s *MatchingService) MatchOrders() error {
+func (s *MatchingService) MatchOrders(ctx context.Context) error {
 	// 1. Get all searching orders
-	orders, err := s.orderRepo.GetPendingOrders()
+	orders, err := s.orderRepo.GetPendingOrders(ctx)
 	if err != nil {
 		return err
 	}
@@ -76,7 +77,7 @@ func (s *MatchingService) MatchOrders() error {
 	}
 
 	// 2. Fetch all geozones
-	rows, err := s.db.Query(`SELECT id, name, type, center_latitude, center_longitude, radius_meters, coordinates FROM geozones`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, type, center_latitude, center_longitude, radius_meters, coordinates FROM geozones`)
 	if err != nil {
 		return err
 	}
@@ -98,7 +99,7 @@ func (s *MatchingService) MatchOrders() error {
 	}
 
 	// 3. Fetch all active shifts
-	activeShifts, err := s.shiftRepo.GetActiveShifts()
+	activeShifts, err := s.shiftRepo.GetActiveShifts(ctx)
 	if err != nil {
 		return err
 	}
@@ -120,7 +121,7 @@ func (s *MatchingService) MatchOrders() error {
 		// Assign orders only from verified customers, mirroring the manual
 		// order feeds ("показ заказов только от верифицированных пользователей").
 		if s.userRepo != nil {
-			if customer, err := s.userRepo.FindByID(order.CustomerID); err == nil && customer != nil && !customer.IsVerified() {
+			if customer, err := s.userRepo.FindByID(ctx, order.CustomerID); err == nil && customer != nil && !customer.IsVerified() {
 				continue
 			}
 		}
@@ -134,7 +135,7 @@ func (s *MatchingService) MatchOrders() error {
 			hasCoords = true
 		} else {
 			var lastGeo string
-			err = s.db.QueryRow(`SELECT last_geo FROM customer_profiles WHERE user_id = $1`, order.CustomerID).Scan(&lastGeo)
+			err = s.db.QueryRowContext(ctx, `SELECT last_geo FROM customer_profiles WHERE user_id = $1`, order.CustomerID).Scan(&lastGeo)
 			if err != nil && err != sql.ErrNoRows {
 				log.Printf("[MatchingWorker] Failed to query last_geo for customer %s: %v", order.CustomerID, err)
 				continue
@@ -179,7 +180,7 @@ func (s *MatchingService) MatchOrders() error {
 		var matchedExecutorID uuid.UUID
 		for execID := range activeExecutors {
 			// Age / verification restrictions apply to automatic assignment too.
-			if !s.executorEligible(execID, order.ServiceVariantID) {
+			if !s.executorEligible(ctx, execID, order.ServiceVariantID) {
 				continue
 			}
 			if execID == order.CustomerID {
@@ -187,7 +188,7 @@ func (s *MatchingService) MatchOrders() error {
 			}
 			// Check executor work area geozone
 			var execWorkAreaID int
-			err = s.db.QueryRow(`SELECT work_area_id FROM executor_profiles WHERE user_id = $1`, execID).Scan(&execWorkAreaID)
+			err = s.db.QueryRowContext(ctx, `SELECT work_area_id FROM executor_profiles WHERE user_id = $1`, execID).Scan(&execWorkAreaID)
 			if err != nil {
 				continue
 			}
@@ -195,7 +196,7 @@ func (s *MatchingService) MatchOrders() error {
 			if execWorkAreaID == geozoneID {
 				// Check if this executor already has an assigned order
 				var hasAssigned bool
-				err = s.db.QueryRow(`
+				err = s.db.QueryRowContext(ctx, `
 					SELECT EXISTS(
 						SELECT 1 FROM orders
 						WHERE executor_id = $1 AND status = 'ASSIGNED'
@@ -209,7 +210,7 @@ func (s *MatchingService) MatchOrders() error {
 		}
 
 		if matchedExecutorID != uuid.Nil {
-			err = s.orderRepo.Assign(nil, order.ID, matchedExecutorID)
+			err = s.orderRepo.Assign(ctx, nil, order.ID, matchedExecutorID)
 			if err != nil {
 				metrics.MatchingAssignment("error")
 				log.Printf("[MatchingWorker] Error assigning order %s to executor %s: %v", order.ID, matchedExecutorID, err)

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"errors"
@@ -68,26 +69,26 @@ type CustomerProfile struct {
 
 // UserRepository defines storage operations for users.
 type UserRepository interface {
-	FindByPhone(phone string) (*User, error)
-	FindByEmail(email string) (*User, error)
-	FindByEmailVerificationToken(token string) (*User, error)
-	Create(user *User) error
-	FindByID(id uuid.UUID) (*User, error)
-	UpdateStatus(id uuid.UUID, status string) error
-	UpdateRole(id uuid.UUID, role string) error
-	UpdateVerified(id uuid.UUID, verified bool) error
-	UpdateBalance(id uuid.UUID, balance money.Amount) error
-	UpdateLastGeo(id uuid.UUID, lastGeo string) error
-	CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error
-	GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
-	UpdateCustomerAddress(userID uuid.UUID, address string) error
-	VerifyEmailToken(token string) (*User, error)
-	UpdatePassword(userID uuid.UUID, newHashedPassword string) error
-	SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
-	ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
-	UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
-	UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error
-	UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error
+	FindByPhone(ctx context.Context, phone string) (*User, error)
+	FindByEmail(ctx context.Context, email string) (*User, error)
+	FindByEmailVerificationToken(ctx context.Context, token string) (*User, error)
+	Create(ctx context.Context, user *User) error
+	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
+	UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error
+	UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error
+	UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error
+	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error
+	GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error)
+	UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error
+	VerifyEmailToken(ctx context.Context, token string) (*User, error)
+	UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error
+	SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error
+	ResetPasswordWithCode(ctx context.Context, email, code, newHashedPassword string) (*User, error)
+	UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
+	UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error
+	UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error
 }
 
 // repo implements UserRepository using *sql.DB.
@@ -100,12 +101,12 @@ func New(db *sql.DB) UserRepository {
 	return &repo{db: db}
 }
 
-func (r *repo) FindByPhone(phone string) (*User, error) {
+func (r *repo) FindByPhone(ctx context.Context, phone string) (*User, error) {
 	var u User
 	var email, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
 	cleanDigits := regexp.MustCompile(`[^0-9]`).ReplaceAllString(phone, "")
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
 		 FROM users
 		 WHERE phone = $1
@@ -129,11 +130,11 @@ func (r *repo) FindByPhone(phone string) (*User, error) {
 	return &u, nil
 }
 
-func (r *repo) FindByEmail(email string) (*User, error) {
+func (r *repo) FindByEmail(ctx context.Context, email string) (*User, error) {
 	var u User
 	var em, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
 		email,
 	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
@@ -152,11 +153,11 @@ func (r *repo) FindByEmail(email string) (*User, error) {
 	return &u, nil
 }
 
-func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
+func (r *repo) FindByEmailVerificationToken(ctx context.Context, token string) (*User, error) {
 	var u User
 	var email, tok, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
 		token,
 	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
@@ -175,11 +176,11 @@ func (r *repo) FindByEmailVerificationToken(token string) (*User, error) {
 	return &u, nil
 }
 
-func (r *repo) FindByID(id uuid.UUID) (*User, error) {
+func (r *repo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	var u User
 	var email, pendingEmail, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
 		id,
 	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
@@ -199,13 +200,13 @@ func (r *repo) FindByID(id uuid.UUID) (*User, error) {
 	return &u, nil
 }
 
-func (r *repo) Create(user *User) error {
+func (r *repo) Create(ctx context.Context, user *User) error {
 	id := user.ID
 	if id == uuid.Nil {
 		id = uuid.New()
 		user.ID = id
 	}
-	_, err := r.db.Exec(
+	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
@@ -213,9 +214,9 @@ func (r *repo) Create(user *User) error {
 	return err
 }
 
-func (r *repo) VerifyEmailToken(token string) (*User, error) {
+func (r *repo) VerifyEmailToken(ctx context.Context, token string) (*User, error) {
 	var userID uuid.UUID
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`UPDATE users
 		 SET email = COALESCE(NULLIF(pending_email, ''), email),
 		     pending_email = NULL,
@@ -229,7 +230,7 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			var isExpired bool
-			errExp := r.db.QueryRow(
+			errExp := r.db.QueryRowContext(ctx,
 				`SELECT EXISTS(SELECT 1 FROM users WHERE email_verification_token = $1 AND email_token_expires_at <= now())`,
 				token,
 			).Scan(&isExpired)
@@ -240,22 +241,22 @@ func (r *repo) VerifyEmailToken(token string) (*User, error) {
 		}
 		return nil, err
 	}
-	return r.FindByID(userID)
+	return r.FindByID(ctx, userID)
 }
 
 // UpdatePassword replaces the stored hash and clears any pending reset code, so
 // a code issued before the change cannot be used afterwards.
-func (r *repo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
-	return execExpectingOne(r.db,
+func (r *repo) UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error {
+	return execExpectingOne(ctx, r.db,
 		`UPDATE users SET password = $1, password_reset_code = NULL,
 		    password_reset_expires_at = NULL, password_reset_attempts = 0
 		 WHERE id = $2`,
 		newHashedPassword, userID)
 }
 
-func (r *repo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+func (r *repo) SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error {
 	// A fresh code resets the attempt counter.
-	_, err := r.db.Exec(
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE users SET password_reset_code = $1, password_reset_expires_at = $2, password_reset_attempts = 0 WHERE id = $3`,
 		code, expiresAt, userID,
 	)
@@ -268,8 +269,8 @@ const maxResetAttempts = 5
 
 // ResetPasswordWithCode verifies the code under a row lock and counts failed
 // attempts, invalidating the code once the limit is reached.
-func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error) {
-	tx, err := r.db.Begin()
+func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashedPassword string) (*User, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +282,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 		expiresAt  sql.NullTime
 		attempts   int
 	)
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(ctx,
 		`SELECT id, password_reset_code, password_reset_expires_at, COALESCE(password_reset_attempts, 0)
 		 FROM users WHERE LOWER(email) = LOWER($1) FOR UPDATE`,
 		email,
@@ -294,7 +295,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 	}
 
 	invalidate := func() error {
-		_, err := tx.Exec(
+		_, err := tx.ExecContext(ctx,
 			`UPDATE users SET password_reset_code = NULL, password_reset_expires_at = NULL, password_reset_attempts = 0 WHERE id = $1`,
 			userID,
 		)
@@ -316,7 +317,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 	}
 
 	if subtle.ConstantTimeCompare([]byte(storedCode.String), []byte(code)) != 1 {
-		if _, err := tx.Exec(`UPDATE users SET password_reset_attempts = COALESCE(password_reset_attempts, 0) + 1 WHERE id = $1`, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET password_reset_attempts = COALESCE(password_reset_attempts, 0) + 1 WHERE id = $1`, userID); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -325,7 +326,7 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 		return nil, errors.New("неверный или истекший код сброса")
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE users
 		 SET password = $1, password_reset_code = NULL, password_reset_expires_at = NULL, password_reset_attempts = 0
 		 WHERE id = $2`,
@@ -336,33 +337,33 @@ func (r *repo) ResetPasswordWithCode(email, code, newHashedPassword string) (*Us
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.FindByID(userID)
+	return r.FindByID(ctx, userID)
 }
 
-func (r *repo) UpdateStatus(id uuid.UUID, status string) error {
-	_, err := r.db.Exec(`UPDATE users SET status = $1 WHERE id = $2`, status, id)
+func (r *repo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET status = $1 WHERE id = $2`, status, id)
 	return err
 }
 
-func (r *repo) UpdateRole(id uuid.UUID, role string) error {
-	_, err := r.db.Exec(`UPDATE users SET role = $1 WHERE id = $2`, role, id)
+func (r *repo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET role = $1 WHERE id = $2`, role, id)
 	return err
 }
 
 // UpdateVerified sets the manual verification flag. This is the only writer of
 // users.is_verified; it is reached exclusively through the admin endpoint.
-func (r *repo) UpdateVerified(id uuid.UUID, verified bool) error {
-	_, err := r.db.Exec(`UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
+func (r *repo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
 	return err
 }
 
-func (r *repo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
-	_, err := r.db.Exec(`UPDATE users SET balance = $1 WHERE id = $2`, balance, id)
+func (r *repo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET balance = $1 WHERE id = $2`, balance, id)
 	return err
 }
 
-func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
-	_, err := r.db.Exec(
+func (r *repo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
+	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
 		 VALUES ($1, '', '', $2)
 		 ON CONFLICT (user_id) DO UPDATE SET last_geo = $2`,
@@ -374,8 +375,8 @@ func (r *repo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
 // CreateCustomerProfile stores the profile and registers the address as the
 // customer's first saved one, so the profile page lists what registration
 // captured instead of showing an empty list next to a working order form.
-func (r *repo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
-	if _, err := r.db.Exec(
+func (r *repo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
+	if _, err := r.db.ExecContext(ctx,
 		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
 		 VALUES ($1, '', $2, $3)
 		 ON CONFLICT (user_id) DO UPDATE SET address = $2, last_geo = $3`,
@@ -383,12 +384,12 @@ func (r *repo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) 
 	); err != nil {
 		return err
 	}
-	return r.saveDefaultAddress(userID, address)
+	return r.saveDefaultAddress(ctx, userID, address)
 }
 
-func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
+func (r *repo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error) {
 	var p CustomerProfile
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT user_id, full_name, address, last_geo FROM customer_profiles WHERE user_id = $1`,
 		userID,
 	).Scan(&p.UserID, &p.FullName, &p.Address, &p.LastGeo)
@@ -401,8 +402,8 @@ func (r *repo) GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error) {
 	return &p, nil
 }
 
-func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
-	if _, err := r.db.Exec(
+func (r *repo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
+	if _, err := r.db.ExecContext(ctx,
 		`INSERT INTO customer_profiles (user_id, full_name, address)
 		 VALUES ($1, '', $2)
 		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
@@ -410,20 +411,20 @@ func (r *repo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
 	); err != nil {
 		return err
 	}
-	return r.saveDefaultAddress(userID, address)
+	return r.saveDefaultAddress(ctx, userID, address)
 }
 
 // saveDefaultAddress keeps customer_addresses in step with the profile address,
 // so the two never disagree about where a customer orders from.
-func (r *repo) saveDefaultAddress(userID uuid.UUID, address string) error {
+func (r *repo) saveDefaultAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	if strings.TrimSpace(address) == "" {
 		return nil
 	}
-	if _, err := r.db.Exec(
+	if _, err := r.db.ExecContext(ctx,
 		`UPDATE customer_addresses SET is_default = FALSE WHERE user_id = $1 AND is_default`, userID); err != nil {
 		return err
 	}
-	_, err := r.db.Exec(
+	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO customer_addresses (user_id, address, is_default) VALUES ($1, $2, TRUE)
 		 ON CONFLICT (user_id, address) DO UPDATE SET is_default = TRUE`,
 		userID, address)
@@ -436,8 +437,8 @@ func (r *repo) saveDefaultAddress(userID uuid.UUID, address string) error {
 // the account's address immediately, which let somebody occupy an address that
 // its real owner had not registered yet, and dropped the working address of a
 // user who mistyped.
-func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
-	row := r.db.QueryRow(
+func (r *repo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
+	row := r.db.QueryRowContext(ctx,
 		`UPDATE users
 		 SET pending_email = $1, email_verification_token = $2, email_token_expires_at = $3
 		 WHERE id = $4
@@ -458,16 +459,16 @@ func (r *repo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string
 	return &u, nil
 }
 
-func (r *repo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
-	_, err := r.db.Exec(
+func (r *repo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE users SET last_name = $1, first_name = $2, patronymic = $3 WHERE id = $4`,
 		lastName, firstName, patronymic, userID,
 	)
 	return err
 }
 
-func (r *repo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error {
-	_, err := r.db.Exec(
+func (r *repo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE users SET birth_date = $1 WHERE id = $2`,
 		birthDate, userID,
 	)

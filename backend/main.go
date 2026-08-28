@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -120,7 +121,7 @@ func main() {
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo)
 
 	// Start background order matcher
-	matchingService.StartMatchingWorker(5 * time.Second)
+	matchingService.StartMatchingWorker(context.Background(), 5*time.Second)
 
 	// Start background workers
 	slaWorker := worker.NewSLAWorker(db, orderService, chatService, ledger)
@@ -149,9 +150,9 @@ func main() {
 	// Expired refresh tokens are dropped daily; used ones are kept until they
 	// expire because replay detection needs to recognise them.
 	go func() {
-		authService.CleanupExpiredRefreshTokens()
+		authService.CleanupExpiredRefreshTokens(context.Background())
 		for range time.Tick(24 * time.Hour) {
-			authService.CleanupExpiredRefreshTokens()
+			authService.CleanupExpiredRefreshTokens(context.Background())
 		}
 	}()
 
@@ -373,7 +374,7 @@ func main() {
 		// Unset means the routes are not registered at all.
 		Secret: os.Getenv("OPS_KEY"),
 		Reconcile: func() (any, error) {
-			return adminService.Reconcile(money.FromRubles(0.01))
+			return adminService.Reconcile(context.Background(), money.FromRubles(0.01))
 		},
 	})
 

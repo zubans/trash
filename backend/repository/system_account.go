@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 
@@ -39,10 +40,10 @@ type SystemAccountRepository interface {
 	// Credit adds to an account; Debit subtracts. Both take the caller's
 	// transaction, because an account movement is always the other half of a
 	// user balance movement and the two must commit together.
-	Credit(q Querier, code string, amount money.Amount) error
-	Debit(q Querier, code string, amount money.Amount) error
-	List() ([]SystemAccount, error)
-	Get(code string) (*SystemAccount, error)
+	Credit(ctx context.Context, q Querier, code string, amount money.Amount) error
+	Debit(ctx context.Context, q Querier, code string, amount money.Amount) error
+	List(ctx context.Context) ([]SystemAccount, error)
+	Get(ctx context.Context, code string) (*SystemAccount, error)
 }
 
 type systemAccountRepo struct {
@@ -54,28 +55,28 @@ func NewSystemAccountRepository(db *sql.DB) SystemAccountRepository {
 	return &systemAccountRepo{db: db}
 }
 
-func (r *systemAccountRepo) exec(q Querier) Querier {
+func (r *systemAccountRepo) exec(ctx context.Context, q Querier) Querier {
 	if q == nil {
 		return r.db
 	}
 	return q
 }
 
-func (r *systemAccountRepo) Credit(q Querier, code string, amount money.Amount) error {
-	return r.move(q, code, amount)
+func (r *systemAccountRepo) Credit(ctx context.Context, q Querier, code string, amount money.Amount) error {
+	return r.move(ctx, q, code, amount)
 }
 
-func (r *systemAccountRepo) Debit(q Querier, code string, amount money.Amount) error {
-	return r.move(q, code, amount.Neg())
+func (r *systemAccountRepo) Debit(ctx context.Context, q Querier, code string, amount money.Amount) error {
+	return r.move(ctx, q, code, amount.Neg())
 }
 
 // move applies a delta. A zero amount is a no-op rather than an error: several
 // call sites legitimately move nothing (a refund of zero, a fine of zero).
-func (r *systemAccountRepo) move(q Querier, code string, delta money.Amount) error {
+func (r *systemAccountRepo) move(ctx context.Context, q Querier, code string, delta money.Amount) error {
 	if delta.IsZero() {
 		return nil
 	}
-	err := execExpectingOne(r.exec(q),
+	err := execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE system_accounts SET balance = balance + $1, updated_at = now() WHERE code = $2`,
 		delta, code)
 	if errors.Is(err, ErrConflict) {
@@ -84,9 +85,9 @@ func (r *systemAccountRepo) move(q Querier, code string, delta money.Amount) err
 	return err
 }
 
-func (r *systemAccountRepo) Get(code string) (*SystemAccount, error) {
+func (r *systemAccountRepo) Get(ctx context.Context, code string) (*SystemAccount, error) {
 	var a SystemAccount
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT code, name, balance FROM system_accounts WHERE code = $1`, code,
 	).Scan(&a.Code, &a.Name, &a.Balance)
 	if err != nil {
@@ -98,8 +99,8 @@ func (r *systemAccountRepo) Get(code string) (*SystemAccount, error) {
 	return &a, nil
 }
 
-func (r *systemAccountRepo) List() ([]SystemAccount, error) {
-	rows, err := r.db.Query(`SELECT code, name, balance FROM system_accounts ORDER BY code`)
+func (r *systemAccountRepo) List(ctx context.Context) ([]SystemAccount, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT code, name, balance FROM system_accounts ORDER BY code`)
 	if err != nil {
 		return nil, err
 	}

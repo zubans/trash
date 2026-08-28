@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
@@ -79,20 +80,20 @@ func KnownTransactionTypes() []TransactionType {
 
 // TransactionRepository defines storage operations for financial transactions and balance.
 type TransactionRepository interface {
-	GetBalance(userID uuid.UUID) (money.Amount, error)
+	GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error)
 	// UpdateBalance applies an unconditional delta. Use Debit instead whenever
 	// the balance must stay non-negative.
-	UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta money.Amount) error
+	UpdateBalance(ctx context.Context, tx *sql.Tx, userID uuid.UUID, delta money.Amount) error
 	// Debit subtracts amount only if the balance covers it, atomically.
 	// Returns ErrInsufficientFunds when it does not.
-	Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amount) error
-	CreateTransaction(tx *sql.Tx, t *Transaction) error
-	GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error)
+	Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error
+	CreateTransaction(ctx context.Context, tx *sql.Tx, t *Transaction) error
+	GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*Transaction, error)
 	// HasTip reports whether the customer already tipped this order, so a tip is
 	// charged at most once. Runs inside the caller's transaction so the check
 	// and the write are one atomic step.
-	HasTip(q Querier, orderID uuid.UUID) (bool, error)
-	RunInTx(fn func(*sql.Tx) error) error
+	HasTip(ctx context.Context, q Querier, orderID uuid.UUID) (bool, error)
+	RunInTx(ctx context.Context, fn func(*sql.Tx) error) error
 }
 
 // transactionRepo implements TransactionRepository using *sql.DB.
@@ -105,27 +106,27 @@ func NewTransactionRepository(db *sql.DB) TransactionRepository {
 	return &transactionRepo{db: db}
 }
 
-func (r *transactionRepo) GetBalance(userID uuid.UUID) (money.Amount, error) {
+func (r *transactionRepo) GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error) {
 	var balance money.Amount
-	err := r.db.QueryRow(`SELECT balance FROM users WHERE id = $1`, userID).Scan(&balance)
+	err := r.db.QueryRowContext(ctx, `SELECT balance FROM users WHERE id = $1`, userID).Scan(&balance)
 	if err != nil {
 		return 0, err
 	}
 	return balance, nil
 }
 
-func (r *transactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
-	return execExpectingOne(r.querier(tx),
+func (r *transactionRepo) UpdateBalance(ctx context.Context, tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
+	return execExpectingOne(ctx, r.querier(ctx, tx),
 		`UPDATE users SET balance = balance + $1 WHERE id = $2`, delta, userID)
 }
 
 // Debit subtracts amount in a single guarded statement, so a check-then-write
 // race cannot push the balance below zero.
-func (r *transactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
+func (r *transactionRepo) Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
 	if amount.IsNegative() {
 		return errors.New("debit amount must not be negative")
 	}
-	err := execExpectingOne(r.querier(tx),
+	err := execExpectingOne(ctx, r.querier(ctx, tx),
 		`UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1`, amount, userID)
 	if errors.Is(err, ErrConflict) {
 		return ErrInsufficientFunds
@@ -133,15 +134,15 @@ func (r *transactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amoun
 	return err
 }
 
-func (r *transactionRepo) querier(tx *sql.Tx) Querier {
+func (r *transactionRepo) querier(ctx context.Context, tx *sql.Tx) Querier {
 	if tx != nil {
 		return tx
 	}
 	return r.db
 }
 
-func (r *transactionRepo) RunInTx(fn func(*sql.Tx) error) error {
-	tx, err := r.db.Begin()
+func (r *transactionRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func (r *transactionRepo) RunInTx(fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func (r *transactionRepo) CreateTransaction(tx *sql.Tx, t *Transaction) error {
+func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *Transaction) error {
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()
 	}
@@ -163,34 +164,34 @@ func (r *transactionRepo) CreateTransaction(tx *sql.Tx, t *Transaction) error {
 	query := `INSERT INTO transactions (id, user_id, order_id, type, amount, admin_id, created_at)
 	          VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	if tx != nil {
-		_, err := tx.Exec(query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
+		_, err := tx.ExecContext(ctx, query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
 		return err
 	}
-	_, err := r.db.Exec(query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
+	_, err := r.db.ExecContext(ctx, query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
 	return err
 }
 
 // HasTip checks for an existing TIP entry on the order. The customer's debit is
 // the TIP row; TIP_REWARD sits on the executor, so one type is enough to look
 // for.
-func (r *transactionRepo) HasTip(q Querier, orderID uuid.UUID) (bool, error) {
+func (r *transactionRepo) HasTip(ctx context.Context, q Querier, orderID uuid.UUID) (bool, error) {
 	var exists bool
-	err := r.querierAny(q).QueryRow(
+	err := r.querierAny(ctx, q).QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM transactions WHERE order_id = $1 AND type = $2)`,
 		orderID, TransactionTypeTip,
 	).Scan(&exists)
 	return exists, err
 }
 
-func (r *transactionRepo) querierAny(q Querier) Querier {
+func (r *transactionRepo) querierAny(ctx context.Context, q Querier) Querier {
 	if q != nil {
 		return q
 	}
 	return r.db
 }
 
-func (r *transactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*Transaction, error) {
-	rows, err := r.db.Query(
+func (r *transactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*Transaction, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, user_id, order_id, type, amount, admin_id, created_at
 		 FROM transactions WHERE user_id = $1 ORDER BY created_at DESC`,
 		userID,

@@ -2,13 +2,10 @@ package com.healthlogin.app.net;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.res.AssetManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -19,13 +16,14 @@ import okhttp3.Response;
  * Fetches and persists the endpoint list ({@code {version, configs:[...]}}).
  *
  * <p>The list is served encrypted and behind an app key: {@link #refresh()} sends
- * {@code X-App-Key} and AES-256-GCM-decrypts the response before caching it. The
- * bundled seed asset is encrypted with the same key, so no plaintext ships in the
- * APK. Only the decrypted JSON lands in app-private SharedPreferences.
+ * {@code X-App-Key} and AES-256-GCM-decrypts the response before caching it. Only
+ * the decrypted JSON lands in app-private SharedPreferences.
  *
- * <p>The list lives on the same backend that may be blocked, so refresh() uses the
- * process-default ProxySelector: DIRECT goes direct, PROXY rides the tunnel. On
- * failure the cached/seeded copy keeps us going.
+ * <p>The list is entirely server-driven — nothing is baked into the APK. While the
+ * direct path works the app refreshes and caches it every cycle, so a working list
+ * is already on hand by the time direct fails. The list lives on the same backend
+ * that may be blocked, so refresh() uses the process-default ProxySelector: DIRECT
+ * goes direct, PROXY rides the tunnel. On failure the cached copy keeps us going.
  */
 final class RemoteConfigRepo {
     private static final String TAG = "VlessConfigRepo";
@@ -46,20 +44,6 @@ final class RemoteConfigRepo {
         this.http = new OkHttpClient.Builder()
                 .callTimeout(10, TimeUnit.SECONDS)
                 .build();
-    }
-
-    /** Seed the cache from the encrypted bundled asset if we never fetched a list. */
-    void seedFromAssetsIfEmpty(Context ctx, String assetName) {
-        if (prefs.contains(KEY_BUNDLE)) return;
-        AssetManager am = ctx.getApplicationContext().getAssets();
-        try (InputStream in = am.open(assetName)) {
-            String json = AesGcm.decrypt(encKey, readAll(in));
-            new JSONObject(json); // validate
-            prefs.edit().putString(KEY_BUNDLE, json).apply();
-            DebugLog.add(TAG, "seeded endpoint list from bundled asset " + assetName);
-        } catch (Throwable t) {
-            DebugLog.add(TAG, "no bundled endpoint list to seed: " + t.getMessage());
-        }
     }
 
     /** Stored bundle version, or -1 if nothing is cached. */
@@ -104,6 +88,15 @@ final class RemoteConfigRepo {
                 }
                 String json = AesGcm.decrypt(encKey, cipher);
                 JSONObject fresh = new JSONObject(json); // validate
+                JSONArray freshConfigs = fresh.optJSONArray("configs");
+                // An empty list is never an upgrade: it would clobber the bundled
+                // seed (or a previously good list) and strand the app with no
+                // servers to fall back to. Keep what we have and log it loudly.
+                if (freshConfigs == null || freshConfigs.length() == 0) {
+                    DebugLog.add(TAG, "server returned 0 configs — keeping cached ("
+                            + configs().length() + " server(s)); populate vless-endpoints.json on the server");
+                    return false;
+                }
                 String old = prefs.getString(KEY_BUNDLE, null);
                 if (old == null || !sameBundle(new JSONObject(old), fresh)) {
                     prefs.edit().putString(KEY_BUNDLE, fresh.toString()).apply();
@@ -135,13 +128,5 @@ final class RemoteConfigRepo {
     private static boolean sameBundle(JSONObject a, JSONObject b) {
         return a.optInt("version", -1) == b.optInt("version", -2)
                 && String.valueOf(a.optJSONArray("configs")).equals(String.valueOf(b.optJSONArray("configs")));
-    }
-
-    private static String readAll(InputStream in) throws Exception {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
-        return bos.toString("UTF-8");
     }
 }

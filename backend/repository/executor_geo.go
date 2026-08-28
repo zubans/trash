@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
@@ -27,10 +28,10 @@ type MapOrder struct {
 }
 
 type ExecutorGeoRepository interface {
-	UpdateExecutorLocation(executorID uuid.UUID, lat, lon float64, isManual bool) error
-	GetExecutorLocation(executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error)
-	CreateGeoAlert(alert *GeoAlert) error
-	GetGeoAlerts(status string, limit, offset int) ([]GeoAlert, error)
+	UpdateExecutorLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64, isManual bool) error
+	GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error)
+	CreateGeoAlert(ctx context.Context, alert *GeoAlert) error
+	GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]GeoAlert, error)
 }
 
 type executorGeoRepository struct {
@@ -41,7 +42,7 @@ func NewExecutorGeoRepository(db *sql.DB) ExecutorGeoRepository {
 	return &executorGeoRepository{db: db}
 }
 
-func (r *executorGeoRepository) UpdateExecutorLocation(executorID uuid.UUID, lat, lon float64, isManual bool) error {
+func (r *executorGeoRepository) UpdateExecutorLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64, isManual bool) error {
 	now := time.Now()
 	if isManual {
 		query := `
@@ -52,7 +53,7 @@ func (r *executorGeoRepository) UpdateExecutorLocation(executorID uuid.UUID, lat
 			    current_lon = EXCLUDED.current_lon,
 			    last_manual_location_change_at = EXCLUDED.last_manual_location_change_at
 		`
-		_, err := r.db.Exec(query, lat, lon, now, executorID)
+		_, err := r.db.ExecContext(ctx, query, lat, lon, now, executorID)
 		return err
 	}
 	query := `
@@ -62,15 +63,15 @@ func (r *executorGeoRepository) UpdateExecutorLocation(executorID uuid.UUID, lat
 		SET current_lat = EXCLUDED.current_lat,
 		    current_lon = EXCLUDED.current_lon
 	`
-	_, err := r.db.Exec(query, lat, lon, executorID)
+	_, err := r.db.ExecContext(ctx, query, lat, lon, executorID)
 	return err
 }
 
-func (r *executorGeoRepository) GetExecutorLocation(executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error) {
+func (r *executorGeoRepository) GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error) {
 	var cLat, cLon sql.NullFloat64
 	var lm sql.NullTime
 	query := `SELECT current_lat, current_lon, last_manual_location_change_at FROM executor_profiles WHERE user_id = $1`
-	err = r.db.QueryRow(query, executorID).Scan(&cLat, &cLon, &lm)
+	err = r.db.QueryRowContext(ctx, query, executorID).Scan(&cLat, &cLon, &lm)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, nil, nil
@@ -92,7 +93,7 @@ func (r *executorGeoRepository) GetExecutorLocation(executorID uuid.UUID) (lat *
 	return lat, lon, lastManual, nil
 }
 
-func (r *executorGeoRepository) CreateGeoAlert(alert *GeoAlert) error {
+func (r *executorGeoRepository) CreateGeoAlert(ctx context.Context, alert *GeoAlert) error {
 	if alert.ID == uuid.Nil {
 		alert.ID = uuid.New()
 	}
@@ -104,11 +105,11 @@ func (r *executorGeoRepository) CreateGeoAlert(alert *GeoAlert) error {
 		INSERT INTO geo_alerts (id, executor_id, old_lat, old_lon, new_lat, new_lon, calculated_speed_kmh, status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
-	_, err := r.db.Exec(query, alert.ID, alert.ExecutorID, alert.OldLat, alert.OldLon, alert.NewLat, alert.NewLon, alert.CalculatedSpeedKMH, alert.Status, alert.CreatedAt)
+	_, err := r.db.ExecContext(ctx, query, alert.ID, alert.ExecutorID, alert.OldLat, alert.OldLon, alert.NewLat, alert.NewLon, alert.CalculatedSpeedKMH, alert.Status, alert.CreatedAt)
 	return err
 }
 
-func (r *executorGeoRepository) GetGeoAlerts(status string, limit, offset int) ([]GeoAlert, error) {
+func (r *executorGeoRepository) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]GeoAlert, error) {
 	query := `
 		SELECT id, executor_id, old_lat, old_lon, new_lat, new_lon, calculated_speed_kmh, status, created_at
 		FROM geo_alerts
@@ -116,7 +117,7 @@ func (r *executorGeoRepository) GetGeoAlerts(status string, limit, offset int) (
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
-	rows, err := r.db.Query(query, status, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, status, limit, offset)
 	if err != nil {
 		return nil, err
 	}

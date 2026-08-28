@@ -52,7 +52,7 @@ func (h *ShiftHandler) StartShift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shift, err := h.shiftService.Start(user.ID, req.DurationHours)
+	shift, err := h.shiftService.Start(r.Context(), user.ID, req.DurationHours)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -71,7 +71,7 @@ func (h *ShiftHandler) EndShift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.shiftService.End(user.ID); err != nil {
+	if err := h.shiftService.End(r.Context(), user.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
@@ -88,7 +88,7 @@ func (h *ShiftHandler) EarlyEndShift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shift, err := h.shiftService.EarlyEnd(user.ID)
+	shift, err := h.shiftService.EarlyEnd(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -112,7 +112,7 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inside, err := h.shiftService.RecordLocationWithResult(user.ID, req.Latitude, req.Longitude)
+	inside, err := h.shiftService.RecordLocationWithResult(r.Context(), user.ID, req.Latitude, req.Longitude)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -131,7 +131,7 @@ func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	shift, err := h.shiftService.GetCurrent(user.ID)
+	shift, err := h.shiftService.GetCurrent(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -149,7 +149,7 @@ func (h *ShiftHandler) GetExecutorHistoryHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	history, err := h.shiftService.GetExecutorFinancialHistory(user.ID)
+	history, err := h.shiftService.GetExecutorFinancialHistory(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

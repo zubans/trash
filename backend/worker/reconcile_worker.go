@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -38,7 +39,7 @@ func (w *ReconcileWorker) Start(interval time.Duration) {
 // Run performs one pass and logs the outcome.
 func (w *ReconcileWorker) Run() {
 	started := time.Now()
-	report, err := w.repo.Reconcile(w.tolerance)
+	report, err := w.repo.Reconcile(context.Background(), w.tolerance)
 	metrics.WorkerRun("reconcile", time.Since(started), err)
 	if err != nil {
 		metrics.ReconcileFailed()

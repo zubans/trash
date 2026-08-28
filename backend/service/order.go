@@ -47,15 +47,15 @@ type CreateOrderRequest struct {
 	Lon              *float64  `json:"lon,omitempty"`
 }
 
-func (s *OrderService) hydrateServiceVariant(order *repository.Order) {
+func (s *OrderService) hydrateServiceVariant(ctx context.Context, order *repository.Order) {
 	if order == nil {
 		return
 	}
-	if variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID); err == nil && variant != nil {
+	if variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID); err == nil && variant != nil {
 		order.ServiceVariant = variant
 	}
 	if order.ExecutorID != nil && s.userRepo != nil {
-		if execUser, err := s.userRepo.FindByID(*order.ExecutorID); err == nil && execUser != nil {
+		if execUser, err := s.userRepo.FindByID(ctx, *order.ExecutorID); err == nil && execUser != nil {
 			order.ExecutorPhone = execUser.Phone
 			var nameParts []string
 			if execUser.FirstName != "" {
@@ -75,14 +75,14 @@ func (s *OrderService) hydrateServiceVariant(order *repository.Order) {
 	}
 }
 
-func (s *OrderService) loadSettings() map[string]float64 {
+func (s *OrderService) loadSettings(ctx context.Context) map[string]float64 {
 	settings := map[string]float64{
 		"standard_tariff_coeff": 1.0,
 		"urgent_tariff_coeff":   3.0,
 		"asap_tariff_coeff":     8.0,
 	}
 	if s.settingsRepo != nil {
-		repoSettings, err := s.settingsRepo.GetSettings()
+		repoSettings, err := s.settingsRepo.GetSettings(ctx)
 		if err == nil {
 			for k, v := range repoSettings {
 				if k == "currency" {
@@ -98,8 +98,8 @@ func (s *OrderService) loadSettings() map[string]float64 {
 }
 
 // CalculatePrice returns the price for a given service variant and urgency flags.
-func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAsap, isDowngraded bool) (money.Amount, error) {
-	variant, err := s.catalogRepo.GetNodeByID(serviceVariantID)
+func (s *OrderService) CalculatePrice(ctx context.Context, serviceVariantID uuid.UUID, isUrgent, isAsap, isDowngraded bool) (money.Amount, error) {
+	variant, err := s.catalogRepo.GetNodeByID(ctx, serviceVariantID)
 	if err != nil {
 		return money.Zero, err
 	}
@@ -122,7 +122,7 @@ func (s *OrderService) CalculatePrice(serviceVariantID uuid.UUID, isUrgent, isAs
 
 	// Scale rounds once, here, instead of letting a float coefficient smear the
 	// result across the rest of the flow.
-	settings := s.loadSettings()
+	settings := s.loadSettings(ctx)
 	switch {
 	case isAsap:
 		price = price.Scale(settings["asap_tariff_coeff"])
@@ -148,7 +148,7 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		return nil, errors.New("cannot set both urgent and asap flags")
 	}
 
-	variant, err := s.catalogRepo.GetNodeByID(serviceVariantID)
+	variant, err := s.catalogRepo.GetNodeByID(ctx, serviceVariantID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		return nil, errors.New("auction variants are ordered through the construction order endpoint")
 	}
 
-	holdAmount, err := s.CalculatePrice(serviceVariantID, isUrgent, isAsap, false)
+	holdAmount, err := s.CalculatePrice(ctx, serviceVariantID, isUrgent, isAsap, false)
 	if err != nil {
 		return nil, err
 	}
@@ -217,18 +217,18 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		}
 	}
 
-	if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		// The order row goes in first: the ledger entry references it, and
 		// transactions.order_id is a foreign key checked immediately. Ordering
 		// costs nothing here — both statements share one transaction, so a
 		// failed hold rolls the order back with it.
-		if err := s.orderRepo.Create(tx, order); err != nil {
+		if err := s.orderRepo.Create(ctx, tx, order); err != nil {
 			return err
 		}
 		// Reserve is a single conditional debit paired with a credit to escrow:
 		// the money is not destroyed, it moves to the account that holds it for
 		// the duration of the order.
-		return s.ledger.Reserve(tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID)
+		return s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID)
 	}); err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {
 			return nil, errors.New("insufficient balance")
@@ -238,18 +238,18 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 
 	// Everything below is best-effort: the order and its hold are already committed.
 	if s.chatRepo != nil {
-		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
+		if _, err := s.chatRepo.CreateChat(ctx, order.ID); err != nil {
 			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
 		}
 	}
 	if s.userRepo != nil && order.PickupLat != nil && order.PickupLon != nil {
-		if err := s.userRepo.UpdateLastGeo(customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
+		if err := s.userRepo.UpdateLastGeo(ctx, customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
 			log.Printf("[OrderService] failed to update last_geo for %s: %v", customerID, err)
 		}
 	}
 
 	metrics.OrderEvent("created")
-	s.hydrateServiceVariant(order)
+	s.hydrateServiceVariant(ctx, order)
 	return order, nil
 }
 
@@ -262,8 +262,8 @@ func (s *OrderService) Create(ctx context.Context, customerID uuid.UUID, req Cre
 // that the order list applies when showing an order is re-checked here, because
 // the list is only a convenience — this method is the actual authorisation
 // point.
-func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
-	shift, err := s.shiftRepo.GetActiveShift(executorID)
+func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID) error {
+	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
 	if err != nil || shift == nil {
 		return errors.New("executor has no active shift")
 	}
@@ -271,30 +271,30 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 		return errors.New("executor is penalized")
 	}
 
-	order, err := s.orderRepo.GetOrderByID(orderID)
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return errors.New("order not found")
 	}
 	if order.CustomerID == executorID {
 		return errors.New("нельзя брать собственный заказ")
 	}
-	if err := s.checkExecutorEligibility(executorID, order.ServiceVariantID); err != nil {
+	if err := s.checkExecutorEligibility(ctx, executorID, order.ServiceVariantID); err != nil {
 		return err
 	}
 
-	balance, err := s.ledger.GetBalance(executorID)
+	balance, err := s.ledger.GetBalance(ctx, executorID)
 	if err != nil {
 		return err
 	}
 	// The limit is configured as a magnitude and applied as a negative floor,
 	// e.g. min_balance_limit=500 means "no new orders below -500".
-	minBalanceLimit := money.FromRubles(-math.Abs(s.settingsFloat("min_balance_limit", defaultMinBalanceLimit)))
+	minBalanceLimit := money.FromRubles(-math.Abs(s.settingsFloat(ctx, "min_balance_limit", defaultMinBalanceLimit)))
 	if balance < minBalanceLimit {
 		return fmt.Errorf("нельзя брать новые заказы: баланс %s ниже допустимого лимита (%s)", balance, minBalanceLimit)
 	}
 
-	maxActive := settingInt(s.settingsRepo, "max_active_orders", defaultMaxActiveOrders)
-	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(executorID)
+	maxActive := settingInt(ctx, s.settingsRepo, "max_active_orders", defaultMaxActiveOrders)
+	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(ctx, executorID)
 	if err != nil {
 		return err
 	}
@@ -302,8 +302,8 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 		return fmt.Errorf("превышен лимит активных заказов (не более %d)", maxActive)
 	}
 
-	maxExecuted := settingInt(s.settingsRepo, "max_executed_unconfirmed_orders", defaultMaxExecutedUnconfirmed)
-	executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(executorID)
+	maxExecuted := settingInt(ctx, s.settingsRepo, "max_executed_unconfirmed_orders", defaultMaxExecutedUnconfirmed)
+	executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(ctx, executorID)
 	if err != nil {
 		return err
 	}
@@ -311,7 +311,7 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 		return fmt.Errorf("превышен лимит непотвержденных заказчиком исполненных заказов (не более %d)", maxExecuted)
 	}
 
-	if err := s.orderRepo.Assign(nil, orderID, executorID); err != nil {
+	if err := s.orderRepo.Assign(ctx, nil, orderID, executorID); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return errors.New("заказ уже взят другим исполнителем")
 		}
@@ -323,15 +323,15 @@ func (s *OrderService) Accept(orderID, executorID uuid.UUID) error {
 
 // checkExecutorEligibility loads the executor and the service variant and
 // applies the shared age/verification rules.
-func (s *OrderService) checkExecutorEligibility(executorID, variantID uuid.UUID) error {
+func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID, variantID uuid.UUID) error {
 	if s.userRepo == nil {
 		return nil
 	}
-	executor, err := s.userRepo.FindByID(executorID)
+	executor, err := s.userRepo.FindByID(ctx, executorID)
 	if err != nil {
 		return errors.New("executor not found")
 	}
-	variant, err := s.catalogRepo.GetNodeByID(variantID)
+	variant, err := s.catalogRepo.GetNodeByID(ctx, variantID)
 	if err != nil {
 		return err
 	}
@@ -339,8 +339,8 @@ func (s *OrderService) checkExecutorEligibility(executorID, variantID uuid.UUID)
 }
 
 // settingsFloat reads a numeric system setting with a fallback default.
-func (s *OrderService) settingsFloat(key string, defaultValue float64) float64 {
-	return settingFloat(s.settingsRepo, key, defaultValue)
+func (s *OrderService) settingsFloat(ctx context.Context, key string, defaultValue float64) float64 {
+	return settingFloat(ctx, s.settingsRepo, key, defaultValue)
 }
 
 // RejectAssignedOrder allows an executor to drop an assigned order. The
@@ -348,8 +348,8 @@ func (s *OrderService) settingsFloat(key string, defaultValue float64) float64 {
 // the order returns to the search pool. Fine and unassignment share one
 // transaction, so the executor is never charged for an order that stayed
 // assigned to them.
-func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error {
-	share := s.settingsFloat("reject_penalty_share", defaultRejectPenaltyShare)
+func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executorID uuid.UUID) error {
+	share := s.settingsFloat(ctx, "reject_penalty_share", defaultRejectPenaltyShare)
 	if share < 0 {
 		share = 0
 	}
@@ -357,8 +357,8 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 		share = 1
 	}
 
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
 		}
@@ -368,10 +368,10 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 
 		// The penalty is collected, not destroyed: it lands on the fines account.
 		penalty := order.HoldAmount.Scale(share)
-		if err := s.ledger.Charge(tx, executorID, repository.AccountFines, penalty, repository.TransactionTypeFine, &order.ID); err != nil {
+		if err := s.ledger.Charge(ctx, tx, executorID, repository.AccountFines, penalty, repository.TransactionTypeFine, &order.ID); err != nil {
 			return err
 		}
-		return s.orderRepo.Unassign(tx, orderID)
+		return s.orderRepo.Unassign(ctx, tx, orderID)
 	})
 	if err == nil {
 		metrics.OrderEvent("rejected")
@@ -380,8 +380,8 @@ func (s *OrderService) RejectAssignedOrder(orderID, executorID uuid.UUID) error 
 }
 
 // ExecuteOrder marks an order as EXECUTED by the executor and sends a system chat message.
-func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uuid.UUID) error {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return errors.New("order not found")
 	}
@@ -389,16 +389,16 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 		return errors.New("order is not assigned to this executor")
 	}
 
-	if err := s.orderRepo.Execute(nil, orderID); err != nil {
+	if err := s.orderRepo.Execute(ctx, nil, orderID); err != nil {
 		return err
 	}
 	metrics.OrderEvent("executed")
 
 	// Send system notification message in chat
 	if s.chatRepo != nil {
-		chat, err := s.chatRepo.GetChatByOrderID(orderID)
+		chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 		if err == nil && chat != nil {
-			_, _ = s.chatRepo.SaveMessage(chat.ID, executorID, "📦 Исполнитель отметил(а) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
+			_, _ = s.chatRepo.SaveMessage(ctx, chat.ID, executorID, "📦 Исполнитель отметил(а) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
 		}
 	}
 
@@ -409,11 +409,11 @@ func (s *OrderService) ExecuteOrder(orderID, executorID uuid.UUID) error {
 // locked and re-read inside the transaction, so two concurrent confirmations
 // cannot both pay out the executor, and the payout is derived from the hold
 // that is actually still held (see the SLA downgrade path).
-func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
+func (s *OrderService) ConfirmOrder(ctx context.Context, orderID uuid.UUID) error {
 	// Counted after the transaction returns, never inside it: a confirmation
 	// that rolled back paid nobody and must not show up as revenue.
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
 		}
@@ -427,7 +427,7 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 		finalAmount := order.HoldAmount
 		isDowngraded := order.IsDowngraded
 		if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
-			downgraded, err := s.CalculatePrice(order.ServiceVariantID, false, false, true)
+			downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
 			if err != nil {
 				return err
 			}
@@ -441,24 +441,24 @@ func (s *OrderService) ConfirmOrder(orderID uuid.UUID) error {
 		// completely here: the unspent part back to the customer, the rest to
 		// the executor.
 		refund := order.HoldAmount.Sub(finalAmount)
-		if err := s.ledger.Release(tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
+		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
 			return err
 		}
 
 		// The customer's money left the balance at hold time; this entry records
 		// the hold being spent rather than a second debit.
-		if err := s.ledger.Note(tx, order.CustomerID, repository.AccountEscrow, finalAmount, repository.TransactionTypePayment, &order.ID); err != nil {
+		if err := s.ledger.Note(ctx, tx, order.CustomerID, repository.AccountEscrow, finalAmount, repository.TransactionTypePayment, &order.ID); err != nil {
 			return err
 		}
 
-		if err := s.ledger.Release(tx, repository.AccountEscrow, *order.ExecutorID, finalAmount, repository.TransactionTypeReward, &order.ID, nil); err != nil {
+		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, *order.ExecutorID, finalAmount, repository.TransactionTypeReward, &order.ID, nil); err != nil {
 			return err
 		}
 
-		if err := s.orderRepo.SetHoldAmount(tx, order.ID, money.Zero); err != nil {
+		if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
 			return err
 		}
-		return s.orderRepo.Confirm(tx, orderID, finalAmount, isDowngraded)
+		return s.orderRepo.Confirm(ctx, tx, orderID, finalAmount, isDowngraded)
 	})
 	if err == nil {
 		metrics.OrderEvent("confirmed")
@@ -476,7 +476,7 @@ var maxTipAmount = money.FromRubles(100_000)
 // once-only guard and the charge share one transaction and one row lock, so a
 // duplicate request cannot charge twice. Returns an insufficient-balance error
 // when the customer cannot cover the tip.
-func (s *OrderService) TipOrder(customerID, orderID uuid.UUID, amount money.Amount) error {
+func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UUID, amount money.Amount) error {
 	if !amount.IsPositive() {
 		return errors.New("tip amount must be positive")
 	}
@@ -484,8 +484,8 @@ func (s *OrderService) TipOrder(customerID, orderID uuid.UUID, amount money.Amou
 		return errors.New("tip amount is too large")
 	}
 
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
 		}
@@ -499,7 +499,7 @@ func (s *OrderService) TipOrder(customerID, orderID uuid.UUID, amount money.Amou
 			return errors.New("order has no executor")
 		}
 
-		tipped, err := s.ledger.HasTip(tx, orderID)
+		tipped, err := s.ledger.HasTip(ctx, tx, orderID)
 		if err != nil {
 			return err
 		}
@@ -507,7 +507,7 @@ func (s *OrderService) TipOrder(customerID, orderID uuid.UUID, amount money.Amou
 			return errors.New("this order has already been tipped")
 		}
 
-		return s.ledger.Tip(tx, customerID, *order.ExecutorID, amount, &order.ID)
+		return s.ledger.Tip(ctx, tx, customerID, *order.ExecutorID, amount, &order.ID)
 	})
 	// ErrInsufficientFunds is passed through so the handler renders it as the
 	// same "недостаточно средств" / 422 as an order hold does.
@@ -518,22 +518,22 @@ func (s *OrderService) TipOrder(customerID, orderID uuid.UUID, amount money.Amou
 }
 
 // Confirm completes an order for a specific customer (alias compatible with handler).
-func (s *OrderService) Confirm(customerID, orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUID) error {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return errors.New("order not found")
 	}
 	if order.CustomerID != customerID {
 		return errors.New("forbidden")
 	}
-	return s.ConfirmOrder(orderID)
+	return s.ConfirmOrder(ctx, orderID)
 }
 
 // CancelOrder cancels an active order and refunds the hold exactly once. The
 // refund and the status change share one transaction and one row lock, and the
 // hold is zeroed, so a repeated or concurrent cancel cannot pay out again.
-func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
-	return s.cancel(orderID, repository.OrderStatusSearching, repository.OrderStatusAssigned)
+func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID) error {
+	return s.cancel(ctx, orderID, repository.OrderStatusSearching, repository.OrderStatusAssigned)
 }
 
 // CancelUnclaimedAuction cancels an auction request that expired without anyone
@@ -547,13 +547,13 @@ func (s *OrderService) CancelOrder(orderID uuid.UUID) error {
 // then would take a job away from an executor who had just won it, refund a
 // customer who had just committed, and do both because of a scan that started
 // moments earlier. Only "nobody claimed this" is a reason to cancel here.
-func (s *OrderService) CancelUnclaimedAuction(orderID uuid.UUID) error {
-	return s.cancel(orderID, repository.OrderStatusSearching)
+func (s *OrderService) CancelUnclaimedAuction(ctx context.Context, orderID uuid.UUID) error {
+	return s.cancel(ctx, orderID, repository.OrderStatusSearching)
 }
 
-func (s *OrderService) cancel(orderID uuid.UUID, allowed ...repository.OrderStatus) error {
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(tx, orderID)
+func (s *OrderService) cancel(ctx context.Context, orderID uuid.UUID, allowed ...repository.OrderStatus) error {
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
 			return errors.New("order not found")
 		}
@@ -569,14 +569,14 @@ func (s *OrderService) cancel(orderID uuid.UUID, allowed ...repository.OrderStat
 		}
 
 		if order.HoldAmount.IsPositive() {
-			if err := s.ledger.Release(tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
+			if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
 				return err
 			}
-			if err := s.orderRepo.SetHoldAmount(tx, order.ID, money.Zero); err != nil {
+			if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
 				return err
 			}
 		}
-		return s.orderRepo.Cancel(tx, orderID)
+		return s.orderRepo.Cancel(ctx, tx, orderID)
 	})
 	if err == nil {
 		metrics.OrderEvent("cancelled")
@@ -585,15 +585,15 @@ func (s *OrderService) cancel(orderID uuid.UUID, allowed ...repository.OrderStat
 }
 
 // Cancel cancels an order for a specific customer (alias compatible with handler).
-func (s *OrderService) Cancel(customerID, orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *OrderService) Cancel(ctx context.Context, customerID, orderID uuid.UUID) error {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return errors.New("order not found")
 	}
 	if order.CustomerID != customerID {
 		return errors.New("forbidden")
 	}
-	return s.CancelOrder(orderID)
+	return s.CancelOrder(ctx, orderID)
 }
 
 // CreateConstructionOrder creates a construction waste auction order.
@@ -611,7 +611,7 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 
 	// GetNodeByCode only sees live nodes, so a retired construction variant
 	// reads as a missing one rather than as a database error.
-	variant, err := s.catalogRepo.GetNodeByCode("trash_construction")
+	variant, err := s.catalogRepo.GetNodeByCode(ctx, "trash_construction")
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -656,43 +656,43 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 		}
 	}
 
-	if err := s.orderRepo.Create(nil, order); err != nil {
+	if err := s.orderRepo.Create(ctx, nil, order); err != nil {
 		return nil, err
 	}
 
 	if s.userRepo != nil && order.PickupLat != nil && order.PickupLon != nil {
-		if err := s.userRepo.UpdateLastGeo(customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
+		if err := s.userRepo.UpdateLastGeo(ctx, customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
 			log.Printf("[OrderService] failed to update last_geo for %s: %v", customerID, err)
 		}
 	}
 
 	// Create the chat room for the new order. Non-fatal if it fails.
 	if s.chatRepo != nil {
-		if _, err := s.chatRepo.CreateChat(order.ID); err != nil {
+		if _, err := s.chatRepo.CreateChat(ctx, order.ID); err != nil {
 			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
 		}
 	}
 
 	metrics.OrderEvent("created_auction")
-	s.hydrateServiceVariant(order)
+	s.hydrateServiceVariant(ctx, order)
 	return order, nil
 }
 
 // GetAvailableConstructionOrders returns open construction waste orders.
-func (s *OrderService) GetAvailableConstructionOrders() ([]*repository.Order, error) {
-	orders, err := s.orderRepo.GetAvailableAuctionOrders()
+func (s *OrderService) GetAvailableConstructionOrders(ctx context.Context) ([]*repository.Order, error) {
+	orders, err := s.orderRepo.GetAvailableAuctionOrders(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, o := range orders {
-		s.hydrateServiceVariant(o)
+		s.hydrateServiceVariant(ctx, o)
 	}
 	return orders, nil
 }
 
 // GetAvailableConstructionOrdersForExecutor returns open construction waste orders filtered for an executor.
-func (s *OrderService) GetAvailableConstructionOrdersForExecutor(executorID uuid.UUID) ([]*repository.Order, error) {
-	executor, _ := s.userRepo.FindByID(executorID)
+func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
+	executor, _ := s.userRepo.FindByID(ctx, executorID)
 	executorAge := 0
 	executorVerified := false
 	if executor != nil {
@@ -700,17 +700,17 @@ func (s *OrderService) GetAvailableConstructionOrdersForExecutor(executorID uuid
 		executorVerified = executor.IsVerified()
 	}
 
-	orders, err := s.orderRepo.GetAvailableAuctionOrders()
+	orders, err := s.orderRepo.GetAvailableAuctionOrders(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	filtered := []*repository.Order{}
 	for _, o := range orders {
-		s.hydrateServiceVariant(o)
+		s.hydrateServiceVariant(ctx, o)
 
 		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей")
-		customer, err := s.userRepo.FindByID(o.CustomerID)
+		customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
 		if err == nil && customer != nil {
 			if !customer.IsVerified() {
 				continue
@@ -735,20 +735,20 @@ func (s *OrderService) GetAvailableConstructionOrdersForExecutor(executorID uuid
 }
 
 // FindNearbyOrders returns searching standard/large orders near the given coordinates within radiusMeters.
-func (s *OrderService) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
+func (s *OrderService) FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+	orders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, radiusMeters)
 	if err != nil {
 		return nil, err
 	}
 	for _, o := range orders {
-		s.hydrateServiceVariant(o)
+		s.hydrateServiceVariant(ctx, o)
 	}
 	return orders, nil
 }
 
 // FindNearbyOrdersForExecutor returns searching standard/large orders near the given coordinates filtered for an executor.
-func (s *OrderService) FindNearbyOrdersForExecutor(executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
-	executor, _ := s.userRepo.FindByID(executorID)
+func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+	executor, _ := s.userRepo.FindByID(ctx, executorID)
 	executorAge := 0
 	executorVerified := false
 	if executor != nil {
@@ -756,17 +756,17 @@ func (s *OrderService) FindNearbyOrdersForExecutor(executorID uuid.UUID, lat, lo
 		executorVerified = executor.IsVerified()
 	}
 
-	orders, err := s.orderRepo.FindNearbyOrders(lat, lon, radiusMeters)
+	orders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, radiusMeters)
 	if err != nil {
 		return nil, err
 	}
 
 	filtered := []*repository.Order{}
 	for _, o := range orders {
-		s.hydrateServiceVariant(o)
+		s.hydrateServiceVariant(ctx, o)
 
 		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей")
-		customer, err := s.userRepo.FindByID(o.CustomerID)
+		customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
 		if err == nil && customer != nil {
 			if !customer.IsVerified() {
 				continue
@@ -791,25 +791,25 @@ func (s *OrderService) FindNearbyOrdersForExecutor(executorID uuid.UUID, lat, lo
 }
 
 // ListAssigned returns orders assigned to an executor.
-func (s *OrderService) ListAssigned(executorID uuid.UUID) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.GetExecutorAssignedOrders(executorID)
+func (s *OrderService) ListAssigned(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
+	orders, err := s.orderRepo.GetExecutorAssignedOrders(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
 	for _, o := range orders {
-		s.hydrateServiceVariant(o)
+		s.hydrateServiceVariant(ctx, o)
 	}
 	return orders, nil
 }
 
 // ListByCustomer returns orders created by a customer.
-func (s *OrderService) ListByCustomer(customerID uuid.UUID) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.GetCustomerOrders(customerID)
+func (s *OrderService) ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]*repository.Order, error) {
+	orders, err := s.orderRepo.GetCustomerOrders(ctx, customerID)
 	if err != nil {
 		return nil, err
 	}
 	for _, o := range orders {
-		s.hydrateServiceVariant(o)
+		s.hydrateServiceVariant(ctx, o)
 	}
 	return orders, nil
 }

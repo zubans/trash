@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -33,7 +34,7 @@ const (
 	maxReviewPhotos = 10
 )
 
-func (s *ReviewService) CreateReview(orderID, authorID uuid.UUID, dto CreateReviewDTO) (*repository.OrderReview, error) {
+func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid.UUID, dto CreateReviewDTO) (*repository.OrderReview, error) {
 	if dto.Rating < 1 || dto.Rating > 5 {
 		return nil, errors.New("rating must be between 1 and 5")
 	}
@@ -54,7 +55,7 @@ func (s *ReviewService) CreateReview(orderID, authorID uuid.UUID, dto CreateRevi
 		return nil, errors.New("слишком много тегов")
 	}
 
-	order, err := s.orderRepo.FindByID(orderID)
+	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil || order == nil {
 		return nil, errors.New("order not found")
 	}
@@ -84,7 +85,7 @@ func (s *ReviewService) CreateReview(orderID, authorID uuid.UUID, dto CreateRevi
 		return nil, errors.New("user is not a participant of this order")
 	}
 
-	existing, err := s.reviewRepo.GetReviewByOrderAndAuthor(orderID, authorID)
+	existing, err := s.reviewRepo.GetReviewByOrderAndAuthor(ctx, orderID, authorID)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func (s *ReviewService) CreateReview(orderID, authorID uuid.UUID, dto CreateRevi
 		Photos:     json.RawMessage(photosJSON),
 	}
 
-	if err := s.reviewRepo.CreateReview(review); err != nil {
+	if err := s.reviewRepo.CreateReview(ctx, review); err != nil {
 		return nil, err
 	}
 
@@ -116,19 +117,19 @@ func (s *ReviewService) CreateReview(orderID, authorID uuid.UUID, dto CreateRevi
 		targetRole = "CUSTOMER"
 	}
 
-	_ = s.reviewRepo.UpdateUserRating(targetID, targetRole)
+	_ = s.reviewRepo.UpdateUserRating(ctx, targetID, targetRole)
 
 	return review, nil
 }
 
-func (s *ReviewService) GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
-	return s.reviewRepo.GetReviewByOrderAndAuthor(orderID, authorID)
+func (s *ReviewService) GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
+	return s.reviewRepo.GetReviewByOrderAndAuthor(ctx, orderID, authorID)
 }
 
-func (s *ReviewService) GetReviewsForUser(targetID uuid.UUID, limit, offset int) ([]repository.OrderReview, error) {
-	return s.reviewRepo.GetReviewsForUser(targetID, limit, offset)
+func (s *ReviewService) GetReviewsForUser(ctx context.Context, targetID uuid.UUID, limit, offset int) ([]repository.OrderReview, error) {
+	return s.reviewRepo.GetReviewsForUser(ctx, targetID, limit, offset)
 }
 
-func (s *ReviewService) GetUserRating(userID uuid.UUID, role string) (*repository.UserRatingSummary, error) {
-	return s.reviewRepo.GetUserRating(userID, role)
+func (s *ReviewService) GetUserRating(ctx context.Context, userID uuid.UUID, role string) (*repository.UserRatingSummary, error) {
+	return s.reviewRepo.GetUserRating(ctx, userID, role)
 }

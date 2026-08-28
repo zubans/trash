@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -19,11 +20,11 @@ type mockAdminRepo struct {
 	transactions []*repository.Transaction
 }
 
-func (m *mockAdminRepo) GetUsers(page, limit int, role, status, search string) ([]*repository.User, int, error) {
+func (m *mockAdminRepo) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*repository.User, int, error) {
 	return m.users, len(m.users), nil
 }
 
-func (m *mockAdminRepo) GetTopUpRequests(limit, offset int) ([]*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*repository.TopUpRequest, error) {
 	var reqs []*repository.TopUpRequest
 	for _, r := range m.requests {
 		reqs = append(reqs, r)
@@ -31,7 +32,7 @@ func (m *mockAdminRepo) GetTopUpRequests(limit, offset int) ([]*repository.TopUp
 	return reqs, nil
 }
 
-func (m *mockAdminRepo) GetTopUpRequestByID(id uuid.UUID) (*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*repository.TopUpRequest, error) {
 	r, ok := m.requests[id]
 	if !ok {
 		return nil, errors.New("not found")
@@ -39,7 +40,7 @@ func (m *mockAdminRepo) GetTopUpRequestByID(id uuid.UUID) (*repository.TopUpRequ
 	return r, nil
 }
 
-func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) CreateTopUpRequest(ctx context.Context, q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
 	req := &repository.TopUpRequest{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -51,15 +52,15 @@ func (m *mockAdminRepo) CreateTopUpRequest(q repository.Querier, userID uuid.UUI
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetWithdrawalRequests(limit, offset int) ([]*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*repository.WithdrawalRequest, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*repository.WithdrawalRequest, error) {
 	return nil, errors.New("not found")
 }
 
-func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) CreateWithdrawalRequest(ctx context.Context, q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
 	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
 	if m.withdrawals == nil {
 		m.withdrawals = make(map[uuid.UUID]*repository.WithdrawalRequest)
@@ -68,11 +69,11 @@ func (m *mockAdminRepo) CreateWithdrawalRequest(q repository.Querier, userID uui
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetTransactions(limit, offset int) ([]*repository.Transaction, error) {
+func (m *mockAdminRepo) GetTransactions(ctx context.Context, limit, offset int) ([]*repository.Transaction, error) {
 	return m.transactions, nil
 }
 
-func (m *mockAdminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
+func (m *mockAdminRepo) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {
 	m.transactions = append(m.transactions, &repository.Transaction{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -84,15 +85,15 @@ func (m *mockAdminRepo) TopUpUserBalance(userID, adminID uuid.UUID, amount money
 	return nil
 }
 
-func (m *mockAdminRepo) GetActiveShifts() ([]*repository.AdminShift, error) {
+func (m *mockAdminRepo) GetActiveShifts(ctx context.Context) ([]*repository.AdminShift, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetActiveOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+func (m *mockAdminRepo) GetActiveOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetCompletedOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+func (m *mockAdminRepo) GetCompletedOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
 	return nil, nil
 }
 
@@ -101,11 +102,11 @@ type mockSettingsRepo struct {
 	settings map[string]string
 }
 
-func (m *mockSettingsRepo) GetSettings() (map[string]string, error) {
+func (m *mockSettingsRepo) GetSettings(ctx context.Context) (map[string]string, error) {
 	return m.settings, nil
 }
 
-func (m *mockSettingsRepo) UpdateSettings(settings map[string]string) error {
+func (m *mockSettingsRepo) UpdateSettings(ctx context.Context, settings map[string]string) error {
 	for k, v := range settings {
 		m.settings[k] = v
 	}
@@ -117,7 +118,7 @@ type mockTokenRepo struct {
 	blacklisted map[string]time.Time
 }
 
-func (m *mockTokenRepo) IsTokenRevoked(tokenHash string) (bool, error) {
+func (m *mockTokenRepo) IsTokenRevoked(ctx context.Context, tokenHash string) (bool, error) {
 	exp, ok := m.blacklisted[tokenHash]
 	if !ok {
 		return false, nil
@@ -128,7 +129,7 @@ func (m *mockTokenRepo) IsTokenRevoked(tokenHash string) (bool, error) {
 	return true, nil
 }
 
-func (m *mockTokenRepo) RevokeToken(tokenHash string, expiresAt time.Time) error {
+func (m *mockTokenRepo) RevokeToken(ctx context.Context, tokenHash string, expiresAt time.Time) error {
 	m.blacklisted[tokenHash] = expiresAt
 	return nil
 }
@@ -151,12 +152,12 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	adminID := uuid.New()
 
 	// Test ban
-	err := svc.UpdateUserStatus(user.ID, adminID, "BANNED")
+	err := svc.UpdateUserStatus(context.Background(), user.ID, adminID, "BANNED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := userRepo.FindByID(user.ID)
+	updated, err := userRepo.FindByID(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("failed to find user: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	}
 
 	// Test invalid status
-	err = svc.UpdateUserStatus(user.ID, adminID, "INVALID")
+	err = svc.UpdateUserStatus(context.Background(), user.ID, adminID, "INVALID")
 	if err == nil {
 		t.Error("expected error for invalid status")
 	}
@@ -187,7 +188,7 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	userRepo.users[user.Phone] = user
 
 	// 1. Create top up request
-	req, err := svc.CreateTopUpRequest(user.ID, money.FromRubles(500.0))
+	req, err := svc.CreateTopUpRequest(context.Background(), user.ID, money.FromRubles(500.0))
 	if err != nil {
 		t.Fatalf("unexpected error creating top-up: %v", err)
 	}
@@ -197,12 +198,12 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 
 	// 2. Approve request
 	adminID := uuid.New()
-	err = svc.ApproveTopUpRequest(req.ID, adminID)
+	err = svc.ApproveTopUpRequest(context.Background(), req.ID, adminID)
 	if err != nil {
 		t.Fatalf("unexpected error approving: %v", err)
 	}
 
-	approvedReq, err := adminRepo.GetTopUpRequestByID(req.ID)
+	approvedReq, err := adminRepo.GetTopUpRequestByID(context.Background(), req.ID)
 	if err != nil {
 		t.Fatalf("failed to get request: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	}
 
 	// 3. Try approving again (should fail)
-	err = svc.ApproveTopUpRequest(req.ID, adminID)
+	err = svc.ApproveTopUpRequest(context.Background(), req.ID, adminID)
 	if err == nil {
 		t.Error("expected error trying to approve an already approved request")
 	}
@@ -231,12 +232,12 @@ func TestAdminService_Settings(t *testing.T) {
 		"currency":              "RUB",
 	}
 
-	err := svc.UpdateSettings(newSettings)
+	err := svc.UpdateSettings(context.Background(), newSettings)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	current, err := svc.GetSettings()
+	current, err := svc.GetSettings(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,25 +248,25 @@ func TestAdminService_Settings(t *testing.T) {
 }
 
 // CountAdmins reports how many administrators exist (used to protect the last one).
-func (m *mockAdminRepo) CountAdmins() (int, error) {
+func (m *mockAdminRepo) CountAdmins(ctx context.Context) (int, error) {
 	return 2, nil
 }
 
 // HasPendingWithdrawal reports an existing open withdrawal request.
-func (m *mockAdminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
+func (m *mockAdminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
 	return false, nil
 }
 
 // LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
 // that it lives in AdminService.
-func (m *mockAdminRepo) LockWithdrawalRequest(q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
+func (m *mockAdminRepo) LockWithdrawalRequest(ctx context.Context, q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
 	if req, ok := m.withdrawals[requestID]; ok {
 		return req, nil
 	}
 	return nil, repository.ErrConflict
 }
 
-func (m *mockAdminRepo) SetWithdrawalStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+func (m *mockAdminRepo) SetWithdrawalStatus(ctx context.Context, q repository.Querier, requestID, adminID uuid.UUID, status string) error {
 	req, ok := m.withdrawals[requestID]
 	if !ok || req.Status != "PENDING" {
 		return repository.ErrConflict
@@ -275,14 +276,14 @@ func (m *mockAdminRepo) SetWithdrawalStatus(q repository.Querier, requestID, adm
 	return nil
 }
 
-func (m *mockAdminRepo) LockTopUpRequest(q repository.Querier, requestID uuid.UUID) (*repository.TopUpRequest, error) {
+func (m *mockAdminRepo) LockTopUpRequest(ctx context.Context, q repository.Querier, requestID uuid.UUID) (*repository.TopUpRequest, error) {
 	if req, ok := m.requests[requestID]; ok {
 		return req, nil
 	}
 	return nil, repository.ErrConflict
 }
 
-func (m *mockAdminRepo) SetTopUpStatus(q repository.Querier, requestID, adminID uuid.UUID, status string) error {
+func (m *mockAdminRepo) SetTopUpStatus(ctx context.Context, q repository.Querier, requestID, adminID uuid.UUID, status string) error {
 	req, ok := m.requests[requestID]
 	if !ok || req.Status != "PENDING" {
 		return repository.ErrConflict

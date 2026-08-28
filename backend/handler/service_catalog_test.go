@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -38,12 +39,12 @@ func (m *mockCatalogRepo) add(node *repository.ServiceNode) *repository.ServiceN
 	return node
 }
 
-func (m *mockCatalogRepo) CreateNode(node *repository.ServiceNode) error {
+func (m *mockCatalogRepo) CreateNode(ctx context.Context, node *repository.ServiceNode) error {
 	m.add(node)
 	return nil
 }
 
-func (m *mockCatalogRepo) UpdateNode(node *repository.ServiceNode) error {
+func (m *mockCatalogRepo) UpdateNode(ctx context.Context, node *repository.ServiceNode) error {
 	existing, ok := m.nodes[node.ID]
 	if !ok {
 		return repository.ErrServiceNodeNotFound
@@ -56,7 +57,7 @@ func (m *mockCatalogRepo) UpdateNode(node *repository.ServiceNode) error {
 	return nil
 }
 
-func (m *mockCatalogRepo) DeleteNode(id uuid.UUID) error {
+func (m *mockCatalogRepo) DeleteNode(ctx context.Context, id uuid.UUID) error {
 	node, ok := m.nodes[id]
 	if !ok {
 		return repository.ErrServiceNodeNotFound
@@ -64,7 +65,7 @@ func (m *mockCatalogRepo) DeleteNode(id uuid.UUID) error {
 	if node.IsDeleted() {
 		return repository.ErrServiceNodeDeleted
 	}
-	if children, _ := m.HasChildren(id); children {
+	if children, _ := m.HasChildren(context.Background(), id); children {
 		return repository.ErrServiceNodeHasChildren
 	}
 	now := time.Now()
@@ -73,7 +74,7 @@ func (m *mockCatalogRepo) DeleteNode(id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockCatalogRepo) RestoreNode(id uuid.UUID) error {
+func (m *mockCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) error {
 	node, ok := m.nodes[id]
 	if !ok {
 		return repository.ErrServiceNodeNotFound
@@ -90,14 +91,14 @@ func (m *mockCatalogRepo) RestoreNode(id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockCatalogRepo) GetNodeByID(id uuid.UUID) (*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetNodeByID(ctx context.Context, id uuid.UUID) (*repository.ServiceNode, error) {
 	if node, ok := m.nodes[id]; ok {
 		return node, nil
 	}
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockCatalogRepo) GetNodeByCode(code string) (*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetNodeByCode(ctx context.Context, code string) (*repository.ServiceNode, error) {
 	for _, n := range m.nodes {
 		if n.Code == code && !n.IsDeleted() {
 			return n, nil
@@ -113,7 +114,7 @@ func (m *mockCatalogRepo) matches(n *repository.ServiceNode, filter repository.S
 	return n.IsActive || !filter.ActiveOnly
 }
 
-func (m *mockCatalogRepo) GetRootCategories(filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetRootCategories(ctx context.Context, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
 	out := []*repository.ServiceNode{}
 	for _, n := range m.nodes {
 		if n.ParentID == nil && m.matches(n, filter) {
@@ -123,7 +124,7 @@ func (m *mockCatalogRepo) GetRootCategories(filter repository.ServiceNodeFilter)
 	return out, nil
 }
 
-func (m *mockCatalogRepo) GetChildren(parentID uuid.UUID, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetChildren(ctx context.Context, parentID uuid.UUID, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
 	out := []*repository.ServiceNode{}
 	for _, n := range m.nodes {
 		if n.ParentID != nil && *n.ParentID == parentID && m.matches(n, filter) {
@@ -133,19 +134,19 @@ func (m *mockCatalogRepo) GetChildren(parentID uuid.UUID, filter repository.Serv
 	return out, nil
 }
 
-func (m *mockCatalogRepo) GetDescendants(ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {
-	return m.GetChildren(ancestorID, repository.FilterLive)
+func (m *mockCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {
+	return m.GetChildren(context.Background(), ancestorID, repository.FilterLive)
 }
 
-func (m *mockCatalogRepo) GetAncestors(descendantID uuid.UUID) ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
 
-func (m *mockCatalogRepo) GetVariantPath(variantID uuid.UUID) ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
 
-func (m *mockCatalogRepo) GetActiveVariants() ([]*repository.ServiceNode, error) {
+func (m *mockCatalogRepo) GetActiveVariants(ctx context.Context) ([]*repository.ServiceNode, error) {
 	out := []*repository.ServiceNode{}
 	for _, n := range m.nodes {
 		if n.IsVariant() && n.IsActive && !n.IsDeleted() {
@@ -155,21 +156,23 @@ func (m *mockCatalogRepo) GetActiveVariants() ([]*repository.ServiceNode, error)
 	return out, nil
 }
 
-func (m *mockCatalogRepo) GetVariantWithCategory(id uuid.UUID) (*repository.ServiceNode, []*repository.ServiceNode, error) {
-	node, err := m.GetNodeByID(id)
+func (m *mockCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*repository.ServiceNode, []*repository.ServiceNode, error) {
+	node, err := m.GetNodeByID(context.Background(), id)
 	return node, nil, err
 }
 
-func (m *mockCatalogRepo) HasChildren(id uuid.UUID) (bool, error) {
-	children, _ := m.GetChildren(id, repository.FilterLive)
+func (m *mockCatalogRepo) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
+	children, _ := m.GetChildren(context.Background(), id, repository.FilterLive)
 	return len(children) > 0, nil
 }
 
-func (m *mockCatalogRepo) HasOrders(id uuid.UUID) (bool, error) {
+func (m *mockCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool, error) {
 	return m.withOrder[id], nil
 }
 
-func (m *mockCatalogRepo) IsDescendantOf(a, b uuid.UUID) (bool, error) { return false, nil }
+func (m *mockCatalogRepo) IsDescendantOf(ctx context.Context, a, b uuid.UUID) (bool, error) {
+	return false, nil
+}
 
 // catalogTestEnv wires the handler into a router so that URL params resolve the
 // same way they do in main.
@@ -247,7 +250,7 @@ func TestAdminUpdateNode_VariantKeepsItsTypeWhenBodyOmitsIt(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	stored, _ := env.repo.GetNodeByID(env.variant.ID)
+	stored, _ := env.repo.GetNodeByID(context.Background(), env.variant.ID)
 	if stored.NodeType != repository.ServiceNodeTypeVariant {
 		t.Errorf("node_type changed to %q", stored.NodeType)
 	}
@@ -273,7 +276,7 @@ func TestAdminUpdateNode_CategoryZeroPriceIsNoPrice(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	stored, _ := env.repo.GetNodeByID(env.rootCat.ID)
+	stored, _ := env.repo.GetNodeByID(context.Background(), env.rootCat.ID)
 	if stored.BasePrice != nil {
 		t.Errorf("expected no base price on the category, got %v", stored.BasePrice)
 	}
@@ -315,7 +318,7 @@ func TestAdminDeleteNode_KeepsOrderedVariant(t *testing.T) {
 		t.Errorf("expected a soft delete reported with order history, got %+v", resp)
 	}
 
-	stored, err := env.repo.GetNodeByID(env.variant.ID)
+	stored, err := env.repo.GetNodeByID(context.Background(), env.variant.ID)
 	if err != nil {
 		t.Fatalf("deleted variant no longer resolves: %v", err)
 	}
@@ -346,7 +349,7 @@ func TestAdminDeleteNode_CategoryWithLiveChildrenIsRejected(t *testing.T) {
 
 func TestAdminUpdateNode_DeletedNodeIsRejected(t *testing.T) {
 	env := newCatalogTestEnv()
-	if err := env.repo.DeleteNode(env.variant.ID); err != nil {
+	if err := env.repo.DeleteNode(context.Background(), env.variant.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -361,7 +364,7 @@ func TestAdminUpdateNode_DeletedNodeIsRejected(t *testing.T) {
 
 func TestAdminRestoreNode_ComesBackSwitchedOff(t *testing.T) {
 	env := newCatalogTestEnv()
-	if err := env.repo.DeleteNode(env.variant.ID); err != nil {
+	if err := env.repo.DeleteNode(context.Background(), env.variant.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -370,7 +373,7 @@ func TestAdminRestoreNode_ComesBackSwitchedOff(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	stored, _ := env.repo.GetNodeByID(env.variant.ID)
+	stored, _ := env.repo.GetNodeByID(context.Background(), env.variant.ID)
 	if stored.IsDeleted() {
 		t.Error("expected the node to be restored")
 	}
@@ -386,7 +389,7 @@ func TestAdminRestoreNode_ComesBackSwitchedOff(t *testing.T) {
 
 func TestAdminListNodes_HidesDeletedUnlessAsked(t *testing.T) {
 	env := newCatalogTestEnv()
-	if err := env.repo.DeleteNode(env.variant.ID); err != nil {
+	if err := env.repo.DeleteNode(context.Background(), env.variant.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 

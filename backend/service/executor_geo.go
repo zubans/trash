@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -51,12 +52,12 @@ func getAcceptRadiusKM() float64 {
 	return val
 }
 
-func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRequest) (*SetLocationResponse, error) {
+func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UUID, req SetLocationRequest) (*SetLocationResponse, error) {
 	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
 		return nil, fmt.Errorf("invalid coordinates")
 	}
 
-	oldLat, oldLon, lastManual, err := s.geoRepo.GetExecutorLocation(executorID)
+	oldLat, oldLon, lastManual, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +124,7 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 				speed := shiftDist / hours
 				if speed > 150.0 {
 					// GPS Spoofing detected! Log GeoAlert for Admin
-					_ = s.geoRepo.CreateGeoAlert(&repository.GeoAlert{
+					_ = s.geoRepo.CreateGeoAlert(ctx, &repository.GeoAlert{
 						ExecutorID:         exID,
 						OldLat:             &oLat,
 						OldLon:             &oLon,
@@ -137,7 +138,7 @@ func (s *ExecutorGeoService) SetLocation(executorID uuid.UUID, req SetLocationRe
 		}(executorID, *oldLat, *oldLon, req.Lat, req.Lon, now)
 	}
 
-	if err := s.geoRepo.UpdateExecutorLocation(executorID, req.Lat, req.Lon, isManual); err != nil {
+	if err := s.geoRepo.UpdateExecutorLocation(ctx, executorID, req.Lat, req.Lon, isManual); err != nil {
 		return nil, err
 	}
 
@@ -165,8 +166,8 @@ type LocationResponse struct {
 // GetLocation returns the executor's own stored coordinates. Like GetMapOrders,
 // the position comes from the database and is scoped to the caller, so it can
 // never be used to read another executor's whereabouts.
-func (s *ExecutorGeoService) GetLocation(executorID uuid.UUID) (*LocationResponse, error) {
-	lat, lon, _, err := s.geoRepo.GetExecutorLocation(executorID)
+func (s *ExecutorGeoService) GetLocation(ctx context.Context, executorID uuid.UUID) (*LocationResponse, error) {
+	lat, lon, _, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,24 +181,24 @@ func (s *ExecutorGeoService) GetLocation(executorID uuid.UUID) (*LocationRespons
 // position. The position deliberately comes from the database rather than from
 // request parameters: with client supplied coordinates any account could sweep
 // the map and harvest customer addresses country-wide.
-func (s *ExecutorGeoService) GetMapOrders(executorID uuid.UUID) ([]repository.MapOrder, error) {
-	lat, lon, _, err := s.geoRepo.GetExecutorLocation(executorID)
+func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.UUID) ([]repository.MapOrder, error) {
+	lat, lon, _, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
 	if lat == nil || lon == nil {
 		return nil, errors.New("местоположение исполнителя не задано")
 	}
-	return s.mapOrdersAround(executorID, *lat, *lon)
+	return s.mapOrdersAround(ctx, executorID, *lat, *lon)
 }
 
-func (s *ExecutorGeoService) mapOrdersAround(executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
+func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
 	// Find pending orders within 10km
 	const overviewRadiusKM = 10.0
 	acceptRadiusKM := getAcceptRadiusKM()
 
 	// Use existing orderRepo to get searching orders
-	pendingOrders, err := s.orderRepo.GetPendingOrders()
+	pendingOrders, err := s.orderRepo.GetPendingOrders(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -226,6 +227,6 @@ func (s *ExecutorGeoService) mapOrdersAround(executorID uuid.UUID, lat, lon floa
 	return mapOrders, nil
 }
 
-func (s *ExecutorGeoService) GetGeoAlerts(status string, limit, offset int) ([]repository.GeoAlert, error) {
-	return s.geoRepo.GetGeoAlerts(status, limit, offset)
+func (s *ExecutorGeoService) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {
+	return s.geoRepo.GetGeoAlerts(ctx, status, limit, offset)
 }

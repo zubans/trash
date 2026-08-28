@@ -28,14 +28,14 @@ func newMockUserRepo() *mockUserRepo {
 	return &mockUserRepo{users: make(map[string]*repository.User)}
 }
 
-func (m *mockUserRepo) FindByPhone(phone string) (*repository.User, error) {
+func (m *mockUserRepo) FindByPhone(ctx context.Context, phone string) (*repository.User, error) {
 	if u, ok := m.users[phone]; ok {
 		return u, nil
 	}
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockUserRepo) Create(user *repository.User) error {
+func (m *mockUserRepo) Create(ctx context.Context, user *repository.User) error {
 	if user.ID == uuid.Nil {
 		user.ID = uuid.New()
 	}
@@ -43,7 +43,7 @@ func (m *mockUserRepo) Create(user *repository.User) error {
 	return nil
 }
 
-func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error) {
+func (m *mockUserRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
 	for _, u := range m.users {
 		if u.ID == id {
 			return u, nil
@@ -52,7 +52,7 @@ func (m *mockUserRepo) FindByID(id uuid.UUID) (*repository.User, error) {
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error {
+func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Status = status
@@ -62,7 +62,7 @@ func (m *mockUserRepo) UpdateStatus(id uuid.UUID, status string) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error {
+func (m *mockUserRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Role = role
@@ -72,7 +72,7 @@ func (m *mockUserRepo) UpdateRole(id uuid.UUID, role string) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateVerified(id uuid.UUID, verified bool) error {
+func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Verified = verified
@@ -82,7 +82,7 @@ func (m *mockUserRepo) UpdateVerified(id uuid.UUID, verified bool) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
+func (m *mockUserRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Balance = balance
@@ -92,19 +92,19 @@ func (m *mockUserRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
+func (m *mockUserRepo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
-func (m *mockUserRepo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
+func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
 	return nil
 }
 
-func (m *mockUserRepo) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
+func (m *mockUserRepo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
 	return &repository.CustomerProfile{UserID: userID}, nil
 }
 
-func (m *mockUserRepo) FindByEmail(email string) (*repository.User, error) {
+func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*repository.User, error) {
 	for _, u := range m.users {
 		if strings.EqualFold(u.Email, email) {
 			return u, nil
@@ -113,35 +113,35 @@ func (m *mockUserRepo) FindByEmail(email string) (*repository.User, error) {
 	return nil, nil
 }
 
-func (m *mockUserRepo) FindByEmailVerificationToken(token string) (*repository.User, error) {
+func (m *mockUserRepo) FindByEmailVerificationToken(ctx context.Context, token string) (*repository.User, error) {
 	return nil, nil
 }
 
-func (m *mockUserRepo) VerifyEmailToken(token string) (*repository.User, error) {
+func (m *mockUserRepo) VerifyEmailToken(ctx context.Context, token string) (*repository.User, error) {
 	return nil, nil
 }
 
-func (m *mockUserRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+func (m *mockUserRepo) SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error {
 	return nil
 }
 
-func (m *mockUserRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) {
+func (m *mockUserRepo) ResetPasswordWithCode(ctx context.Context, email, code, newHashedPassword string) (*repository.User, error) {
 	return nil, nil
 }
 
-func (m *mockUserRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
+func (m *mockUserRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
 }
 
-func (m *mockUserRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
+func (m *mockUserRepo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	return nil
 }
 
-func (m *mockUserRepo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error {
+func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
 	return nil
 }
 
-func (m *mockUserRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (m *mockUserRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	return nil
 }
 
@@ -283,7 +283,7 @@ func newMockRefreshRepo() *mockRefreshRepo {
 	return &mockRefreshRepo{tokens: make(map[string]*repository.RefreshToken)}
 }
 
-func (m *mockRefreshRepo) Create(userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+func (m *mockRefreshRepo) Create(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
 	m.tokens[tokenHash] = &repository.RefreshToken{
 		ID:        uuid.New(),
 		UserID:    userID,
@@ -293,7 +293,7 @@ func (m *mockRefreshRepo) Create(userID uuid.UUID, tokenHash string, expiresAt t
 	return nil
 }
 
-func (m *mockRefreshRepo) FindByHash(tokenHash string) (*repository.RefreshToken, error) {
+func (m *mockRefreshRepo) FindByHash(ctx context.Context, tokenHash string) (*repository.RefreshToken, error) {
 	t, ok := m.tokens[tokenHash]
 	if !ok {
 		return nil, repository.ErrRefreshTokenNotFound
@@ -301,7 +301,7 @@ func (m *mockRefreshRepo) FindByHash(tokenHash string) (*repository.RefreshToken
 	return t, nil
 }
 
-func (m *mockRefreshRepo) MarkUsed(tokenHash string) error {
+func (m *mockRefreshRepo) MarkUsed(ctx context.Context, tokenHash string) error {
 	t, ok := m.tokens[tokenHash]
 	if !ok || !t.IsUsable(time.Now()) {
 		return repository.ErrConflict
@@ -311,7 +311,7 @@ func (m *mockRefreshRepo) MarkUsed(tokenHash string) error {
 	return nil
 }
 
-func (m *mockRefreshRepo) RevokeAllForUser(userID uuid.UUID) error {
+func (m *mockRefreshRepo) RevokeAllForUser(ctx context.Context, userID uuid.UUID) error {
 	now := time.Now()
 	for _, t := range m.tokens {
 		if t.UserID == userID && t.RevokedAt == nil {
@@ -321,7 +321,7 @@ func (m *mockRefreshRepo) RevokeAllForUser(userID uuid.UUID) error {
 	return nil
 }
 
-func (m *mockRefreshRepo) Revoke(tokenHash string) error {
+func (m *mockRefreshRepo) Revoke(ctx context.Context, tokenHash string) error {
 	if t, ok := m.tokens[tokenHash]; ok && t.RevokedAt == nil {
 		now := time.Now()
 		t.RevokedAt = &now
@@ -329,7 +329,7 @@ func (m *mockRefreshRepo) Revoke(tokenHash string) error {
 	return nil
 }
 
-func (m *mockRefreshRepo) DeleteExpired() (int64, error) { return 0, nil }
+func (m *mockRefreshRepo) DeleteExpired(ctx context.Context) (int64, error) { return 0, nil }
 
 type mockAccessTokenRepo struct {
 	revoked map[string]time.Time
@@ -339,17 +339,17 @@ func newMockAccessTokenRepo() *mockAccessTokenRepo {
 	return &mockAccessTokenRepo{revoked: make(map[string]time.Time)}
 }
 
-func (m *mockAccessTokenRepo) IsTokenRevoked(tokenHash string) (bool, error) {
+func (m *mockAccessTokenRepo) IsTokenRevoked(ctx context.Context, tokenHash string) (bool, error) {
 	exp, ok := m.revoked[tokenHash]
 	return ok && exp.After(time.Now()), nil
 }
 
-func (m *mockAccessTokenRepo) RevokeToken(tokenHash string, expiresAt time.Time) error {
+func (m *mockAccessTokenRepo) RevokeToken(ctx context.Context, tokenHash string, expiresAt time.Time) error {
 	m.revoked[tokenHash] = expiresAt
 	return nil
 }
 
-func (m *mockUserRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
+func (m *mockUserRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			u.Password = newHashedPassword

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ type mockChatRepo struct {
 	supportOwners map[uuid.UUID]uuid.UUID
 }
 
-func (m *mockChatRepo) GetChatByOrderID(orderID uuid.UUID) (*repository.Chat, error) {
+func (m *mockChatRepo) GetChatByOrderID(ctx context.Context, orderID uuid.UUID) (*repository.Chat, error) {
 	for _, c := range m.chats {
 		if c.OrderID == orderID {
 			return c, nil
@@ -25,7 +26,7 @@ func (m *mockChatRepo) GetChatByOrderID(orderID uuid.UUID) (*repository.Chat, er
 	return nil, nil
 }
 
-func (m *mockChatRepo) CreateChat(orderID uuid.UUID) (*repository.Chat, error) {
+func (m *mockChatRepo) CreateChat(ctx context.Context, orderID uuid.UUID) (*repository.Chat, error) {
 	c := &repository.Chat{
 		ID:       uuid.New(),
 		OrderID:  orderID,
@@ -35,7 +36,7 @@ func (m *mockChatRepo) CreateChat(orderID uuid.UUID) (*repository.Chat, error) {
 	return c, nil
 }
 
-func (m *mockChatRepo) SaveMessage(chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
+func (m *mockChatRepo) SaveMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
 	msg := &repository.Message{
 		ID:        uuid.New(),
 		ChatID:    chatID,
@@ -47,7 +48,7 @@ func (m *mockChatRepo) SaveMessage(chatID, senderID uuid.UUID, text string) (*re
 	return msg, nil
 }
 
-func (m *mockChatRepo) GetMessages(chatID uuid.UUID) ([]*repository.Message, error) {
+func (m *mockChatRepo) GetMessages(ctx context.Context, chatID uuid.UUID) ([]*repository.Message, error) {
 	var list []*repository.Message
 	for _, msg := range m.messages {
 		if msg.ChatID == chatID {
@@ -57,7 +58,7 @@ func (m *mockChatRepo) GetMessages(chatID uuid.UUID) ([]*repository.Message, err
 	return list, nil
 }
 
-func (m *mockChatRepo) DeactivateChat(chatID uuid.UUID) error {
+func (m *mockChatRepo) DeactivateChat(ctx context.Context, chatID uuid.UUID) error {
 	for _, c := range m.chats {
 		if c.ID == chatID {
 			c.IsActive = false
@@ -67,19 +68,19 @@ func (m *mockChatRepo) DeactivateChat(chatID uuid.UUID) error {
 	return errors.New("chat not found")
 }
 
-func (m *mockChatRepo) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
+func (m *mockChatRepo) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }
 
-func (m *mockChatRepo) MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
+func (m *mockChatRepo) MarkMessagesAsDelivered(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }
 
-func (m *mockChatRepo) MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
+func (m *mockChatRepo) MarkMessagesAsRead(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }
 
-func (m *mockChatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+func (m *mockChatRepo) SaveMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
 	fn := fileName
 	msg := &repository.Message{
 		ID:        uuid.New(),
@@ -96,11 +97,11 @@ func (m *mockChatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, tex
 	return msg, nil
 }
 
-func (m *mockChatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
+func (m *mockChatRepo) DeleteMessage(ctx context.Context, messageID, senderID uuid.UUID) error {
 	return nil
 }
 
-func (m *mockChatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) (*repository.Message, error) {
+func (m *mockChatRepo) UpdateMessage(ctx context.Context, messageID, senderID uuid.UUID, newText string) (*repository.Message, error) {
 	for _, msg := range m.messages {
 		if msg.ID == messageID && msg.SenderID == senderID {
 			msg.Text = newText
@@ -112,22 +113,22 @@ func (m *mockChatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText stri
 	return nil, errors.New("not found")
 }
 
-func (m *mockChatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*repository.SupportChat, error) {
+func (m *mockChatRepo) GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*repository.SupportChat, error) {
 	return &repository.SupportChat{ID: uuid.New(), UserID: userID}, nil
 }
-func (m *mockChatRepo) GetSupportMessages(chatID uuid.UUID) ([]*repository.Message, error) {
+func (m *mockChatRepo) GetSupportMessages(ctx context.Context, chatID uuid.UUID) ([]*repository.Message, error) {
 	return nil, nil
 }
-func (m *mockChatRepo) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
+func (m *mockChatRepo) SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
 	return &repository.Message{ID: uuid.New(), ChatID: chatID, SenderID: senderID, Text: text}, nil
 }
-func (m *mockChatRepo) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+func (m *mockChatRepo) SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
 	return &repository.Message{ID: uuid.New(), ChatID: chatID, SenderID: senderID, Text: text}, nil
 }
-func (m *mockChatRepo) GetAdminSupportChatList() ([]*repository.SupportChatListItem, error) {
+func (m *mockChatRepo) GetAdminSupportChatList(ctx context.Context) ([]*repository.SupportChatListItem, error) {
 	return nil, nil
 }
-func (m *mockChatRepo) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
+func (m *mockChatRepo) MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error {
 	return nil
 }
 
@@ -142,27 +143,27 @@ func TestChatService_GetMessagesAccessControl(t *testing.T) {
 
 	// Create order and assign executor
 	standardVariantID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
-	order, _ := orderRepo.CreateOrderWithHold(customerID, standardVariantID, false, false, 100.00, "")
-	_ = orderRepo.AssignOrder(order.ID, executorID)
+	order, _ := orderRepo.CreateOrderWithHold(context.Background(), customerID, standardVariantID, false, false, 100.00, "")
+	_ = orderRepo.AssignOrder(context.Background(), order.ID, executorID)
 
 	// Create chat session
-	chat, _ := chatRepo.CreateChat(order.ID)
-	_, _ = chatRepo.SaveMessage(chat.ID, customerID, "Hello!")
+	chat, _ := chatRepo.CreateChat(context.Background(), order.ID)
+	_, _ = chatRepo.SaveMessage(context.Background(), chat.ID, customerID, "Hello!")
 
 	// Case 1: Customer should access messages
-	msgs, err := srv.GetMessages(order.ID, customerID)
+	msgs, err := srv.GetMessages(context.Background(), order.ID, customerID)
 	if err != nil || len(msgs) != 1 {
 		t.Errorf("expected customer to access messages, got err: %v, len: %d", err, len(msgs))
 	}
 
 	// Case 2: Executor should access messages
-	msgs, err = srv.GetMessages(order.ID, executorID)
+	msgs, err = srv.GetMessages(context.Background(), order.ID, executorID)
 	if err != nil || len(msgs) != 1 {
 		t.Errorf("expected executor to access messages, got err: %v", err)
 	}
 
 	// Case 3: Stranger should NOT access messages (should return error)
-	_, err = srv.GetMessages(order.ID, strangerID)
+	_, err = srv.GetMessages(context.Background(), order.ID, strangerID)
 	if err == nil {
 		t.Error("expected error for stranger accessing messages")
 	}
@@ -175,11 +176,11 @@ func TestChatService_EditAndDeleteMessage(t *testing.T) {
 
 	customerID := uuid.New()
 	orderID := uuid.New()
-	chat, _ := chatRepo.CreateChat(orderID)
-	msg, _ := chatRepo.SaveMessage(chat.ID, customerID, "Initial Message")
+	chat, _ := chatRepo.CreateChat(context.Background(), orderID)
+	msg, _ := chatRepo.SaveMessage(context.Background(), chat.ID, customerID, "Initial Message")
 
 	// Test EditMessage
-	editedMsg, err := srv.EditMessage(msg.ID, customerID, orderID, "Edited Message Text")
+	editedMsg, err := srv.EditMessage(context.Background(), msg.ID, customerID, orderID, "Edited Message Text")
 	if err != nil {
 		t.Fatalf("unexpected error editing message: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestChatService_EditAndDeleteMessage(t *testing.T) {
 	}
 
 	// Test DeleteMessage
-	err = srv.DeleteMessage(msg.ID, customerID, orderID)
+	err = srv.DeleteMessage(context.Background(), msg.ID, customerID, orderID)
 	if err != nil {
 		t.Fatalf("unexpected error deleting message: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestChatService_EditAndDeleteMessage(t *testing.T) {
 
 // --- support chat methods required by repository.ChatRepository ---
 
-func (m *mockChatRepo) SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error) {
+func (m *mockChatRepo) SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid.UUID, error) {
 	if m.supportOwners == nil {
 		return uuid.Nil, errors.New("support chat not found")
 	}
@@ -210,19 +211,21 @@ func (m *mockChatRepo) SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error) {
 	return owner, nil
 }
 
-func (m *mockChatRepo) CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, error) {
+func (m *mockChatRepo) CanAccessAttachment(ctx context.Context, userID uuid.UUID, fileURL string) (bool, error) {
 	return false, nil
 }
 
-func (m *mockChatRepo) BanSupportChat(chatID uuid.UUID, duration string) error { return nil }
+func (m *mockChatRepo) BanSupportChat(ctx context.Context, chatID uuid.UUID, duration string) error {
+	return nil
+}
 
-func (m *mockChatRepo) UnbanSupportChat(chatID uuid.UUID) error { return nil }
+func (m *mockChatRepo) UnbanSupportChat(ctx context.Context, chatID uuid.UUID) error { return nil }
 
-func (m *mockChatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
+func (m *mockChatRepo) IsSupportChatBanned(ctx context.Context, chatID uuid.UUID) (bool, *time.Time, error) {
 	return false, nil, nil
 }
 
-func (m *mockChatRepo) GetAdminSupportUnreadCount() (int, error) { return 0, nil }
+func (m *mockChatRepo) GetAdminSupportUnreadCount(ctx context.Context) (int, error) { return 0, nil }
 
 // TestChatService_SupportChatOwnership verifies that a support conversation is
 // only readable and writable by the user it belongs to (and by admins).
@@ -234,16 +237,16 @@ func TestChatService_SupportChatOwnership(t *testing.T) {
 	chatRepo := &mockChatRepo{supportOwners: map[uuid.UUID]uuid.UUID{chatID: owner}}
 	svc := NewChatService(chatRepo, &mockOrderRepo{})
 
-	if _, err := svc.GetSupportMessages(chatID, stranger, "CUSTOMER"); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "CUSTOMER"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("stranger must not read the chat, got %v", err)
 	}
-	if _, err := svc.SaveSupportMessage(chatID, stranger, "CUSTOMER", "hi"); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SaveSupportMessage(context.Background(), chatID, stranger, "CUSTOMER", "hi"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("stranger must not write to the chat, got %v", err)
 	}
-	if _, err := svc.GetSupportMessages(chatID, owner, "CUSTOMER"); err != nil {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, owner, "CUSTOMER"); err != nil {
 		t.Errorf("owner must be able to read the chat: %v", err)
 	}
-	if _, err := svc.GetSupportMessages(chatID, stranger, "ADMIN"); err != nil {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "ADMIN"); err != nil {
 		t.Errorf("admin must be able to read any chat: %v", err)
 	}
 }

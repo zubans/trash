@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -26,7 +27,7 @@ func main() {
 	defer db.Close()
 
 	repo := repository.NewAppReleaseRepository(db)
-	active, err := repo.GetActiveRelease(platform)
+	active, err := repo.GetActiveRelease(context.Background(), platform)
 	if err != nil || active == nil || active.VersionName == "" {
 		fmt.Print("1.0.0")
 		return

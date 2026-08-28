@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -23,7 +24,7 @@ const maxAdminPageSize = 200
 // SessionRevoker ends every session of a user. Satisfied by *AuthService;
 // AdminService only needs this much of it.
 type SessionRevoker interface {
-	RevokeAllSessions(userID uuid.UUID) error
+	RevokeAllSessions(ctx context.Context, userID uuid.UUID) error
 }
 
 // AdminService manages administrative business logic.
@@ -70,11 +71,11 @@ func (s *AdminService) WithAddresses(addressRepo repository.CustomerAddressRepos
 }
 
 // ListAddresses returns a customer's saved pickup addresses.
-func (s *AdminService) ListAddresses(userID uuid.UUID) ([]repository.CustomerAddress, error) {
+func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]repository.CustomerAddress, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
-	return s.addressRepo.List(userID)
+	return s.addressRepo.List(ctx, userID)
 }
 
 // AddAddress saves a new pickup address.
@@ -83,39 +84,39 @@ func (s *AdminService) ListAddresses(userID uuid.UUID) ([]repository.CustomerAdd
 // suggestion list. A client that still sends a single line — the mobile builds
 // in people's hands do — has it split here, so those keep working and are no
 // longer held to the old numeric-house-number format.
-func (s *AdminService) AddAddress(userID uuid.UUID, address Address) ([]repository.CustomerAddress, error) {
+func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address Address) ([]repository.CustomerAddress, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
 	if err := address.Validate(); err != nil {
 		return nil, err
 	}
-	return s.addressRepo.Add(userID, address.ToRecord())
+	return s.addressRepo.Add(ctx, userID, address.ToRecord())
 }
 
 // DeleteAddress removes one of the customer's addresses.
-func (s *AdminService) DeleteAddress(userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
-	return s.addressRepo.Delete(userID, addressID)
+	return s.addressRepo.Delete(ctx, userID, addressID)
 }
 
 // SetDefaultAddress marks which address new orders should start from.
-func (s *AdminService) SetDefaultAddress(userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+func (s *AdminService) SetDefaultAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
-	return s.addressRepo.SetDefault(userID, addressID)
+	return s.addressRepo.SetDefault(ctx, userID, addressID)
 }
 
 // SetDefaultAddressByValue is the same, for clients that identify an address by
 // its text.
-func (s *AdminService) SetDefaultAddressByValue(userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+func (s *AdminService) SetDefaultAddressByValue(ctx context.Context, userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
-	return s.addressRepo.SetDefaultByValue(userID, strings.TrimSpace(address))
+	return s.addressRepo.SetDefaultByValue(ctx, userID, strings.TrimSpace(address))
 }
 
 // WithLedger attaches the ledger. Top-ups and withdrawals move money, and the
@@ -133,7 +134,7 @@ func (s *AdminService) WithReconciliation(repo repository.ReconciliationReposito
 
 // Reconcile compares every stored balance with the sum of that user's ledger
 // entries. Read-only: a mismatch is reported, never silently corrected.
-func (s *AdminService) Reconcile(tolerance money.Amount) (*repository.ReconciliationReport, error) {
+func (s *AdminService) Reconcile(ctx context.Context, tolerance money.Amount) (*repository.ReconciliationReport, error) {
 	if s.reconcileRepo == nil {
 		return nil, errors.New("reconciliation is not configured")
 	}
@@ -142,7 +143,7 @@ func (s *AdminService) Reconcile(tolerance money.Amount) (*repository.Reconcilia
 	}
 
 	started := time.Now()
-	report, err := s.reconcileRepo.Reconcile(tolerance)
+	report, err := s.reconcileRepo.Reconcile(ctx, tolerance)
 	metrics.WorkerRun("reconcile", time.Since(started), err)
 	if err != nil {
 		metrics.ReconcileFailed()
@@ -175,11 +176,11 @@ func (s *AdminService) WithSessions(sessions SessionRevoker) *AdminService {
 
 // revokeSessions ends every session of a user, logging but not failing on error:
 // the access change itself has already been persisted.
-func (s *AdminService) revokeSessions(userID uuid.UUID, reason string) {
+func (s *AdminService) revokeSessions(ctx context.Context, userID uuid.UUID, reason string) {
 	if s.sessions == nil {
 		return
 	}
-	if err := s.sessions.RevokeAllSessions(userID); err != nil {
+	if err := s.sessions.RevokeAllSessions(ctx, userID); err != nil {
 		log.Printf("[AUDIT] failed to end sessions of user %s after %s: %v", userID, reason, err)
 	}
 }
@@ -189,7 +190,7 @@ func (s *AdminService) revokeSessions(userID uuid.UUID, reason string) {
 // role and status are validated here rather than handed straight to the enum
 // columns: an unexpected value used to surface as a database error and a 500,
 // which is both a bad answer and a way to probe the schema.
-func (s *AdminService) GetUsers(page, limit int, role, status, search string) ([]*repository.User, int, error) {
+func (s *AdminService) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*repository.User, int, error) {
 	if role != "" && role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
 		return nil, 0, errors.New("invalid role filter")
 	}
@@ -199,25 +200,25 @@ func (s *AdminService) GetUsers(page, limit int, role, status, search string) ([
 	if limit > maxAdminPageSize {
 		limit = maxAdminPageSize
 	}
-	return s.adminRepo.GetUsers(page, limit, role, status, search)
+	return s.adminRepo.GetUsers(ctx, page, limit, role, status, search)
 }
 
 // UpdateUserStatus updates user status (e.g., ACTIVE or BANNED).
-func (s *AdminService) UpdateUserStatus(userID, adminID uuid.UUID, status string) error {
+func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uuid.UUID, status string) error {
 	if status != "ACTIVE" && status != "BANNED" {
 		return errors.New("invalid status")
 	}
 	if status == "BANNED" && userID == adminID {
 		return errors.New("нельзя заблокировать самого себя")
 	}
-	if err := s.userRepo.UpdateStatus(userID, status); err != nil {
+	if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
 		return err
 	}
 	if status == "BANNED" {
 		// A ban has to end the sessions too: RequireAuth rejects the banned user
 		// on the next request, but their refresh token would otherwise keep
 		// minting access tokens.
-		s.revokeSessions(userID, "ban")
+		s.revokeSessions(ctx, userID, "ban")
 	}
 	log.Printf("[AUDIT] admin %s set status of user %s to %s", adminID, userID, status)
 	return nil
@@ -227,11 +228,11 @@ func (s *AdminService) UpdateUserStatus(userID, adminID uuid.UUID, status string
 // admin "verified" checkbox: it is the only thing that makes IsVerified() true,
 // which in turn gates customer order visibility and services that require a
 // verified account.
-func (s *AdminService) SetUserVerified(userID, adminID uuid.UUID, verified bool) error {
-	if _, err := s.userRepo.FindByID(userID); err != nil {
+func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid.UUID, verified bool) error {
+	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	if err := s.userRepo.UpdateVerified(userID, verified); err != nil {
+	if err := s.userRepo.UpdateVerified(ctx, userID, verified); err != nil {
 		return err
 	}
 	log.Printf("[AUDIT] admin %s set verified of user %s to %t", adminID, userID, verified)
@@ -240,12 +241,12 @@ func (s *AdminService) SetUserVerified(userID, adminID uuid.UUID, verified bool)
 
 // UpdateUserRole updates a user's role. Role changes take effect on the next
 // request because authorization reads the role from the database.
-func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) error {
+func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.UUID, role string) error {
 	if role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
 		return errors.New("invalid role")
 	}
 
-	current, err := s.userRepo.FindByID(userID)
+	current, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return errors.New("user not found")
 	}
@@ -253,7 +254,7 @@ func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) er
 		if userID == adminID {
 			return errors.New("нельзя снять роль администратора с самого себя")
 		}
-		admins, err := s.adminRepo.CountAdmins()
+		admins, err := s.adminRepo.CountAdmins(ctx)
 		if err != nil {
 			return err
 		}
@@ -262,19 +263,19 @@ func (s *AdminService) UpdateUserRole(userID, adminID uuid.UUID, role string) er
 		}
 	}
 
-	if err := s.userRepo.UpdateRole(userID, role); err != nil {
+	if err := s.userRepo.UpdateRole(ctx, userID, role); err != nil {
 		return err
 	}
 	// Authorization reads the role from the database on every request, so the
 	// change is already effective; ending the sessions makes the client pick up
 	// its new role instead of rendering a UI it can no longer use.
-	s.revokeSessions(userID, "role change")
+	s.revokeSessions(ctx, userID, "role change")
 	log.Printf("[AUDIT] admin %s changed role of user %s: %s -> %s", adminID, userID, current.Role, role)
 	return nil
 }
 
 // UpdateUserAddress updates a customer's pickup address (admin-only).
-func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error {
+func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	if strings.TrimSpace(address) == "" {
 		return errors.New("address is required")
 	}
@@ -283,29 +284,29 @@ func (s *AdminService) UpdateUserAddress(userID uuid.UUID, address string) error
 		return err
 	}
 	normalizedAddress := parsed.Compose()
-	if _, err := s.userRepo.FindByID(userID); err != nil {
+	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	return s.userRepo.UpdateCustomerAddress(userID, normalizedAddress)
+	return s.userRepo.UpdateCustomerAddress(ctx, userID, normalizedAddress)
 }
 
 // UpdateUserName updates a user's full name (admin-only).
-func (s *AdminService) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	lastName = strings.TrimSpace(lastName)
 	firstName = strings.TrimSpace(firstName)
 	patronymic = strings.TrimSpace(patronymic)
 	if lastName == "" || firstName == "" || patronymic == "" {
 		return errors.New("last_name, first_name and patronymic are required")
 	}
-	if _, err := s.userRepo.FindByID(userID); err != nil {
+	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	return s.userRepo.UpdateUserName(userID, lastName, firstName, patronymic)
+	return s.userRepo.UpdateUserName(ctx, userID, lastName, firstName, patronymic)
 }
 
 // TopUpUserBalance adds funds directly to a user's balance.
 // Only non-admin users may be topped up, and an admin cannot credit themselves.
-func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.Amount) error {
+func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {
 	if !amount.IsPositive() {
 		return errors.New("amount must be greater than zero")
 	}
@@ -315,7 +316,7 @@ func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.
 	}
 
 	// Verify user exists and is not an admin
-	user, err := s.userRepo.FindByID(userID)
+	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return errors.New("user not found")
 	}
@@ -331,8 +332,8 @@ func (s *AdminService) TopUpUserBalance(userID, adminID uuid.UUID, amount money.
 	if s.ledger == nil {
 		return errors.New("ledger is not configured")
 	}
-	if err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		return s.ledger.Deposit(tx, userID, amount, &adminID)
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		return s.ledger.Deposit(ctx, tx, userID, amount, &adminID)
 	}); err != nil {
 		return err
 	}
@@ -357,19 +358,19 @@ func page(limit, offset int) (int, int) {
 }
 
 // GetTopUpRequests lists balance top-up requests, newest first.
-func (s *AdminService) GetTopUpRequests(limit, offset int) ([]*repository.TopUpRequest, error) {
+func (s *AdminService) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*repository.TopUpRequest, error) {
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetTopUpRequests(limit, offset)
+	return s.adminRepo.GetTopUpRequests(ctx, limit, offset)
 }
 
 // CreateTopUpRequest creates a pending balance top-up request.
-func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
+func (s *AdminService) CreateTopUpRequest(ctx context.Context, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
 	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
 
 	// Verify user exists
-	user, err := s.userRepo.FindByID(userID)
+	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -377,42 +378,42 @@ func (s *AdminService) CreateTopUpRequest(userID uuid.UUID, amount money.Amount)
 		return nil, errors.New("cannot request top-up for a banned user")
 	}
 
-	return s.adminRepo.CreateTopUpRequest(nil, userID, amount)
+	return s.adminRepo.CreateTopUpRequest(ctx, nil, userID, amount)
 }
 
 // ApproveTopUpRequest credits the requested amount to the user.
 //
 // The money comes in from the DEPOSITS account, which represents the outside
 // world: a top-up used to make a balance grow with nothing on the other side.
-func (s *AdminService) ApproveTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return s.decideTopUp(requestID, adminID, "APPROVED")
+func (s *AdminService) ApproveTopUpRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
+	return s.decideTopUp(ctx, requestID, adminID, "APPROVED")
 }
 
 // RejectTopUpRequest closes a request without moving money.
-func (s *AdminService) RejectTopUpRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return s.decideTopUp(requestID, adminID, "REJECTED")
+func (s *AdminService) RejectTopUpRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
+	return s.decideTopUp(ctx, requestID, adminID, "REJECTED")
 }
 
-func (s *AdminService) decideTopUp(requestID, adminID uuid.UUID, status string) error {
+func (s *AdminService) decideTopUp(ctx context.Context, requestID, adminID uuid.UUID, status string) error {
 	if s.ledger == nil {
 		return errors.New("ledger is not configured")
 	}
 
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		req, err := s.adminRepo.LockTopUpRequest(tx, requestID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		req, err := s.adminRepo.LockTopUpRequest(ctx, tx, requestID)
 		if err != nil {
 			return errors.New("request not found")
 		}
 		if req.Status != "PENDING" {
 			return errors.New("request is not in PENDING status")
 		}
-		if err := s.adminRepo.SetTopUpStatus(tx, requestID, adminID, status); err != nil {
+		if err := s.adminRepo.SetTopUpStatus(ctx, tx, requestID, adminID, status); err != nil {
 			return err
 		}
 		if status != "APPROVED" {
 			return nil
 		}
-		return s.ledger.Deposit(tx, req.UserID, req.Amount, &adminID)
+		return s.ledger.Deposit(ctx, tx, req.UserID, req.Amount, &adminID)
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -425,9 +426,9 @@ func (s *AdminService) decideTopUp(requestID, adminID uuid.UUID, status string) 
 }
 
 // GetWithdrawalRequests lists all balance withdrawal requests.
-func (s *AdminService) GetWithdrawalRequests(limit, offset int) ([]*repository.WithdrawalRequest, error) {
+func (s *AdminService) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*repository.WithdrawalRequest, error) {
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetWithdrawalRequests(limit, offset)
+	return s.adminRepo.GetWithdrawalRequests(ctx, limit, offset)
 }
 
 // CreateWithdrawalRequest reserves the requested amount and records a pending
@@ -438,7 +439,7 @@ func (s *AdminService) GetWithdrawalRequests(limit, offset int) ([]*repository.W
 // a user could queue several requests against the same money and spend it while
 // they waited — the payout queue then contained amounts that could not all be
 // honoured.
-func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
+func (s *AdminService) CreateWithdrawalRequest(ctx context.Context, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
 	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
@@ -446,7 +447,7 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Am
 		return nil, errors.New("ledger is not configured")
 	}
 
-	user, err := s.userRepo.FindByID(userID)
+	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +455,7 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Am
 		return nil, errors.New("cannot request withdrawal for a banned user")
 	}
 
-	pending, err := s.adminRepo.HasPendingWithdrawal(userID)
+	pending, err := s.adminRepo.HasPendingWithdrawal(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -463,15 +464,15 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Am
 	}
 
 	var created *repository.WithdrawalRequest
-	err = s.ledger.RunInTx(func(tx *sql.Tx) error {
+	err = s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		// Guarded debit: the balance has to cover the request at this moment,
 		// not at some earlier read.
 		// The money moves out of the balance and onto the payouts account, where
 		// it waits for an admin decision.
-		if err := s.ledger.Reserve(tx, userID, repository.AccountPayouts, amount, repository.TransactionTypeWithdrawalHold, nil); err != nil {
+		if err := s.ledger.Reserve(ctx, tx, userID, repository.AccountPayouts, amount, repository.TransactionTypeWithdrawalHold, nil); err != nil {
 			return err
 		}
-		req, err := s.adminRepo.CreateWithdrawalRequest(tx, userID, amount)
+		req, err := s.adminRepo.CreateWithdrawalRequest(ctx, tx, userID, amount)
 		if err != nil {
 			return err
 		}
@@ -490,22 +491,22 @@ func (s *AdminService) CreateWithdrawalRequest(userID uuid.UUID, amount money.Am
 // ApproveWithdrawalRequest marks a reserved withdrawal as paid out. No balance
 // movement happens here: the money left the balance when the request was
 // created, and this records that reservation being spent.
-func (s *AdminService) ApproveWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return s.decideWithdrawal(requestID, adminID, "APPROVED")
+func (s *AdminService) ApproveWithdrawalRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
+	return s.decideWithdrawal(ctx, requestID, adminID, "APPROVED")
 }
 
 // RejectWithdrawalRequest returns the reserved money to the user.
-func (s *AdminService) RejectWithdrawalRequest(requestID uuid.UUID, adminID uuid.UUID) error {
-	return s.decideWithdrawal(requestID, adminID, "REJECTED")
+func (s *AdminService) RejectWithdrawalRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
+	return s.decideWithdrawal(ctx, requestID, adminID, "REJECTED")
 }
 
-func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status string) error {
+func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID uuid.UUID, status string) error {
 	if s.ledger == nil {
 		return errors.New("ledger is not configured")
 	}
 
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		req, err := s.adminRepo.LockWithdrawalRequest(tx, requestID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		req, err := s.adminRepo.LockWithdrawalRequest(ctx, tx, requestID)
 		if err != nil {
 			return errors.New("request not found")
 		}
@@ -513,18 +514,18 @@ func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status str
 			return errors.New("request is not in PENDING status")
 		}
 
-		if err := s.adminRepo.SetWithdrawalStatus(tx, requestID, adminID, status); err != nil {
+		if err := s.adminRepo.SetWithdrawalStatus(ctx, tx, requestID, adminID, status); err != nil {
 			return err
 		}
 
 		if status == "REJECTED" {
 			// Give the reserved money back.
-			return s.ledger.Release(tx, repository.AccountPayouts, req.UserID, req.Amount, repository.TransactionTypeRefund, nil, &adminID)
+			return s.ledger.Release(ctx, tx, repository.AccountPayouts, req.UserID, req.Amount, repository.TransactionTypeRefund, nil, &adminID)
 		}
 
 		// Paid out: the reservation leaves the system through the account that
 		// represents the outside world.
-		return s.ledger.Settle(tx, repository.AccountPayouts, repository.AccountDeposits, req.UserID, req.Amount, repository.TransactionTypeWithdrawalPaid, &adminID)
+		return s.ledger.Settle(ctx, tx, repository.AccountPayouts, repository.AccountDeposits, req.UserID, req.Amount, repository.TransactionTypeWithdrawalPaid, &adminID)
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -537,31 +538,31 @@ func (s *AdminService) decideWithdrawal(requestID, adminID uuid.UUID, status str
 }
 
 // GetTransactions retrieves transaction history.
-func (s *AdminService) GetTransactions(limit, offset int) ([]*repository.Transaction, error) {
+func (s *AdminService) GetTransactions(ctx context.Context, limit, offset int) ([]*repository.Transaction, error) {
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetTransactions(limit, offset)
+	return s.adminRepo.GetTransactions(ctx, limit, offset)
 }
 
 // GetActiveShifts returns all currently active executor shifts.
-func (s *AdminService) GetActiveShifts() ([]*repository.AdminShift, error) {
-	return s.adminRepo.GetActiveShifts()
+func (s *AdminService) GetActiveShifts(ctx context.Context) ([]*repository.AdminShift, error) {
+	return s.adminRepo.GetActiveShifts(ctx)
 }
 
 // GetActiveOrders returns customer orders that are still active (searching or assigned).
-func (s *AdminService) GetActiveOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+func (s *AdminService) GetActiveOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetActiveOrders(limit, offset)
+	return s.adminRepo.GetActiveOrders(ctx, limit, offset)
 }
 
 // GetCompletedOrders returns completed customer orders.
-func (s *AdminService) GetCompletedOrders(limit, offset int) ([]*repository.AdminOrder, error) {
+func (s *AdminService) GetCompletedOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetCompletedOrders(limit, offset)
+	return s.adminRepo.GetCompletedOrders(ctx, limit, offset)
 }
 
 // GetProfile returns the authenticated user's profile including customer address.
-func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, error) {
-	user, err := s.userRepo.FindByID(userID)
+func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[string]interface{}, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +582,7 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 		"address":    "",
 	}
 
-	cp, err := s.userRepo.GetCustomerProfile(userID)
+	cp, err := s.userRepo.GetCustomerProfile(ctx, userID)
 	if err != nil {
 		log.Printf("[GetProfile] failed to load customer profile for %s: %v", userID, err)
 	} else if cp != nil {
@@ -594,7 +595,7 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 	// profile page, which reads the latter.
 	profile["addresses"] = []repository.CustomerAddress{}
 	if s.addressRepo != nil {
-		addresses, err := s.addressRepo.List(userID)
+		addresses, err := s.addressRepo.List(ctx, userID)
 		if err != nil {
 			log.Printf("[GetProfile] failed to load addresses for %s: %v", userID, err)
 		} else {
@@ -616,12 +617,12 @@ func (s *AdminService) GetProfile(userID uuid.UUID) (map[string]interface{}, err
 }
 
 // GetSettings retrieves global settings.
-func (s *AdminService) GetSettings() (map[string]string, error) {
-	return s.settingsRepo.GetSettings()
+func (s *AdminService) GetSettings(ctx context.Context) (map[string]string, error) {
+	return s.settingsRepo.GetSettings(ctx)
 }
 
 // UpdateSettings updates global settings.
-func (s *AdminService) UpdateSettings(settings map[string]string) error {
+func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]string) error {
 	// Numeric settings must be non-negative when applicable.
 	numericKeys := map[string]bool{
 		"standard_tariff_coeff":  true,
@@ -667,7 +668,7 @@ func (s *AdminService) UpdateSettings(settings map[string]string) error {
 			}
 		}
 	}
-	return s.settingsRepo.UpdateSettings(settings)
+	return s.settingsRepo.UpdateSettings(ctx, settings)
 }
 
 // BroadcastEmailRequest defines payload for email broadcast.
@@ -687,7 +688,7 @@ type BroadcastEmailResult struct {
 }
 
 // SendBroadcastEmail dispatches email broadcasts to selected user groups or custom recipient list.
-func (s *AdminService) SendBroadcastEmail(req BroadcastEmailRequest) (*BroadcastEmailResult, error) {
+func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmailRequest) (*BroadcastEmailResult, error) {
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.BodyHTML = strings.TrimSpace(req.BodyHTML)
 	if req.Subject == "" || req.BodyHTML == "" {
@@ -697,7 +698,7 @@ func (s *AdminService) SendBroadcastEmail(req BroadcastEmailRequest) (*Broadcast
 	var recipientEmails []string
 	switch strings.ToUpper(req.TargetGroup) {
 	case "CUSTOMERS":
-		users, _, err := s.adminRepo.GetUsers(1, 10000, "CUSTOMER", "", "")
+		users, _, err := s.adminRepo.GetUsers(ctx, 1, 10000, "CUSTOMER", "", "")
 		if err != nil {
 			return nil, err
 		}
@@ -707,7 +708,7 @@ func (s *AdminService) SendBroadcastEmail(req BroadcastEmailRequest) (*Broadcast
 			}
 		}
 	case "EXECUTORS":
-		users, _, err := s.adminRepo.GetUsers(1, 10000, "EXECUTOR", "", "")
+		users, _, err := s.adminRepo.GetUsers(ctx, 1, 10000, "EXECUTOR", "", "")
 		if err != nil {
 			return nil, err
 		}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -29,14 +30,14 @@ func formatGeo(lat, lon float64) string {
 
 // settingsGetter is the small slice of SettingsRepository used for tunables.
 type settingsGetter interface {
-	GetSettings() (map[string]string, error)
+	GetSettings(ctx context.Context) (map[string]string, error)
 }
 
-func settingFloat(repo settingsGetter, key string, defaultValue float64) float64 {
+func settingFloat(ctx context.Context, repo settingsGetter, key string, defaultValue float64) float64 {
 	if repo == nil {
 		return defaultValue
 	}
-	settings, err := repo.GetSettings()
+	settings, err := repo.GetSettings(ctx)
 	if err != nil {
 		return defaultValue
 	}
@@ -48,8 +49,8 @@ func settingFloat(repo settingsGetter, key string, defaultValue float64) float64
 	return defaultValue
 }
 
-func settingInt(repo settingsGetter, key string, defaultValue int) int {
-	return int(settingFloat(repo, key, float64(defaultValue)))
+func settingInt(ctx context.Context, repo settingsGetter, key string, defaultValue int) int {
+	return int(settingFloat(ctx, repo, key, float64(defaultValue)))
 }
 
 // canExecutorTakeOrder is the single place that decides whether an executor is

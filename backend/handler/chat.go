@@ -93,7 +93,7 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	fileURL := "/uploads/" + name
-	allowed, err := h.chatService.CanAccessAttachment(user.ID, user.Role, fileURL)
+	allowed, err := h.chatService.CanAccessAttachment(r.Context(), user.ID, user.Role, fileURL)
 	if err != nil {
 		http.Error(w, "failed to check access", http.StatusInternalServerError)
 		return
@@ -142,7 +142,7 @@ func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	messages, err := h.chatService.GetMessages(orderID, user.ID)
+	messages, err := h.chatService.GetMessages(r.Context(), orderID, user.ID)
 	if err != nil {
 		log.Printf("[GetMessagesHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -182,7 +182,7 @@ func (h *ChatHandler) SendMessageHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	msg, err := h.chatService.SendMessage(orderID, user.ID, req.Text)
+	msg, err := h.chatService.SendMessage(r.Context(), orderID, user.ID, req.Text)
 	if err != nil {
 		log.Printf("[SendMessageHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
 		writeChatError(w, err)
@@ -209,7 +209,7 @@ func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.chatService.HandleWS(w, r, orderID, user.ID, user.Role)
+	h.chatService.HandleWS(r.Context(), w, r, orderID, user.ID, user.Role)
 }
 
 // MarkReadHandler marks all messages in a chat as read.
@@ -227,7 +227,7 @@ func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedIDs, err := h.chatService.MarkMessagesAsRead(orderID, user.ID)
+	updatedIDs, err := h.chatService.MarkMessagesAsRead(r.Context(), orderID, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -248,7 +248,7 @@ func (h *ChatHandler) GetUnreadSummaryHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	orderIDs, err := h.chatService.GetUnreadOrderIDs(user.ID)
+	orderIDs, err := h.chatService.GetUnreadOrderIDs(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -330,7 +330,7 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 	fileURL := fmt.Sprintf("/uploads/chat/%s", uniqueFileName)
 	fileName := header.Filename
 
-	msg, err := h.chatService.SendMessageWithAttachment(orderID, user.ID, text, fileURL, fileName, fileType, fileSize)
+	msg, err := h.chatService.SendMessageWithAttachment(r.Context(), orderID, user.ID, text, fileURL, fileName, fileType, fileSize)
 	if err != nil {
 		log.Printf("[UploadAttachmentHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -377,7 +377,7 @@ func (h *ChatHandler) EditMessageHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	msg, err := h.chatService.EditMessage(messageID, user.ID, orderID, req.Text)
+	msg, err := h.chatService.EditMessage(r.Context(), messageID, user.ID, orderID, req.Text)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -409,7 +409,7 @@ func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.chatService.DeleteMessage(messageID, user.ID, orderID); err != nil {
+	if err := h.chatService.DeleteMessage(r.Context(), messageID, user.ID, orderID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -425,7 +425,7 @@ func (h *ChatHandler) GetUserSupportChatHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	chat, err := h.chatService.GetOrCreateSupportChat(user.ID)
+	chat, err := h.chatService.GetOrCreateSupportChat(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -450,12 +450,12 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	messages, err := h.chatService.GetSupportMessages(chatID, user.ID, user.Role)
+	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user.ID, user.Role)
 	if err != nil {
 		writeChatError(w, err)
 		return
 	}
-	_ = h.chatService.MarkSupportMessagesAsRead(chatID, user.ID, user.Role)
+	_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user.ID, user.Role)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(messages)
@@ -477,7 +477,7 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 	}
 
 	if user.Role != "ADMIN" {
-		banned, until, err := h.chatService.IsSupportChatBanned(chatID)
+		banned, until, err := h.chatService.IsSupportChatBanned(r.Context(), chatID)
 		if err == nil && banned {
 			msg := "Чат поддержки заблокирован администратором"
 			if until != nil {
@@ -496,7 +496,7 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	msg, err := h.chatService.SaveSupportMessage(chatID, user.ID, user.Role, req.Text)
+	msg, err := h.chatService.SaveSupportMessage(r.Context(), chatID, user.ID, user.Role, req.Text)
 	if err != nil {
 		writeChatError(w, err)
 		return
@@ -522,7 +522,7 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	}
 
 	if user.Role != "ADMIN" {
-		banned, until, err := h.chatService.IsSupportChatBanned(chatID)
+		banned, until, err := h.chatService.IsSupportChatBanned(r.Context(), chatID)
 		if err == nil && banned {
 			msg := "Чат поддержки заблокирован администратором"
 			if until != nil {
@@ -577,7 +577,7 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	}
 
 	text := r.FormValue("text")
-	msg, err := h.chatService.SaveSupportMessageWithAttachment(chatID, user.ID, user.Role, text, fileURL, header.Filename, fileType, header.Size)
+	msg, err := h.chatService.SaveSupportMessageWithAttachment(r.Context(), chatID, user.ID, user.Role, text, fileURL, header.Filename, fileType, header.Size)
 	if err != nil {
 		writeChatError(w, err)
 		return
@@ -595,7 +595,7 @@ func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	list, err := h.chatService.GetAdminSupportChatList()
+	list, err := h.chatService.GetAdminSupportChatList(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -624,7 +624,7 @@ func (h *ChatHandler) BanSupportChatHandler(w http.ResponseWriter, r *http.Reque
 		req.Duration = "10m"
 	}
 
-	if err := h.chatService.BanSupportChat(chatID, req.Duration); err != nil {
+	if err := h.chatService.BanSupportChat(r.Context(), chatID, req.Duration); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -642,7 +642,7 @@ func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := h.chatService.UnbanSupportChat(chatID); err != nil {
+	if err := h.chatService.UnbanSupportChat(r.Context(), chatID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -659,7 +659,7 @@ func (h *ChatHandler) GetAdminSupportUnreadSummaryHandler(w http.ResponseWriter,
 		return
 	}
 
-	total, err := h.chatService.GetAdminSupportUnreadCount()
+	total, err := h.chatService.GetAdminSupportUnreadCount(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

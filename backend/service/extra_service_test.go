@@ -15,12 +15,12 @@ type mockReviewRepo struct {
 	reviews []*repository.OrderReview
 }
 
-func (m *mockReviewRepo) CreateReview(r *repository.OrderReview) error {
+func (m *mockReviewRepo) CreateReview(ctx context.Context, r *repository.OrderReview) error {
 	m.reviews = append(m.reviews, r)
 	return nil
 }
 
-func (m *mockReviewRepo) GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
+func (m *mockReviewRepo) GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
 	for _, rev := range m.reviews {
 		if rev.OrderID == orderID && rev.AuthorID == authorID {
 			return rev, nil
@@ -29,7 +29,7 @@ func (m *mockReviewRepo) GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID) 
 	return nil, nil
 }
 
-func (m *mockReviewRepo) GetReviewsForUser(targetID uuid.UUID, limit, offset int) ([]repository.OrderReview, error) {
+func (m *mockReviewRepo) GetReviewsForUser(ctx context.Context, targetID uuid.UUID, limit, offset int) ([]repository.OrderReview, error) {
 	var res []repository.OrderReview
 	for _, rev := range m.reviews {
 		if rev.TargetID == targetID {
@@ -39,11 +39,11 @@ func (m *mockReviewRepo) GetReviewsForUser(targetID uuid.UUID, limit, offset int
 	return res, nil
 }
 
-func (m *mockReviewRepo) UpdateUserRating(userID uuid.UUID, role string) error {
+func (m *mockReviewRepo) UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error {
 	return nil
 }
 
-func (m *mockReviewRepo) GetUserRating(userID uuid.UUID, role string) (*repository.UserRatingSummary, error) {
+func (m *mockReviewRepo) GetUserRating(ctx context.Context, userID uuid.UUID, role string) (*repository.UserRatingSummary, error) {
 	var sum int
 	var count int
 	for _, rev := range m.reviews {
@@ -80,13 +80,13 @@ func TestReviewService_CreateReview(t *testing.T) {
 	orderRepo.orders = append(orderRepo.orders, order)
 
 	// Invalid rating
-	_, err := srv.CreateReview(orderID, custID, CreateReviewDTO{Rating: 0})
+	_, err := srv.CreateReview(context.Background(), orderID, custID, CreateReviewDTO{Rating: 0})
 	if err == nil {
 		t.Error("expected error for invalid rating")
 	}
 
 	// Create review successfully
-	rev, err := srv.CreateReview(orderID, custID, CreateReviewDTO{
+	rev, err := srv.CreateReview(context.Background(), orderID, custID, CreateReviewDTO{
 		Rating:  5,
 		Tags:    []string{"fast"},
 		Comment: "Great job!",
@@ -99,32 +99,32 @@ func TestReviewService_CreateReview(t *testing.T) {
 	}
 
 	// Duplicate review attempt
-	_, err = srv.CreateReview(orderID, custID, CreateReviewDTO{Rating: 4})
+	_, err = srv.CreateReview(context.Background(), orderID, custID, CreateReviewDTO{Rating: 4})
 	if err == nil {
 		t.Error("expected error on duplicate review")
 	}
 
 	// Uninvolved user attempt
 	strangerID := uuid.New()
-	_, err = srv.CreateReview(orderID, strangerID, CreateReviewDTO{Rating: 5})
+	_, err = srv.CreateReview(context.Background(), orderID, strangerID, CreateReviewDTO{Rating: 5})
 	if err == nil {
 		t.Error("expected error for uninvolved user")
 	}
 
 	// Review by order and author
-	found, err := srv.GetReviewByOrderAndAuthor(orderID, custID)
+	found, err := srv.GetReviewByOrderAndAuthor(context.Background(), orderID, custID)
 	if err != nil || found == nil {
 		t.Errorf("expected to find review, got err: %v", err)
 	}
 
 	// Get reviews for user
-	revs, err := srv.GetReviewsForUser(execID, 10, 0)
+	revs, err := srv.GetReviewsForUser(context.Background(), execID, 10, 0)
 	if err != nil || len(revs) != 1 {
 		t.Errorf("expected 1 review for executor, got %d", len(revs))
 	}
 
 	// Get user rating
-	summary, err := srv.GetUserRating(execID, "EXECUTOR")
+	summary, err := srv.GetUserRating(context.Background(), execID, "EXECUTOR")
 	if err != nil || summary.Rating != 5.0 || summary.ReviewsCount != 1 {
 		t.Errorf("expected rating 5.0 count 1, got summary: %v", summary)
 	}
@@ -139,7 +139,7 @@ func TestReviewService_CreateReview(t *testing.T) {
 		Status:      repository.OrderStatusCompleted,
 		CompletedAt: &eightDaysAgo,
 	})
-	_, err = srv.CreateReview(oldOrderID, custID, CreateReviewDTO{Rating: 5})
+	_, err = srv.CreateReview(context.Background(), oldOrderID, custID, CreateReviewDTO{Rating: 5})
 	if err == nil {
 		t.Error("expected error when submitting review after 7 days window")
 	}
@@ -171,29 +171,29 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 		PlannedEndAt: time.Now().Add(time.Hour),
 	})
 
-	bid, err := srv.CreateBid(orderID, execID, money.FromRubles(350.00))
+	bid, err := srv.CreateBid(context.Background(), orderID, execID, money.FromRubles(350.00))
 	if err != nil {
 		t.Fatalf("unexpected error creating bid: %v", err)
 	}
 
 	// Only the order's own customer may list its bids.
-	bids, err := srv.GetBidsForOrder(orderID, custID)
+	bids, err := srv.GetBidsForOrder(context.Background(), orderID, custID)
 	if err != nil || len(bids) != 1 {
 		t.Fatalf("expected 1 bid for order, got %d (err %v)", len(bids), err)
 	}
 
-	if _, err := srv.GetBidsForOrder(orderID, uuid.New()); err == nil {
+	if _, err := srv.GetBidsForOrder(context.Background(), orderID, uuid.New()); err == nil {
 		t.Error("expected error when a stranger lists bids for someone else's order")
 	}
 
 	// Invalid bid price (0 or negative)
-	_, err = srv.CreateBid(orderID, execID, money.FromRubles(0))
+	_, err = srv.CreateBid(context.Background(), orderID, execID, money.FromRubles(0))
 	if err == nil {
 		t.Error("expected error for bid price 0")
 	}
 
 	// Accept bid
-	err = srv.AcceptBid(bid.ID, custID)
+	err = srv.AcceptBid(context.Background(), bid.ID, custID)
 	if err != nil {
 		t.Fatalf("unexpected error accepting bid: %v", err)
 	}
@@ -212,13 +212,13 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 	order, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
 
 	// Accept
-	err := srv.Accept(order.ID, execID)
+	err := srv.Accept(context.Background(), order.ID, execID)
 	if err != nil {
 		t.Fatalf("unexpected error accepting order: %v", err)
 	}
 
 	// ExecuteOrder
-	err = srv.ExecuteOrder(order.ID, execID)
+	err = srv.ExecuteOrder(context.Background(), order.ID, execID)
 	if err != nil {
 		t.Fatalf("unexpected error executing order: %v", err)
 	}
@@ -228,8 +228,8 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 
 	// RejectAssignedOrder (verify 50% penalty fine transaction)
 	order2, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
-	_ = srv.Accept(order2.ID, execID)
-	err = srv.RejectAssignedOrder(order2.ID, execID)
+	_ = srv.Accept(context.Background(), order2.ID, execID)
+	err = srv.RejectAssignedOrder(context.Background(), order2.ID, execID)
 	if err != nil {
 		t.Fatalf("unexpected error rejecting order: %v", err)
 	}
@@ -241,26 +241,28 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 	}
 
 	// ListAssigned & ListByCustomer & FindNearbyOrders
-	custOrders, _ := srv.ListByCustomer(custID)
+	custOrders, _ := srv.ListByCustomer(context.Background(), custID)
 	if len(custOrders) != 2 {
 		t.Errorf("expected 2 customer orders, got %d", len(custOrders))
 	}
-	_, _ = srv.FindNearbyOrders(55.75, 37.61, 5000)
-	_, _ = srv.GetAvailableConstructionOrders()
+	_, _ = srv.FindNearbyOrders(context.Background(), 55.75, 37.61, 5000)
+	_, _ = srv.GetAvailableConstructionOrders(context.Background())
 }
 
 type mockExecutorGeoRepo struct{}
 
-func (m *mockExecutorGeoRepo) UpdateExecutorLocation(executorID uuid.UUID, lat, lon float64, isManual bool) error {
+func (m *mockExecutorGeoRepo) UpdateExecutorLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64, isManual bool) error {
 	return nil
 }
-func (m *mockExecutorGeoRepo) GetExecutorLocation(executorID uuid.UUID) (*float64, *float64, *time.Time, error) {
+func (m *mockExecutorGeoRepo) GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (*float64, *float64, *time.Time, error) {
 	lat := 55.7558
 	lon := 37.6173
 	return &lat, &lon, nil, nil
 }
-func (m *mockExecutorGeoRepo) CreateGeoAlert(alert *repository.GeoAlert) error { return nil }
-func (m *mockExecutorGeoRepo) GetGeoAlerts(status string, limit, offset int) ([]repository.GeoAlert, error) {
+func (m *mockExecutorGeoRepo) CreateGeoAlert(ctx context.Context, alert *repository.GeoAlert) error {
+	return nil
+}
+func (m *mockExecutorGeoRepo) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {
 	return []repository.GeoAlert{}, nil
 }
 
@@ -272,23 +274,23 @@ func TestExecutorGeoService(t *testing.T) {
 	execID := uuid.New()
 
 	// Invalid coordinates
-	_, err := srv.SetLocation(execID, SetLocationRequest{Lat: 100.0, Lon: 200.0})
+	_, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 100.0, Lon: 200.0})
 	if err == nil {
 		t.Error("expected error for invalid coordinates")
 	}
 
 	// Valid set location
-	res, err := srv.SetLocation(execID, SetLocationRequest{Lat: 55.7558, Lon: 37.6173, IsManual: false})
+	res, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 55.7558, Lon: 37.6173, IsManual: false})
 	if err != nil || !res.Success {
 		t.Fatalf("unexpected error setting location: %v", err)
 	}
 
 	// Manual location shift (>2km) triggering cooldown
-	res2, err := srv.SetLocation(execID, SetLocationRequest{Lat: 55.8000, Lon: 37.7000, IsManual: true})
+	res2, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 55.8000, Lon: 37.7000, IsManual: true})
 	if err != nil || !res2.Success {
 		t.Fatalf("unexpected error setting manual location: %v", err)
 	}
-	res3, err := srv.SetLocation(execID, SetLocationRequest{Lat: 55.9000, Lon: 37.8000, IsManual: true})
+	res3, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 55.9000, Lon: 37.8000, IsManual: true})
 	if err != nil || res3.Success {
 		t.Error("expected cooldown rejection for manual shift within 10 min")
 	}
@@ -303,12 +305,12 @@ func TestExecutorGeoService(t *testing.T) {
 	})
 
 	// Coordinates now come from the executor's stored location, not the caller.
-	orders, err := srv.GetMapOrders(execID)
+	orders, err := srv.GetMapOrders(context.Background(), execID)
 	if err != nil || len(orders) != 1 {
 		t.Errorf("expected 1 map order, got %d", len(orders))
 	}
 
-	alerts, err := srv.GetGeoAlerts("NEW", 10, 0)
+	alerts, err := srv.GetGeoAlerts(context.Background(), "NEW", 10, 0)
 	if err != nil {
 		t.Errorf("unexpected error getting geo alerts: %v", err)
 	}
@@ -326,30 +328,30 @@ func TestAdminService_Extended(t *testing.T) {
 	userRepo.users[u.Phone] = u
 
 	adminID := uuid.New()
-	_ = srv.UpdateUserRole(u.ID, adminID, "EXECUTOR")
-	_ = srv.UpdateUserRole(u.ID, adminID, "INVALID_ROLE")
-	_ = srv.UpdateUserAddress(u.ID, "New Address")
-	_ = srv.UpdateUserAddress(u.ID, "")
-	_ = srv.TopUpUserBalance(adminID, u.ID, money.FromRubles(500.0))
-	_ = srv.TopUpUserBalance(u.ID, u.ID, 500.0)
-	_ = srv.TopUpUserBalance(adminID, u.ID, money.FromRubles(-50.0))
+	_ = srv.UpdateUserRole(context.Background(), u.ID, adminID, "EXECUTOR")
+	_ = srv.UpdateUserRole(context.Background(), u.ID, adminID, "INVALID_ROLE")
+	_ = srv.UpdateUserAddress(context.Background(), u.ID, "New Address")
+	_ = srv.UpdateUserAddress(context.Background(), u.ID, "")
+	_ = srv.TopUpUserBalance(context.Background(), adminID, u.ID, money.FromRubles(500.0))
+	_ = srv.TopUpUserBalance(context.Background(), u.ID, u.ID, 500.0)
+	_ = srv.TopUpUserBalance(context.Background(), adminID, u.ID, money.FromRubles(-50.0))
 
-	users, total, _ := srv.GetUsers(1, 10, "", "", "")
+	users, total, _ := srv.GetUsers(context.Background(), 1, 10, "", "", "")
 	if total != 0 || len(users) != 0 {
 		// mockAdminRepo returned empty
 	}
 
-	_, _ = srv.GetActiveShifts()
-	_, _ = srv.GetActiveOrders(0, 0)
-	_, _ = srv.GetCompletedOrders(0, 0)
+	_, _ = srv.GetActiveShifts(context.Background())
+	_, _ = srv.GetActiveOrders(context.Background(), 0, 0)
+	_, _ = srv.GetCompletedOrders(context.Background(), 0, 0)
 
-	prof, err := srv.GetProfile(u.ID)
+	prof, err := srv.GetProfile(context.Background(), u.ID)
 	if err != nil || prof["phone"] != "70000000000" {
 		t.Errorf("expected user profile with phone, got %v", prof)
 	}
 
-	_ = srv.RejectTopUpRequest(uuid.New(), adminID)
-	_, _ = srv.GetTransactions(0, 0)
+	_ = srv.RejectTopUpRequest(context.Background(), uuid.New(), adminID)
+	_, _ = srv.GetTransactions(context.Background(), 0, 0)
 }
 
 func TestChatService_Extended(t *testing.T) {
@@ -363,9 +365,9 @@ func TestChatService_Extended(t *testing.T) {
 	order := &repository.Order{ID: orderID, CustomerID: custID, ExecutorID: &execID, Status: repository.OrderStatusAssigned}
 	orderRepo.orders = append(orderRepo.orders, order)
 
-	_, _ = chatRepo.CreateChat(orderID)
+	_, _ = chatRepo.CreateChat(context.Background(), orderID)
 
-	msg, err := srv.SendMessage(orderID, custID, "Hello via REST")
+	msg, err := srv.SendMessage(context.Background(), orderID, custID, "Hello via REST")
 	if err != nil {
 		t.Fatalf("unexpected error sending message: %v", err)
 	}
@@ -373,7 +375,7 @@ func TestChatService_Extended(t *testing.T) {
 		t.Errorf("expected text 'Hello via REST', got '%s'", msg.Text)
 	}
 
-	attMsg, err := srv.SendMessageWithAttachment(orderID, custID, "Photo caption", "/uploads/test.jpg", "test.jpg", "image", 1024)
+	attMsg, err := srv.SendMessageWithAttachment(context.Background(), orderID, custID, "Photo caption", "/uploads/test.jpg", "test.jpg", "image", 1024)
 	if err != nil {
 		t.Fatalf("unexpected error sending attachment: %v", err)
 	}
@@ -381,9 +383,9 @@ func TestChatService_Extended(t *testing.T) {
 		t.Errorf("expected file_name 'test.jpg'")
 	}
 
-	_, _ = srv.MarkMessagesAsRead(orderID, execID)
-	_, _ = srv.GetUnreadOrderIDs(execID)
-	srv.BroadcastSystemMessage(orderID, map[string]string{"type": "system", "text": "hello"})
+	_, _ = srv.MarkMessagesAsRead(context.Background(), orderID, execID)
+	_, _ = srv.GetUnreadOrderIDs(context.Background(), execID)
+	srv.BroadcastSystemMessage(context.Background(), orderID, map[string]string{"type": "system", "text": "hello"})
 }
 
 func TestShiftService_Extended(t *testing.T) {
@@ -391,7 +393,7 @@ func TestShiftService_Extended(t *testing.T) {
 	srv := NewShiftService(shiftRepo, nil, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil, nil)
 
 	execID := uuid.New()
-	shift, err := srv.StartShift(execID, 3)
+	shift, err := srv.StartShift(context.Background(), execID, 3)
 	if err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
@@ -399,25 +401,25 @@ func TestShiftService_Extended(t *testing.T) {
 		t.Errorf("expected duration 3, got %d", shift.DurationHours)
 	}
 
-	_, _ = srv.GetExecutorFinancialHistory(execID)
-	_ = srv.EndShiftByID(shift.ID)
-	srv.AutoEndExpiredShifts()
+	_, _ = srv.GetExecutorFinancialHistory(context.Background(), execID)
+	_ = srv.EndShiftByID(context.Background(), shift.ID)
+	srv.AutoEndExpiredShifts(context.Background())
 
 	// Test Start, GetActive, GetCurrent, End
 	execID2 := uuid.New()
-	s2, err := srv.Start(execID2, 1)
+	s2, err := srv.Start(context.Background(), execID2, 1)
 	if err != nil {
 		t.Fatalf("unexpected error in Start: %v", err)
 	}
-	act, err := srv.GetActive(execID2)
+	act, err := srv.GetActive(context.Background(), execID2)
 	if err != nil || act.ID != s2.ID {
 		t.Errorf("expected active shift %s, got %v", s2.ID, act)
 	}
-	curr, err := srv.GetCurrent(execID2)
+	curr, err := srv.GetCurrent(context.Background(), execID2)
 	if err != nil || curr.ID != s2.ID {
 		t.Errorf("expected current shift %s, got %v", s2.ID, curr)
 	}
-	err = srv.End(execID2)
+	err = srv.End(context.Background(), execID2)
 	if err != nil {
 		t.Errorf("unexpected error in End: %v", err)
 	}
@@ -428,17 +430,17 @@ func TestAuthService_ParseJWT(t *testing.T) {
 	srv := NewAuthServiceWithSecret(userRepo, "test-secret", nil, nil)
 
 	u := &repository.User{ID: uuid.New(), Phone: "79001112233", Role: "CUSTOMER"}
-	tokenStr, err := srv.GenerateJWT(u)
+	tokenStr, err := srv.GenerateJWT(context.Background(), u)
 	if err != nil {
 		t.Fatalf("failed to generate JWT: %v", err)
 	}
 
-	claims, err := srv.ParseJWT(tokenStr)
+	claims, err := srv.ParseJWT(context.Background(), tokenStr)
 	if err != nil || claims.UserID != u.ID || claims.Phone != u.Phone {
 		t.Errorf("failed parsing JWT: %v, claims: %v", err, claims)
 	}
 
-	_, err = srv.ParseJWT("invalid.jwt.token")
+	_, err = srv.ParseJWT(context.Background(), "invalid.jwt.token")
 	if err == nil {
 		t.Error("expected error for invalid JWT")
 	}
@@ -464,22 +466,22 @@ func TestOrderService_Aliases(t *testing.T) {
 	}
 
 	// Confirm alias
-	_ = orderRepo.AssignOrder(order.ID, execID)
-	_ = orderRepo.Execute(nil, order.ID)
-	err = srv.Confirm(custID, order.ID)
+	_ = orderRepo.AssignOrder(context.Background(), order.ID, execID)
+	_ = orderRepo.Execute(context.Background(), nil, order.ID)
+	err = srv.Confirm(context.Background(), custID, order.ID)
 	if err != nil {
 		t.Errorf("unexpected error in Confirm alias: %v", err)
 	}
 
 	// Cancel alias
 	order2, _ := srv.Create(context.Background(), custID, CreateOrderRequest{ServiceVariantID: standardVariantID})
-	err = srv.Cancel(custID, order2.ID)
+	err = srv.Cancel(context.Background(), custID, order2.ID)
 	if err != nil {
 		t.Errorf("unexpected error in Cancel alias: %v", err)
 	}
 
 	// ListAssigned
-	_, _ = srv.ListAssigned(execID)
+	_, _ = srv.ListAssigned(context.Background(), execID)
 }
 
 func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
@@ -492,18 +494,18 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 	u := &repository.User{ID: uuid.New(), Phone: "79998887766"}
 	userRepo.users[u.Phone] = u
 
-	req, err := srv.CreateTopUpRequest(u.ID, money.FromRubles(300.0))
+	req, err := srv.CreateTopUpRequest(context.Background(), u.ID, money.FromRubles(300.0))
 	if err != nil || req.Amount != money.FromRubles(300) {
 		t.Fatalf("unexpected error creating top up request: %v", err)
 	}
 
-	reqs, err := srv.GetTopUpRequests(0, 0)
+	reqs, err := srv.GetTopUpRequests(context.Background(), 0, 0)
 	if err != nil || len(reqs) != 1 {
 		t.Errorf("expected 1 top up request, got %d", len(reqs))
 	}
 
-	_ = srv.UpdateSettings(map[string]string{"base_fee": "50"})
-	st, _ := srv.GetSettings()
+	_ = srv.UpdateSettings(context.Background(), map[string]string{"base_fee": "50"})
+	st, _ := srv.GetSettings(context.Background())
 	if st["base_fee"] != "50" {
 		t.Errorf("expected setting base_fee=50, got %v", st)
 	}
@@ -515,13 +517,13 @@ func TestMatchingService_MatchOrders(t *testing.T) {
 	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo(), nil)
 
 	// When no pending orders exist
-	err := srv.MatchOrders()
+	err := srv.MatchOrders(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error matching orders: %v", err)
 	}
 
 	// Test StartMatchingWorker
-	srv.StartMatchingWorker(10 * time.Millisecond)
+	srv.StartMatchingWorker(context.Background(), 10*time.Millisecond)
 	time.Sleep(25 * time.Millisecond)
 }
 

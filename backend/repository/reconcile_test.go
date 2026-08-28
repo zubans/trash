@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -170,7 +171,7 @@ func TestReconcileAgainstDatabase(t *testing.T) {
 	entry(drifted, TransactionTypeHold, money.FromRubles(300))
 	entry(drifted, TransactionTypePayment, money.FromRubles(300))
 
-	report, err := NewReconciliationRepository(db).Reconcile(money.FromRubles(0.01))
+	report, err := NewReconciliationRepository(db).Reconcile(context.Background(), money.FromRubles(0.01))
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

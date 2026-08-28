@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -30,11 +31,11 @@ type UserRatingSummary struct {
 }
 
 type ReviewRepository interface {
-	CreateReview(review *OrderReview) error
-	GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID) (*OrderReview, error)
-	GetReviewsForUser(targetID uuid.UUID, limit, offset int) ([]OrderReview, error)
-	UpdateUserRating(userID uuid.UUID, role string) error
-	GetUserRating(userID uuid.UUID, role string) (*UserRatingSummary, error)
+	CreateReview(ctx context.Context, review *OrderReview) error
+	GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*OrderReview, error)
+	GetReviewsForUser(ctx context.Context, targetID uuid.UUID, limit, offset int) ([]OrderReview, error)
+	UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error
+	GetUserRating(ctx context.Context, userID uuid.UUID, role string) (*UserRatingSummary, error)
 }
 
 type reviewRepository struct {
@@ -45,7 +46,7 @@ func NewReviewRepository(db *sql.DB) ReviewRepository {
 	return &reviewRepository{db: db}
 }
 
-func (r *reviewRepository) CreateReview(review *OrderReview) error {
+func (r *reviewRepository) CreateReview(ctx context.Context, review *OrderReview) error {
 	if review.ID == uuid.Nil {
 		review.ID = uuid.New()
 	}
@@ -66,11 +67,11 @@ func (r *reviewRepository) CreateReview(review *OrderReview) error {
 		INSERT INTO order_reviews (id, order_id, author_id, target_id, author_role, rating, tags, comment, photos, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err := r.db.Exec(query, review.ID, review.OrderID, review.AuthorID, review.TargetID, review.AuthorRole, review.Rating, tagsJSON, review.Comment, photosJSON, review.CreatedAt, review.UpdatedAt)
+	_, err := r.db.ExecContext(ctx, query, review.ID, review.OrderID, review.AuthorID, review.TargetID, review.AuthorRole, review.Rating, tagsJSON, review.Comment, photosJSON, review.CreatedAt, review.UpdatedAt)
 	return err
 }
 
-func (r *reviewRepository) GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID) (*OrderReview, error) {
+func (r *reviewRepository) GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*OrderReview, error) {
 	var rev OrderReview
 	var tagsJSON, photosJSON []byte
 	query := `
@@ -78,7 +79,7 @@ func (r *reviewRepository) GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID
 		FROM order_reviews
 		WHERE order_id = $1 AND author_id = $2
 	`
-	err := r.db.QueryRow(query, orderID, authorID).Scan(
+	err := r.db.QueryRowContext(ctx, query, orderID, authorID).Scan(
 		&rev.ID, &rev.OrderID, &rev.AuthorID, &rev.TargetID, &rev.AuthorRole, &rev.Rating, &tagsJSON, &rev.Comment, &photosJSON, &rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if err != nil {
@@ -92,7 +93,7 @@ func (r *reviewRepository) GetReviewByOrderAndAuthor(orderID, authorID uuid.UUID
 	return &rev, nil
 }
 
-func (r *reviewRepository) GetReviewsForUser(targetID uuid.UUID, limit, offset int) ([]OrderReview, error) {
+func (r *reviewRepository) GetReviewsForUser(ctx context.Context, targetID uuid.UUID, limit, offset int) ([]OrderReview, error) {
 	query := `
 		SELECT id, order_id, author_id, target_id, author_role, rating, tags, comment, photos, created_at, updated_at
 		FROM order_reviews
@@ -100,7 +101,7 @@ func (r *reviewRepository) GetReviewsForUser(targetID uuid.UUID, limit, offset i
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
-	rows, err := r.db.Query(query, targetID, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, targetID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -120,13 +121,13 @@ func (r *reviewRepository) GetReviewsForUser(targetID uuid.UUID, limit, offset i
 	return reviews, nil
 }
 
-func (r *reviewRepository) UpdateUserRating(userID uuid.UUID, role string) error {
+func (r *reviewRepository) UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error {
 	// Calculate Bayesian Average Rating
 	// m = 4.8, C = 5
 	// R = (C*m + SUM(r_i)) / (C + n)
 	var sumRating float64
 	var count int
-	err := r.db.QueryRow(`SELECT COALESCE(SUM(rating), 0), COUNT(id) FROM order_reviews WHERE target_id = $1`, userID).Scan(&sumRating, &count)
+	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(rating), 0), COUNT(id) FROM order_reviews WHERE target_id = $1`, userID).Scan(&sumRating, &count)
 	if err != nil {
 		return err
 	}
@@ -137,20 +138,20 @@ func (r *reviewRepository) UpdateUserRating(userID uuid.UUID, role string) error
 
 	if role == "CUSTOMER" {
 		query := `UPDATE customer_profiles SET rating = $1, reviews_count = $2 WHERE user_id = $3`
-		_, err = r.db.Exec(query, bayesianRating, count, userID)
+		_, err = r.db.ExecContext(ctx, query, bayesianRating, count, userID)
 	} else {
 		query := `UPDATE executor_profiles SET rating = $1, reviews_count = $2 WHERE user_id = $3`
-		_, err = r.db.Exec(query, bayesianRating, count, userID)
+		_, err = r.db.ExecContext(ctx, query, bayesianRating, count, userID)
 	}
 	return err
 }
 
-func (r *reviewRepository) GetUserRating(userID uuid.UUID, role string) (*UserRatingSummary, error) {
+func (r *reviewRepository) GetUserRating(ctx context.Context, userID uuid.UUID, role string) (*UserRatingSummary, error) {
 	var summary UserRatingSummary
 	summary.UserID = userID
 
 	if role == "CUSTOMER" {
-		err := r.db.QueryRow(`SELECT rating, reviews_count FROM customer_profiles WHERE user_id = $1`, userID).Scan(&summary.Rating, &summary.ReviewsCount)
+		err := r.db.QueryRowContext(ctx, `SELECT rating, reviews_count FROM customer_profiles WHERE user_id = $1`, userID).Scan(&summary.Rating, &summary.ReviewsCount)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return &UserRatingSummary{UserID: userID, Rating: 5.0, ReviewsCount: 0}, nil
@@ -158,7 +159,7 @@ func (r *reviewRepository) GetUserRating(userID uuid.UUID, role string) (*UserRa
 			return nil, err
 		}
 	} else {
-		err := r.db.QueryRow(`SELECT rating, reviews_count FROM executor_profiles WHERE user_id = $1`, userID).Scan(&summary.Rating, &summary.ReviewsCount)
+		err := r.db.QueryRowContext(ctx, `SELECT rating, reviews_count FROM executor_profiles WHERE user_id = $1`, userID).Scan(&summary.Rating, &summary.ReviewsCount)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return &UserRatingSummary{UserID: userID, Rating: 5.0, ReviewsCount: 0}, nil

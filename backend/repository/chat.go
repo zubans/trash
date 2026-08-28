@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"time"
@@ -63,34 +64,34 @@ type SupportChatListItem struct {
 
 // ChatRepository defines database operations for chats and messages.
 type ChatRepository interface {
-	GetChatByOrderID(orderID uuid.UUID) (*Chat, error)
-	CreateChat(orderID uuid.UUID) (*Chat, error)
-	SaveMessage(chatID, senderID uuid.UUID, text string) (*Message, error)
-	SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
-	GetMessages(chatID uuid.UUID) ([]*Message, error)
-	DeactivateChat(chatID uuid.UUID) error
-	MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
-	MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
-	GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error)
-	DeleteMessage(messageID, senderID uuid.UUID) error
-	UpdateMessage(messageID, senderID uuid.UUID, newText string) (*Message, error)
+	GetChatByOrderID(ctx context.Context, orderID uuid.UUID) (*Chat, error)
+	CreateChat(ctx context.Context, orderID uuid.UUID) (*Chat, error)
+	SaveMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error)
+	SaveMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
+	GetMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error)
+	DeactivateChat(ctx context.Context, chatID uuid.UUID) error
+	MarkMessagesAsDelivered(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
+	MarkMessagesAsRead(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
+	GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	DeleteMessage(ctx context.Context, messageID, senderID uuid.UUID) error
+	UpdateMessage(ctx context.Context, messageID, senderID uuid.UUID, newText string) (*Message, error)
 
-	GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error)
+	GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*SupportChat, error)
 	// SupportChatOwner returns the user a support chat belongs to, so callers
 	// can verify ownership before reading or writing messages.
-	SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error)
+	SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid.UUID, error)
 	// CanAccessAttachment reports whether a user is a participant of the chat
 	// that a stored file belongs to.
-	CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, error)
-	GetSupportMessages(chatID uuid.UUID) ([]*Message, error)
-	SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*Message, error)
-	SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
-	GetAdminSupportChatList() ([]*SupportChatListItem, error)
-	MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error
-	BanSupportChat(chatID uuid.UUID, duration string) error
-	UnbanSupportChat(chatID uuid.UUID) error
-	IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error)
-	GetAdminSupportUnreadCount() (int, error)
+	CanAccessAttachment(ctx context.Context, userID uuid.UUID, fileURL string) (bool, error)
+	GetSupportMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error)
+	SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error)
+	SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
+	GetAdminSupportChatList(ctx context.Context) ([]*SupportChatListItem, error)
+	MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error
+	BanSupportChat(ctx context.Context, chatID uuid.UUID, duration string) error
+	UnbanSupportChat(ctx context.Context, chatID uuid.UUID) error
+	IsSupportChatBanned(ctx context.Context, chatID uuid.UUID) (bool, *time.Time, error)
+	GetAdminSupportUnreadCount(ctx context.Context) (int, error)
 }
 
 type chatRepo struct {
@@ -103,9 +104,9 @@ func NewChatRepository(db *sql.DB) ChatRepository {
 	return &chatRepo{db: db}
 }
 
-func (r *chatRepo) GetChatByOrderID(orderID uuid.UUID) (*Chat, error) {
+func (r *chatRepo) GetChatByOrderID(ctx context.Context, orderID uuid.UUID) (*Chat, error) {
 	var c Chat
-	err := r.db.QueryRow(`SELECT id, order_id, is_active FROM chats WHERE order_id = $1`, orderID).Scan(&c.ID, &c.OrderID, &c.IsActive)
+	err := r.db.QueryRowContext(ctx, `SELECT id, order_id, is_active FROM chats WHERE order_id = $1`, orderID).Scan(&c.ID, &c.OrderID, &c.IsActive)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -115,9 +116,9 @@ func (r *chatRepo) GetChatByOrderID(orderID uuid.UUID) (*Chat, error) {
 	return &c, nil
 }
 
-func (r *chatRepo) CreateChat(orderID uuid.UUID) (*Chat, error) {
+func (r *chatRepo) CreateChat(ctx context.Context, orderID uuid.UUID) (*Chat, error) {
 	var c Chat
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO chats (order_id, is_active)
 		VALUES ($1, TRUE)
 		ON CONFLICT (order_id) DO UPDATE SET is_active = TRUE
@@ -128,9 +129,9 @@ func (r *chatRepo) CreateChat(orderID uuid.UUID) (*Chat, error) {
 	return &c, nil
 }
 
-func (r *chatRepo) SaveMessage(chatID, senderID uuid.UUID, text string) (*Message, error) {
+func (r *chatRepo) SaveMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error) {
 	var m Message
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO messages (chat_id, sender_id, text, status, created_at)
 		VALUES ($1, $2, $3, 'sent', now())
 		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
@@ -141,9 +142,9 @@ func (r *chatRepo) SaveMessage(chatID, senderID uuid.UUID, text string) (*Messag
 	return &m, nil
 }
 
-func (r *chatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error) {
+func (r *chatRepo) SaveMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error) {
 	var m Message
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO messages (chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at)
 		VALUES ($1, $2, $3, 'sent', $4, $5, $6, $7, now())
 		RETURNING id, chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at`,
@@ -155,13 +156,13 @@ func (r *chatRepo) SaveMessageWithAttachment(chatID, senderID uuid.UUID, text, f
 	return &m, nil
 }
 
-func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
+func (r *chatRepo) GetMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error) {
 	query := `
 		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
 		FROM messages
 		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
 		ORDER BY created_at ASC`
-	rows, err := r.db.Query(query, chatID)
+	rows, err := r.db.QueryContext(ctx, query, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -179,18 +180,18 @@ func (r *chatRepo) GetMessages(chatID uuid.UUID) ([]*Message, error) {
 	return messages, nil
 }
 
-func (r *chatRepo) DeactivateChat(chatID uuid.UUID) error {
-	_, err := r.db.Exec(`UPDATE chats SET is_active = FALSE WHERE id = $1`, chatID)
+func (r *chatRepo) DeactivateChat(ctx context.Context, chatID uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE chats SET is_active = FALSE WHERE id = $1`, chatID)
 	return err
 }
 
-func (r *chatRepo) MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
+func (r *chatRepo) MarkMessagesAsDelivered(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
 	query := `
 		UPDATE messages
 		SET status = 'delivered'
 		WHERE chat_id = $1 AND sender_id != $2 AND status = 'sent'
 		RETURNING id`
-	rows, err := r.db.Query(query, chatID, recipientID)
+	rows, err := r.db.QueryContext(ctx, query, chatID, recipientID)
 	if err != nil {
 		return nil, err
 	}
@@ -206,13 +207,13 @@ func (r *chatRepo) MarkMessagesAsDelivered(chatID, recipientID uuid.UUID) ([]uui
 	return updatedIDs, nil
 }
 
-func (r *chatRepo) MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
+func (r *chatRepo) MarkMessagesAsRead(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
 	query := `
 		UPDATE messages
 		SET status = 'read', read_at = now()
 		WHERE chat_id = $1 AND sender_id != $2 AND status IN ('sent', 'delivered')
 		RETURNING id`
-	rows, err := r.db.Query(query, chatID, recipientID)
+	rows, err := r.db.QueryContext(ctx, query, chatID, recipientID)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +229,7 @@ func (r *chatRepo) MarkMessagesAsRead(chatID, recipientID uuid.UUID) ([]uuid.UUI
 	return updatedIDs, nil
 }
 
-func (r *chatRepo) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
+func (r *chatRepo) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
 	query := `
 		SELECT DISTINCT c.order_id
 		FROM messages m
@@ -237,7 +238,7 @@ func (r *chatRepo) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
 		WHERE m.sender_id != $1
 		  AND m.status != 'read'
 		  AND (o.customer_id = $1 OR o.executor_id = $1)`
-	rows, err := r.db.Query(query, userID)
+	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -253,8 +254,8 @@ func (r *chatRepo) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
 	return orderIDs, nil
 }
 
-func (r *chatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
-	res, err := r.db.Exec(`UPDATE messages SET is_deleted = TRUE WHERE id = $1 AND sender_id = $2`, messageID, senderID)
+func (r *chatRepo) DeleteMessage(ctx context.Context, messageID, senderID uuid.UUID) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE messages SET is_deleted = TRUE WHERE id = $1 AND sender_id = $2`, messageID, senderID)
 	if err != nil {
 		return err
 	}
@@ -268,9 +269,9 @@ func (r *chatRepo) DeleteMessage(messageID, senderID uuid.UUID) error {
 	return nil
 }
 
-func (r *chatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) (*Message, error) {
+func (r *chatRepo) UpdateMessage(ctx context.Context, messageID, senderID uuid.UUID, newText string) (*Message, error) {
 	var m Message
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		UPDATE messages
 		SET text = $3, updated_at = now()
 		WHERE id = $1 AND sender_id = $2 AND COALESCE(is_deleted, false) = false
@@ -283,11 +284,11 @@ func (r *chatRepo) UpdateMessage(messageID, senderID uuid.UUID, newText string) 
 	return &m, nil
 }
 
-func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error) {
+func (r *chatRepo) GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*SupportChat, error) {
 	var sc SupportChat
 	var bannedUntil sql.NullTime
 	var lastMsg sql.NullString
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		WITH sc_row AS (
 			INSERT INTO support_chats (user_id, updated_at)
 			VALUES ($1, now())
@@ -308,7 +309,7 @@ func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error
 	if bannedUntil.Valid {
 		if time.Now().After(bannedUntil.Time) {
 			sc.IsBanned = false
-			_, _ = r.db.Exec(`UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, sc.ID)
+			_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, sc.ID)
 		} else {
 			sc.BannedUntil = &bannedUntil.Time
 		}
@@ -319,9 +320,9 @@ func (r *chatRepo) GetOrCreateSupportChat(userID uuid.UUID) (*SupportChat, error
 	return &sc, nil
 }
 
-func (r *chatRepo) SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error) {
+func (r *chatRepo) SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid.UUID, error) {
 	var userID uuid.UUID
-	err := r.db.QueryRow(`SELECT user_id FROM support_chats WHERE id = $1`, chatID).Scan(&userID)
+	err := r.db.QueryRowContext(ctx, `SELECT user_id FROM support_chats WHERE id = $1`, chatID).Scan(&userID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -331,9 +332,9 @@ func (r *chatRepo) SupportChatOwner(chatID uuid.UUID) (uuid.UUID, error) {
 // CanAccessAttachment checks both attachment sources: order chats (customer and
 // assigned executor) and support chats (the owning user). Admin access is
 // handled by the caller.
-func (r *chatRepo) CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, error) {
+func (r *chatRepo) CanAccessAttachment(ctx context.Context, userID uuid.UUID, fileURL string) (bool, error) {
 	var allowed bool
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		SELECT EXISTS(
 			SELECT 1
 			FROM messages m
@@ -353,13 +354,13 @@ func (r *chatRepo) CanAccessAttachment(userID uuid.UUID, fileURL string) (bool, 
 	return allowed, nil
 }
 
-func (r *chatRepo) GetSupportMessages(chatID uuid.UUID) ([]*Message, error) {
+func (r *chatRepo) GetSupportMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error) {
 	query := `
 		SELECT id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
 		FROM support_messages
 		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
 		ORDER BY created_at ASC`
-	rows, err := r.db.Query(query, chatID)
+	rows, err := r.db.QueryContext(ctx, query, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -377,9 +378,9 @@ func (r *chatRepo) GetSupportMessages(chatID uuid.UUID) ([]*Message, error) {
 	return messages, nil
 }
 
-func (r *chatRepo) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (*Message, error) {
+func (r *chatRepo) SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error) {
 	var m Message
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO support_messages (chat_id, sender_id, text, status, created_at)
 		VALUES ($1, $2, $3, 'sent', now())
 		RETURNING id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, created_at`,
@@ -387,13 +388,13 @@ func (r *chatRepo) SaveSupportMessage(chatID, senderID uuid.UUID, text string) (
 	if err != nil {
 		return nil, err
 	}
-	_, _ = r.db.Exec(`UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
+	_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
 	return &m, nil
 }
 
-func (r *chatRepo) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error) {
+func (r *chatRepo) SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error) {
 	var m Message
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO support_messages (chat_id, sender_id, text, status, file_url, file_name, file_type, file_size, created_at)
 		VALUES ($1, $2, $3, 'sent', $4, $5, $6, $7, now())
 		RETURNING id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, created_at`,
@@ -402,11 +403,11 @@ func (r *chatRepo) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	_, _ = r.db.Exec(`UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
+	_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
 	return &m, nil
 }
 
-func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
+func (r *chatRepo) GetAdminSupportChatList(ctx context.Context) ([]*SupportChatListItem, error) {
 	query := `
 		SELECT 
 			sc.id,
@@ -427,7 +428,7 @@ func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
 		GROUP BY sc.id, sc.user_id, u.phone, u.first_name, u.last_name, u.patronymic, u.role, sc.is_banned, sc.banned_until
 		ORDER BY COALESCE((SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1), sc.created_at) DESC
 	`
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -470,12 +471,12 @@ func (r *chatRepo) GetAdminSupportChatList() ([]*SupportChatListItem, error) {
 	return items, nil
 }
 
-func (r *chatRepo) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID) error {
-	_, err := r.db.Exec(`UPDATE support_messages SET read_at = now(), status = 'read' WHERE chat_id = $1 AND sender_id != $2 AND read_at IS NULL`, chatID, readerID)
+func (r *chatRepo) MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE support_messages SET read_at = now(), status = 'read' WHERE chat_id = $1 AND sender_id != $2 AND read_at IS NULL`, chatID, readerID)
 	return err
 }
 
-func (r *chatRepo) BanSupportChat(chatID uuid.UUID, duration string) error {
+func (r *chatRepo) BanSupportChat(ctx context.Context, chatID uuid.UUID, duration string) error {
 	var until time.Time
 	now := time.Now()
 	switch duration {
@@ -488,19 +489,19 @@ func (r *chatRepo) BanSupportChat(chatID uuid.UUID, duration string) error {
 	default:
 		until = now.Add(10 * time.Minute)
 	}
-	_, err := r.db.Exec(`UPDATE support_chats SET is_banned = true, banned_until = $2, updated_at = now() WHERE id = $1`, chatID, until)
+	_, err := r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = true, banned_until = $2, updated_at = now() WHERE id = $1`, chatID, until)
 	return err
 }
 
-func (r *chatRepo) UnbanSupportChat(chatID uuid.UUID) error {
-	_, err := r.db.Exec(`UPDATE support_chats SET is_banned = false, banned_until = NULL, updated_at = now() WHERE id = $1`, chatID)
+func (r *chatRepo) UnbanSupportChat(ctx context.Context, chatID uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL, updated_at = now() WHERE id = $1`, chatID)
 	return err
 }
 
-func (r *chatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
+func (r *chatRepo) IsSupportChatBanned(ctx context.Context, chatID uuid.UUID) (bool, *time.Time, error) {
 	var isBanned bool
 	var bannedUntil sql.NullTime
-	err := r.db.QueryRow(`SELECT COALESCE(is_banned, false), banned_until FROM support_chats WHERE id = $1`, chatID).Scan(&isBanned, &bannedUntil)
+	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(is_banned, false), banned_until FROM support_chats WHERE id = $1`, chatID).Scan(&isBanned, &bannedUntil)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil, nil
@@ -509,7 +510,7 @@ func (r *chatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, erro
 	}
 	if isBanned && bannedUntil.Valid {
 		if time.Now().After(bannedUntil.Time) {
-			_, _ = r.db.Exec(`UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, chatID)
+			_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, chatID)
 			return false, nil, nil
 		}
 		return true, &bannedUntil.Time, nil
@@ -517,9 +518,9 @@ func (r *chatRepo) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, erro
 	return isBanned, nil, nil
 }
 
-func (r *chatRepo) GetAdminSupportUnreadCount() (int, error) {
+func (r *chatRepo) GetAdminSupportUnreadCount(ctx context.Context) (int, error) {
 	var total int
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(sm.id)
 		FROM support_messages sm
 		JOIN support_chats sc ON sc.id = sm.chat_id

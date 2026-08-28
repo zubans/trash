@@ -49,7 +49,7 @@ func (w *GeocodeBackfillWorker) Run() error {
 		return nil
 	}
 
-	orders, err := w.orderRepo.GetOrdersMissingCoordinates(w.batchSize)
+	orders, err := w.orderRepo.GetOrdersMissingCoordinates(context.Background(), w.batchSize)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (w *GeocodeBackfillWorker) Run() error {
 			continue
 		}
 
-		if err := w.orderRepo.SetPickupCoordinates(o.ID, geo.Lat, geo.Lon); err != nil {
+		if err := w.orderRepo.SetPickupCoordinates(context.Background(), o.ID, geo.Lat, geo.Lon); err != nil {
 			log.Printf("[GeocodeBackfillWorker] failed to persist coordinates for order %s: %v", o.ID, err)
 		}
 	}

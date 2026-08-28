@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -17,7 +18,7 @@ type mockShiftRepo struct {
 	logs   []bool
 }
 
-func (m *mockShiftRepo) StartShift(executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
+func (m *mockShiftRepo) StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
 	s := &repository.Shift{
 		ID:            uuid.New(),
 		ExecutorID:    executorID,
@@ -30,7 +31,7 @@ func (m *mockShiftRepo) StartShift(executorID uuid.UUID, durationHours int) (*re
 	return s, nil
 }
 
-func (m *mockShiftRepo) GetActiveShift(executorID uuid.UUID) (*repository.Shift, error) {
+func (m *mockShiftRepo) GetActiveShift(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
 	for _, s := range m.shifts {
 		if s.ExecutorID == executorID && s.Status == "ACTIVE" {
 			return s, nil
@@ -39,7 +40,7 @@ func (m *mockShiftRepo) GetActiveShift(executorID uuid.UUID) (*repository.Shift,
 	return nil, nil
 }
 
-func (m *mockShiftRepo) UpdateShiftStatus(shiftID uuid.UUID, status string) error {
+func (m *mockShiftRepo) UpdateShiftStatus(ctx context.Context, shiftID uuid.UUID, status string) error {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {
 			s.Status = repository.ShiftStatus(status)
@@ -49,12 +50,12 @@ func (m *mockShiftRepo) UpdateShiftStatus(shiftID uuid.UUID, status string) erro
 	return errors.New("not found")
 }
 
-func (m *mockShiftRepo) AddGPSLog(shiftID uuid.UUID, lat, lon float64, isInside bool) error {
+func (m *mockShiftRepo) AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error {
 	m.logs = append(m.logs, isInside)
 	return nil
 }
 
-func (m *mockShiftRepo) GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, error) {
+func (m *mockShiftRepo) GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error) {
 	if len(m.logs) == 0 {
 		return []bool{}, nil
 	}
@@ -68,29 +69,29 @@ func (m *mockShiftRepo) GetLastGPSLogs(shiftID uuid.UUID, count int) ([]bool, er
 	return result, nil
 }
 
-func (m *mockShiftRepo) GetGeozoneByID(id int) (*repository.Geozone, error) {
+func (m *mockShiftRepo) GetGeozoneByID(ctx context.Context, id int) (*repository.Geozone, error) {
 	return nil, nil
 }
 
-func (m *mockShiftRepo) GetActiveShifts() ([]*repository.Shift, error) {
+func (m *mockShiftRepo) GetActiveShifts(ctx context.Context) ([]*repository.Shift, error) {
 	return m.shifts, nil
 }
 
 // Methods required by the ShiftRepository interface.
-func (m *mockShiftRepo) Create(shift *repository.Shift) error {
+func (m *mockShiftRepo) Create(ctx context.Context, shift *repository.Shift) error {
 	m.shifts = append(m.shifts, shift)
 	return nil
 }
 
-func (m *mockShiftRepo) FindActiveByExecutor(executorID uuid.UUID) (*repository.Shift, error) {
-	return m.GetActiveShift(executorID)
+func (m *mockShiftRepo) FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
+	return m.GetActiveShift(context.Background(), executorID)
 }
 
-func (m *mockShiftRepo) End(shiftID uuid.UUID) error {
-	return m.UpdateShiftStatus(shiftID, string(repository.ShiftStatusCompleted))
+func (m *mockShiftRepo) End(ctx context.Context, shiftID uuid.UUID) error {
+	return m.UpdateShiftStatus(context.Background(), shiftID, string(repository.ShiftStatusCompleted))
 }
 
-func (m *mockShiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error {
+func (m *mockShiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {
 			s.Status = repository.ShiftStatusPenalized
@@ -101,7 +102,7 @@ func (m *mockShiftRepo) Penalize(shiftID uuid.UUID, fine money.Amount) error {
 	return errors.New("not found")
 }
 
-func (m *mockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error {
+func (m *mockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {
 			now := time.Now()
@@ -114,7 +115,7 @@ func (m *mockShiftRepo) EarlyEnd(shiftID uuid.UUID, fine money.Amount) error {
 	return errors.New("not found")
 }
 
-func (m *mockShiftRepo) GetShiftByID(shiftID uuid.UUID) (*repository.Shift, error) {
+func (m *mockShiftRepo) GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*repository.Shift, error) {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {
 			return s, nil
@@ -123,7 +124,7 @@ func (m *mockShiftRepo) GetShiftByID(shiftID uuid.UUID) (*repository.Shift, erro
 	return nil, errors.New("not found")
 }
 
-func (m *mockShiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*repository.Shift, error) {
+func (m *mockShiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
 	var last *repository.Shift
 	for _, s := range m.shifts {
 		if s.ExecutorID == executorID {
@@ -138,7 +139,7 @@ func (m *mockShiftRepo) GetLastShiftByExecutor(executorID uuid.UUID) (*repositor
 	return last, nil
 }
 
-func (m *mockShiftRepo) SaveGPSLog(log *repository.GPSLog) error {
+func (m *mockShiftRepo) SaveGPSLog(ctx context.Context, log *repository.GPSLog) error {
 	return nil
 }
 
@@ -149,7 +150,7 @@ func TestShiftService_StartShift(t *testing.T) {
 	executorID := uuid.New()
 
 	// Case 1: Valid shift (1 hour)
-	s, err := srv.StartShift(executorID, 1)
+	s, err := srv.StartShift(context.Background(), executorID, 1)
 	if err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestShiftService_StartShift(t *testing.T) {
 	}
 
 	// Case 2: Invalid duration (2 hours)
-	_, err = srv.StartShift(executorID, 2)
+	_, err = srv.StartShift(context.Background(), executorID, 2)
 	if err == nil {
 		t.Error("expected error starting shift with duration 2")
 	}
@@ -201,11 +202,11 @@ type mockGeozoneRepo struct {
 	geozone *repository.Geozone
 }
 
-func (m *mockGeozoneRepo) FindByID(id int) (*repository.Geozone, error) {
+func (m *mockGeozoneRepo) FindByID(ctx context.Context, id int) (*repository.Geozone, error) {
 	return m.geozone, nil
 }
 
-func (m *mockGeozoneRepo) FindByExecutor(userID uuid.UUID) (*repository.Geozone, error) {
+func (m *mockGeozoneRepo) FindByExecutor(ctx context.Context, userID uuid.UUID) (*repository.Geozone, error) {
 	return m.geozone, nil
 }
 
@@ -214,32 +215,32 @@ type mockShiftTransactionRepo struct {
 	txs []*repository.Transaction
 }
 
-func (m *mockShiftTransactionRepo) GetBalance(userID uuid.UUID) (money.Amount, error) {
+func (m *mockShiftTransactionRepo) GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error) {
 	return 0, nil
 }
 
-func (m *mockShiftTransactionRepo) Debit(tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
-	return m.UpdateBalance(tx, userID, -amount)
+func (m *mockShiftTransactionRepo) Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
+	return m.UpdateBalance(context.Background(), tx, userID, -amount)
 }
 
-func (m *mockShiftTransactionRepo) UpdateBalance(tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
+func (m *mockShiftTransactionRepo) UpdateBalance(ctx context.Context, tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
 	return nil
 }
 
-func (m *mockShiftTransactionRepo) CreateTransaction(tx *sql.Tx, t *repository.Transaction) error {
+func (m *mockShiftTransactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *repository.Transaction) error {
 	m.txs = append(m.txs, t)
 	return nil
 }
 
-func (m *mockShiftTransactionRepo) RunInTx(fn func(*sql.Tx) error) error {
+func (m *mockShiftTransactionRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return fn(nil)
 }
 
-func (m *mockShiftTransactionRepo) GetTransactionsByUserID(userID uuid.UUID) ([]*repository.Transaction, error) {
+func (m *mockShiftTransactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*repository.Transaction, error) {
 	return nil, nil
 }
 
-func (m *mockShiftTransactionRepo) HasTip(q repository.Querier, orderID uuid.UUID) (bool, error) {
+func (m *mockShiftTransactionRepo) HasTip(ctx context.Context, q repository.Querier, orderID uuid.UUID) (bool, error) {
 	return false, nil
 }
 
@@ -260,14 +261,14 @@ func TestShiftService_RecordLocation_Penalty(t *testing.T) {
 	srv := NewShiftService(repo, geoRepo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil, nil, nil)
 
 	executorID := uuid.New()
-	shift, err := srv.StartShift(executorID, 1)
+	shift, err := srv.StartShift(context.Background(), executorID, 1)
 	if err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
 
 	// Three consecutive coordinates far outside the 100m geozone.
 	for i := 0; i < 3; i++ {
-		if err := srv.RecordLocation(executorID, 55.80, 37.70); err != nil {
+		if err := srv.RecordLocation(context.Background(), executorID, 55.80, 37.70); err != nil {
 			t.Fatalf("unexpected error recording location: %v", err)
 		}
 	}
@@ -291,12 +292,12 @@ func TestShiftService_EarlyEnd(t *testing.T) {
 	srv := NewShiftService(repo, nil, NewLedger(txRepo, newMockAccounts()), nil, nil, nil, nil)
 
 	executorID := uuid.New()
-	shift, err := srv.StartShift(executorID, 3)
+	shift, err := srv.StartShift(context.Background(), executorID, 3)
 	if err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
 
-	ended, err := srv.EarlyEnd(executorID)
+	ended, err := srv.EarlyEnd(context.Background(), executorID)
 	if err != nil {
 		t.Fatalf("unexpected error ending shift early: %v", err)
 	}
@@ -324,7 +325,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	customerID := uuid.New()
 	orderID := uuid.New()
 
-	shift, err := srv.StartShift(executorID, 3)
+	shift, err := srv.StartShift(context.Background(), executorID, 3)
 	if err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
@@ -337,7 +338,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 		HoldAmount: money.FromRubles(300),
 	})
 
-	ended, err := srv.EarlyEnd(executorID)
+	ended, err := srv.EarlyEnd(context.Background(), executorID)
 	if err != nil {
 		t.Fatalf("unexpected error ending shift early with order: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	}
 
 	// Assigned order should be unassigned (SEARCHING).
-	updatedOrder, err := orderRepo.GetOrderByID(orderID)
+	updatedOrder, err := orderRepo.GetOrderByID(context.Background(), orderID)
 	if err != nil {
 		t.Fatalf("unexpected error fetching order: %v", err)
 	}

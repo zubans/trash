@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -66,7 +67,7 @@ func main() {
 	}
 
 	// Skip registration if this version is already in the database.
-	if existing, err := releaseRepo.GetReleaseByVersionCode(*platform, resolvedVersionCode); err != nil {
+	if existing, err := releaseRepo.GetReleaseByVersionCode(context.Background(), *platform, resolvedVersionCode); err != nil {
 		log.Fatalf("failed to check existing release: %v", err)
 	} else if existing != nil {
 		fmt.Printf("Release already registered: platform=%s version=%s code=%d\n",
@@ -110,11 +111,11 @@ func main() {
 		IsActive:     true,
 	}
 
-	if err := releaseRepo.CreateRelease(release); err != nil {
+	if err := releaseRepo.CreateRelease(context.Background(), release); err != nil {
 		log.Fatalf("failed to create release record: %v", err)
 	}
 
-	if err := releaseRepo.DeactivateOldReleases(*platform, release.ID); err != nil {
+	if err := releaseRepo.DeactivateOldReleases(context.Background(), *platform, release.ID); err != nil {
 		log.Printf("warning: failed to deactivate old releases: %v", err)
 	}
 

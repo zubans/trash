@@ -155,7 +155,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 	}
 	normalizedAddress := parsedAddress.Compose()
 
-	existingPhone, err := s.repo.FindByPhone(phone)
+	existingPhone, err := s.repo.FindByPhone(ctx, phone)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		return nil, errors.New("user with this phone already exists")
 	}
 
-	existingEmail, err := s.repo.FindByEmail(email)
+	existingEmail, err := s.repo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -193,11 +193,11 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		Balance:                0,
 		Status:                 "ACTIVE",
 	}
-	if err := s.repo.Create(user); err != nil {
+	if err := s.repo.Create(ctx, user); err != nil {
 		return nil, err
 	}
 
-	created, err := s.repo.FindByPhone(phone)
+	created, err := s.repo.FindByPhone(ctx, phone)
 	if err != nil {
 		return nil, err
 	}
@@ -218,13 +218,13 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		}
 	}
 
-	if err := s.repo.CreateCustomerProfile(created.ID, normalizedAddress, lastGeo); err != nil {
+	if err := s.repo.CreateCustomerProfile(ctx, created.ID, normalizedAddress, lastGeo); err != nil {
 		return nil, err
 	}
 
 	// Set initial executor location
 	if role == "EXECUTOR" && lastGeo != "" {
-		if err := s.repo.UpdateLastGeo(created.ID, lastGeo); err != nil {
+		if err := s.repo.UpdateLastGeo(ctx, created.ID, lastGeo); err != nil {
 			log.Printf("[AuthService] failed to store initial geo for %s: %v", created.ID, err)
 		}
 	}
@@ -237,7 +237,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 }
 
 // Authenticate verifies phone/password or email/password and returns the matching user.
-func (s *AuthService) Authenticate(phoneOrEmail, password string) (*repository.User, error) {
+func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password string) (*repository.User, error) {
 	if phoneOrEmail == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
@@ -247,11 +247,11 @@ func (s *AuthService) Authenticate(phoneOrEmail, password string) (*repository.U
 	var err error
 
 	if strings.Contains(input, "@") {
-		user, err = s.repo.FindByEmail(input)
+		user, err = s.repo.FindByEmail(ctx, input)
 	} else {
-		user, err = s.repo.FindByPhone(normalizePhone(input))
+		user, err = s.repo.FindByPhone(ctx, normalizePhone(input))
 		if (err != nil || user == nil) && input != "" {
-			user, err = s.repo.FindByPhone(input)
+			user, err = s.repo.FindByPhone(ctx, input)
 		}
 	}
 
@@ -269,7 +269,7 @@ func (s *AuthService) Authenticate(phoneOrEmail, password string) (*repository.U
 }
 
 // GenerateJWT creates a signed JWT for the authenticated user.
-func (s *AuthService) GenerateJWT(user *repository.User) (string, error) {
+func (s *AuthService) GenerateJWT(ctx context.Context, user *repository.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   user.ID.String(),
 		"phone": user.Phone,
@@ -281,7 +281,7 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error) {
 }
 
 // ParseJWT validates a token string and returns the extracted claims.
-func (s *AuthService) ParseJWT(tokenStr string) (*JWTClaims, error) {
+func (s *AuthService) ParseJWT(ctx context.Context, tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
@@ -320,20 +320,20 @@ func (s *AuthService) ParseJWT(tokenStr string) (*JWTClaims, error) {
 }
 
 // VerifyEmail confirms user email by token.
-func (s *AuthService) VerifyEmail(token string) (*repository.User, error) {
+func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repository.User, error) {
 	if token == "" {
 		return nil, errors.New("token is required")
 	}
-	return s.repo.VerifyEmailToken(token)
+	return s.repo.VerifyEmailToken(ctx, token)
 }
 
 // RequestPasswordReset generates a 6-digit code for password reset and sends it via email.
-func (s *AuthService) RequestPasswordReset(email string) error {
+func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) error {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return errors.New("укажите Email")
 	}
-	user, err := s.repo.FindByEmail(email)
+	user, err := s.repo.FindByEmail(ctx, email)
 	if err != nil || user == nil {
 		// Report success regardless: a different answer here tells an attacker
 		// which email addresses have an account.
@@ -350,7 +350,7 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 	code := fmt.Sprintf("%08d", n.Int64())
 	expiresAt := time.Now().Add(30 * time.Minute)
 
-	if err := s.repo.SetPasswordResetCode(user.ID, code, expiresAt); err != nil {
+	if err := s.repo.SetPasswordResetCode(ctx, user.ID, code, expiresAt); err != nil {
 		return err
 	}
 
@@ -367,7 +367,7 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 			// it in place would keep the previous code overwritten and the
 			// attempt counter reset for nothing.
 			log.Printf("[PASSWORD RESET] user %s: the code was NOT delivered: %v", user.ID, err)
-			if clearErr := s.repo.SetPasswordResetCode(user.ID, "", time.Now()); clearErr != nil {
+			if clearErr := s.repo.SetPasswordResetCode(ctx, user.ID, "", time.Now()); clearErr != nil {
 				log.Printf("[PASSWORD RESET] user %s: could not clear the undelivered code: %v", user.ID, clearErr)
 			}
 			return nil
@@ -380,7 +380,7 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 }
 
 // ResetPassword verifies the code and updates password.
-func (s *AuthService) ResetPassword(email, code, newPassword string) error {
+func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPassword string) error {
 	email = strings.TrimSpace(email)
 	code = strings.TrimSpace(code)
 	if email == "" || code == "" || newPassword == "" {
@@ -395,7 +395,7 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) error {
 		return err
 	}
 
-	_, err = s.repo.ResetPasswordWithCode(email, code, string(hash))
+	_, err = s.repo.ResetPasswordWithCode(ctx, email, code, string(hash))
 	return err
 }
 
@@ -404,7 +404,7 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) error {
 //
 // The profile page has always offered this form; there was no endpoint behind
 // it, so the only way to change a password was the forgot-password flow.
-func (s *AuthService) ChangePassword(userID uuid.UUID, oldPassword, newPassword string) (*TokenPair, error) {
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) (*TokenPair, error) {
 	if oldPassword == "" || newPassword == "" {
 		return nil, errors.New("укажите текущий и новый пароль")
 	}
@@ -415,7 +415,7 @@ func (s *AuthService) ChangePassword(userID uuid.UUID, oldPassword, newPassword 
 		return nil, errors.New("новый пароль совпадает с текущим")
 	}
 
-	user, err := s.repo.FindByID(userID)
+	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, errors.New("user not found")
 	}
@@ -427,31 +427,31 @@ func (s *AuthService) ChangePassword(userID uuid.UUID, oldPassword, newPassword 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.UpdatePassword(userID, string(hash)); err != nil {
+	if err := s.repo.UpdatePassword(ctx, userID, string(hash)); err != nil {
 		return nil, err
 	}
 
 	// Whoever else was signed in with the old password is signed out. The caller
 	// gets a fresh pair so the device that made the change stays usable.
-	if err := s.RevokeAllSessions(userID); err != nil {
+	if err := s.RevokeAllSessions(ctx, userID); err != nil {
 		log.Printf("[AuthService] failed to end sessions after password change for %s: %v", userID, err)
 	}
-	return s.IssueTokenPair(user)
+	return s.IssueTokenPair(ctx, user)
 }
 
 // UpdateUserEmail updates the email for a user and triggers verification.
-func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repository.User, error) {
+func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, newEmail string) (*repository.User, error) {
 	newEmail = strings.TrimSpace(newEmail)
 	if newEmail == "" || !emailRegex.MatchString(newEmail) {
 		return nil, errors.New("a valid email is required")
 	}
 
-	currentUser, err := s.repo.FindByID(userID)
+	currentUser, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	existingUser, err := s.repo.FindByEmail(newEmail)
+	existingUser, err := s.repo.FindByEmail(ctx, newEmail)
 	if err == nil && existingUser != nil && existingUser.ID != userID {
 		log.Printf("[SECURITY NOTICE] User with phone %s (ID: %s) attempted to attach email %s which is already bound to user with phone %s (ID: %s)",
 			currentUser.Phone, currentUser.ID, newEmail, existingUser.Phone, existingUser.ID)
@@ -460,7 +460,7 @@ func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repos
 
 	verificationToken := uuid.New().String()
 	tokenExpiresAt := time.Now().Add(60 * time.Minute)
-	user, err := s.repo.UpdateUserEmail(userID, newEmail, verificationToken, tokenExpiresAt)
+	user, err := s.repo.UpdateUserEmail(ctx, userID, newEmail, verificationToken, tokenExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -477,13 +477,13 @@ func (s *AuthService) UpdateUserEmail(userID uuid.UUID, newEmail string) (*repos
 }
 
 // UpdateUserBirthDate updates user's date of birth.
-func (s *AuthService) UpdateUserBirthDate(userID uuid.UUID, birthDateStr string) (*repository.User, error) {
+func (s *AuthService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDateStr string) (*repository.User, error) {
 	t, err := time.Parse("2006-01-02", birthDateStr)
 	if err != nil {
 		return nil, errors.New("invalid birth date format, expected YYYY-MM-DD")
 	}
-	if err := s.repo.UpdateUserBirthDate(userID, t); err != nil {
+	if err := s.repo.UpdateUserBirthDate(ctx, userID, t); err != nil {
 		return nil, err
 	}
-	return s.repo.FindByID(userID)
+	return s.repo.FindByID(ctx, userID)
 }

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"sort"
@@ -85,7 +86,7 @@ func (r *ReconciliationReport) Summary() string {
 // ReconciliationRepository verifies that the stored balances agree with the
 // transaction log.
 type ReconciliationRepository interface {
-	Reconcile(tolerance money.Amount) (*ReconciliationReport, error)
+	Reconcile(ctx context.Context, tolerance money.Amount) (*ReconciliationReport, error)
 }
 
 type reconcileRepo struct {
@@ -126,16 +127,16 @@ func ledgerSumExpr(column string) string {
 
 // Reconcile compares every user's balance with the sum of their ledger entries.
 // tolerance absorbs float rounding; pass 0.01 to allow a kopeck of drift.
-func (r *reconcileRepo) Reconcile(tolerance money.Amount) (*ReconciliationReport, error) {
+func (r *reconcileRepo) Reconcile(ctx context.Context, tolerance money.Amount) (*ReconciliationReport, error) {
 	report := &ReconciliationReport{}
 
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&report.UsersChecked); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&report.UsersChecked); err != nil {
 		return nil, fmt.Errorf("count users: %w", err)
 	}
 
 	// 1. Transaction types the sign convention does not cover. Checked first:
 	//    if any exist, the sums below cannot be trusted.
-	unknown, err := r.unknownTransactionTypes()
+	unknown, err := r.unknownTransactionTypes(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +152,7 @@ func (r *reconcileRepo) Reconcile(tolerance money.Amount) (*ReconciliationReport
 		ORDER BY ABS(u.balance - %s) DESC`,
 		ledgerSumExpr("t"), ledgerSumExpr("t"), ledgerSumExpr("t"))
 
-	rows, err := r.db.Query(query, tolerance)
+	rows, err := r.db.QueryContext(ctx, query, tolerance)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile balances: %w", err)
 	}
@@ -170,7 +171,7 @@ func (r *reconcileRepo) Reconcile(tolerance money.Amount) (*ReconciliationReport
 	}
 
 	// 3. Holds that contradict the order status.
-	anomalies, err := r.holdAnomalies(tolerance)
+	anomalies, err := r.holdAnomalies(ctx, tolerance)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,7 @@ func (r *reconcileRepo) Reconcile(tolerance money.Amount) (*ReconciliationReport
 
 	// 4. Do the books close? Every movement touches a user balance and a system
 	//    account, so the two sides must cancel out exactly.
-	books, err := r.books()
+	books, err := r.books(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -191,18 +192,18 @@ func (r *reconcileRepo) Reconcile(tolerance money.Amount) (*ReconciliationReport
 
 // books adds up both sides of the system and compares escrow against the orders
 // it is supposed to be holding money for.
-func (r *reconcileRepo) books() (*BooksSummary, error) {
+func (r *reconcileRepo) books(ctx context.Context) (*BooksSummary, error) {
 	var b BooksSummary
 
-	if err := r.db.QueryRow(`SELECT COALESCE(SUM(balance), 0) FROM users`).Scan(&b.UserTotal); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(balance), 0) FROM users`).Scan(&b.UserTotal); err != nil {
 		return nil, fmt.Errorf("sum user balances: %w", err)
 	}
-	if err := r.db.QueryRow(`SELECT COALESCE(SUM(balance), 0) FROM system_accounts`).Scan(&b.AccountTotal); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(balance), 0) FROM system_accounts`).Scan(&b.AccountTotal); err != nil {
 		return nil, fmt.Errorf("sum system accounts: %w", err)
 	}
 	b.Difference = b.UserTotal.Add(b.AccountTotal)
 
-	rows, err := r.db.Query(`SELECT code, name, balance FROM system_accounts ORDER BY code`)
+	rows, err := r.db.QueryContext(ctx, `SELECT code, name, balance FROM system_accounts ORDER BY code`)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +222,7 @@ func (r *reconcileRepo) books() (*BooksSummary, error) {
 		return nil, err
 	}
 
-	if err := r.db.QueryRow(`
+	if err := r.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(hold_amount), 0) FROM orders
 		WHERE status IN ('SEARCHING', 'ASSIGNED', 'EXECUTED')`).Scan(&b.LiveOrderSum); err != nil {
 		return nil, fmt.Errorf("sum live order holds: %w", err)
@@ -231,7 +232,7 @@ func (r *reconcileRepo) books() (*BooksSummary, error) {
 	return &b, nil
 }
 
-func (r *reconcileRepo) unknownTransactionTypes() ([]string, error) {
+func (r *reconcileRepo) unknownTransactionTypes(ctx context.Context) ([]string, error) {
 	known := KnownTransactionTypes()
 	placeholders := make([]string, 0, len(known))
 	args := make([]interface{}, 0, len(known))
@@ -240,7 +241,7 @@ func (r *reconcileRepo) unknownTransactionTypes() ([]string, error) {
 		args = append(args, string(t))
 	}
 
-	rows, err := r.db.Query(fmt.Sprintf(
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(
 		`SELECT DISTINCT type::text FROM transactions WHERE type::text NOT IN (%s)`,
 		strings.Join(placeholders, ", ")), args...)
 	if err != nil {
@@ -262,8 +263,8 @@ func (r *reconcileRepo) unknownTransactionTypes() ([]string, error) {
 // holdAnomalies finds orders whose held amount contradicts their status. A
 // finished order still holding money, or a live paid order holding none, is the
 // signature of a refund or payout that ran without its state transition.
-func (r *reconcileRepo) holdAnomalies(tolerance money.Amount) ([]OrderHoldAnomaly, error) {
-	rows, err := r.db.Query(`
+func (r *reconcileRepo) holdAnomalies(ctx context.Context, tolerance money.Amount) ([]OrderHoldAnomaly, error) {
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT o.id, o.customer_id, o.status::text, o.hold_amount,
 		       CASE
 		           WHEN o.status IN ('COMPLETED', 'CANCELED') THEN 'finished order still holds money'

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"time"
@@ -63,7 +64,7 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 		  AND deadline_at < now() 
 		  AND (is_urgent = TRUE OR is_asap = TRUE)`
 
-	rows, err := w.db.Query(query)
+	rows, err := w.db.QueryContext(context.Background(), query)
 	if err != nil {
 		return err
 	}
@@ -93,14 +94,14 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 }
 
 func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
-	tx, err := w.db.Begin()
+	tx, err := w.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	// 1. Calculate base (non-urgent) price for the variant.
-	basePrice, err := w.orderService.CalculatePrice(o.ServiceVariantID, false, false, false)
+	basePrice, err := w.orderService.CalculatePrice(context.Background(), o.ServiceVariantID, false, false, false)
 	if err != nil {
 		return err
 	}
@@ -143,7 +144,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	// order claimed any more, which is one of the ways the platform books came
 	// to differ from the sum of user balances.
 	if refund.IsPositive() {
-		if err := w.ledger.Release(tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
+		if err := w.ledger.Release(context.Background(), tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
 			return err
 		}
 	}
@@ -154,7 +155,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	}
 
 	// 4. Send websocket notification to active rooms
-	w.chatService.BroadcastSystemMessage(o.ID, map[string]interface{}{
+	w.chatService.BroadcastSystemMessage(context.Background(), o.ID, map[string]interface{}{
 		"type":         "system",
 		"action":       "downgrade",
 		"is_urgent":    false,

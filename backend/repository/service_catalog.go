@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
@@ -134,35 +135,35 @@ func (f ServiceNodeFilter) where(col string) string {
 // ServiceCatalogRepository defines storage operations for the service catalog.
 type ServiceCatalogRepository interface {
 	// CRUD
-	CreateNode(node *ServiceNode) error
-	UpdateNode(node *ServiceNode) error
+	CreateNode(ctx context.Context, node *ServiceNode) error
+	UpdateNode(ctx context.Context, node *ServiceNode) error
 	// DeleteNode soft-deletes a node: the row survives so that historical
 	// orders keep resolving, and the catalog stops offering it.
-	DeleteNode(id uuid.UUID) error
+	DeleteNode(ctx context.Context, id uuid.UUID) error
 	// RestoreNode brings a soft-deleted node back, switched off.
-	RestoreNode(id uuid.UUID) error
+	RestoreNode(ctx context.Context, id uuid.UUID) error
 	// GetNodeByID returns the node even when it was deleted, because orders
 	// placed before the deletion still have to render their service.
-	GetNodeByID(id uuid.UUID) (*ServiceNode, error)
+	GetNodeByID(ctx context.Context, id uuid.UUID) (*ServiceNode, error)
 	// GetNodeByCode looks up a live node only; a deleted code is free to be
 	// taken by a new node.
-	GetNodeByCode(code string) (*ServiceNode, error)
+	GetNodeByCode(ctx context.Context, code string) (*ServiceNode, error)
 
 	// Tree navigation
-	GetRootCategories(filter ServiceNodeFilter) ([]*ServiceNode, error)
-	GetChildren(parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error)
-	GetDescendants(ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error)
-	GetAncestors(descendantID uuid.UUID) ([]*ServiceNode, error)
-	GetVariantPath(variantID uuid.UUID) ([]*ServiceNode, error)
+	GetRootCategories(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error)
+	GetChildren(ctx context.Context, parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error)
+	GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error)
+	GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*ServiceNode, error)
+	GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*ServiceNode, error)
 
 	// Catalog helpers
-	GetActiveVariants() ([]*ServiceNode, error)
-	GetVariantWithCategory(id uuid.UUID) (*ServiceNode, []*ServiceNode, error)
+	GetActiveVariants(ctx context.Context) ([]*ServiceNode, error)
+	GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*ServiceNode, []*ServiceNode, error)
 
 	// Transactional helpers used by the service layer.
-	HasChildren(id uuid.UUID) (bool, error)
-	HasOrders(id uuid.UUID) (bool, error)
-	IsDescendantOf(candidateAncestor, candidateDescendant uuid.UUID) (bool, error)
+	HasChildren(ctx context.Context, id uuid.UUID) (bool, error)
+	HasOrders(ctx context.Context, id uuid.UUID) (bool, error)
+	IsDescendantOf(ctx context.Context, candidateAncestor, candidateDescendant uuid.UUID) (bool, error)
 }
 
 type serviceCatalogRepo struct {
@@ -205,8 +206,8 @@ func scanServiceNodeRows(rows *sql.Rows) (*ServiceNode, error) {
 	return scanServiceNodeInto(rows)
 }
 
-func (r *serviceCatalogRepo) queryNodes(query string, args ...interface{}) ([]*ServiceNode, error) {
-	rows, err := r.db.Query(query, args...)
+func (r *serviceCatalogRepo) queryNodes(ctx context.Context, query string, args ...interface{}) ([]*ServiceNode, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +224,7 @@ func (r *serviceCatalogRepo) queryNodes(query string, args ...interface{}) ([]*S
 	return nodes, rows.Err()
 }
 
-func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
+func (r *serviceCatalogRepo) CreateNode(ctx context.Context, node *ServiceNode) error {
 	if node.ID == uuid.Nil {
 		node.ID = uuid.New()
 	}
@@ -234,7 +235,7 @@ func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
 
 	// The unique index only covers live nodes, so report the collision with a
 	// message the admin panel can show instead of a driver error.
-	taken, err := r.codeTaken(node.Code, node.ID)
+	taken, err := r.codeTaken(ctx, node.Code, node.ID)
 	if err != nil {
 		return err
 	}
@@ -242,7 +243,7 @@ func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
 		return ErrServiceNodeCodeTaken
 	}
 
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -252,7 +253,7 @@ func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
         INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     `
-	_, err = tx.Exec(query,
+	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Code, node.Name, node.Description,
 		node.NodeType, node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
 		node.RequiresVerification, node.MinAge, node.CreatedAt, node.UpdatedAt,
@@ -261,7 +262,7 @@ func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
 		return err
 	}
 
-	_, err = tx.Exec(`SELECT rebuild_service_node_paths($1)`, node.ID)
+	_, err = tx.ExecContext(ctx, `SELECT rebuild_service_node_paths($1)`, node.ID)
 	if err != nil {
 		return err
 	}
@@ -269,10 +270,10 @@ func (r *serviceCatalogRepo) CreateNode(node *ServiceNode) error {
 	return tx.Commit()
 }
 
-func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
+func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) error {
 	node.UpdatedAt = time.Now()
 
-	existing, err := r.GetNodeByID(node.ID)
+	existing, err := r.GetNodeByID(ctx, node.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrServiceNodeNotFound
@@ -299,7 +300,7 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
 		if *node.ParentID == node.ID {
 			return errors.New("cannot set parent to self")
 		}
-		isDescendant, err := r.IsDescendantOf(*node.ParentID, node.ID)
+		isDescendant, err := r.IsDescendantOf(ctx, *node.ParentID, node.ID)
 		if err != nil {
 			return err
 		}
@@ -308,7 +309,7 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
 		}
 		// Moving a live node under a deleted category would hide it from the
 		// catalog without ever deleting it.
-		parent, err := r.GetNodeByID(*node.ParentID)
+		parent, err := r.GetNodeByID(ctx, *node.ParentID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return errors.New("parent not found")
@@ -320,7 +321,7 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
 		}
 	}
 
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -332,7 +333,7 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
             is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, updated_at = $11
         WHERE id = $1 AND deleted_at IS NULL
     `
-	_, err = tx.Exec(query,
+	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Name, node.Description,
 		node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
 		node.RequiresVerification, node.MinAge, node.UpdatedAt,
@@ -341,7 +342,7 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
 		return err
 	}
 
-	_, err = tx.Exec(`SELECT rebuild_service_node_paths($1)`, node.ID)
+	_, err = tx.ExecContext(ctx, `SELECT rebuild_service_node_paths($1)`, node.ID)
 	if err != nil {
 		return err
 	}
@@ -353,8 +354,8 @@ func (r *serviceCatalogRepo) UpdateNode(node *ServiceNode) error {
 // to the variant they were placed for, so a hard delete would either fail or
 // take the order history with it; marking the node keeps that history readable
 // while the catalog stops offering the service.
-func (r *serviceCatalogRepo) DeleteNode(id uuid.UUID) error {
-	node, err := r.GetNodeByID(id)
+func (r *serviceCatalogRepo) DeleteNode(ctx context.Context, id uuid.UUID) error {
+	node, err := r.GetNodeByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrServiceNodeNotFound
@@ -370,7 +371,7 @@ func (r *serviceCatalogRepo) DeleteNode(id uuid.UUID) error {
 
 	// Children are deleted from the leaves up: a category whose children were
 	// all retired can go, one that still holds live children cannot.
-	hasChildren, err := r.HasChildren(id)
+	hasChildren, err := r.HasChildren(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -381,7 +382,7 @@ func (r *serviceCatalogRepo) DeleteNode(id uuid.UUID) error {
 	// is_active is switched off in the same statement: every catalog query
 	// already filters on it, so the service disappears even from a caller that
 	// predates deleted_at. The database check constraint pins the pair.
-	res, err := r.db.Exec(`
+	res, err := r.db.ExecContext(ctx, `
         UPDATE service_nodes
         SET deleted_at = now(), is_active = FALSE, updated_at = now()
         WHERE id = $1 AND deleted_at IS NULL
@@ -402,8 +403,8 @@ func (r *serviceCatalogRepo) DeleteNode(id uuid.UUID) error {
 
 // RestoreNode clears the deletion mark. The node comes back switched off, so an
 // admin has to re-enable it deliberately before customers see it again.
-func (r *serviceCatalogRepo) RestoreNode(id uuid.UUID) error {
-	node, err := r.GetNodeByID(id)
+func (r *serviceCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) error {
+	node, err := r.GetNodeByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrServiceNodeNotFound
@@ -419,7 +420,7 @@ func (r *serviceCatalogRepo) RestoreNode(id uuid.UUID) error {
 
 	// Restoring into a deleted branch would produce a node nobody can reach.
 	if node.ParentID != nil {
-		parent, err := r.GetNodeByID(*node.ParentID)
+		parent, err := r.GetNodeByID(ctx, *node.ParentID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrServiceNodeParentDeleted
@@ -432,7 +433,7 @@ func (r *serviceCatalogRepo) RestoreNode(id uuid.UUID) error {
 	}
 
 	// The code was free while the node was deleted, so a new node may hold it.
-	taken, err := r.codeTaken(node.Code, id)
+	taken, err := r.codeTaken(ctx, node.Code, id)
 	if err != nil {
 		return err
 	}
@@ -440,7 +441,7 @@ func (r *serviceCatalogRepo) RestoreNode(id uuid.UUID) error {
 		return ErrServiceNodeCodeTaken
 	}
 
-	_, err = r.db.Exec(`
+	_, err = r.db.ExecContext(ctx, `
         UPDATE service_nodes
         SET deleted_at = NULL, updated_at = now()
         WHERE id = $1 AND deleted_at IS NOT NULL
@@ -449,9 +450,9 @@ func (r *serviceCatalogRepo) RestoreNode(id uuid.UUID) error {
 }
 
 // codeTaken reports whether a live node other than exclude uses the code.
-func (r *serviceCatalogRepo) codeTaken(code string, exclude uuid.UUID) (bool, error) {
+func (r *serviceCatalogRepo) codeTaken(ctx context.Context, code string, exclude uuid.UUID) (bool, error) {
 	var exists bool
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
         SELECT EXISTS(
             SELECT 1 FROM service_nodes
             WHERE code = $1 AND deleted_at IS NULL AND id <> $2
@@ -460,33 +461,33 @@ func (r *serviceCatalogRepo) codeTaken(code string, exclude uuid.UUID) (bool, er
 	return exists, err
 }
 
-func (r *serviceCatalogRepo) GetNodeByID(id uuid.UUID) (*ServiceNode, error) {
-	row := r.db.QueryRow(
+func (r *serviceCatalogRepo) GetNodeByID(ctx context.Context, id uuid.UUID) (*ServiceNode, error) {
+	row := r.db.QueryRowContext(ctx,
 		"SELECT "+serviceNodeColumns+" FROM service_nodes WHERE id = $1", id,
 	)
 	return scanServiceNode(row)
 }
 
-func (r *serviceCatalogRepo) GetNodeByCode(code string) (*ServiceNode, error) {
-	row := r.db.QueryRow(
+func (r *serviceCatalogRepo) GetNodeByCode(ctx context.Context, code string) (*ServiceNode, error) {
+	row := r.db.QueryRowContext(ctx,
 		"SELECT "+serviceNodeColumns+" FROM service_nodes WHERE code = $1 AND deleted_at IS NULL", code,
 	)
 	return scanServiceNode(row)
 }
 
-func (r *serviceCatalogRepo) GetRootCategories(filter ServiceNodeFilter) ([]*ServiceNode, error) {
+func (r *serviceCatalogRepo) GetRootCategories(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE parent_id IS NULL" +
 		filter.where("") + " ORDER BY sort_order, name->>'ru'"
-	return r.queryNodes(query)
+	return r.queryNodes(ctx, query)
 }
 
-func (r *serviceCatalogRepo) GetChildren(parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error) {
+func (r *serviceCatalogRepo) GetChildren(ctx context.Context, parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE parent_id = $1" +
 		filter.where("") + " ORDER BY sort_order, name->>'ru'"
-	return r.queryNodes(query, parentID)
+	return r.queryNodes(ctx, query, parentID)
 }
 
-func (r *serviceCatalogRepo) GetDescendants(ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error) {
+func (r *serviceCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_node_paths p JOIN service_nodes sn ON sn.id = p.descendant_id WHERE p.ancestor_id = $1 AND p.depth > 0 AND sn.deleted_at IS NULL"
 	args := []interface{}{ancestorID}
 	if maxDepth != nil {
@@ -494,38 +495,38 @@ func (r *serviceCatalogRepo) GetDescendants(ancestorID uuid.UUID, maxDepth *int)
 		args = append(args, *maxDepth)
 	}
 	query += " ORDER BY p.depth, sn.sort_order, sn.name->>'ru'"
-	return r.queryNodes(query, args...)
+	return r.queryNodes(ctx, query, args...)
 }
 
 // GetAncestors and GetVariantPath keep deleted nodes: they are read to render a
 // node's position, including for orders placed on a service that was retired
 // afterwards. A live node can never sit under a deleted one, so a live node's
 // path is always live too.
-func (r *serviceCatalogRepo) GetAncestors(descendantID uuid.UUID) ([]*ServiceNode, error) {
+func (r *serviceCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_node_paths p JOIN service_nodes sn ON sn.id = p.ancestor_id WHERE p.descendant_id = $1 AND p.depth > 0 ORDER BY p.depth"
-	return r.queryNodes(query, descendantID)
+	return r.queryNodes(ctx, query, descendantID)
 }
 
-func (r *serviceCatalogRepo) GetVariantPath(variantID uuid.UUID) ([]*ServiceNode, error) {
+func (r *serviceCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_node_paths p JOIN service_nodes sn ON sn.id = p.ancestor_id WHERE p.descendant_id = $1 ORDER BY p.depth"
-	return r.queryNodes(query, variantID)
+	return r.queryNodes(ctx, query, variantID)
 }
 
-func (r *serviceCatalogRepo) GetActiveVariants() ([]*ServiceNode, error) {
+func (r *serviceCatalogRepo) GetActiveVariants(ctx context.Context) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE node_type = 'VARIANT'" +
 		FilterActive.where("") + " ORDER BY sort_order, name->>'ru'"
-	return r.queryNodes(query)
+	return r.queryNodes(ctx, query)
 }
 
-func (r *serviceCatalogRepo) GetVariantWithCategory(id uuid.UUID) (*ServiceNode, []*ServiceNode, error) {
-	variant, err := r.GetNodeByID(id)
+func (r *serviceCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*ServiceNode, []*ServiceNode, error) {
+	variant, err := r.GetNodeByID(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
 	if variant == nil {
 		return nil, nil, errors.New("variant not found")
 	}
-	path, err := r.GetVariantPath(id)
+	path, err := r.GetVariantPath(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -534,24 +535,24 @@ func (r *serviceCatalogRepo) GetVariantWithCategory(id uuid.UUID) (*ServiceNode,
 
 // HasChildren counts live children only: a category whose whole subtree was
 // retired can be retired in turn.
-func (r *serviceCatalogRepo) HasChildren(id uuid.UUID) (bool, error) {
+func (r *serviceCatalogRepo) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
 	var count int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM service_nodes WHERE parent_id = $1 AND deleted_at IS NULL`, id).Scan(&count)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM service_nodes WHERE parent_id = $1 AND deleted_at IS NULL`, id).Scan(&count)
 	return count > 0, err
 }
 
 // HasOrders reports whether the node was ever ordered. It no longer blocks
 // deletion — it tells the admin panel that retiring the service leaves order
 // history behind.
-func (r *serviceCatalogRepo) HasOrders(id uuid.UUID) (bool, error) {
+func (r *serviceCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool, error) {
 	var count int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM orders WHERE service_variant_id = $1`, id).Scan(&count)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE service_variant_id = $1`, id).Scan(&count)
 	return count > 0, err
 }
 
-func (r *serviceCatalogRepo) IsDescendantOf(candidateAncestor, candidateDescendant uuid.UUID) (bool, error) {
+func (r *serviceCatalogRepo) IsDescendantOf(ctx context.Context, candidateAncestor, candidateDescendant uuid.UUID) (bool, error) {
 	var exists bool
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
         SELECT EXISTS(
             SELECT 1 FROM service_node_paths
             WHERE ancestor_id = $1 AND descendant_id = $2 AND depth > 0

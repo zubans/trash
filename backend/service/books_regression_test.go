@@ -41,13 +41,13 @@ func TestAdminTopUpKeepsBooksClosed(t *testing.T) {
 
 	userID := uuid.New()
 	// Touch the balance so the opening total includes this user.
-	if _, err := txRepo.GetBalance(userID); err != nil {
+	if _, err := txRepo.GetBalance(context.Background(), userID); err != nil {
 		t.Fatalf("balance: %v", err)
 	}
 	opening := booksTotal(txRepo, accounts)
 
 	amount := money.FromRubles(500)
-	if err := srv.TopUpUserBalance(userID, uuid.New(), amount); err != nil {
+	if err := srv.TopUpUserBalance(context.Background(), userID, uuid.New(), amount); err != nil {
 		t.Fatalf("top up: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestCancellingSearchingOrderDrainsEscrowAndHold(t *testing.T) {
 		newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
 
 	customerID := uuid.New()
-	if _, err := txRepo.GetBalance(customerID); err != nil {
+	if _, err := txRepo.GetBalance(context.Background(), customerID); err != nil {
 		t.Fatalf("balance: %v", err)
 	}
 	opening := booksTotal(txRepo, accounts)
@@ -90,14 +90,14 @@ func TestCancellingSearchingOrderDrainsEscrowAndHold(t *testing.T) {
 		t.Fatalf("escrow should hold %s, holds %s", order.HoldAmount, accounts.balances[repository.AccountEscrow])
 	}
 
-	if err := orders.CancelOrder(order.ID); err != nil {
+	if err := orders.CancelOrder(context.Background(), order.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
 	if got := accounts.balances[repository.AccountEscrow]; !got.IsZero() {
 		t.Errorf("escrow still holds %s after cancelling", got)
 	}
-	cancelled, err := orderRepo.GetOrderByID(order.ID)
+	cancelled, err := orderRepo.GetOrderByID(context.Background(), order.ID)
 	if err != nil {
 		t.Fatalf("reload order: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestPartialRefundOutOfEscrowKeepsBooksClosed(t *testing.T) {
 	ledger := NewLedger(txRepo, accounts)
 
 	customerID := uuid.New()
-	if _, err := txRepo.GetBalance(customerID); err != nil {
+	if _, err := txRepo.GetBalance(context.Background(), customerID); err != nil {
 		t.Fatalf("balance: %v", err)
 	}
 	opening := booksTotal(txRepo, accounts)
@@ -127,13 +127,13 @@ func TestPartialRefundOutOfEscrowKeepsBooksClosed(t *testing.T) {
 	refund := money.FromRubles(120)
 	orderID := uuid.New()
 
-	if err := ledger.RunInTx(func(tx *sql.Tx) error {
-		return ledger.Reserve(tx, customerID, repository.AccountEscrow, hold, repository.TransactionTypeHold, &orderID)
+	if err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
+		return ledger.Reserve(context.Background(), tx, customerID, repository.AccountEscrow, hold, repository.TransactionTypeHold, &orderID)
 	}); err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	if err := ledger.RunInTx(func(tx *sql.Tx) error {
-		return ledger.Release(tx, repository.AccountEscrow, customerID, refund, repository.TransactionTypeRefund, &orderID, nil)
+	if err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
+		return ledger.Release(context.Background(), tx, repository.AccountEscrow, customerID, refund, repository.TransactionTypeRefund, &orderID, nil)
 	}); err != nil {
 		t.Fatalf("refund: %v", err)
 	}
@@ -168,15 +168,15 @@ func TestExpiredAuctionSweepWillNotCancelAClaimedOrder(t *testing.T) {
 	}
 
 	// A bid is accepted just as the sweep is about to reach this order.
-	if err := orderRepo.AssignOrder(order.ID, uuid.New()); err != nil {
+	if err := orderRepo.AssignOrder(context.Background(), order.ID, uuid.New()); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
 
-	if err := orders.CancelUnclaimedAuction(order.ID); err == nil {
+	if err := orders.CancelUnclaimedAuction(context.Background(), order.ID); err == nil {
 		t.Fatal("the sweep cancelled an order that had already been claimed")
 	}
 
-	claimed, err := orderRepo.GetOrderByID(order.ID)
+	claimed, err := orderRepo.GetOrderByID(context.Background(), order.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestExpiredAuctionSweepWillNotCancelAClaimedOrder(t *testing.T) {
 	}
 	// A customer cancelling the same order is still allowed: only the sweep is
 	// restricted.
-	if err := orders.CancelOrder(order.ID); err != nil {
+	if err := orders.CancelOrder(context.Background(), order.ID); err != nil {
 		t.Errorf("an ordinary cancel must still work: %v", err)
 	}
 }

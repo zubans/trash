@@ -28,7 +28,7 @@ func newMockRepo() *mockRepo {
 	return &mockRepo{users: make(map[string]*repository.User)}
 }
 
-func (m *mockRepo) FindByPhone(phone string) (*repository.User, error) {
+func (m *mockRepo) FindByPhone(ctx context.Context, phone string) (*repository.User, error) {
 	if m.findErr != nil {
 		return nil, m.findErr
 	}
@@ -38,7 +38,7 @@ func (m *mockRepo) FindByPhone(phone string) (*repository.User, error) {
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockRepo) Create(user *repository.User) error {
+func (m *mockRepo) Create(ctx context.Context, user *repository.User) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -49,7 +49,7 @@ func (m *mockRepo) Create(user *repository.User) error {
 	return nil
 }
 
-func (m *mockRepo) FindByID(id uuid.UUID) (*repository.User, error) {
+func (m *mockRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
 	if m.findErr != nil {
 		return nil, m.findErr
 	}
@@ -61,7 +61,7 @@ func (m *mockRepo) FindByID(id uuid.UUID) (*repository.User, error) {
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateStatus(id uuid.UUID, status string) error {
+func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Status = status
@@ -71,7 +71,7 @@ func (m *mockRepo) UpdateStatus(id uuid.UUID, status string) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateVerified(id uuid.UUID, verified bool) error {
+func (m *mockRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Verified = verified
@@ -81,7 +81,7 @@ func (m *mockRepo) UpdateVerified(id uuid.UUID, verified bool) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateRole(id uuid.UUID, role string) error {
+func (m *mockRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Role = role
@@ -91,7 +91,7 @@ func (m *mockRepo) UpdateRole(id uuid.UUID, role string) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
+func (m *mockRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Balance = balance
@@ -101,19 +101,19 @@ func (m *mockRepo) UpdateBalance(id uuid.UUID, balance money.Amount) error {
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateLastGeo(id uuid.UUID, lastGeo string) error {
+func (m *mockRepo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
 	return nil
 }
 
-func (m *mockRepo) CreateCustomerProfile(userID uuid.UUID, address, lastGeo string) error {
+func (m *mockRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
 	return nil
 }
 
-func (m *mockRepo) GetCustomerProfile(userID uuid.UUID) (*repository.CustomerProfile, error) {
+func (m *mockRepo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
 	return &repository.CustomerProfile{UserID: userID}, nil
 }
 
-func (m *mockRepo) FindByEmail(email string) (*repository.User, error) {
+func (m *mockRepo) FindByEmail(ctx context.Context, email string) (*repository.User, error) {
 	if m.findErr != nil {
 		return nil, m.findErr
 	}
@@ -125,7 +125,7 @@ func (m *mockRepo) FindByEmail(email string) (*repository.User, error) {
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockRepo) FindByEmailVerificationToken(token string) (*repository.User, error) {
+func (m *mockRepo) FindByEmailVerificationToken(ctx context.Context, token string) (*repository.User, error) {
 	for _, u := range m.users {
 		if u.EmailVerificationToken == token {
 			return u, nil
@@ -134,7 +134,7 @@ func (m *mockRepo) FindByEmailVerificationToken(token string) (*repository.User,
 	return nil, sql.ErrNoRows
 }
 
-func (m *mockRepo) VerifyEmailToken(token string) (*repository.User, error) {
+func (m *mockRepo) VerifyEmailToken(ctx context.Context, token string) (*repository.User, error) {
 	for _, u := range m.users {
 		if u.EmailVerificationToken == token {
 			if u.PendingEmail != "" {
@@ -149,7 +149,7 @@ func (m *mockRepo) VerifyEmailToken(token string) (*repository.User, error) {
 	return nil, errors.New("invalid or expired verification token")
 }
 
-func (m *mockRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+func (m *mockRepo) SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			u.PasswordResetCode = code
@@ -160,7 +160,7 @@ func (m *mockRepo) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) ResetPasswordWithCode(email, code, newHashedPassword string) (*repository.User, error) {
+func (m *mockRepo) ResetPasswordWithCode(ctx context.Context, email, code, newHashedPassword string) (*repository.User, error) {
 	for _, u := range m.users {
 		if strings.EqualFold(u.Email, email) && u.PasswordResetCode == code {
 			u.Password = newHashedPassword
@@ -172,7 +172,7 @@ func (m *mockRepo) ResetPasswordWithCode(email, code, newHashedPassword string) 
 	return nil, errors.New("invalid or expired reset code")
 }
 
-func (m *mockRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
+func (m *mockRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	for _, u := range m.users {
 		if u.ID == userID {
 			u.PendingEmail = email
@@ -184,11 +184,11 @@ func (m *mockRepo) UpdateUserEmail(userID uuid.UUID, email, verificationToken st
 	return nil, errors.New("user not found")
 }
 
-func (m *mockRepo) UpdateCustomerAddress(userID uuid.UUID, address string) error {
+func (m *mockRepo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	return nil
 }
 
-func (m *mockRepo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) error {
+func (m *mockRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			bd := birthDate
@@ -199,7 +199,7 @@ func (m *mockRepo) UpdateUserBirthDate(userID uuid.UUID, birthDate time.Time) er
 	return nil
 }
 
-func (m *mockRepo) UpdateUserName(userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (m *mockRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			u.LastName = lastName
@@ -362,7 +362,7 @@ func TestAuthenticate_Success(t *testing.T) {
 		t.Fatalf("registration failed: %v", err)
 	}
 
-	user, err := svc.Authenticate(phone, password)
+	user, err := svc.Authenticate(context.Background(), phone, password)
 	if err != nil {
 		t.Fatalf("unexpected authentication error: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestAuthenticate_Success(t *testing.T) {
 
 func TestAuthenticate_EmptyPhone(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Authenticate("", "password")
+	_, err := svc.Authenticate(context.Background(), "", "password")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
 	}
@@ -381,7 +381,7 @@ func TestAuthenticate_EmptyPhone(t *testing.T) {
 
 func TestAuthenticate_EmptyPassword(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Authenticate("+79001234567", "")
+	_, err := svc.Authenticate(context.Background(), "+79001234567", "")
 	if err == nil {
 		t.Fatal("expected error for empty password")
 	}
@@ -389,7 +389,7 @@ func TestAuthenticate_EmptyPassword(t *testing.T) {
 
 func TestAuthenticate_UserNotFound(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Authenticate("+79001234567", "password")
+	_, err := svc.Authenticate(context.Background(), "+79001234567", "password")
 	if err == nil {
 		t.Fatal("expected error for unknown user")
 	}
@@ -407,7 +407,7 @@ func TestAuthenticate_WrongPassword(t *testing.T) {
 		t.Fatalf("registration failed: %v", err)
 	}
 
-	_, err := svc.Authenticate(phone, "wrong-password")
+	_, err := svc.Authenticate(context.Background(), phone, "wrong-password")
 	if err == nil {
 		t.Fatal("expected error for wrong password")
 	}
@@ -421,7 +421,7 @@ func TestAuthenticate_RepositoryError(t *testing.T) {
 	repo.findErr = errors.New("db error")
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 
-	_, err := svc.Authenticate("+79001234567", "password")
+	_, err := svc.Authenticate(context.Background(), "+79001234567", "password")
 	if err == nil {
 		t.Fatal("expected error from repository")
 	}
@@ -438,7 +438,7 @@ func TestGenerateJWT_Success(t *testing.T) {
 		Role:  "CUSTOMER",
 	}
 
-	token, err := svc.GenerateJWT(user)
+	token, err := svc.GenerateJWT(context.Background(), user)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestGenerateJWT_InvalidWithWrongSecret(t *testing.T) {
 		Role:  "CUSTOMER",
 	}
 
-	token, err := svc.GenerateJWT(user)
+	token, err := svc.GenerateJWT(context.Background(), user)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestGenerateJWT_InvalidWithWrongSecret(t *testing.T) {
 	}
 }
 
-func (m *mockRepo) UpdatePassword(userID uuid.UUID, newHashedPassword string) error {
+func (m *mockRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			u.Password = newHashedPassword
@@ -534,10 +534,10 @@ func TestRequestPasswordReset_DoesNotRevealAccounts(t *testing.T) {
 	repo.users[known.Phone] = known
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, mailer)
 
-	if err := svc.RequestPasswordReset("nobody@example.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "nobody@example.com"); err != nil {
 		t.Fatalf("an unknown address must report success, got %v", err)
 	}
-	if err := svc.RequestPasswordReset(known.Email); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), known.Email); err != nil {
 		t.Fatalf("a known address must report the same thing when mail fails, got %v", err)
 	}
 	if mailer.calls != 1 {
@@ -600,10 +600,10 @@ type resetCodeRecorder struct {
 	writes   int
 }
 
-func (r *resetCodeRecorder) SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error {
+func (r *resetCodeRecorder) SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error {
 	r.lastCode = code
 	r.writes++
-	return r.mockRepo.SetPasswordResetCode(userID, code, expiresAt)
+	return r.mockRepo.SetPasswordResetCode(context.Background(), userID, code, expiresAt)
 }
 
 // TestUndeliveredResetCodeIsCleared covers what the production log exposed: the
@@ -619,7 +619,7 @@ func TestUndeliveredResetCodeIsCleared(t *testing.T) {
 	repo := &resetCodeRecorder{mockRepo: base}
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, &failingMailer{})
 
-	if err := svc.RequestPasswordReset(known.Email); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), known.Email); err != nil {
 		t.Fatalf("the caller must still see success: %v", err)
 	}
 

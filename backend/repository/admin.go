@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -65,25 +66,25 @@ type AdminOrder struct {
 
 // AdminRepository defines admin database operations.
 type AdminRepository interface {
-	GetUsers(page, limit int, role, status, search string) ([]*User, int, error)
-	GetTopUpRequests(limit, offset int) ([]*TopUpRequest, error)
-	GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error)
-	CreateTopUpRequest(q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
-	LockTopUpRequest(q Querier, requestID uuid.UUID) (*TopUpRequest, error)
-	SetTopUpStatus(q Querier, requestID, adminID uuid.UUID, status string) error
-	GetWithdrawalRequests(limit, offset int) ([]*WithdrawalRequest, error)
-	GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, error)
+	GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error)
+	GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error)
+	GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*TopUpRequest, error)
+	CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
+	LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error)
+	SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
+	GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*WithdrawalRequest, error)
+	GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*WithdrawalRequest, error)
 	// Withdrawals are a money workflow and live in AdminService; the repository
 	// provides the locked read and the individual writes it needs.
-	CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
-	LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
-	SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error
-	HasPendingWithdrawal(userID uuid.UUID) (bool, error)
-	CountAdmins() (int, error)
-	GetTransactions(limit, offset int) ([]*Transaction, error)
-	GetActiveShifts() ([]*AdminShift, error)
-	GetActiveOrders(limit, offset int) ([]*AdminOrder, error)
-	GetCompletedOrders(limit, offset int) ([]*AdminOrder, error)
+	CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
+	LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
+	SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
+	HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error)
+	CountAdmins(ctx context.Context) (int, error)
+	GetTransactions(ctx context.Context, limit, offset int) ([]*Transaction, error)
+	GetActiveShifts(ctx context.Context) ([]*AdminShift, error)
+	GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
+	GetCompletedOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
 }
 
 type adminRepo struct {
@@ -95,7 +96,7 @@ func NewAdminRepository(db *sql.DB) AdminRepository {
 	return &adminRepo{db: db}
 }
 
-func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*User, int, error) {
+func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -127,7 +128,7 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 	// Get total count
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users %s", whereClause)
 	var total int
-	err := r.db.QueryRow(countQuery, args...).Scan(&total)
+	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -142,7 +143,7 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 	)
 	queryArgs := append(args, limit, offset)
 
-	rows, err := r.db.Query(listQuery, queryArgs...)
+	rows, err := r.db.QueryContext(ctx, listQuery, queryArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -163,7 +164,7 @@ func (r *adminRepo) GetUsers(page, limit int, role, status, search string) ([]*U
 	return users, total, nil
 }
 
-func (r *adminRepo) GetTopUpRequests(limit, offset int) ([]*TopUpRequest, error) {
+func (r *adminRepo) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error) {
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
 		FROM balance_topup_requests r
@@ -171,7 +172,7 @@ func (r *adminRepo) GetTopUpRequests(limit, offset int) ([]*TopUpRequest, error)
 		ORDER BY r.created_at DESC
 		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -189,21 +190,21 @@ func (r *adminRepo) GetTopUpRequests(limit, offset int) ([]*TopUpRequest, error)
 	return reqs, rows.Err()
 }
 
-func (r *adminRepo) GetTopUpRequestByID(id uuid.UUID) (*TopUpRequest, error) {
+func (r *adminRepo) GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*TopUpRequest, error) {
 	var req TopUpRequest
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
 		FROM balance_topup_requests r
 		JOIN users u ON r.user_id = u.id
 		WHERE r.id = $1`
-	err := r.db.QueryRow(query, id).Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &req, nil
 }
 
-func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error) {
+func (r *adminRepo) CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_topup_requests (id, user_id, amount, status, created_at)
@@ -211,7 +212,7 @@ func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount money
 		RETURNING id, user_id, amount, status, created_at`
 
 	var req TopUpRequest
-	err := r.exec(q).QueryRow(query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
+	err := r.exec(ctx, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +221,9 @@ func (r *adminRepo) CreateTopUpRequest(q Querier, userID uuid.UUID, amount money
 
 // LockTopUpRequest reads a request taking a row lock, so two admins deciding at
 // the same time serialise instead of both crediting the balance.
-func (r *adminRepo) LockTopUpRequest(q Querier, requestID uuid.UUID) (*TopUpRequest, error) {
+func (r *adminRepo) LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error) {
 	var req TopUpRequest
-	err := r.exec(q).QueryRow(`
+	err := r.exec(ctx, q).QueryRowContext(ctx, `
 		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
 		FROM balance_topup_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
 		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
@@ -234,14 +235,14 @@ func (r *adminRepo) LockTopUpRequest(q Querier, requestID uuid.UUID) (*TopUpRequ
 
 // SetTopUpStatus decides a pending request; the guard keeps a second decision
 // from crediting the balance twice.
-func (r *adminRepo) SetTopUpStatus(q Querier, requestID, adminID uuid.UUID, status string) error {
-	return execExpectingOne(r.exec(q), `
+func (r *adminRepo) SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
+	return execExpectingOne(ctx, r.exec(ctx, q), `
 		UPDATE balance_topup_requests
 		SET status = $1::topup_status, admin_id = $2, updated_at = now()
 		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
 }
 
-func (r *adminRepo) GetWithdrawalRequests(limit, offset int) ([]*WithdrawalRequest, error) {
+func (r *adminRepo) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*WithdrawalRequest, error) {
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
 		FROM balance_withdrawal_requests r
@@ -249,7 +250,7 @@ func (r *adminRepo) GetWithdrawalRequests(limit, offset int) ([]*WithdrawalReque
 		ORDER BY r.created_at DESC
 		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -267,28 +268,28 @@ func (r *adminRepo) GetWithdrawalRequests(limit, offset int) ([]*WithdrawalReque
 	return reqs, rows.Err()
 }
 
-func (r *adminRepo) GetWithdrawalRequestByID(id uuid.UUID) (*WithdrawalRequest, error) {
+func (r *adminRepo) GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*WithdrawalRequest, error) {
 	var req WithdrawalRequest
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
 		FROM balance_withdrawal_requests r
 		JOIN users u ON r.user_id = u.id
 		WHERE r.id = $1`
-	err := r.db.QueryRow(query, id).Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &req, nil
 }
 
-func (r *adminRepo) exec(q Querier) Querier {
+func (r *adminRepo) exec(ctx context.Context, q Querier) Querier {
 	if q == nil {
 		return r.db
 	}
 	return q
 }
 
-func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error) {
+func (r *adminRepo) CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error) {
 	id := uuid.New()
 	query := `
 		INSERT INTO balance_withdrawal_requests (id, user_id, amount, status, created_at)
@@ -296,7 +297,7 @@ func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount 
 		RETURNING id, user_id, amount, status, created_at`
 
 	var req WithdrawalRequest
-	err := r.exec(q).QueryRow(query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
+	err := r.exec(ctx, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -305,9 +306,9 @@ func (r *adminRepo) CreateWithdrawalRequest(q Querier, userID uuid.UUID, amount 
 
 // LockWithdrawalRequest reads a request taking a row lock, so two admins acting
 // at the same time serialise instead of both seeing it as PENDING.
-func (r *adminRepo) LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*WithdrawalRequest, error) {
+func (r *adminRepo) LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error) {
 	var req WithdrawalRequest
-	err := r.exec(q).QueryRow(`
+	err := r.exec(ctx, q).QueryRowContext(ctx, `
 		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
 		FROM balance_withdrawal_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
 		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
@@ -319,8 +320,8 @@ func (r *adminRepo) LockWithdrawalRequest(q Querier, requestID uuid.UUID) (*With
 
 // SetWithdrawalStatus decides a pending request. The guard makes a second
 // decision on the same request fail instead of overwriting the first.
-func (r *adminRepo) SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID, status string) error {
-	return execExpectingOne(r.exec(q), `
+func (r *adminRepo) SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
+	return execExpectingOne(ctx, r.exec(ctx, q), `
 		UPDATE balance_withdrawal_requests
 		SET status = $1::withdrawal_status, admin_id = $2, updated_at = now()
 		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
@@ -329,9 +330,9 @@ func (r *adminRepo) SetWithdrawalStatus(q Querier, requestID, adminID uuid.UUID,
 // HasPendingWithdrawal reports whether the user already has an open request.
 // Requests do not reserve funds, so several open ones for the same balance
 // would leave the admin approving payouts that cannot all be honoured.
-func (r *adminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
+func (r *adminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
 	var exists bool
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM balance_withdrawal_requests WHERE user_id = $1 AND status = 'PENDING')`,
 		userID,
 	).Scan(&exists)
@@ -339,13 +340,13 @@ func (r *adminRepo) HasPendingWithdrawal(userID uuid.UUID) (bool, error) {
 }
 
 // CountAdmins is used to keep the last administrator from being demoted.
-func (r *adminRepo) CountAdmins() (int, error) {
+func (r *adminRepo) CountAdmins(ctx context.Context) (int, error) {
 	var count int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
 	return count, err
 }
 
-func (r *adminRepo) GetTransactions(limit, offset int) ([]*Transaction, error) {
+func (r *adminRepo) GetTransactions(ctx context.Context, limit, offset int) ([]*Transaction, error) {
 	query := `
 		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount, t.admin_id, t.created_at
 		FROM transactions t
@@ -353,7 +354,7 @@ func (r *adminRepo) GetTransactions(limit, offset int) ([]*Transaction, error) {
 		ORDER BY t.created_at DESC
 		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +372,7 @@ func (r *adminRepo) GetTransactions(limit, offset int) ([]*Transaction, error) {
 	return txs, rows.Err()
 }
 
-func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
+func (r *adminRepo) GetActiveShifts(ctx context.Context) ([]*AdminShift, error) {
 	query := `
 		SELECT s.id, s.executor_id, s.duration_hours, s.started_at, s.planned_end_at, s.actual_end_at, s.status, s.fine_amount,
 		       u.phone
@@ -380,7 +381,7 @@ func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
 		WHERE s.status = $1
 		ORDER BY s.started_at DESC`
 
-	rows, err := r.db.Query(query, ShiftStatusActive)
+	rows, err := r.db.QueryContext(ctx, query, ShiftStatusActive)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +402,7 @@ func (r *adminRepo) GetActiveShifts() ([]*AdminShift, error) {
 	return shifts, rows.Err()
 }
 
-func (r *adminRepo) GetActiveOrders(limit, offset int) ([]*AdminOrder, error) {
+func (r *adminRepo) GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error) {
 	query := `
 		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
@@ -415,7 +416,7 @@ func (r *adminRepo) GetActiveOrders(limit, offset int) ([]*AdminOrder, error) {
 		ORDER BY o.created_at DESC
 		LIMIT $3 OFFSET $4`
 
-	rows, err := r.db.Query(query, OrderStatusSearching, OrderStatusAssigned, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, OrderStatusSearching, OrderStatusAssigned, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +439,7 @@ func (r *adminRepo) GetActiveOrders(limit, offset int) ([]*AdminOrder, error) {
 	return orders, rows.Err()
 }
 
-func (r *adminRepo) GetCompletedOrders(limit, offset int) ([]*AdminOrder, error) {
+func (r *adminRepo) GetCompletedOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error) {
 	query := `
 		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
@@ -452,7 +453,7 @@ func (r *adminRepo) GetCompletedOrders(limit, offset int) ([]*AdminOrder, error)
 		ORDER BY o.completed_at DESC, o.created_at DESC
 		LIMIT $2 OFFSET $3`
 
-	rows, err := r.db.Query(query, OrderStatusCompleted, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, OrderStatusCompleted, limit, offset)
 	if err != nil {
 		return nil, err
 	}

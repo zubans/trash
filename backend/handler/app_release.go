@@ -38,7 +38,7 @@ func (h *AppReleaseHandler) GetVersionHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	release, err := h.releaseRepo.GetActiveRelease(platform)
+	release, err := h.releaseRepo.GetActiveRelease(r.Context(), platform)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -155,13 +155,13 @@ func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.
 		IsActive:     true,
 	}
 
-	if err := h.releaseRepo.CreateRelease(release); err != nil {
+	if err := h.releaseRepo.CreateRelease(r.Context(), release); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Keep only one active release per platform.
-	_ = h.releaseRepo.DeactivateOldReleases(platform, release.ID)
+	_ = h.releaseRepo.DeactivateOldReleases(r.Context(), platform, release.ID)
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, release)

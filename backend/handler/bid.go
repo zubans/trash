@@ -81,7 +81,7 @@ func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bid, err := h.bidService.CreateBid(orderID, user.ID, req.OfferedPrice)
+	bid, err := h.bidService.CreateBid(r.Context(), orderID, user.ID, req.OfferedPrice)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -107,7 +107,7 @@ func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.bidService.AcceptBid(bidID, user.ID)
+	err = h.bidService.AcceptBid(r.Context(), bidID, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -133,7 +133,7 @@ func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bids, err := h.bidService.GetBidsForOrder(orderID, user.ID)
+	bids, err := h.bidService.GetBidsForOrder(r.Context(), orderID, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -151,7 +151,7 @@ func (h *BidHandler) GetAvailableConstructionOrdersHandler(w http.ResponseWriter
 		return
 	}
 
-	orders, err := h.orderService.GetAvailableConstructionOrdersForExecutor(user.ID)
+	orders, err := h.orderService.GetAvailableConstructionOrdersForExecutor(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

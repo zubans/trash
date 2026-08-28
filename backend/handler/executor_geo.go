@@ -29,7 +29,7 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	resp, err := h.geoService.SetLocation(user.ID, req)
+	resp, err := h.geoService.SetLocation(r.Context(), user.ID, req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -53,7 +53,7 @@ func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request)
 
 	// Scoped to the authenticated executor: the location belongs to user.ID and
 	// cannot be requested for anyone else.
-	resp, err := h.geoService.GetLocation(user.ID)
+	resp, err := h.geoService.GetLocation(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -72,7 +72,7 @@ func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request
 
 	// Coordinates are read from the executor's stored location, not from the
 	// query string, so the endpoint cannot be used to scan arbitrary areas.
-	orders, err := h.geoService.GetMapOrders(user.ID)
+	orders, err := h.geoService.GetMapOrders(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -96,7 +96,7 @@ func (h *ExecutorGeoHandler) GetGeoAlerts(w http.ResponseWriter, r *http.Request
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
-	alerts, err := h.geoService.GetGeoAlerts(status, limit, offset)
+	alerts, err := h.geoService.GetGeoAlerts(r.Context(), status, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -59,7 +59,7 @@ func (s *AddressSuggester) Resolve(ctx context.Context, query string) (*Geocodin
 	}
 
 	if s.cache != nil {
-		if hit, err := s.cache.Lookup(query); err == nil && hit != nil {
+		if hit, err := s.cache.Lookup(ctx, query); err == nil && hit != nil {
 			metrics.UpstreamResult("dadata", "resolve", "cache_hit", 0)
 			return &GeocodingResult{Lat: hit.Lat, Lon: hit.Lon, Address: hit.Address}, nil
 		}
@@ -75,7 +75,7 @@ func (s *AddressSuggester) Resolve(ctx context.Context, query string) (*Geocodin
 		}
 		result := &GeocodingResult{Lat: *a.Lat, Lon: *a.Lon, Address: a.Compose()}
 		if s.cache != nil {
-			_ = s.cache.Save(query, result.Address, result.Lat, result.Lon)
+			_ = s.cache.Save(ctx, query, result.Address, result.Lat, result.Lon)
 		}
 		return result, nil
 	}

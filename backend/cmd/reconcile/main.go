@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -49,7 +50,7 @@ func main() {
 		log.Fatalf("connect to database: %v", err)
 	}
 
-	report, err := repository.NewReconciliationRepository(db).Reconcile(money.FromRubles(*tolerance))
+	report, err := repository.NewReconciliationRepository(db).Reconcile(context.Background(), money.FromRubles(*tolerance))
 	if err != nil {
 		log.Fatalf("reconcile: %v", err)
 	}

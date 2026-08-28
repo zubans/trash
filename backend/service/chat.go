@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ func NewChatService(chatRepo repository.ChatRepository, orderRepo repository.Ord
 	}
 }
 
-func (s *ChatService) getOrCreateRoom(orderID, chatID uuid.UUID) *ChatRoom {
+func (s *ChatService) getOrCreateRoom(ctx context.Context, orderID, chatID uuid.UUID) *ChatRoom {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -81,12 +82,12 @@ func (s *ChatService) getOrCreateRoom(orderID, chatID uuid.UUID) *ChatRoom {
 			Broadcast:  make(chan []byte),
 		}
 		s.rooms[orderID] = room
-		go s.runRoom(room)
+		go s.runRoom(ctx, room)
 	}
 	return room
 }
 
-func (s *ChatService) runRoom(room *ChatRoom) {
+func (s *ChatService) runRoom(ctx context.Context, room *ChatRoom) {
 	for {
 		select {
 		case client := <-room.Register:
@@ -129,7 +130,7 @@ func (c *ChatClient) WritePump() {
 }
 
 // ReadPump listens for messages from the WebSocket client and broadcasts them.
-func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
+func (s *ChatService) ReadPump(ctx context.Context, client *ChatClient, room *ChatRoom) {
 	defer func() {
 		room.Unregister <- client
 		client.Conn.Close()
@@ -142,7 +143,7 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 		}
 
 		// 1. Fetch current order status to verify chat state
-		order, err := s.orderRepo.GetOrderByID(room.OrderID)
+		order, err := s.orderRepo.GetOrderByID(ctx, room.OrderID)
 		if err != nil {
 			log.Printf("[ChatService] Failed to check order status: %v", err)
 			continue
@@ -150,7 +151,7 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 
 		// If the order is already COMPLETED or CANCELED, shut down the chat
 		if order.Status == "COMPLETED" || order.Status == "CANCELED" {
-			_ = s.chatRepo.DeactivateChat(room.ChatID)
+			_ = s.chatRepo.DeactivateChat(ctx, room.ChatID)
 			sysMsg, _ := json.Marshal(map[string]string{
 				"type":   "system",
 				"action": "lock",
@@ -160,7 +161,7 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 		}
 
 		// Check if chat room is active in DB
-		chat, err := s.chatRepo.GetChatByOrderID(room.OrderID)
+		chat, err := s.chatRepo.GetChatByOrderID(ctx, room.OrderID)
 		if err != nil || chat == nil || !chat.IsActive {
 			warnMsg, _ := json.Marshal(map[string]string{
 				"type":    "error",
@@ -178,7 +179,7 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 		}
 		if err := json.Unmarshal(messageBytes, &eventReq); err == nil && eventReq.Type != "" {
 			if eventReq.Type == "delivery_ack" {
-				updatedIDs, err := s.chatRepo.MarkMessagesAsDelivered(room.ChatID, client.UserID)
+				updatedIDs, err := s.chatRepo.MarkMessagesAsDelivered(ctx, room.ChatID, client.UserID)
 				if err == nil && len(updatedIDs) > 0 {
 					ackBytes, _ := json.Marshal(map[string]interface{}{
 						"type":        "status_update",
@@ -189,7 +190,7 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 				}
 				continue
 			} else if eventReq.Type == "read_ack" {
-				updatedIDs, err := s.chatRepo.MarkMessagesAsRead(room.ChatID, client.UserID)
+				updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, room.ChatID, client.UserID)
 				if err == nil && len(updatedIDs) > 0 {
 					ackBytes, _ := json.Marshal(map[string]interface{}{
 						"type":        "status_update",
@@ -214,7 +215,7 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 		}
 
 		// Save message to DB
-		savedMsg, err := s.chatRepo.SaveMessage(room.ChatID, client.UserID, msgReq.Text)
+		savedMsg, err := s.chatRepo.SaveMessage(ctx, room.ChatID, client.UserID, msgReq.Text)
 		if err != nil {
 			log.Printf("[ChatService] Failed to save message: %v", err)
 			continue
@@ -229,12 +230,12 @@ func (s *ChatService) ReadPump(client *ChatClient, room *ChatRoom) {
 }
 
 // MarkMessagesAsRead marks messages as read for an order.
-func (s *ChatService) MarkMessagesAsRead(orderID, userID uuid.UUID) ([]uuid.UUID, error) {
-	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+func (s *ChatService) MarkMessagesAsRead(ctx context.Context, orderID, userID uuid.UUID) ([]uuid.UUID, error) {
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil || chat == nil {
 		return nil, errors.New("chat room not found")
 	}
-	updatedIDs, err := s.chatRepo.MarkMessagesAsRead(chat.ID, userID)
+	updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, chat.ID, userID)
 	if err == nil && len(updatedIDs) > 0 {
 		s.mu.RLock()
 		room, exists := s.rooms[orderID]
@@ -255,13 +256,13 @@ func (s *ChatService) MarkMessagesAsRead(orderID, userID uuid.UUID) ([]uuid.UUID
 }
 
 // GetUnreadOrderIDs returns order IDs with unread messages for a user.
-func (s *ChatService) GetUnreadOrderIDs(userID uuid.UUID) ([]uuid.UUID, error) {
-	return s.chatRepo.GetUnreadOrderIDs(userID)
+func (s *ChatService) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	return s.chatRepo.GetUnreadOrderIDs(ctx, userID)
 }
 
 // GetMessages retrieves all saved messages for an order's chat room (verifying participant access).
-func (s *ChatService) GetMessages(orderID, userID uuid.UUID) ([]*repository.Message, error) {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *ChatService) GetMessages(ctx context.Context, orderID, userID uuid.UUID) ([]*repository.Message, error) {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -269,25 +270,25 @@ func (s *ChatService) GetMessages(orderID, userID uuid.UUID) ([]*repository.Mess
 		return nil, ErrForbidden
 	}
 
-	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
 	if chat == nil {
-		chat, err = s.chatRepo.CreateChat(orderID)
+		chat, err = s.chatRepo.CreateChat(ctx, orderID)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return s.chatRepo.GetMessages(chat.ID)
+	return s.chatRepo.GetMessages(ctx, chat.ID)
 }
 
 // SendMessage saves a chat message via REST and broadcasts it to active WS clients.
 // This is the classic HTTP fallback used when the WebSocket send path is not
 // available (e.g. on mobile WebViews where the bridge swallows ws.send()).
-func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repository.Message, error) {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *ChatService) SendMessage(ctx context.Context, orderID, userID uuid.UUID, text string) (*repository.Message, error) {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +300,7 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 		return nil, fmt.Errorf("%w: order completed or canceled", ErrChatLocked)
 	}
 
-	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +312,7 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 		return nil, errors.New("сообщение слишком длинное")
 	}
 
-	savedMsg, err := s.chatRepo.SaveMessage(chat.ID, userID, text)
+	savedMsg, err := s.chatRepo.SaveMessage(ctx, chat.ID, userID, text)
 	if err != nil {
 		return nil, err
 	}
@@ -336,8 +337,8 @@ func (s *ChatService) SendMessage(orderID, userID uuid.UUID, text string) (*repo
 }
 
 // SendMessageWithAttachment saves a chat message with a file attachment via REST and broadcasts it.
-func (s *ChatService) SendMessageWithAttachment(orderID, userID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *ChatService) SendMessageWithAttachment(ctx context.Context, orderID, userID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +350,7 @@ func (s *ChatService) SendMessageWithAttachment(orderID, userID uuid.UUID, text,
 		return nil, fmt.Errorf("%w: order completed or canceled", ErrChatLocked)
 	}
 
-	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +358,7 @@ func (s *ChatService) SendMessageWithAttachment(orderID, userID uuid.UUID, text,
 		return nil, ErrChatLocked
 	}
 
-	savedMsg, err := s.chatRepo.SaveMessageWithAttachment(chat.ID, userID, text, fileURL, fileName, fileType, fileSize)
+	savedMsg, err := s.chatRepo.SaveMessageWithAttachment(ctx, chat.ID, userID, text, fileURL, fileName, fileType, fileSize)
 	if err != nil {
 		return nil, err
 	}
@@ -380,8 +381,8 @@ func (s *ChatService) SendMessageWithAttachment(orderID, userID uuid.UUID, text,
 }
 
 // HandleWS handles upgrades, authorization, and loops.
-func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, userID uuid.UUID, role string) {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, orderID, userID uuid.UUID, role string) {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		http.Error(w, "order not found", http.StatusNotFound)
 		return
@@ -391,13 +392,13 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 		return
 	}
 
-	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if chat == nil {
-		chat, err = s.chatRepo.CreateChat(orderID)
+		chat, err = s.chatRepo.CreateChat(ctx, orderID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -410,7 +411,7 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 		return
 	}
 
-	room := s.getOrCreateRoom(orderID, chat.ID)
+	room := s.getOrCreateRoom(ctx, orderID, chat.ID)
 	client := &ChatClient{
 		Conn:   conn,
 		UserID: userID,
@@ -422,7 +423,7 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 	go client.WritePump()
 
 	// Automatically mark messages as read when user connects to room and notify partner
-	if updatedIDs, err := s.chatRepo.MarkMessagesAsRead(chat.ID, userID); err == nil && len(updatedIDs) > 0 {
+	if updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, chat.ID, userID); err == nil && len(updatedIDs) > 0 {
 		ackBytes, _ := json.Marshal(map[string]interface{}{
 			"type":        "status_update",
 			"message_ids": updatedIDs,
@@ -439,24 +440,24 @@ func (s *ChatService) HandleWS(w http.ResponseWriter, r *http.Request, orderID, 
 	metrics.ChatConnected("order")
 	go func() {
 		defer metrics.ChatDisconnected("order")
-		s.ReadPump(client, room)
+		s.ReadPump(ctx, client, room)
 	}()
 }
 
 // EditMessage updates message text if owned by sender and broadcasts message_edited event.
-func (s *ChatService) EditMessage(messageID, senderID, orderID uuid.UUID, newText string) (*repository.Message, error) {
+func (s *ChatService) EditMessage(ctx context.Context, messageID, senderID, orderID uuid.UUID, newText string) (*repository.Message, error) {
 	if len([]rune(newText)) > maxMessageRunes {
 		return nil, errors.New("сообщение слишком длинное")
 	}
 
-	msg, err := s.chatRepo.UpdateMessage(messageID, senderID, newText)
+	msg, err := s.chatRepo.UpdateMessage(ctx, messageID, senderID, newText)
 	if err != nil {
 		return nil, err
 	}
 	// The room to notify is derived from the message itself: taking the order id
 	// from the request would let a sender push an edit event into a chat they
 	// are not part of.
-	if err := s.assertMessageInOrder(msg, orderID); err != nil {
+	if err := s.assertMessageInOrder(ctx, msg, orderID); err != nil {
 		return nil, err
 	}
 
@@ -484,8 +485,8 @@ func (s *ChatService) EditMessage(messageID, senderID, orderID uuid.UUID, newTex
 }
 
 // DeleteMessage deletes a message if owned by sender and broadcasts message_deleted event.
-func (s *ChatService) DeleteMessage(messageID, senderID, orderID uuid.UUID) error {
-	if err := s.chatRepo.DeleteMessage(messageID, senderID); err != nil {
+func (s *ChatService) DeleteMessage(ctx context.Context, messageID, senderID, orderID uuid.UUID) error {
+	if err := s.chatRepo.DeleteMessage(ctx, messageID, senderID); err != nil {
 		return err
 	}
 
@@ -511,8 +512,8 @@ func (s *ChatService) DeleteMessage(messageID, senderID, orderID uuid.UUID) erro
 
 // assertMessageInOrder checks that a message really belongs to the chat of the
 // given order.
-func (s *ChatService) assertMessageInOrder(msg *repository.Message, orderID uuid.UUID) error {
-	chat, err := s.chatRepo.GetChatByOrderID(orderID)
+func (s *ChatService) assertMessageInOrder(ctx context.Context, msg *repository.Message, orderID uuid.UUID) error {
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil || chat == nil || chat.ID != msg.ChatID {
 		return ErrForbidden
 	}
@@ -523,7 +524,7 @@ func (s *ChatService) assertMessageInOrder(msg *repository.Message, orderID uuid
 // connections of an order. The send never blocks: a room whose last client just
 // disconnected has no reader left, and a blocking send would leak the caller's
 // goroutine forever.
-func (s *ChatService) BroadcastSystemMessage(orderID uuid.UUID, msg interface{}) {
+func (s *ChatService) BroadcastSystemMessage(ctx context.Context, orderID uuid.UUID, msg interface{}) {
 	s.mu.RLock()
 	room, exists := s.rooms[orderID]
 	s.mu.RUnlock()
@@ -542,8 +543,8 @@ func (s *ChatService) BroadcastSystemMessage(orderID uuid.UUID, msg interface{})
 }
 
 // GetOrCreateSupportChat returns user's support chat.
-func (s *ChatService) GetOrCreateSupportChat(userID uuid.UUID) (*repository.SupportChat, error) {
-	return s.chatRepo.GetOrCreateSupportChat(userID)
+func (s *ChatService) GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*repository.SupportChat, error) {
+	return s.chatRepo.GetOrCreateSupportChat(ctx, userID)
 }
 
 // Errors the chat service returns. Handlers map them to status codes by
@@ -559,11 +560,11 @@ var (
 // authorizeSupportChat allows the owner of the chat and any admin. Support
 // conversations are addressed by chat id, so without this check any
 // authenticated user could read or post into somebody else's chat.
-func (s *ChatService) authorizeSupportChat(chatID, userID uuid.UUID, role string) error {
+func (s *ChatService) authorizeSupportChat(ctx context.Context, chatID, userID uuid.UUID, role string) error {
 	if role == "ADMIN" {
 		return nil
 	}
-	owner, err := s.chatRepo.SupportChatOwner(chatID)
+	owner, err := s.chatRepo.SupportChatOwner(ctx, chatID)
 	if err != nil {
 		return ErrForbidden
 	}
@@ -574,16 +575,16 @@ func (s *ChatService) authorizeSupportChat(chatID, userID uuid.UUID, role string
 }
 
 // GetSupportMessages returns all messages for a support chat the caller owns.
-func (s *ChatService) GetSupportMessages(chatID, userID uuid.UUID, role string) ([]*repository.Message, error) {
-	if err := s.authorizeSupportChat(chatID, userID, role); err != nil {
+func (s *ChatService) GetSupportMessages(ctx context.Context, chatID, userID uuid.UUID, role string) ([]*repository.Message, error) {
+	if err := s.authorizeSupportChat(ctx, chatID, userID, role); err != nil {
 		return nil, err
 	}
-	return s.chatRepo.GetSupportMessages(chatID)
+	return s.chatRepo.GetSupportMessages(ctx, chatID)
 }
 
 // SaveSupportMessage saves a new support text message.
-func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, role, text string) (*repository.Message, error) {
-	if err := s.authorizeSupportChat(chatID, senderID, role); err != nil {
+func (s *ChatService) SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, role, text string) (*repository.Message, error) {
+	if err := s.authorizeSupportChat(ctx, chatID, senderID, role); err != nil {
 		return nil, err
 	}
 	text = strings.TrimSpace(text)
@@ -593,7 +594,7 @@ func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, role, text 
 	if len([]rune(text)) > maxMessageRunes {
 		return nil, errors.New("сообщение слишком длинное")
 	}
-	msg, err := s.chatRepo.SaveSupportMessage(chatID, senderID, text)
+	msg, err := s.chatRepo.SaveSupportMessage(ctx, chatID, senderID, text)
 	if err != nil {
 		return nil, err
 	}
@@ -602,50 +603,50 @@ func (s *ChatService) SaveSupportMessage(chatID, senderID uuid.UUID, role, text 
 }
 
 // SaveSupportMessageWithAttachment saves a new support message with file attachment.
-func (s *ChatService) SaveSupportMessageWithAttachment(chatID, senderID uuid.UUID, role, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
-	if err := s.authorizeSupportChat(chatID, senderID, role); err != nil {
+func (s *ChatService) SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, role, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	if err := s.authorizeSupportChat(ctx, chatID, senderID, role); err != nil {
 		return nil, err
 	}
-	return s.chatRepo.SaveSupportMessageWithAttachment(chatID, senderID, text, fileURL, fileName, fileType, fileSize)
+	return s.chatRepo.SaveSupportMessageWithAttachment(ctx, chatID, senderID, text, fileURL, fileName, fileType, fileSize)
 }
 
 // CanAccessAttachment reports whether the user may download a stored file.
-func (s *ChatService) CanAccessAttachment(userID uuid.UUID, role, fileURL string) (bool, error) {
+func (s *ChatService) CanAccessAttachment(ctx context.Context, userID uuid.UUID, role, fileURL string) (bool, error) {
 	if role == "ADMIN" {
 		return true, nil
 	}
-	return s.chatRepo.CanAccessAttachment(userID, fileURL)
+	return s.chatRepo.CanAccessAttachment(ctx, userID, fileURL)
 }
 
 // GetAdminSupportChatList returns all user support chats for Telegram-style admin UI.
-func (s *ChatService) GetAdminSupportChatList() ([]*repository.SupportChatListItem, error) {
-	return s.chatRepo.GetAdminSupportChatList()
+func (s *ChatService) GetAdminSupportChatList(ctx context.Context) ([]*repository.SupportChatListItem, error) {
+	return s.chatRepo.GetAdminSupportChatList(ctx)
 }
 
 // MarkSupportMessagesAsRead marks unread messages in a support chat as read.
-func (s *ChatService) MarkSupportMessagesAsRead(chatID, readerID uuid.UUID, role string) error {
-	if err := s.authorizeSupportChat(chatID, readerID, role); err != nil {
+func (s *ChatService) MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID, role string) error {
+	if err := s.authorizeSupportChat(ctx, chatID, readerID, role); err != nil {
 		return err
 	}
-	return s.chatRepo.MarkSupportMessagesAsRead(chatID, readerID)
+	return s.chatRepo.MarkSupportMessagesAsRead(ctx, chatID, readerID)
 }
 
 // BanSupportChat bans a support chat for specified duration ("10m", "1h", "forever").
-func (s *ChatService) BanSupportChat(chatID uuid.UUID, duration string) error {
-	return s.chatRepo.BanSupportChat(chatID, duration)
+func (s *ChatService) BanSupportChat(ctx context.Context, chatID uuid.UUID, duration string) error {
+	return s.chatRepo.BanSupportChat(ctx, chatID, duration)
 }
 
 // UnbanSupportChat unbans a support chat.
-func (s *ChatService) UnbanSupportChat(chatID uuid.UUID) error {
-	return s.chatRepo.UnbanSupportChat(chatID)
+func (s *ChatService) UnbanSupportChat(ctx context.Context, chatID uuid.UUID) error {
+	return s.chatRepo.UnbanSupportChat(ctx, chatID)
 }
 
 // IsSupportChatBanned checks if support chat is banned.
-func (s *ChatService) IsSupportChatBanned(chatID uuid.UUID) (bool, *time.Time, error) {
-	return s.chatRepo.IsSupportChatBanned(chatID)
+func (s *ChatService) IsSupportChatBanned(ctx context.Context, chatID uuid.UUID) (bool, *time.Time, error) {
+	return s.chatRepo.IsSupportChatBanned(ctx, chatID)
 }
 
 // GetAdminSupportUnreadCount returns total unread messages count for admin.
-func (s *ChatService) GetAdminSupportUnreadCount() (int, error) {
-	return s.chatRepo.GetAdminSupportUnreadCount()
+func (s *ChatService) GetAdminSupportUnreadCount(ctx context.Context) (int, error) {
+	return s.chatRepo.GetAdminSupportUnreadCount(ctx)
 }

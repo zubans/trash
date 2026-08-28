@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -36,8 +37,8 @@ type Geozone struct {
 
 // GeozoneRepository defines storage operations for geozones.
 type GeozoneRepository interface {
-	FindByID(id int) (*Geozone, error)
-	FindByExecutor(userID uuid.UUID) (*Geozone, error)
+	FindByID(ctx context.Context, id int) (*Geozone, error)
+	FindByExecutor(ctx context.Context, userID uuid.UUID) (*Geozone, error)
 }
 
 // geozoneRepo implements GeozoneRepository using *sql.DB.
@@ -50,10 +51,10 @@ func NewGeozoneRepository(db *sql.DB) GeozoneRepository {
 	return &geozoneRepo{db: db}
 }
 
-func (r *geozoneRepo) FindByID(id int) (*Geozone, error) {
+func (r *geozoneRepo) FindByID(ctx context.Context, id int) (*Geozone, error) {
 	var g Geozone
 	var coordinatesRaw []byte
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT id, name, type, center_latitude, center_longitude, radius_meters, coordinates FROM geozones WHERE id = $1`, id,
 	).Scan(&g.ID, &g.Name, &g.Type, &g.CenterLatitude, &g.CenterLongitude, &g.RadiusMeters, &coordinatesRaw)
 	if err != nil {
@@ -69,9 +70,9 @@ func (r *geozoneRepo) FindByID(id int) (*Geozone, error) {
 	return &g, nil
 }
 
-func (r *geozoneRepo) FindByExecutor(userID uuid.UUID) (*Geozone, error) {
+func (r *geozoneRepo) FindByExecutor(ctx context.Context, userID uuid.UUID) (*Geozone, error) {
 	var geozoneID *int
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT work_area_id FROM executor_profiles WHERE user_id = $1`, userID,
 	).Scan(&geozoneID)
 	if err != nil {
@@ -80,5 +81,5 @@ func (r *geozoneRepo) FindByExecutor(userID uuid.UUID) (*Geozone, error) {
 	if geozoneID == nil {
 		return nil, errors.New("executor has no geozone")
 	}
-	return r.FindByID(*geozoneID)
+	return r.FindByID(ctx, *geozoneID)
 }

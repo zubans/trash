@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -24,7 +25,7 @@ func main() {
 	defer db.Close()
 
 	repo := repository.NewAppReleaseRepository(db)
-	nextCode, err := repo.GetNextVersionCode(platform)
+	nextCode, err := repo.GetNextVersionCode(context.Background(), platform)
 	if err != nil {
 		log.Fatalf("failed to get next version code: %v", err)
 	}

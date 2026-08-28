@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"time"
@@ -49,7 +50,7 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 		  AND sn.is_auction = TRUE 
 		  AND o.created_at < now() - INTERVAL '7 days'`
 
-	rows, err := w.db.Query(query)
+	rows, err := w.db.QueryContext(context.Background(), query)
 	if err != nil {
 		return err
 	}
@@ -75,7 +76,7 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 		// moves it to ASSIGNED. A request that reached ASSIGNED between the
 		// scan above and this line has been claimed and is no longer expired
 		// business — it belongs to the executor who won it.
-		err := w.orderService.CancelUnclaimedAuction(a.ID)
+		err := w.orderService.CancelUnclaimedAuction(context.Background(), a.ID)
 		if err != nil {
 			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", a.ID, err)
 		} else {

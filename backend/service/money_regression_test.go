@@ -34,28 +34,28 @@ func TestCancelAssignedOrderRefundsOnce(t *testing.T) {
 		t.Fatalf("unexpected error creating order: %v", err)
 	}
 
-	afterHold, _ := txRepo.GetBalance(customerID)
+	afterHold, _ := txRepo.GetBalance(context.Background(), customerID)
 	if afterHold != mockDefaultBalance-order.HoldAmount {
 		t.Fatalf("expected hold of %s, balance is %s", order.HoldAmount, afterHold)
 	}
 
 	// An executor takes the order.
-	if err := orderRepo.AssignOrder(order.ID, uuid.New()); err != nil {
+	if err := orderRepo.AssignOrder(context.Background(), order.ID, uuid.New()); err != nil {
 		t.Fatalf("failed to assign order: %v", err)
 	}
 
-	if err := srv.Cancel(customerID, order.ID); err != nil {
+	if err := srv.Cancel(context.Background(), customerID, order.ID); err != nil {
 		t.Fatalf("first cancel should succeed: %v", err)
 	}
 
 	// Every further cancel must be refused, not silently refunded again.
 	for i := 0; i < 3; i++ {
-		if err := srv.Cancel(customerID, order.ID); err == nil {
+		if err := srv.Cancel(context.Background(), customerID, order.ID); err == nil {
 			t.Fatalf("repeat cancel #%d was accepted", i+1)
 		}
 	}
 
-	final, _ := txRepo.GetBalance(customerID)
+	final, _ := txRepo.GetBalance(context.Background(), customerID)
 	if final != mockDefaultBalance {
 		t.Errorf("expected balance restored to %s exactly once, got %s", mockDefaultBalance, final)
 	}
@@ -77,21 +77,21 @@ func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 	// Capture the hold before confirmation: confirming zeroes it.
 	holdAmount := order.HoldAmount
 
-	if err := orderRepo.AssignOrder(order.ID, executorID); err != nil {
+	if err := orderRepo.AssignOrder(context.Background(), order.ID, executorID); err != nil {
 		t.Fatalf("failed to assign order: %v", err)
 	}
-	if err := srv.ExecuteOrder(order.ID, executorID); err != nil {
+	if err := srv.ExecuteOrder(context.Background(), order.ID, executorID); err != nil {
 		t.Fatalf("failed to mark order executed: %v", err)
 	}
 
-	if err := srv.Confirm(customerID, order.ID); err != nil {
+	if err := srv.Confirm(context.Background(), customerID, order.ID); err != nil {
 		t.Fatalf("first confirm should succeed: %v", err)
 	}
-	if err := srv.Confirm(customerID, order.ID); err == nil {
+	if err := srv.Confirm(context.Background(), customerID, order.ID); err == nil {
 		t.Fatal("second confirm was accepted")
 	}
 
-	executorBalance, _ := txRepo.GetBalance(executorID)
+	executorBalance, _ := txRepo.GetBalance(context.Background(), executorID)
 	expected := mockDefaultBalance + holdAmount
 	if executorBalance != expected {
 		t.Errorf("expected executor to be paid once (%s), got %s", expected, executorBalance)
@@ -114,7 +114,7 @@ func TestCreateOrderRejectsOverdraft(t *testing.T) {
 	// Whether the order row survives is a property of the database transaction
 	// the two statements share, which mocks do not model; that is asserted
 	// against a real Postgres in TestCreateOrderRollsBackOnInsufficientFunds.
-	balance, _ := txRepo.GetBalance(customerID)
+	balance, _ := txRepo.GetBalance(context.Background(), customerID)
 	if balance != money.FromRubles(50) {
 		t.Errorf("balance must be untouched, got %s", balance)
 	}
@@ -159,11 +159,11 @@ func TestEndShiftEarlyChargesPenalty(t *testing.T) {
 	srv := NewShiftService(shiftRepo, nil, NewLedger(txRepo, newMockAccounts()), settings, &mockOrderRepo{}, nil, nil)
 
 	executorID := uuid.New()
-	if _, err := shiftRepo.StartShift(executorID, 3); err != nil {
+	if _, err := shiftRepo.StartShift(context.Background(), executorID, 3); err != nil {
 		t.Fatalf("failed to start shift: %v", err)
 	}
 
-	if err := srv.End(executorID); err != nil {
+	if err := srv.End(context.Background(), executorID); err != nil {
 		t.Fatalf("ending the shift should succeed: %v", err)
 	}
 
@@ -199,13 +199,13 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 	}
 	orderRepo.orders = append(orderRepo.orders, order)
 
-	bid, err := bidRepo.CreateBid(order.ID, executorID, money.FromRubles(350))
+	bid, err := bidRepo.CreateBid(context.Background(), order.ID, executorID, money.FromRubles(350))
 	if err != nil {
 		t.Fatalf("failed to seed bid: %v", err)
 	}
 
 	// The executor placed the bid but is no longer on shift.
-	if err := srv.AcceptBid(bid.ID, customerID); err == nil {
+	if err := srv.AcceptBid(context.Background(), bid.ID, customerID); err == nil {
 		t.Error("expected accept to fail while the executor has no active shift")
 	}
 	if bid.Status != "PENDING" {
@@ -219,10 +219,10 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 		Status:       repository.ShiftStatusActive,
 		PlannedEndAt: time.Now().Add(time.Hour),
 	})
-	if err := srv.AcceptBid(bid.ID, customerID); err != nil {
+	if err := srv.AcceptBid(context.Background(), bid.ID, customerID); err != nil {
 		t.Fatalf("expected accept to succeed: %v", err)
 	}
-	if balance, _ := txRepo.GetBalance(customerID); balance != mockDefaultBalance.Sub(money.FromRubles(350)) {
+	if balance, _ := txRepo.GetBalance(context.Background(), customerID); balance != mockDefaultBalance.Sub(money.FromRubles(350)) {
 		t.Errorf("expected the offer to be held, balance is %s", balance)
 	}
 	if order.HoldAmount != money.FromRubles(350) || order.Status != repository.OrderStatusAssigned {
@@ -230,10 +230,10 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 	}
 
 	// A second accept must not double-charge.
-	if err := srv.AcceptBid(bid.ID, customerID); err == nil {
+	if err := srv.AcceptBid(context.Background(), bid.ID, customerID); err == nil {
 		t.Error("expected a repeated accept to be refused")
 	}
-	if balance, _ := txRepo.GetBalance(customerID); balance != mockDefaultBalance.Sub(money.FromRubles(350)) {
+	if balance, _ := txRepo.GetBalance(context.Background(), customerID); balance != mockDefaultBalance.Sub(money.FromRubles(350)) {
 		t.Errorf("balance must be charged once, got %s", balance)
 	}
 }
@@ -253,9 +253,9 @@ func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 		Status:           repository.OrderStatusSearching,
 	}
 	orderRepo.orders = append(orderRepo.orders, order)
-	bid, _ := bidRepo.CreateBid(order.ID, uuid.New(), money.FromRubles(100))
+	bid, _ := bidRepo.CreateBid(context.Background(), order.ID, uuid.New(), money.FromRubles(100))
 
-	if err := srv.AcceptBid(bid.ID, uuid.New()); err == nil {
+	if err := srv.AcceptBid(context.Background(), bid.ID, uuid.New()); err == nil {
 		t.Error("expected a stranger to be refused")
 	}
 }
@@ -281,11 +281,11 @@ func TestWithdrawalReservesFunds(t *testing.T) {
 	user := &repository.User{ID: uuid.New(), Phone: "+79990000010", Role: "EXECUTOR", Status: "ACTIVE"}
 	userRepo.users[user.Phone] = user
 
-	if _, err := svc.CreateWithdrawalRequest(user.ID, money.FromRubles(400)); err != nil {
+	if _, err := svc.CreateWithdrawalRequest(context.Background(), user.ID, money.FromRubles(400)); err != nil {
 		t.Fatalf("unexpected error requesting withdrawal: %v", err)
 	}
 
-	balance, _ := txRepo.GetBalance(user.ID)
+	balance, _ := txRepo.GetBalance(context.Background(), user.ID)
 	if balance != mockDefaultBalance.Sub(money.FromRubles(400)) {
 		t.Errorf("expected the money to be reserved at request time, balance is %s", balance)
 	}
@@ -310,10 +310,10 @@ func TestWithdrawalCannotExceedBalance(t *testing.T) {
 	userRepo.users[user.Phone] = user
 	txRepo.balances = map[uuid.UUID]money.Amount{user.ID: money.FromRubles(100)}
 
-	if _, err := svc.CreateWithdrawalRequest(user.ID, money.FromRubles(500)); err == nil {
+	if _, err := svc.CreateWithdrawalRequest(context.Background(), user.ID, money.FromRubles(500)); err == nil {
 		t.Error("expected a request larger than the balance to be refused")
 	}
-	if balance, _ := txRepo.GetBalance(user.ID); balance != money.FromRubles(100) {
+	if balance, _ := txRepo.GetBalance(context.Background(), user.ID); balance != money.FromRubles(100) {
 		t.Errorf("a refused request must not touch the balance, got %s", balance)
 	}
 }
@@ -326,23 +326,23 @@ func TestRejectedWithdrawalReturnsTheMoney(t *testing.T) {
 	user := &repository.User{ID: uuid.New(), Phone: "+79990000012", Role: "EXECUTOR", Status: "ACTIVE"}
 	userRepo.users[user.Phone] = user
 
-	req, err := svc.CreateWithdrawalRequest(user.ID, money.FromRubles(250))
+	req, err := svc.CreateWithdrawalRequest(context.Background(), user.ID, money.FromRubles(250))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if err := svc.RejectWithdrawalRequest(req.ID, uuid.New()); err != nil {
+	if err := svc.RejectWithdrawalRequest(context.Background(), req.ID, uuid.New()); err != nil {
 		t.Fatalf("unexpected error rejecting: %v", err)
 	}
-	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance {
+	if balance, _ := txRepo.GetBalance(context.Background(), user.ID); balance != mockDefaultBalance {
 		t.Errorf("rejecting must return the reserved money, balance is %s", balance)
 	}
 
 	// A second decision on the same request must not double-refund.
-	if err := svc.RejectWithdrawalRequest(req.ID, uuid.New()); err == nil {
+	if err := svc.RejectWithdrawalRequest(context.Background(), req.ID, uuid.New()); err == nil {
 		t.Error("expected a second decision to be refused")
 	}
-	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance {
+	if balance, _ := txRepo.GetBalance(context.Background(), user.ID); balance != mockDefaultBalance {
 		t.Errorf("balance must be restored once, got %s", balance)
 	}
 }
@@ -355,18 +355,18 @@ func TestApprovedWithdrawalDoesNotDebitTwice(t *testing.T) {
 	user := &repository.User{ID: uuid.New(), Phone: "+79990000013", Role: "EXECUTOR", Status: "ACTIVE"}
 	userRepo.users[user.Phone] = user
 
-	req, err := svc.CreateWithdrawalRequest(user.ID, money.FromRubles(300))
+	req, err := svc.CreateWithdrawalRequest(context.Background(), user.ID, money.FromRubles(300))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := svc.ApproveWithdrawalRequest(req.ID, uuid.New()); err != nil {
+	if err := svc.ApproveWithdrawalRequest(context.Background(), req.ID, uuid.New()); err != nil {
 		t.Fatalf("unexpected error approving: %v", err)
 	}
 
-	if balance, _ := txRepo.GetBalance(user.ID); balance != mockDefaultBalance.Sub(money.FromRubles(300)) {
+	if balance, _ := txRepo.GetBalance(context.Background(), user.ID); balance != mockDefaultBalance.Sub(money.FromRubles(300)) {
 		t.Errorf("approval must not debit again, balance is %s", balance)
 	}
-	if err := svc.ApproveWithdrawalRequest(req.ID, uuid.New()); err == nil {
+	if err := svc.ApproveWithdrawalRequest(context.Background(), req.ID, uuid.New()); err == nil {
 		t.Error("expected a repeated approval to be refused")
 	}
 }
@@ -399,8 +399,8 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 	}
 
 	// Give both participants a starting balance the way the world does.
-	customerStart, _ := txRepo.GetBalance(customerID)
-	executorStart, _ := txRepo.GetBalance(executorID)
+	customerStart, _ := txRepo.GetBalance(context.Background(), customerID)
+	executorStart, _ := txRepo.GetBalance(context.Background(), executorID)
 	opening := customerStart.Add(executorStart)
 	if total() != opening {
 		t.Fatalf("fixture is not balanced: %s vs %s", total(), opening)
@@ -419,13 +419,13 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 	}
 
 	// Run the order to completion: escrow drains into the executor.
-	if err := orderRepo.AssignOrder(order.ID, executorID); err != nil {
+	if err := orderRepo.AssignOrder(context.Background(), order.ID, executorID); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
-	if err := orders.ExecuteOrder(order.ID, executorID); err != nil {
+	if err := orders.ExecuteOrder(context.Background(), order.ID, executorID); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if err := orders.Confirm(customerID, order.ID); err != nil {
+	if err := orders.Confirm(context.Background(), customerID, order.ID); err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
 	if !accounts.balances[repository.AccountEscrow].IsZero() {
@@ -440,10 +440,10 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second order: %v", err)
 	}
-	if err := orderRepo.AssignOrder(second.ID, executorID); err != nil {
+	if err := orderRepo.AssignOrder(context.Background(), second.ID, executorID); err != nil {
 		t.Fatalf("assign second: %v", err)
 	}
-	if err := orders.RejectAssignedOrder(second.ID, executorID); err != nil {
+	if err := orders.RejectAssignedOrder(context.Background(), second.ID, executorID); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
 	if !accounts.balances[repository.AccountFines].IsPositive() {

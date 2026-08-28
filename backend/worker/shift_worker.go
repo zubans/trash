@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -23,7 +24,7 @@ func (w *ShiftWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := metrics.TrackWorker("shift_autoclose", w.shiftService.AutoEndExpiredShifts); err != nil {
+			if err := metrics.TrackWorker("shift_autoclose", func() error { return w.shiftService.AutoEndExpiredShifts(context.Background()) }); err != nil {
 				log.Printf("[ShiftWorker] Error auto-ending expired shifts: %v", err)
 			}
 		}

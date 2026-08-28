@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"math"
 	"time"
@@ -50,37 +51,37 @@ type Order struct {
 
 // OrderRepository defines storage operations for orders.
 type OrderRepository interface {
-	Create(q Querier, order *Order) error
-	FindByID(id uuid.UUID) (*Order, error)
-	GetOrderByID(id uuid.UUID) (*Order, error)
-	FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error)
-	FindAllByExecutor(executorID uuid.UUID) ([]Order, error)
-	FindByCustomer(customerID uuid.UUID) ([]Order, error)
-	GetPendingOrders() ([]*Order, error)
+	Create(ctx context.Context, q Querier, order *Order) error
+	FindByID(ctx context.Context, id uuid.UUID) (*Order, error)
+	GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, error)
+	FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error)
+	FindAllByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error)
+	FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]Order, error)
+	GetPendingOrders(ctx context.Context) ([]*Order, error)
 	// GetOrdersMissingCoordinates returns searching orders that have an address
 	// but no pickup coordinates, so a background job can geocode them.
-	GetOrdersMissingCoordinates(limit int) ([]*Order, error)
+	GetOrdersMissingCoordinates(ctx context.Context, limit int) ([]*Order, error)
 	// SetPickupCoordinates fills in an order's pickup coordinates after a
 	// deferred geocode. It touches only the two columns and nothing else.
-	SetPickupCoordinates(orderID uuid.UUID, lat, lon float64) error
-	FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error)
+	SetPickupCoordinates(ctx context.Context, orderID uuid.UUID, lat, lon float64) error
+	FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*Order, error)
 	// Mutating operations take a Querier so the caller can run them inside its
 	// own transaction; pass nil to run on the connection pool. They return
 	// ErrConflict when the entity was not in the expected state.
-	Assign(q Querier, orderID, executorID uuid.UUID) error
-	Execute(q Querier, orderID uuid.UUID) error
-	Confirm(q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
-	Cancel(q Querier, orderID uuid.UUID) error
-	Unassign(q Querier, orderID uuid.UUID) error
-	LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error)
-	SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount money.Amount) error
-	AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error
-	CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error)
-	CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error)
+	Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error
+	Execute(ctx context.Context, q Querier, orderID uuid.UUID) error
+	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
+	Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error
+	Unassign(ctx context.Context, q Querier, orderID uuid.UUID) error
+	LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error)
+	SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error
+	AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error
+	CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
+	CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
 
-	GetExecutorAssignedOrders(executorID uuid.UUID) ([]*Order, error)
-	GetCustomerOrders(customerID uuid.UUID) ([]*Order, error)
-	GetAvailableAuctionOrders() ([]*Order, error)
+	GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error)
+	GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
+	GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error)
 }
 
 // orderRepo implements OrderRepository using *sql.DB.
@@ -139,8 +140,8 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 	return o, err
 }
 
-func (r *orderRepo) Create(q Querier, order *Order) error {
-	_, err := r.exec(q).Exec(
+func (r *orderRepo) Create(ctx context.Context, q Querier, order *Order) error {
+	_, err := r.exec(ctx, q).ExecContext(ctx,
 		`INSERT INTO orders (`+orderInsertColumns+`)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		order.ID, order.CustomerID, order.ExecutorID, order.ServiceVariantID, order.IsUrgent, order.IsAsap,
@@ -151,8 +152,8 @@ func (r *orderRepo) Create(q Querier, order *Order) error {
 	return err
 }
 
-func (r *orderRepo) FindByID(id uuid.UUID) (*Order, error) {
-	row := r.db.QueryRow(
+func (r *orderRepo) FindByID(ctx context.Context, id uuid.UUID) (*Order, error) {
+	row := r.db.QueryRowContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.id = $1`, id,
 	)
 	o, err := scanOrderRow(row)
@@ -162,12 +163,12 @@ func (r *orderRepo) FindByID(id uuid.UUID) (*Order, error) {
 	return &o, nil
 }
 
-func (r *orderRepo) GetOrderByID(id uuid.UUID) (*Order, error) {
-	return r.FindByID(id)
+func (r *orderRepo) GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, error) {
+	return r.FindByID(ctx, id)
 }
 
-func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error) {
-	rows, err := r.db.Query(
+func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3) ORDER BY o.created_at DESC`,
 		executorID, OrderStatusAssigned, OrderStatusExecuted,
 	)
@@ -187,8 +188,8 @@ func (r *orderRepo) FindAssignedByExecutor(executorID uuid.UUID) ([]Order, error
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) FindAllByExecutor(executorID uuid.UUID) ([]Order, error) {
-	rows, err := r.db.Query(
+func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC`,
 		executorID,
 	)
@@ -208,8 +209,8 @@ func (r *orderRepo) FindAllByExecutor(executorID uuid.UUID) ([]Order, error) {
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
-	rows, err := r.db.Query(
+func (r *orderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]Order, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC`,
 		customerID,
 	)
@@ -229,8 +230,8 @@ func (r *orderRepo) FindByCustomer(customerID uuid.UUID) ([]Order, error) {
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
-	rows, err := r.db.Query(
+func (r *orderRepo) GetPendingOrders(ctx context.Context) ([]*Order, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.status = $1`,
 		OrderStatusSearching,
 	)
@@ -254,8 +255,8 @@ func (r *orderRepo) GetPendingOrders() ([]*Order, error) {
 // non-empty address but no stored pickup coordinates. The executor map only
 // plots orders that already carry coordinates, so these would otherwise stay
 // invisible until re-geocoded.
-func (r *orderRepo) GetOrdersMissingCoordinates(limit int) ([]*Order, error) {
-	rows, err := r.db.Query(
+func (r *orderRepo) GetOrdersMissingCoordinates(ctx context.Context, limit int) ([]*Order, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o
 		 WHERE o.status = $1
 		   AND (o.pickup_lat IS NULL OR o.pickup_lon IS NULL)
@@ -281,8 +282,8 @@ func (r *orderRepo) GetOrdersMissingCoordinates(limit int) ([]*Order, error) {
 }
 
 // SetPickupCoordinates writes just the pickup coordinates for an order.
-func (r *orderRepo) SetPickupCoordinates(orderID uuid.UUID, lat, lon float64) error {
-	_, err := r.db.Exec(
+func (r *orderRepo) SetPickupCoordinates(ctx context.Context, orderID uuid.UUID, lat, lon float64) error {
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE orders SET pickup_lat = $2, pickup_lon = $3 WHERE id = $1`,
 		orderID, lat, lon,
 	)
@@ -292,12 +293,12 @@ func (r *orderRepo) SetPickupCoordinates(orderID uuid.UUID, lat, lon float64) er
 // FindNearbyOrders returns searching orders with pickup coordinates within radiusMeters of (lat, lon).
 // Uses the Haversine formula approximation via the earth-distance cube operator is not available,
 // so we filter with a bounding box first and then compute exact distance in code.
-func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Order, error) {
+func (r *orderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*Order, error) {
 	// Approximate degrees for the bounding box: 1 degree lat ~ 111 km.
 	deltaLat := float64(radiusMeters) / 111000.0
 	deltaLon := float64(radiusMeters) / (111000.0 * math.Cos(lat*math.Pi/180.0))
 
-	rows, err := r.db.Query(
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o
 		 WHERE o.status = $1
 		   AND o.pickup_lat BETWEEN $2 AND $3
@@ -331,29 +332,29 @@ func (r *orderRepo) FindNearbyOrders(lat, lon float64, radiusMeters int) ([]*Ord
 // supplied, the pool otherwise. Every state transition below is guarded in SQL
 // and reports ErrConflict when the guard does not match, so a no-op update can
 // never be mistaken for success.
-func (r *orderRepo) exec(q Querier) Querier {
+func (r *orderRepo) exec(ctx context.Context, q Querier) Querier {
 	if q == nil {
 		return r.db
 	}
 	return q
 }
 
-func (r *orderRepo) Assign(q Querier, orderID, executorID uuid.UUID) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now() WHERE id = $3 AND status = $4 AND executor_id IS NULL`,
 		executorID, OrderStatusAssigned, orderID, OrderStatusSearching,
 	)
 }
 
-func (r *orderRepo) Execute(q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) Execute(ctx context.Context, q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
 		OrderStatusExecuted, orderID, OrderStatusAssigned,
 	)
 }
 
-func (r *orderRepo) Confirm(q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
@@ -366,15 +367,15 @@ func (r *orderRepo) Confirm(q Querier, orderID uuid.UUID, finalAmount money.Amou
 // Cancel voids an order that has not been executed yet. Both SEARCHING and
 // ASSIGNED are accepted because the service layer refunds the hold for both;
 // the guard keeps a second concurrent cancel from refunding twice.
-func (r *orderRepo) Cancel(q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
 		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned,
 	)
 }
 
-func (r *orderRepo) Unassign(q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) Unassign(ctx context.Context, q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET status = $1, executor_id = NULL, assigned_at = NULL WHERE id = $2 AND status = $3`,
 		OrderStatusSearching, orderID, OrderStatusAssigned,
 	)
@@ -383,8 +384,8 @@ func (r *orderRepo) Unassign(q Querier, orderID uuid.UUID) error {
 // AssignWithHold assigns an executor and records the agreed price in one
 // statement. Used when a customer accepts an auction bid, where the price is
 // only known at that moment.
-func (r *orderRepo) AssignWithHold(q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now(),
 		    hold_amount = $3, final_amount = $3
 		 WHERE id = $4 AND status = $5 AND executor_id IS NULL`,
@@ -395,8 +396,8 @@ func (r *orderRepo) AssignWithHold(q Querier, orderID, executorID uuid.UUID, hol
 // LockForUpdate reads an order inside a transaction taking a row lock, so that
 // concurrent confirm/cancel requests serialise instead of both seeing the same
 // pre-transition state.
-func (r *orderRepo) LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error) {
-	row := r.exec(q).QueryRow(`SELECT `+orderColumns+` FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID)
+func (r *orderRepo) LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error) {
+	row := r.exec(ctx, q).QueryRowContext(ctx, `SELECT `+orderColumns+` FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID)
 	o, err := scanOrderRow(row)
 	if err != nil {
 		return nil, err
@@ -407,16 +408,16 @@ func (r *orderRepo) LockForUpdate(q Querier, orderID uuid.UUID) (*Order, error) 
 // SetHoldAmount adjusts the amount currently held from the customer. It must be
 // kept in step with every refund, otherwise the payout at confirmation time is
 // computed from a stale hold.
-func (r *orderRepo) SetHoldAmount(q Querier, orderID uuid.UUID, holdAmount money.Amount) error {
-	return execExpectingOne(r.exec(q),
+func (r *orderRepo) SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET hold_amount = $1 WHERE id = $2`,
 		holdAmount, orderID,
 	)
 }
 
 // GetExecutorAssignedOrders returns orders assigned to a specific executor.
-func (r *orderRepo) GetExecutorAssignedOrders(executorID uuid.UUID) ([]*Order, error) {
-	orders, err := r.FindAssignedByExecutor(executorID)
+func (r *orderRepo) GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error) {
+	orders, err := r.FindAssignedByExecutor(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
@@ -428,8 +429,8 @@ func (r *orderRepo) GetExecutorAssignedOrders(executorID uuid.UUID) ([]*Order, e
 }
 
 // GetCustomerOrders returns orders created by a customer.
-func (r *orderRepo) GetCustomerOrders(customerID uuid.UUID) ([]*Order, error) {
-	orders, err := r.FindByCustomer(customerID)
+func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
+	orders, err := r.FindByCustomer(ctx, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -441,8 +442,8 @@ func (r *orderRepo) GetCustomerOrders(customerID uuid.UUID) ([]*Order, error) {
 }
 
 // GetAvailableAuctionOrders returns open auction orders.
-func (r *orderRepo) GetAvailableAuctionOrders() ([]*Order, error) {
-	rows, err := r.db.Query(
+func (r *orderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o
 		 JOIN service_nodes sn ON sn.id = o.service_variant_id
 		 WHERE sn.is_auction = TRUE AND o.status = $1`,
@@ -464,18 +465,18 @@ func (r *orderRepo) GetAvailableAuctionOrders() ([]*Order, error) {
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) CountActiveOrdersByExecutor(executorID uuid.UUID) (int, error) {
+func (r *orderRepo) CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'ASSIGNED'`,
 		executorID,
 	).Scan(&count)
 	return count, err
 }
 
-func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(executorID uuid.UUID) (int, error) {
+func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'EXECUTED'`,
 		executorID,
 	).Scan(&count)

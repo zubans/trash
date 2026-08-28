@@ -54,7 +54,6 @@ public final class ChannelManager {
         LibXrayBridge lib = LibXrayBridge.tryLoad();
         this.xray = new XrayController(ctx, lib);
         this.repo = new RemoteConfigRepo(ctx, cfg.configUrl);
-        this.repo.seedFromAssetsIfEmpty(ctx, "vless-endpoints.enc");
 
         // Direct probe must never ride the tunnel, even while we are on PROXY.
         this.directClient = new OkHttpClient.Builder()

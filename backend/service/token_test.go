@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -21,14 +22,14 @@ func newFakeRefreshRepo() *fakeRefreshRepo {
 	return &fakeRefreshRepo{tokens: make(map[string]*repository.RefreshToken)}
 }
 
-func (f *fakeRefreshRepo) Create(userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+func (f *fakeRefreshRepo) Create(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
 	f.tokens[tokenHash] = &repository.RefreshToken{
 		ID: uuid.New(), UserID: userID, ExpiresAt: expiresAt, CreatedAt: time.Now(),
 	}
 	return nil
 }
 
-func (f *fakeRefreshRepo) FindByHash(tokenHash string) (*repository.RefreshToken, error) {
+func (f *fakeRefreshRepo) FindByHash(ctx context.Context, tokenHash string) (*repository.RefreshToken, error) {
 	t, ok := f.tokens[tokenHash]
 	if !ok {
 		return nil, repository.ErrRefreshTokenNotFound
@@ -36,7 +37,7 @@ func (f *fakeRefreshRepo) FindByHash(tokenHash string) (*repository.RefreshToken
 	return t, nil
 }
 
-func (f *fakeRefreshRepo) MarkUsed(tokenHash string) error {
+func (f *fakeRefreshRepo) MarkUsed(ctx context.Context, tokenHash string) error {
 	t, ok := f.tokens[tokenHash]
 	if !ok || !t.IsUsable(time.Now()) {
 		return repository.ErrConflict
@@ -46,7 +47,7 @@ func (f *fakeRefreshRepo) MarkUsed(tokenHash string) error {
 	return nil
 }
 
-func (f *fakeRefreshRepo) RevokeAllForUser(userID uuid.UUID) error {
+func (f *fakeRefreshRepo) RevokeAllForUser(ctx context.Context, userID uuid.UUID) error {
 	now := time.Now()
 	for _, t := range f.tokens {
 		if t.UserID == userID && t.RevokedAt == nil {
@@ -56,7 +57,7 @@ func (f *fakeRefreshRepo) RevokeAllForUser(userID uuid.UUID) error {
 	return nil
 }
 
-func (f *fakeRefreshRepo) Revoke(tokenHash string) error {
+func (f *fakeRefreshRepo) Revoke(ctx context.Context, tokenHash string) error {
 	if t, ok := f.tokens[tokenHash]; ok && t.RevokedAt == nil {
 		now := time.Now()
 		t.RevokedAt = &now
@@ -64,7 +65,7 @@ func (f *fakeRefreshRepo) Revoke(tokenHash string) error {
 	return nil
 }
 
-func (f *fakeRefreshRepo) DeleteExpired() (int64, error) { return 0, nil }
+func (f *fakeRefreshRepo) DeleteExpired(ctx context.Context) (int64, error) { return 0, nil }
 
 func (f *fakeRefreshRepo) usableCount(userID uuid.UUID) int {
 	n := 0
@@ -91,7 +92,7 @@ func newSessionTestService(t *testing.T) (*AuthService, *mockRepo, *fakeRefreshR
 func TestRefreshRotatesTheToken(t *testing.T) {
 	svc, _, _, user := newSessionTestService(t)
 
-	first, err := svc.IssueTokenPair(user)
+	first, err := svc.IssueTokenPair(context.Background(), user)
 	if err != nil {
 		t.Fatalf("unexpected error issuing pair: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 		t.Fatal("expected both tokens to be issued")
 	}
 
-	second, err := svc.Refresh(first.RefreshToken)
+	second, err := svc.Refresh(context.Background(), first.RefreshToken)
 	if err != nil {
 		t.Fatalf("unexpected error refreshing: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 	}
 
 	// The rotated token works.
-	if _, err := svc.Refresh(second.RefreshToken); err != nil {
+	if _, err := svc.Refresh(context.Background(), second.RefreshToken); err != nil {
 		t.Errorf("expected the rotated token to be usable: %v", err)
 	}
 }
@@ -118,21 +119,21 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 func TestRefreshReplayRevokesEverySession(t *testing.T) {
 	svc, _, refresh, user := newSessionTestService(t)
 
-	stolen, err := svc.IssueTokenPair(user)
+	stolen, err := svc.IssueTokenPair(context.Background(), user)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// A second, unrelated session of the same user (another device).
-	if _, err := svc.IssueTokenPair(user); err != nil {
+	if _, err := svc.IssueTokenPair(context.Background(), user); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, err := svc.Refresh(stolen.RefreshToken); err != nil {
+	if _, err := svc.Refresh(context.Background(), stolen.RefreshToken); err != nil {
 		t.Fatalf("first exchange should succeed: %v", err)
 	}
 
 	// The attacker replays the value the legitimate client already used.
-	if _, err := svc.Refresh(stolen.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+	if _, err := svc.Refresh(context.Background(), stolen.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("expected the replay to be rejected, got %v", err)
 	}
 	if n := refresh.usableCount(user.ID); n != 0 {
@@ -143,24 +144,24 @@ func TestRefreshReplayRevokesEverySession(t *testing.T) {
 func TestRefreshRejectsUnknownExpiredAndRevoked(t *testing.T) {
 	svc, _, refresh, user := newSessionTestService(t)
 
-	if _, err := svc.Refresh("not-a-real-token"); !errors.Is(err, ErrInvalidRefreshToken) {
+	if _, err := svc.Refresh(context.Background(), "not-a-real-token"); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("unknown token: expected ErrInvalidRefreshToken, got %v", err)
 	}
-	if _, err := svc.Refresh(""); !errors.Is(err, ErrInvalidRefreshToken) {
+	if _, err := svc.Refresh(context.Background(), ""); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("empty token: expected ErrInvalidRefreshToken, got %v", err)
 	}
 
-	expired, _ := svc.IssueTokenPair(user)
+	expired, _ := svc.IssueTokenPair(context.Background(), user)
 	refresh.tokens[hashRefreshToken(expired.RefreshToken)].ExpiresAt = time.Now().Add(-time.Minute)
-	if _, err := svc.Refresh(expired.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+	if _, err := svc.Refresh(context.Background(), expired.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("expired token: expected ErrInvalidRefreshToken, got %v", err)
 	}
 
-	loggedOut, _ := svc.IssueTokenPair(user)
-	if err := svc.RevokeRefreshToken(loggedOut.RefreshToken); err != nil {
+	loggedOut, _ := svc.IssueTokenPair(context.Background(), user)
+	if err := svc.RevokeRefreshToken(context.Background(), loggedOut.RefreshToken); err != nil {
 		t.Fatalf("unexpected error revoking: %v", err)
 	}
-	if _, err := svc.Refresh(loggedOut.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+	if _, err := svc.Refresh(context.Background(), loggedOut.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("revoked token: expected ErrInvalidRefreshToken, got %v", err)
 	}
 }
@@ -170,14 +171,14 @@ func TestRefreshRejectsUnknownExpiredAndRevoked(t *testing.T) {
 func TestRefreshRefusesBannedUser(t *testing.T) {
 	svc, repo, refresh, user := newSessionTestService(t)
 
-	pair, err := svc.IssueTokenPair(user)
+	pair, err := svc.IssueTokenPair(context.Background(), user)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	repo.users[user.Phone].Status = "BANNED"
 
-	if _, err := svc.Refresh(pair.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("expected a banned user to be refused, got %v", err)
 	}
 	if n := refresh.usableCount(user.ID); n != 0 {
@@ -189,11 +190,11 @@ func TestRefreshRefusesBannedUser(t *testing.T) {
 func TestIssuedAccessTokenCarriesTheUser(t *testing.T) {
 	svc, _, _, user := newSessionTestService(t)
 
-	pair, err := svc.IssueTokenPair(user)
+	pair, err := svc.IssueTokenPair(context.Background(), user)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	claims, err := svc.ParseJWT(pair.AccessToken)
+	claims, err := svc.ParseJWT(context.Background(), pair.AccessToken)
 	if err != nil {
 		t.Fatalf("issued access token does not parse: %v", err)
 	}
@@ -217,21 +218,21 @@ func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 	repo.users[user.Phone].Password = string(hash)
 
 	// A session that is about to be ended by the change.
-	if _, err := svc.IssueTokenPair(user); err != nil {
+	if _, err := svc.IssueTokenPair(context.Background(), user); err != nil {
 		t.Fatalf("issue pair: %v", err)
 	}
 
-	if _, err := svc.ChangePassword(user.ID, "wrong-password", "An0therStr0ng!"); err == nil {
+	if _, err := svc.ChangePassword(context.Background(), user.ID, "wrong-password", "An0therStr0ng!"); err == nil {
 		t.Error("expected the wrong current password to be refused")
 	}
-	if _, err := svc.ChangePassword(user.ID, "Str0ngPassw0rd", "short"); err == nil {
+	if _, err := svc.ChangePassword(context.Background(), user.ID, "Str0ngPassw0rd", "short"); err == nil {
 		t.Error("expected a weak new password to be refused")
 	}
-	if _, err := svc.ChangePassword(user.ID, "Str0ngPassw0rd", "Str0ngPassw0rd"); err == nil {
+	if _, err := svc.ChangePassword(context.Background(), user.ID, "Str0ngPassw0rd", "Str0ngPassw0rd"); err == nil {
 		t.Error("expected an unchanged password to be refused")
 	}
 
-	pair, err := svc.ChangePassword(user.ID, "Str0ngPassw0rd", "An0therStr0ng!")
+	pair, err := svc.ChangePassword(context.Background(), user.ID, "Str0ngPassw0rd", "An0therStr0ng!")
 	if err != nil {
 		t.Fatalf("unexpected error changing password: %v", err)
 	}

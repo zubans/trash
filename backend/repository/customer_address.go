@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 
@@ -44,8 +45,8 @@ type CustomerAddress struct {
 // addressColumns lists the stored columns once, so the SELECTs and the scan
 // cannot drift apart.
 const addressColumns = `id, address, is_default,
-	COALESCE(region, ''), COALESCE(city, ''), COALESCE(street, ''),
-	COALESCE(house, ''), COALESCE(flat, ''), COALESCE(fias_id, ''),
+	COALESCE(ctx context.Context, region, ''), COALESCE(city, ''), COALESCE(street, ''),
+	COALESCE(ctx context.Context, house, ''), COALESCE(flat, ''), COALESCE(fias_id, ''),
 	geo_lat, geo_lon, COALESCE(source, '')`
 
 // scanAddresses reads a result set of addressColumns.
@@ -67,14 +68,14 @@ func scanAddresses(rows *sql.Rows) ([]CustomerAddress, error) {
 
 // CustomerAddressRepository stores the addresses a customer orders from.
 type CustomerAddressRepository interface {
-	List(userID uuid.UUID) ([]CustomerAddress, error)
-	Add(userID uuid.UUID, address CustomerAddress) ([]CustomerAddress, error)
-	Delete(userID, addressID uuid.UUID) ([]CustomerAddress, error)
-	SetDefault(userID, addressID uuid.UUID) ([]CustomerAddress, error)
+	List(ctx context.Context, userID uuid.UUID) ([]CustomerAddress, error)
+	Add(ctx context.Context, userID uuid.UUID, address CustomerAddress) ([]CustomerAddress, error)
+	Delete(ctx context.Context, userID, addressID uuid.UUID) ([]CustomerAddress, error)
+	SetDefault(ctx context.Context, userID, addressID uuid.UUID) ([]CustomerAddress, error)
 	// SetDefaultByValue keeps the older clients working: they identify an
 	// address by its text rather than by id.
-	SetDefaultByValue(userID uuid.UUID, address string) ([]CustomerAddress, error)
-	Default(userID uuid.UUID) (string, error)
+	SetDefaultByValue(ctx context.Context, userID uuid.UUID, address string) ([]CustomerAddress, error)
+	Default(ctx context.Context, userID uuid.UUID) (string, error)
 }
 
 type customerAddressRepo struct {
@@ -88,8 +89,8 @@ func NewCustomerAddressRepository(db *sql.DB) CustomerAddressRepository {
 
 // List returns the addresses with the default one first, then oldest to newest,
 // so the order the client renders is stable.
-func (r *customerAddressRepo) List(userID uuid.UUID) ([]CustomerAddress, error) {
-	rows, err := r.db.Query(
+func (r *customerAddressRepo) List(ctx context.Context, userID uuid.UUID) ([]CustomerAddress, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+addressColumns+` FROM customer_addresses
 		 WHERE user_id = $1 ORDER BY is_default DESC, created_at`, userID)
 	if err != nil {
@@ -101,22 +102,22 @@ func (r *customerAddressRepo) List(userID uuid.UUID) ([]CustomerAddress, error) 
 }
 
 // Add saves an address, making it the default when it is the first one.
-func (r *customerAddressRepo) Add(userID uuid.UUID, address CustomerAddress) ([]CustomerAddress, error) {
-	tx, err := r.db.Begin()
+func (r *customerAddressRepo) Add(ctx context.Context, userID uuid.UUID, address CustomerAddress) ([]CustomerAddress, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	var count int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM customer_addresses WHERE user_id = $1`, userID).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM customer_addresses WHERE user_id = $1`, userID).Scan(&count); err != nil {
 		return nil, err
 	}
 	if count >= MaxCustomerAddresses {
 		return nil, ErrAddressLimitReached
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO customer_addresses
 		     (user_id, address, is_default, region, city, street, house, flat, fias_id, geo_lat, geo_lon, source)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -133,21 +134,21 @@ func (r *customerAddressRepo) Add(userID uuid.UUID, address CustomerAddress) ([]
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.List(userID)
+	return r.List(ctx, userID)
 }
 
 // Delete removes an address. If it was the default, the oldest remaining one
 // takes over, so a customer is never left without a default while having
 // addresses.
-func (r *customerAddressRepo) Delete(userID, addressID uuid.UUID) ([]CustomerAddress, error) {
-	tx, err := r.db.Begin()
+func (r *customerAddressRepo) Delete(ctx context.Context, userID, addressID uuid.UUID) ([]CustomerAddress, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	var wasDefault bool
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(ctx,
 		`DELETE FROM customer_addresses WHERE id = $1 AND user_id = $2 RETURNING is_default`,
 		addressID, userID).Scan(&wasDefault)
 	if err != nil {
@@ -158,7 +159,7 @@ func (r *customerAddressRepo) Delete(userID, addressID uuid.UUID) ([]CustomerAdd
 	}
 
 	if wasDefault {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`UPDATE customer_addresses SET is_default = TRUE
 			 WHERE id = (SELECT id FROM customer_addresses WHERE user_id = $1 ORDER BY created_at LIMIT 1)`,
 			userID); err != nil {
@@ -168,31 +169,31 @@ func (r *customerAddressRepo) Delete(userID, addressID uuid.UUID) ([]CustomerAdd
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.List(userID)
+	return r.List(ctx, userID)
 }
 
-func (r *customerAddressRepo) SetDefault(userID, addressID uuid.UUID) ([]CustomerAddress, error) {
-	return r.setDefault(userID, `id = $2`, addressID)
+func (r *customerAddressRepo) SetDefault(ctx context.Context, userID, addressID uuid.UUID) ([]CustomerAddress, error) {
+	return r.setDefault(ctx, userID, `id = $2`, addressID)
 }
 
-func (r *customerAddressRepo) SetDefaultByValue(userID uuid.UUID, address string) ([]CustomerAddress, error) {
-	return r.setDefault(userID, `address = $2`, address)
+func (r *customerAddressRepo) SetDefaultByValue(ctx context.Context, userID uuid.UUID, address string) ([]CustomerAddress, error) {
+	return r.setDefault(ctx, userID, `address = $2`, address)
 }
 
 // setDefault clears the previous default and sets the new one in a single
 // transaction; the partial unique index would reject an overlap otherwise.
-func (r *customerAddressRepo) setDefault(userID uuid.UUID, match string, arg interface{}) ([]CustomerAddress, error) {
-	tx, err := r.db.Begin()
+func (r *customerAddressRepo) setDefault(ctx context.Context, userID uuid.UUID, match string, arg interface{}) ([]CustomerAddress, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE customer_addresses SET is_default = FALSE WHERE user_id = $1 AND is_default`, userID); err != nil {
 		return nil, err
 	}
-	res, err := tx.Exec(
+	res, err := tx.ExecContext(ctx,
 		`UPDATE customer_addresses SET is_default = TRUE WHERE user_id = $1 AND `+match, userID, arg)
 	if err != nil {
 		return nil, err
@@ -207,13 +208,13 @@ func (r *customerAddressRepo) setDefault(userID uuid.UUID, match string, arg int
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.List(userID)
+	return r.List(ctx, userID)
 }
 
 // Default returns the customer's default address, or an empty string.
-func (r *customerAddressRepo) Default(userID uuid.UUID) (string, error) {
+func (r *customerAddressRepo) Default(ctx context.Context, userID uuid.UUID) (string, error) {
 	var address string
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`SELECT address FROM customer_addresses WHERE user_id = $1 AND is_default`, userID).Scan(&address)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

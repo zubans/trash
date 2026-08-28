@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
@@ -50,7 +51,7 @@ func NewBidService(
 const maxBidPrice = money.Amount(10_000_000 * 100)
 
 // CreateBid submits a bid on a construction waste order.
-func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
+func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
 	if !offeredPrice.IsPositive() {
 		return nil, errors.New("offered price must be greater than zero")
 	}
@@ -59,7 +60,7 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 	}
 
 	// Verify executor has an active shift
-	shift, err := s.shiftRepo.GetActiveShift(executorID)
+	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +70,7 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 
 	// The same age / verification rules that apply to accepting an order apply
 	// to bidding on one.
-	order, err := s.orderRepo.GetOrderByID(orderID)
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, errors.New("order not found")
 	}
@@ -77,11 +78,11 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 		return nil, errors.New("нельзя делать ставки на собственный заказ")
 	}
 	if s.userRepo != nil && s.catalogRepo != nil {
-		executor, err := s.userRepo.FindByID(executorID)
+		executor, err := s.userRepo.FindByID(ctx, executorID)
 		if err != nil {
 			return nil, errors.New("executor not found")
 		}
-		variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID)
+		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
 		if err != nil {
 			return nil, err
 		}
@@ -91,7 +92,7 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 	}
 
 	if s.ledger != nil {
-		balance, err := s.ledger.GetBalance(executorID)
+		balance, err := s.ledger.GetBalance(ctx, executorID)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +101,7 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 		}
 	}
 
-	bid, err := s.bidRepo.CreateBid(orderID, executorID, offeredPrice)
+	bid, err := s.bidRepo.CreateBid(ctx, orderID, executorID, offeredPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -110,15 +111,15 @@ func (s *BidService) CreateBid(orderID, executorID uuid.UUID, offeredPrice money
 
 // GetBidsForOrder lists bids placed on an order, but only for the customer who
 // owns it — bids carry executor contact details.
-func (s *BidService) GetBidsForOrder(orderID, customerID uuid.UUID) ([]*repository.Bid, error) {
-	order, err := s.orderRepo.GetOrderByID(orderID)
+func (s *BidService) GetBidsForOrder(ctx context.Context, orderID, customerID uuid.UUID) ([]*repository.Bid, error) {
+	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, errors.New("order not found")
 	}
 	if order.CustomerID != customerID {
 		return nil, errors.New("forbidden: you do not own this order")
 	}
-	return s.bidRepo.GetBidsForOrder(orderID)
+	return s.bidRepo.GetBidsForOrder(ctx, orderID)
 }
 
 // AcceptBid accepts an offer: it holds the customer's money, assigns the
@@ -127,11 +128,11 @@ func (s *BidService) GetBidsForOrder(orderID, customerID uuid.UUID) ([]*reposito
 // This used to live in the repository, which meant it applied a different set
 // of rules than Accept() for regular orders — an executor could win an auction
 // while banned, off shift, or below the age the service variant requires.
-func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
+func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID) error {
 	var acceptedOrderID uuid.UUID
 
-	err := s.ledger.RunInTx(func(tx *sql.Tx) error {
-		bid, err := s.bidRepo.LockBidForUpdate(tx, bidID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		bid, err := s.bidRepo.LockBidForUpdate(ctx, tx, bidID)
 		if err != nil {
 			return errors.New("bid not found")
 		}
@@ -139,7 +140,7 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 			return errors.New("bid is not pending")
 		}
 
-		order, err := s.orderRepo.LockForUpdate(tx, bid.OrderID)
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, bid.OrderID)
 		if err != nil {
 			return errors.New("order not found")
 		}
@@ -150,7 +151,7 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 			return errors.New("order is no longer in searching status")
 		}
 
-		variant, err := s.catalogRepo.GetNodeByID(order.ServiceVariantID)
+		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
 		if err != nil {
 			return err
 		}
@@ -160,30 +161,30 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 
 		// The executor must still be allowed to take this order at the moment
 		// the customer accepts, not only when the bid was placed.
-		executor, err := s.userRepo.FindByID(bid.ExecutorID)
+		executor, err := s.userRepo.FindByID(ctx, bid.ExecutorID)
 		if err != nil {
 			return errors.New("executor not found")
 		}
 		if err := canExecutorTakeOrder(executor, variant); err != nil {
 			return err
 		}
-		shift, err := s.shiftRepo.GetActiveShift(bid.ExecutorID)
+		shift, err := s.shiftRepo.GetActiveShift(ctx, bid.ExecutorID)
 		if err != nil || shift == nil {
 			return errors.New("исполнитель сейчас не на смене, выберите другое предложение")
 		}
 
 		// The accepted price moves from the customer into escrow, exactly like a
 		// regular order hold.
-		if err := s.ledger.Reserve(tx, customerID, repository.AccountEscrow, bid.OfferedPrice, repository.TransactionTypeHold, &order.ID); err != nil {
+		if err := s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, bid.OfferedPrice, repository.TransactionTypeHold, &order.ID); err != nil {
 			return err
 		}
-		if err := s.orderRepo.AssignWithHold(tx, order.ID, bid.ExecutorID, bid.OfferedPrice); err != nil {
+		if err := s.orderRepo.AssignWithHold(ctx, tx, order.ID, bid.ExecutorID, bid.OfferedPrice); err != nil {
 			return err
 		}
-		if err := s.bidRepo.SetBidStatus(tx, bid.ID, "ACCEPTED"); err != nil {
+		if err := s.bidRepo.SetBidStatus(ctx, tx, bid.ID, "ACCEPTED"); err != nil {
 			return err
 		}
-		if err := s.bidRepo.RejectOtherBids(tx, order.ID, bid.ID); err != nil {
+		if err := s.bidRepo.RejectOtherBids(ctx, tx, order.ID, bid.ID); err != nil {
 			return err
 		}
 		acceptedOrderID = order.ID
@@ -202,7 +203,7 @@ func (s *BidService) AcceptBid(bidID, customerID uuid.UUID) error {
 	// The chat room is not part of the money transaction: failing to create it
 	// must not undo an accepted bid.
 	if s.chatRepo != nil {
-		if _, err := s.chatRepo.CreateChat(acceptedOrderID); err != nil {
+		if _, err := s.chatRepo.CreateChat(ctx, acceptedOrderID); err != nil {
 			log.Printf("[BidService] failed to create chat for order %s: %v", acceptedOrderID, err)
 		}
 	}

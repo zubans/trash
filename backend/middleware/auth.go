@@ -26,7 +26,7 @@ const (
 // SessionChecker reports whether an access token has been blacklisted. It is
 // satisfied by *service.AuthService; the middleware only needs this much.
 type SessionChecker interface {
-	IsAccessTokenRevoked(token string) (bool, error)
+	IsAccessTokenRevoked(ctx context.Context, token string) (bool, error)
 }
 
 // AuthMiddleware validates JWTs and injects user information into the request context.
@@ -110,7 +110,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		// Check revocation if session storage is available.
 		if m.sessions != nil {
-			revoked, err := m.sessions.IsAccessTokenRevoked(tokenStr)
+			revoked, err := m.sessions.IsAccessTokenRevoked(r.Context(), tokenStr)
 			if err != nil {
 				http.Error(w, "Token check failed", http.StatusInternalServerError)
 				return
@@ -139,7 +139,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		user, err := m.userRepo.FindByID(userID)
+		user, err := m.userRepo.FindByID(r.Context(), userID)
 		if err != nil {
 			http.Error(w, "User not found", http.StatusUnauthorized)
 			return

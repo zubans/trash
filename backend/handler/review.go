@@ -42,7 +42,7 @@ func (h *ReviewHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	review, err := h.reviewService.CreateReview(orderID, user.ID, dto)
+	review, err := h.reviewService.CreateReview(r.Context(), orderID, user.ID, dto)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -67,7 +67,7 @@ func (h *ReviewHandler) GetOrderReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	review, err := h.reviewService.GetReviewByOrderAndAuthor(orderID, user.ID)
+	review, err := h.reviewService.GetReviewByOrderAndAuthor(r.Context(), orderID, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -103,7 +103,7 @@ func (h *ReviewHandler) GetUserReviews(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
-	reviews, err := h.reviewService.GetReviewsForUser(userID, limit, offset)
+	reviews, err := h.reviewService.GetReviewsForUser(r.Context(), userID, limit, offset)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -127,7 +127,7 @@ func (h *ReviewHandler) GetUserRating(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rating, err := h.reviewService.GetUserRating(userID, role)
+	rating, err := h.reviewService.GetUserRating(r.Context(), userID, role)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -121,7 +121,7 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.authService.Authenticate(req.Phone, req.Password)
+	user, err := h.authService.Authenticate(r.Context(), req.Phone, req.Password)
 	if err != nil {
 		// Counted separately from the 401 rate in the HTTP metrics: a burst of
 		// denied logins against valid accounts is a credential-stuffing signal,
@@ -131,7 +131,7 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.IssueTokenPair(user)
+	pair, err := h.authService.IssueTokenPair(r.Context(), user)
 	if err != nil {
 		metrics.AuthEvent("login", "error")
 		http.Error(w, "Could not generate token", http.StatusInternalServerError)
@@ -167,7 +167,7 @@ func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.Refresh(strings.TrimSpace(req.RefreshToken))
+	pair, err := h.authService.Refresh(r.Context(), strings.TrimSpace(req.RefreshToken))
 	if err != nil {
 		metrics.AuthEvent("refresh", "denied")
 		if errors.Is(err, service.ErrInvalidRefreshToken) {
@@ -201,7 +201,7 @@ func (h *PublicHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	if err := h.authService.Logout(tokenStr, strings.TrimSpace(req.RefreshToken)); err != nil {
+	if err := h.authService.Logout(r.Context(), tokenStr, strings.TrimSpace(req.RefreshToken)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -254,7 +254,7 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	user, err := h.authService.VerifyEmail(token)
+	user, err := h.authService.VerifyEmail(r.Context(), token)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -289,7 +289,7 @@ func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := h.authService.RequestPasswordReset(req.Email); err != nil {
+	if err := h.authService.RequestPasswordReset(r.Context(), req.Email); err != nil {
 		metrics.AuthEvent("password_reset_request", "denied")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -318,7 +318,7 @@ func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.authService.ResetPassword(req.Email, req.Code, req.NewPassword); err != nil {
+	if err := h.authService.ResetPassword(r.Context(), req.Email, req.Code, req.NewPassword); err != nil {
 		metrics.AuthEvent("password_reset", "denied")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -347,7 +347,7 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	updatedUser, err := h.authService.UpdateUserEmail(user.ID, req.Email)
+	updatedUser, err := h.authService.UpdateUserEmail(r.Context(), user.ID, req.Email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -381,7 +381,7 @@ func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	pair, err := h.authService.ChangePassword(user.ID, req.OldPassword, req.NewPassword)
+	pair, err := h.authService.ChangePassword(r.Context(), user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -407,7 +407,7 @@ func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	updatedUser, err := h.authService.UpdateUserBirthDate(user.ID, req.BirthDate)
+	updatedUser, err := h.authService.UpdateUserBirthDate(r.Context(), user.ID, req.BirthDate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
