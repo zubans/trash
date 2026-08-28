@@ -85,21 +85,29 @@ final class LibXrayBridge {
      */
     private String call(String name, String paramsJson) {
         try {
-            // The invoke wrapper is base64; the inner "data" is a raw JSON string
-            // (libXray json-unmarshals it directly — base64 there yields the
-            // "invalid character 'e'" decode error).
+            // Wire format (from libXray invoke.go): the invoke argument is RAW JSON
+            // of {apiVersion,name,data}; the inner "data" is base64 of the specific
+            // request JSON (the handler base64-decodes it). The response is
+            // {success, data(base64), error}.
             JSONObject req = new JSONObject()
+                    .put("apiVersion", 1)
                     .put("name", name)
-                    .put("data", paramsJson == null ? "{}" : paramsJson);
-            String out = (String) invoke.invoke(null, b64(req.toString()));
+                    .put("data", b64(paramsJson == null ? "{}" : paramsJson));
+            String out = (String) invoke.invoke(null, req.toString());
             if (out == null) {
                 DebugLog.add(TAG, name + ": null response");
                 return null;
             }
-            JSONObject resp = new JSONObject(asJson(out));
+            JSONObject resp;
+            try {
+                resp = new JSONObject(asJson(out));
+            } catch (Throwable pe) {
+                DebugLog.add(TAG, name + ": unparseable response: " + trunc(out));
+                return null;
+            }
             if (!resp.optBoolean("success", false)) {
                 String err = resp.optString("error", resp.optString("err", "unknown"));
-                DebugLog.add(TAG, name + " failed: " + err);
+                DebugLog.add(TAG, name + " failed: " + err + " | raw=" + trunc(out));
                 return null;
             }
             String data = resp.optString("data", "");
@@ -108,6 +116,12 @@ final class LibXrayBridge {
             DebugLog.add(TAG, name + " invoke threw: " + t.getClass().getSimpleName() + ": " + t.getMessage());
             return null;
         }
+    }
+
+    private static String trunc(String s) {
+        if (s == null) return "null";
+        s = s.replace('\n', ' ');
+        return s.length() > 240 ? s.substring(0, 240) + "…" : s;
     }
 
     private static String b64(String s) {

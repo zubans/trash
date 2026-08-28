@@ -6,6 +6,9 @@
       class="force-update-overlay"
     >
       <div class="force-update-dialog">
+        <div class="force-update-logo-wrapper mb-3">
+          <AppLogo />
+        </div>
         <h5 class="mb-2">
           {{ $t('app.updateRequired') }}
         </h5>
@@ -46,7 +49,7 @@
     >
       <div class="banner-content">
         <div class="banner-icon">
-          <i class="ph-bold ph-sparkle"></i>
+          <AppLogo :compact="true" />
         </div>
         <div class="banner-text-box">
           <div class="banner-title">
@@ -94,9 +97,12 @@
 <script lang="ts">
 import { defineComponent, ref, computed } from 'vue'
 import { useAppUpdate } from '../composables/useAppUpdate'
+import AppLogo from './AppLogo.vue'
 
 export default defineComponent({
   name: 'UpdateBanner',
+  components: { AppLogo },
+
   setup() {
     const {
       updateAvailable,

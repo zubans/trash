@@ -190,8 +190,8 @@ public class UpdatePlugin extends Plugin {
         try {
             request = new DownloadManager.Request(Uri.parse(url));
             request.setMimeType("application/vnd.android.package-archive");
-            request.setTitle("Healthlogin update");
-            request.setDescription("Downloading new version...");
+            request.setTitle("Моя Услуга");
+            request.setDescription("Загрузка обновления...");
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             request.setDestinationInExternalFilesDir(context, UPDATE_SUBDIR, UPDATE_FILE_NAME);
             request.setAllowedOverMetered(true);
