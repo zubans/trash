@@ -45,9 +45,9 @@ final class LibXrayBridge {
         }
     }
 
-    /** libXray core version, or "?". */
+    /** libXray core version, or "?". Best-effort — only used for logging. */
     String version() {
-        String r = call("XrayVersion", "{}");
+        String r = call("getCoreVersion", "{}");
         if (r == null) return "?";
         try {
             JSONObject o = new JSONObject(r);
@@ -66,7 +66,7 @@ final class LibXrayBridge {
                     .put("configJSON", configJson)
                     .put("maxMemory", 0L)
                     .toString();
-            return call("RunXrayFromJSON", params) != null;
+            return call("runXrayFromJson", params) != null;
         } catch (Throwable t) {
             DebugLog.add(TAG, "run marshal failed: " + t.getMessage());
             return false;
@@ -74,7 +74,7 @@ final class LibXrayBridge {
     }
 
     void stop() {
-        call("StopXray", "{}");
+        call("stopXray", "{}");
     }
 
     // --- invoke plumbing ---
