@@ -1,25 +1,27 @@
 package com.healthlogin.app.net;
 
+import com.healthlogin.app.BuildConfig;
+
 /**
  * Secrets shared with the backend for the encrypted endpoint list.
  *
- * <p><b>These must exactly match the server env</b> {@code APP_ENDPOINTS_KEY} and
- * {@code APP_ENDPOINTS_ENC_KEY} (docker-compose / .env.deploy).
+ * <p>These are <b>not</b> hardcoded: they are injected into {@code BuildConfig}
+ * at build time from {@code APP_ENDPOINTS_KEY} / {@code APP_ENDPOINTS_ENC_KEY}
+ * (see app/build.gradle) — the same GitHub Actions secrets that populate the
+ * server's {@code .env}. One source of truth, so app and server never drift and
+ * nothing sensitive is committed. A build without those env vars (e.g. a local
+ * debug build) gets empty strings, and the fallback channel simply stays off.
  *
- * <p>Client-side secrets are inherently extractable from an APK, so this is not
- * a hard boundary — it raises the bar against casual scraping and keeps the list
- * off the server in the clear. Treat the committed values as burned: generate a
- * fresh pair before a real release and rotate both places together.
- *   APP_KEY:     openssl rand -base64 24 | tr -d '/+=' | head -c 32
- *   ENC_KEY_HEX: openssl rand -hex 32
+ * <p>Client-side secrets are still extractable from an APK, so this is defence in
+ * depth (keeps the list off the server in the clear and off casual scrapers),
+ * not an absolute boundary.
  */
 final class Secrets {
     private Secrets() {}
 
-    /** Sent as the X-App-Key header. Matches APP_ENDPOINTS_KEY. */
-    static final String APP_KEY = "s6rNCMbJXDg8q1C3Xsz1mL3KLPQPLyG";
+    /** Sent as the X-App-Key header. Mirrors server APP_ENDPOINTS_KEY. */
+    static final String APP_KEY = BuildConfig.APP_ENDPOINTS_KEY;
 
-    /** AES-256 key as 64 hex chars. Matches APP_ENDPOINTS_ENC_KEY. */
-    static final String ENC_KEY_HEX =
-            "91eaff0c81db619e997beaa411d5180c39ca561e586ada3c7cace00bae9de7fd";
+    /** AES-256 key as 64 hex chars. Mirrors server APP_ENDPOINTS_ENC_KEY. */
+    static final String ENC_KEY_HEX = BuildConfig.APP_ENDPOINTS_ENC_KEY;
 }

@@ -10,11 +10,26 @@ android {
         versionCode 182
         versionName "1.0.12"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Endpoint-list shared secrets are injected at build time from the same
+        // source as the server (the CI/deploy environment holds APP_ENDPOINTS_KEY
+        // / APP_ENDPOINTS_ENC_KEY from GitHub Actions secrets), so app and server
+        // never drift and nothing is committed. Falls back to a Gradle property
+        // (e.g. ~/.gradle/gradle.properties or -P) and finally to empty for local
+        // builds that do not exercise the fallback channel.
+        def appEndpointsKey = System.getenv('APP_ENDPOINTS_KEY') ?: (project.findProperty('APP_ENDPOINTS_KEY') ?: '')
+        def appEndpointsEncKey = System.getenv('APP_ENDPOINTS_ENC_KEY') ?: (project.findProperty('APP_ENDPOINTS_ENC_KEY') ?: '')
+        buildConfigField "String", "APP_ENDPOINTS_KEY", "\"${appEndpointsKey}\""
+        buildConfigField "String", "APP_ENDPOINTS_ENC_KEY", "\"${appEndpointsEncKey}\""
+
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+    }
+    buildFeatures {
+        buildConfig true
     }
     buildTypes {
         release {

@@ -85,9 +85,12 @@ final class LibXrayBridge {
      */
     private String call(String name, String paramsJson) {
         try {
+            // The invoke wrapper is base64; the inner "data" is a raw JSON string
+            // (libXray json-unmarshals it directly — base64 there yields the
+            // "invalid character 'e'" decode error).
             JSONObject req = new JSONObject()
                     .put("name", name)
-                    .put("data", b64(paramsJson == null ? "{}" : paramsJson));
+                    .put("data", paramsJson == null ? "{}" : paramsJson);
             String out = (String) invoke.invoke(null, b64(req.toString()));
             if (out == null) {
                 DebugLog.add(TAG, name + ": null response");
