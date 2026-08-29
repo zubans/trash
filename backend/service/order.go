@@ -207,7 +207,7 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 	if err != nil {
 		return nil, err
 	}
-	if !holdAmount.IsPositive() {
+	if holdAmount.IsNegative() {
 		return nil, errors.New("invalid order price")
 	}
 
