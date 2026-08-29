@@ -31,11 +31,10 @@
 | **Чат в реальном времени** | WebSocket-чат между заказчиком и исполнителем, блокировки и события. | [`chat.md`](./chat.md) |
 | **Панель администратора** | Разделы управления пользователями, заявками на пополнение, с динамическими настройками. | [`admin_panel.md`](./admin_panel.md) |
 | **Автообновление (Android)** | In-App автообновление с нативным прогресс-баром байтов скачивания. | [`app_update.md`](./app_update.md) |
-| **Резервный канал (Android)** | Прозрачное переключение на VLESS-туннель, когда прямой путь до API недоступен; зашифрованный список endpoint'ов. | [`mobile_fallback_channel.md`](./mobile_fallback_channel.md) |
 | **Рейтинги & Жизненный цикл** | Двухсторонняя система рейтингов (Байесовское среднее), статус `EXECUTED` и последовательность. | [`rating_system_and_order_lifecycle.md`](./rating_system_and_order_lifecycle.md) |
 | **Карта & Гео-ограничения** | Интерактивная карта Leaflet (10км / 2км), 10-мин кулдаун и аномалии. | [`executor_map_and_geofencing.md`](./executor_map_and_geofencing.md) |
 | **Инфраструктура & Деплой** | Docker-окружение, конфигурация Nginx и автоматический деплой через CI/CD. | [`deployment.md`](./deployment.md) |
-| **Метрики & Мониторинг** | Метрики бэкенда, Prometheus/Grafana/Alertmanager, экспортеры и сквозная проба резервного VPN-канала. | [`monitoring.md`](./monitoring.md) |
+| **Метрики & Мониторинг** | Метрики бэкенда, Prometheus/Grafana/Alertmanager и экспортеры. | [`monitoring.md`](./monitoring.md) |
 | **Миграции БД** | Полный перечень SQL-миграций и порядок их применения. | [`migration.md`](./migration.md) |
 
 ---

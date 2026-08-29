@@ -52,11 +52,11 @@ jobs:
           # Paths that only ever affect the monitoring stack. backend/metrics/
           # is deliberately absent: it is compiled into the backend binary, so a
           # change there is an application change.
-          ONLY_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/cmd/vlessprobe/|doc/monitoring\.md$)'
+          ONLY_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|doc/monitoring\.md$)'
           # Paths that should redeploy monitoring. Wider than the set above: the
-          # prober shares a Go module with the backend and is started by the
+          # opsbot shares a Go module with the backend and is started by the
           # Makefile, so both move it.
-          TOUCHES_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/cmd/vlessprobe/|backend/go\.(mod|sum)$|Makefile$)'
+          TOUCHES_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/go\.(mod|sum)$|Makefile$)'
 
           run_all() {
             echo "Deploying both halves."
@@ -212,7 +212,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL,DADATA_API_KEY,APP_ENDPOINTS_KEY,APP_ENDPOINTS_ENC_KEY
+          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL,DADATA_API_KEY
           script: |
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
@@ -224,7 +224,7 @@ jobs:
             
             # Write production .env file from GitHub Actions secrets & variables
             echo "Writing production .env file from GitHub Secrets..."
-            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\nDADATA_API_KEY=%s\nAPP_ENDPOINTS_KEY=%s\nAPP_ENDPOINTS_ENC_KEY=%s\n" \
+            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\nDADATA_API_KEY=%s\n" \
               "${DOCKER_USERNAME}" \
               "${DB_USER:-healthlogin}" \
               "${DB_PASSWORD}" \
@@ -235,9 +235,7 @@ jobs:
               "${SMTP_HOST:-mailserver}" \
               "${CORS_ORIGIN:-https://moya-usluga.ru}" \
               "${APP_BASE_URL:-https://moya-usluga.ru}" \
-              "${DADATA_API_KEY}" \
-              "${APP_ENDPOINTS_KEY}" \
-              "${APP_ENDPOINTS_ENC_KEY}" > .env
+              "${DADATA_API_KEY}" > .env
             chmod 600 .env
 
             echo "Restarting services via make restart..."
@@ -263,15 +261,13 @@ jobs:
           CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL || secrets.APP_BASE_URL }}
           DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
-          APP_ENDPOINTS_KEY: ${{ secrets.APP_ENDPOINTS_KEY }}
-          APP_ENDPOINTS_ENC_KEY: ${{ secrets.APP_ENDPOINTS_ENC_KEY }}
 
   # Monitoring is deployed by its own job, in parallel with `deploy`.
   #
   # It is not downstream of build-and-push because nothing here ships in the
   # application images: Prometheus, Grafana and the exporters are upstream
-  # images, and the VLESS prober is built on the server from this checkout. It
-  # is downstream of `test` because that prober is compiled from the same Go
+  # images, and the opsbot is built on the server from this checkout. It is
+  # downstream of `test` because the opsbot is compiled from the same Go
   # module as the backend.
   #
   # Nothing in this job restarts the application. `make monitoring-up` passes
@@ -288,7 +284,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GRAFANA_ADMIN_USER,GRAFANA_ADMIN_PASSWORD,GRAFANA_ROOT_URL,PROBE_ENDPOINTS_URL,PROBE_TARGET_URL,PROBE_INTERVAL,OPS_KEY,OPSBOT_ALLOWED_CHATS,OPSBOT_ALLOWED_USERS
+          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GRAFANA_ADMIN_USER,GRAFANA_ADMIN_PASSWORD,GRAFANA_ROOT_URL,OPS_KEY,OPSBOT_ALLOWED_CHATS,OPSBOT_ALLOWED_USERS
           script: |
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
@@ -309,15 +305,12 @@ jobs:
             # rewrites .env wholesale, and appending to it would lose these on
             # the next run — or, worse, half-lose them mid-race.
             echo "Writing .env.monitoring from GitHub Secrets..."
-            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\nGRAFANA_ADMIN_USER=%s\nGRAFANA_ADMIN_PASSWORD=%s\nGRAFANA_ROOT_URL=%s\nPROBE_ENDPOINTS_URL=%s\nPROBE_TARGET_URL=%s\nPROBE_INTERVAL=%s\nOPS_KEY=%s\nOPSBOT_ALLOWED_CHATS=%s\nOPSBOT_ALLOWED_USERS=%s\n" \
+            printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\nGRAFANA_ADMIN_USER=%s\nGRAFANA_ADMIN_PASSWORD=%s\nGRAFANA_ROOT_URL=%s\nOPS_KEY=%s\nOPSBOT_ALLOWED_CHATS=%s\nOPSBOT_ALLOWED_USERS=%s\n" \
               "${TELEGRAM_BOT_TOKEN}" \
               "${TELEGRAM_CHAT_ID}" \
               "${GRAFANA_ADMIN_USER:-admin}" \
               "${GRAFANA_ADMIN_PASSWORD}" \
               "${GRAFANA_ROOT_URL:-http://localhost:3000}" \
-              "${PROBE_ENDPOINTS_URL:-https://moya-usluga.ru/api/app/endpoints}" \
-              "${PROBE_TARGET_URL:-https://moya-usluga.ru/health}" \
-              "${PROBE_INTERVAL:-2m}" \
               "${OPS_KEY}" \
               "${OPSBOT_ALLOWED_CHATS:-}" \
               "${OPSBOT_ALLOWED_USERS:-}" > .env.monitoring
@@ -349,9 +342,6 @@ jobs:
           GRAFANA_ADMIN_USER: ${{ vars.GRAFANA_ADMIN_USER }}
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
           GRAFANA_ROOT_URL: ${{ vars.GRAFANA_ROOT_URL }}
-          PROBE_ENDPOINTS_URL: ${{ vars.PROBE_ENDPOINTS_URL }}
-          PROBE_TARGET_URL: ${{ vars.PROBE_TARGET_URL }}
-          PROBE_INTERVAL: ${{ vars.PROBE_INTERVAL }}
           OPS_KEY: ${{ secrets.OPS_KEY }}
           OPSBOT_ALLOWED_CHATS: ${{ vars.OPSBOT_ALLOWED_CHATS }}
           OPSBOT_ALLOWED_USERS: ${{ vars.OPSBOT_ALLOWED_USERS }}

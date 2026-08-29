@@ -171,11 +171,6 @@ func main() {
 	gh := handler.NewGeoHandler(addressSuggester)
 	sch := handler.NewServiceCatalogHandler(catalogRepo)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
-	aeh := handler.NewAppEndpointsHandler(
-		getEnv("APP_ENDPOINTS_FILE", "/app/vless-endpoints.json"),
-		os.Getenv("APP_ENDPOINTS_KEY"),
-		os.Getenv("APP_ENDPOINTS_ENC_KEY"),
-	)
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 
@@ -230,10 +225,6 @@ func main() {
 			r.Get("/service-variants/{id}", sch.GetVariant)
 		})
 		r.Get("/app/version", arh.GetVersionHandler)
-		// Encrypted VLESS fallback endpoint list. Gated by the X-App-Key header
-		// and AES-256-GCM encrypted in the handler; the plaintext file is never
-		// served directly. Rate limited by the api zone at the edge.
-		r.Get("/app/endpoints", aeh.Serve)
 		r.Get("/users/{id}/reviews", rh.GetUserReviews)
 		r.Get("/users/{id}/rating", rh.GetUserRating)
 

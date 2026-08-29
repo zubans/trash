@@ -31,17 +31,6 @@ scrape_configs:
         labels:
           service: backend
 
-  # The VLESS fallback channel, probed end to end. Slower than the rest because
-  # a pass starts an xray process per endpoint; the interval must stay above the
-  # time one full pass takes.
-  - job_name: vlessprobe
-    scrape_interval: 60s
-    scrape_timeout: 30s
-    static_configs:
-      - targets: ['vlessprobe:9102']
-        labels:
-          service: vpn_fallback
-
   - job_name: node
     static_configs:
       - targets: ['node-exporter:9100']

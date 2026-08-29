@@ -37,29 +37,6 @@ inhibit_rules:
       - severity =~ "page|ticket"
     equal: ['environment']
 
-  # A dead endpoint cannot also have a working proxy; the specific alert wins.
-  - source_matchers:
-      - alertname = "VlessEndpointDown"
-    target_matchers:
-      - alertname = "VlessTunnelBroken"
-    equal: ['remarks']
-
-  # The whole channel being down subsumes the partial-degradation ticket.
-  - source_matchers:
-      - alertname = "VlessFallbackChannelDown"
-    target_matchers:
-      - alertname =~ "VlessFallbackChannelDegraded|VlessEndpointDown|VlessTunnelBroken"
-    equal: ['environment']
-
-  # A list that cannot be fetched also reads as an empty list, because the
-  # prober has nothing to count. Both fired together on the first real incident;
-  # the fetch failure is the one worth reading, and the emptiness is its shadow.
-  - source_matchers:
-      - alertname = "VlessEndpointListUnavailable"
-    target_matchers:
-      - alertname = "VlessEndpointListEmpty"
-    equal: ['environment']
-
 receivers:
   - name: telegram
     telegram_configs:

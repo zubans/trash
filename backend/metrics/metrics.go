@@ -227,38 +227,6 @@ var (
 		Name:      "chat_messages_total",
 		Help:      "Chat messages accepted by the server, by conversation kind.",
 	}, []string{"kind"})
-
-	// ---- VLESS fallback channel (control plane) --------------------------
-	//
-	// This is the server half of the proxy system: the app asks for the
-	// endpoint list only when it is about to use, or is already using, the
-	// tunnel. A rising rate here means clients are losing the direct path —
-	// which is exactly the signal that the fallback channel is earning its
-	// keep, or that something upstream is blocking us.
-
-	appEndpointRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: Namespace,
-		Name:      "app_endpoints_requests_total",
-		Help:      "Requests for the encrypted VLESS endpoint list, by outcome.",
-	}, []string{"result"})
-
-	appEndpointServed = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: Namespace,
-		Name:      "app_endpoints_last_served_timestamp_seconds",
-		Help:      "Unix time the endpoint list was last served successfully.",
-	})
-
-	appEndpointConfigs = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: Namespace,
-		Name:      "app_endpoints_configs",
-		Help:      "Number of VLESS configs in the endpoint list currently on disk.",
-	})
-
-	appEndpointFileAge = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: Namespace,
-		Name:      "app_endpoints_file_mtime_seconds",
-		Help:      "Modification time of the endpoint list file, as unix time.",
-	})
 )
 
 func init() {
@@ -284,7 +252,6 @@ func init() {
 		upstreamRequests, upstreamDuration,
 		mailSends, mailDuration,
 		chatConnections, chatMessages,
-		appEndpointRequests, appEndpointServed, appEndpointConfigs, appEndpointFileAge,
 	)
 }
 
@@ -427,24 +394,6 @@ func ChatDisconnected(kind string) { chatConnections.WithLabelValues(kind).Dec()
 
 // ChatMessage records an accepted message.
 func ChatMessage(kind string) { chatMessages.WithLabelValues(kind).Inc() }
-
-// AppEndpointsRequest records one request for the VLESS endpoint list.
-func AppEndpointsRequest(result string) {
-	appEndpointRequests.WithLabelValues(result).Inc()
-	if result == "ok" {
-		appEndpointServed.SetToCurrentTime()
-	}
-}
-
-// AppEndpointsFile publishes what the served list currently contains. An empty
-// list served successfully is the worst case for the mobile app — it looks
-// healthy from the outside and leaves the client with nowhere to fall back to.
-func AppEndpointsFile(configs int, mtime time.Time) {
-	appEndpointConfigs.Set(float64(configs))
-	if !mtime.IsZero() {
-		appEndpointFileAge.Set(float64(mtime.Unix()))
-	}
-}
 
 // TrackWorker runs one worker pass and records its duration and outcome. It
 // returns the pass's own error untouched, so a loop reads the same as before:

@@ -82,36 +82,6 @@ services:
     depends_on:
       - prometheus
 
-  # The end-to-end prober for the VLESS fallback channel. It fetches the
-  # endpoint list through the public API exactly as the Android app does, then
-  # runs each config through xray and pulls the health URL through the tunnel.
-  vlessprobe:
-    build:
-      context: .
-      dockerfile: monitoring/vlessprobe/Dockerfile
-    container_name: healthlogin_vlessprobe
-    restart: unless-stopped
-    environment:
-      # Going through the public URL rather than the mounted file is deliberate:
-      # it exercises nginx, the handler, the access key and the decryption — the
-      # whole path a client depends on — instead of only the servers behind it.
-      PROBE_ENDPOINTS_URL: ${PROBE_ENDPOINTS_URL:-https://moya-usluga.ru/api/app/endpoints}
-      PROBE_APP_KEY: ${APP_ENDPOINTS_KEY:?APP_ENDPOINTS_KEY is required}
-      PROBE_ENC_KEY: ${APP_ENDPOINTS_ENC_KEY:?APP_ENDPOINTS_ENC_KEY is required}
-      PROBE_TARGET_URL: ${PROBE_TARGET_URL:-https://moya-usluga.ru/health}
-      PROBE_INTERVAL: ${PROBE_INTERVAL:-2m}
-      PROBE_TIMEOUT: ${PROBE_TIMEOUT:-20s}
-    # No bind mount of vless-endpoints.json here, deliberately. The prober only
-    # falls back to the file when the URL or the keys are missing, and both are
-    # required above, so the mount was unreachable code — while carrying a real
-    # hazard: that file is gitignored and placed by hand, and Docker silently
-    # creates a *directory* in place of a missing bind-mount source. The backend
-    # mounts the same path, so an absent file would turn into a directory that
-    # makes every /app/endpoints request answer 503.
-    # PROBE_ENDPOINTS_FILE stays supported for running the prober by hand.
-    expose:
-      - "9102"
-
   # Operational commands over Telegram: force a reconciliation, read the
   # headline metrics, restart the stack.
   #
@@ -138,8 +108,6 @@ services:
       OPSBOT_CONFIRM_WINDOW: ${OPSBOT_CONFIRM_WINDOW:-2m}
       OPSBOT_RESTART_TIMEOUT: ${OPSBOT_RESTART_TIMEOUT:-10m}
     volumes:
-      # Read-write because `make restart` runs the endpoint-file preflight,
-      # which may have to create vless-endpoints.json.
       - .:/project
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

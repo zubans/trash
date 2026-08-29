@@ -62,13 +62,6 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
       SMTP_FROM: ${SMTP_FROM:-system@moya-usluga.ru}
       APP_BASE_URL: ${APP_BASE_URL:-https://moya-usluga.ru}
-      # VLESS fallback endpoint list, served encrypted at /api/app/endpoints.
-      # APP_ENDPOINTS_KEY gates access (X-App-Key header); APP_ENDPOINTS_ENC_KEY
-      # is the 32-byte (64 hex) AES-256-GCM key. Both must match the values
-      # embedded in the Android build (see frontend/android .../net/Secrets.java).
-      APP_ENDPOINTS_KEY: ${APP_ENDPOINTS_KEY:?APP_ENDPOINTS_KEY is required}
-      APP_ENDPOINTS_ENC_KEY: ${APP_ENDPOINTS_ENC_KEY:?APP_ENDPOINTS_ENC_KEY is required}
-      APP_ENDPOINTS_FILE: /app/vless-endpoints.json
       # Prometheus scrape target, on its own listener. Reachable only from the
       # compose network — it is never published to the host and nginx does not
       # proxy it. Set to an empty value to turn metrics off entirely.
@@ -86,9 +79,6 @@ services:
       - ./releases:/app/releases
       - uploads_data:/app/uploads
       - ./certs:/app/certs:ro
-      # Plaintext endpoint list, read by the backend and served only encrypted.
-      # Edit it and the change is live on the next app poll; no rebuild needed.
-      - ./vless-endpoints.json:/app/vless-endpoints.json:ro
     # 8080 is the TLS listener used by the host; 8081 stays inside the compose
     # network for nginx (it is plain HTTP and must not be published).
     expose:

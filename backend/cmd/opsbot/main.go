@@ -233,18 +233,7 @@ func loadConfig() config {
 					"healthlogin_orders_searching",
 					"healthlogin_shifts_active",
 					"healthlogin_http_requests_in_flight",
-					"healthlogin_app_endpoints_configs",
 					"healthlogin_chat_websocket_connections",
-				},
-			},
-			{
-				name: "Резервный VPN-канал",
-				url:  getEnv("OPSBOT_VLESSPROBE_URL", "http://vlessprobe:9102") + "/metrics",
-				watch: []string{
-					"vless_endpoints_usable",
-					"vless_endpoints_total",
-					"vless_config_fetch_up",
-					"vless_probe_last_pass_timestamp_seconds",
 				},
 			},
 		},

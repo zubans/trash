@@ -3,7 +3,6 @@
   <UpdateBanner />
   <router-view />
   <AppVersionFooter />
-  <VpnDebugConsole />
 </template>
 
 <script lang="ts">
@@ -11,13 +10,12 @@ import { defineComponent, onMounted, onUnmounted } from 'vue'
 import ServerStatusIndicator from './components/ServerStatusIndicator.vue'
 import UpdateBanner from './components/UpdateBanner.vue'
 import AppVersionFooter from './components/AppVersionFooter.vue'
-import VpnDebugConsole from './components/VpnDebugConsole.vue'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
 
 export default defineComponent({
   name: 'App',
-  components: { ServerStatusIndicator, UpdateBanner, AppVersionFooter, VpnDebugConsole },
+  components: { ServerStatusIndicator, UpdateBanner, AppVersionFooter },
   setup() {
     const authStore = useAuthStore()
 

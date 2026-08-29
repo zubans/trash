@@ -74,12 +74,7 @@ var metricLabels = map[string]string{
 	"healthlogin_orders_searching":                     "Заказов в поиске",
 	"healthlogin_shifts_active":                        "Исполнителей на смене",
 	"healthlogin_http_requests_in_flight":              "Запросов в обработке",
-	"healthlogin_app_endpoints_configs":                "Конфигов в списке VLESS",
 	"healthlogin_chat_websocket_connections":           "Открытых чатов",
-	"vless_endpoints_usable":                           "Рабочих VLESS-endpoint'ов",
-	"vless_endpoints_total":                            "Всего VLESS-endpoint'ов",
-	"vless_config_fetch_up":                            "Список endpoint'ов отдаётся",
-	"vless_probe_last_pass_timestamp_seconds":          "Последняя проба VLESS",
 	"healthlogin_reconcile_last_run_timestamp_seconds": "Последняя сверка",
 }
 
@@ -97,7 +92,7 @@ func formatValue(name string, value float64) string {
 			return "не отрабатывала"
 		}
 		return time.Since(time.Unix(int64(value), 0)).Round(time.Second).String() + " назад"
-	case name == "healthlogin_reconcile_ok" || name == "vless_config_fetch_up":
+	case name == "healthlogin_reconcile_ok":
 		if value == 1 {
 			return "да"
 		}

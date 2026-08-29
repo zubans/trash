@@ -11,8 +11,7 @@ backend/
 │   ├── shift.go    # shifts and GPS telemetry
 │   ├── bid.go      # construction auction bids
 │   ├── chat.go     # WebSocket chat
-│   ├── geo.go      # address suggestions (DaData) and geocoding proxy
-│   └── app_endpoints.go # encrypted VLESS endpoint list for the mobile app
+│   └── geo.go      # address suggestions (DaData) and geocoding proxy
 ├── service/        # Business logic
 ├── repository/     # Database access
 ├── middleware/     # Auth and role middleware
@@ -50,6 +49,5 @@ backend/
 * `system_settings.value` was changed from `NUMERIC` to `VARCHAR` to support non-numeric settings like `currency`.
 * `customer_profiles.address` was changed from `JSONB` to `VARCHAR` to store a single pickup address. Migration `031` then split the address back into columns (`city`, `street`, `house`, `flat`, `fias_id`, coordinates), keeping `address` as the display line only: the previous single-line format was parsed with a regex that rejected ordinary house numbers such as `12к1`.
 * Address suggestions have **no fallback provider** on purpose. A missing `DADATA_API_KEY` answers `503` instead of silently degrading to a source that has no apartment data.
-* The mobile app carries a covert VLESS fallback channel; the endpoint list is served encrypted and behind an app key rather than as nginx static content.
 * Mobile app uses `CapacitorHttp` to bypass WebView CORS and cleartext restrictions.
 * Docker Compose uses a named volume for PostgreSQL data persistence.

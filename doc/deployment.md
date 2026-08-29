@@ -42,7 +42,7 @@ docker compose exec mailserver /bin/maddy -config /data/maddy.conf creds create 
 
 ## 2.1. Мониторинг
 
-Prometheus, Grafana, Alertmanager, экспортеры и сквозная проба VLESS-канала подключаются отдельным overlay-файлом [`docker-compose.monitoring.yml`](../docker-compose.monitoring.yml):
+Prometheus, Grafana, Alertmanager и экспортеры подключаются отдельным overlay-файлом [`docker-compose.monitoring.yml`](../docker-compose.monitoring.yml):
 
 ```bash
 make monitoring-up
@@ -67,9 +67,6 @@ make monitoring-up
 | `APP_BASE_URL` | Базовый URL приложения для генерации ссылок подтверждения | `https://moya-usluga.ru:8443` |
 | `JWT_SECRET` | Секретный ключ подписи JWT-токенов | — |
 | `DADATA_API_KEY` | Ключ API подсказок адресов DaData. **Обязателен** — без него контейнер бэкенда не стартует, а `/geo/suggest` и `/geo/autocomplete` отвечали бы `503`. См. [`address_suggestions.md`](./address_suggestions.md) | — |
-| `APP_ENDPOINTS_KEY` | Ключ доступа к списку резервных endpoint'ов (`GET /api/app/endpoints`, заголовок `X-App-Key`). **Обязателен.** Должен совпадать с `Secrets.APP_KEY` в Android-сборке | — |
-| `APP_ENDPOINTS_ENC_KEY` | Ключ AES-256-GCM (32 байта = 64 hex-символа) для шифрования списка endpoint'ов. **Обязателен.** Должен совпадать с `Secrets.ENC_KEY_HEX` | — |
-| `APP_ENDPOINTS_FILE` | Путь к plaintext-файлу списка внутри контейнера | `/app/vless-endpoints.json` |
 
 ---
 
@@ -80,9 +77,6 @@ make monitoring-up
 | `./releases` | `backend:/app/releases` | Релизные APK. |
 | `uploads_data` | `backend:/app/uploads` | Вложения чата и изображения. |
 | `./certs` | `backend:/app/certs:ro`, `nginx:/etc/nginx/certs:ro` | TLS-сертификаты. |
-| `./vless-endpoints.json` | `backend:/app/vless-endpoints.json:ro` | Список резервных VLESS-endpoint'ов. Правка файла применяется на следующем опросе приложения — пересборка не нужна. См. [`mobile_fallback_channel.md`](./mobile_fallback_channel.md). |
-
-Раньше `vless-endpoints.json` раздавался nginx'ом как статика по `/app/vless.json`; этот том удалён — список теперь отдаёт только бэкенд, зашифрованным и за ключом доступа.
 
 ---
 
@@ -107,7 +101,7 @@ make monitoring-up
 
 | Изменение | `deploy` | `deploy-monitoring` |
 | :--- | :---: | :---: |
-| `monitoring/**`, `docker-compose.monitoring.yml`, `backend/cmd/vlessprobe/**` | — | ✅ |
+| `monitoring/**`, `docker-compose.monitoring.yml` | — | ✅ |
 | `backend/metrics/**` | ✅ | — |
 | `Makefile`, `backend/go.mod` | ✅ | ✅ |
 | Всё остальное | ✅ | — |
@@ -139,6 +133,5 @@ make monitoring-up
 | `TELEGRAM_CHAT_ID` | secret | да |
 | `GRAFANA_ADMIN_PASSWORD` | secret | да |
 | `GRAFANA_ADMIN_USER`, `GRAFANA_ROOT_URL` | variable | нет |
-| `PROBE_ENDPOINTS_URL`, `PROBE_TARGET_URL`, `PROBE_INTERVAL` | variable | нет |
 
-Пароль базы и ключи `APP_ENDPOINTS_*` мониторинг берёт из `.env`, который пишет деплой приложения, — дублировать их во втором файле значило бы завести второе место для утечки и ротации. Поэтому **первый** деплой мониторинга требует, чтобы приложение уже разворачивалось хотя бы раз; если `.env` нет, job останавливается с внятной ошибкой.
+Пароль базы мониторинг берёт из `.env`, который пишет деплой приложения, — дублировать его во втором файле значило бы завести второе место для утечки и ротации. Поэтому **первый** деплой мониторинга требует, чтобы приложение уже разворачивалось хотя бы раз; если `.env` нет, job останавливается с внятной ошибкой.

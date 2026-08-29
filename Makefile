@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check probe-once check-endpoints-file
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -173,47 +173,8 @@ setup-smtp-creds:
 		echo "SMTP credentials synchronized for $$SMTP_USER."; \
 	fi
 
-# vless-endpoints.json is gitignored and placed by hand, and it is bind-mounted
-# into the backend. Docker creates a *directory* when a bind mount's source file
-# is missing, and a directory there makes every /app/endpoints request answer
-# 503 — silently, and self-perpetuating, because each recreate remakes it.
-#
-# So the file is guaranteed to exist as a file before anything mounts it:
-#
-#   - An empty directory is removed. It is Docker's own artefact and holds
-#     nothing, so there is nothing to lose; rmdir refuses on anything else,
-#     which is exactly the safety wanted here. It is owned by root, but
-#     removing a directory entry needs write permission on the *parent*, not
-#     ownership of the entry, so this works without sudo.
-#   - A directory with contents is a hard stop. That is not the Docker
-#     artefact, and deleting data is not a build target's decision.
-#   - A missing file becomes a valid empty list, so Docker cannot put a
-#     directory there again. The fallback channel is then genuinely without
-#     servers, and says so through VlessEndpointListEmpty rather than by
-#     corrupting the mount.
-check-endpoints-file:
-	@if [ -d vless-endpoints.json ]; then \
-		if rmdir vless-endpoints.json 2>/dev/null; then \
-			echo "NOTICE: removed the empty directory Docker had created in place of"; \
-			echo "        vless-endpoints.json. Nothing was lost — it held no data."; \
-		else \
-			echo "ERROR: vless-endpoints.json is a directory and it is not empty."; \
-			echo "Docker creates one when a bind mount's source file is missing, but this"; \
-			echo "one has contents, so it is not simply that. Look before removing it:"; \
-			echo "    ls -la vless-endpoints.json"; \
-			echo "Until this is a readable file, /api/app/endpoints answers 503."; \
-			exit 1; \
-		fi; \
-	fi
-	@if [ ! -f vless-endpoints.json ]; then \
-		echo '{"version":1,"configs":[]}' > vless-endpoints.json; \
-		echo "WARNING: vless-endpoints.json was missing; created an empty list so Docker cannot"; \
-		echo "         mount a directory in its place. The mobile fallback channel has no servers"; \
-		echo "         until the real list is put there (see vless-endpoints.example.json)."; \
-	fi
-
 # Start backend, frontend and database via Docker Compose
-start: check-endpoints-file
+start:
 	@echo "Starting backend, frontend and database..."
 	$(call compose,up -d --build)
 	@$(MAKE) setup-smtp-creds || true
@@ -222,7 +183,7 @@ start: check-endpoints-file
 	@echo "  Frontend: https://localhost:8443"
 
 # Start backend with Delve remote debugger, frontend and database via Docker Compose
-start-debug: check-endpoints-file
+start-debug:
 	@echo "Starting backend with Delve debugger, frontend and database..."
 	$(call compose,-f docker-compose.debug.yml up -d --build)
 	@echo "Debug services started."
@@ -262,7 +223,7 @@ register-release:
 # but by then `stop` has already torn the stack down — a broken bind mount would
 # take the whole application offline and then refuse to bring it back. Failing
 # here leaves the running containers untouched.
-restart: check-endpoints-file stop start register-release
+restart: stop start register-release
 	@echo "Services restarted."
 
 # Show logs from all services
@@ -300,14 +261,14 @@ reconcile:
 # is passed explicitly whenever it exists; values in the later file win.
 MONITORING_ENV = $(if $(wildcard .env),--env-file .env) $(if $(wildcard .env.monitoring),--env-file .env.monitoring)
 MONITORING_COMPOSE = $(MONITORING_ENV) -f docker-compose.yml -f docker-compose.monitoring.yml
-MONITORING_SERVICES = prometheus alertmanager grafana vlessprobe opsbot node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter
+MONITORING_SERVICES = prometheus alertmanager grafana opsbot node-exporter cadvisor postgres-exporter nginx-exporter blackbox-exporter
 
 # --no-deps keeps this from starting or recreating db and frontend: the
 # application deploy may be running at the same time, and two processes bringing
 # the same containers up is how you get a half-restarted stack. The exporters
 # retry until their target is back, which is the correct behaviour anyway.
 monitoring-up:
-	@echo "Starting Prometheus, Grafana, Alertmanager, exporters and the VLESS prober..."
+	@echo "Starting Prometheus, Grafana, Alertmanager and exporters..."
 	$(call compose,$(MONITORING_COMPOSE) up -d --build --no-deps $(MONITORING_SERVICES))
 	@echo "Monitoring started (all bound to localhost):"
 	@echo "  Grafana:      http://127.0.0.1:3000"
@@ -320,7 +281,7 @@ monitoring-down:
 	$(call compose,$(MONITORING_COMPOSE) rm -f $(MONITORING_SERVICES))
 
 monitoring-logs:
-	$(call compose,$(MONITORING_COMPOSE) logs -f prometheus alertmanager grafana vlessprobe opsbot)
+	$(call compose,$(MONITORING_COMPOSE) logs -f prometheus alertmanager grafana opsbot)
 
 # Reload Prometheus after editing rules, without dropping the series database.
 monitoring-reload:
@@ -346,14 +307,6 @@ monitoring-check:
 		--entrypoint promtool prom/prometheus:v3.1.0 \
 		test rules $(RULE_TESTS)
 	@echo "Configuration and rules are valid."
-
-# Run one VLESS probe pass in the foreground and print the resulting metrics.
-# Useful after editing vless-endpoints.json, when waiting for the next scrape
-# is slower than just asking.
-probe-once:
-	@echo "Probing the VLESS fallback channel once..."
-	$(call compose,$(MONITORING_COMPOSE) exec vlessprobe wget -qO- http://127.0.0.1:9102/metrics) | grep -E '^vless_' || \
-		echo "The prober is not running. Start it with: make monitoring-up"
 
 clean:
 	rm -f healthlogin-app.apk

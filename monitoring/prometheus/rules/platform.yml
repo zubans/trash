@@ -225,15 +225,6 @@ groups:
           summary: "Всплеск неудачных входов"
           description: "Более 2 отказов в секунду в течение 10 минут. Ограничитель частоты работает, но всплеск стоит посмотреть."
 
-      - alert: EndpointListProbedWithWrongKey
-        expr: sum(rate(healthlogin_app_endpoints_requests_total{result="forbidden"}[10m])) > 0.2
-        for: 15m
-        labels:
-          severity: ticket
-        annotations:
-          summary: "Список VLESS-endpoint'ов запрашивают с неверным ключом"
-          description: "Либо в обращении осталась старая сборка приложения с прежним APP_KEY, либо URL нашли снаружи."
-
   - name: resources
     rules:
       # Absolute bytes, not a percentage. On a 914G volume ten percent is 91G —

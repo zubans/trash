@@ -26,8 +26,6 @@ func TestRegistryGathers(t *testing.T) {
 	MailSend("password_reset", time.Second, nil)
 	ChatConnected("order")
 	ChatMessage("order")
-	AppEndpointsRequest("ok")
-	AppEndpointsFile(3, time.Now())
 	SetBuildInfo("1.2.3", "abc123")
 
 	families, err := Registry.Gather()
@@ -46,7 +44,6 @@ func TestRegistryGathers(t *testing.T) {
 		"healthlogin_http_requests_total",
 		"healthlogin_ledger_amount_rubles_total",
 		"healthlogin_reconcile_ok",
-		"healthlogin_app_endpoints_configs",
 		"healthlogin_build_info",
 		// Registered by default, and the reason a leaking goroutine or a
 		// saturated pool is diagnosable at all.
