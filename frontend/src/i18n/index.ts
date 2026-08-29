@@ -35,3 +35,6 @@ export function setLocale(locale: string) {
   i18n.global.locale.value = locale as 'en' | 'ru'
   localStorage.setItem('locale', locale)
 }
+
+export { useI18n } from 'vue-i18n'
+
