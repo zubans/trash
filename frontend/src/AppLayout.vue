@@ -96,16 +96,10 @@
         </div>
 
         <div class="header-controls">
-          <LanguageSwitcher />
-
           <div class="control-pill user-pill">
             <i class="ph-fill ph-user-circle"></i>
             <span class="user-phone-text">{{ phone || '7 999 999 99 99' }}</span>
           </div>
-
-          <button class="btn-logout" :title="$t('app.logout')" @click="doLogout">
-            <i class="ph-bold ph-sign-out"></i>
-          </button>
         </div>
       </header>
 
