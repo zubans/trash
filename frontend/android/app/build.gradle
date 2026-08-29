@@ -7,8 +7,8 @@ android {
         applicationId "com.healthlogin.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 192
-        versionName "1.0.19"
+        versionCode 216
+        versionName "1.0.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // Endpoint-list shared secrets are injected at build time from the same
