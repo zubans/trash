@@ -194,10 +194,13 @@
       @cancel="closeAddressModal"
     >
       <p class="mb-2">{{ $t('users.user') }}: <strong>{{ selectedUser?.phone }}</strong></p>
-      <va-input
-        v-model="newAddress"
+      <p v-if="selectedUser?.address" class="mb-2 text-secondary">
+        {{ $t('users.address') }}: <strong>{{ selectedUser.address }}</strong>
+      </p>
+      <AddressAutocomplete
+        v-model="newAddressStruct"
         :label="$t('users.newAddress')"
-        required
+        placeholder="Начните вводить адрес..."
       />
     </va-modal>
 
@@ -241,9 +244,11 @@ import { defineComponent, ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
+import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 
 export default defineComponent({
   name: 'UserList',
+  components: { AddressAutocomplete },
   setup() {
     const { t } = useI18n()
     const authStore = useAuthStore()
@@ -386,6 +391,7 @@ export default defineComponent({
     const topUpAmount = ref(0)
     const showAddressModal = ref(false)
     const newAddress = ref('')
+    const newAddressStruct = ref<StructuredAddress | null>(null)
 
     const showNameModal = ref(false)
     const newLastName = ref('')
@@ -466,6 +472,9 @@ export default defineComponent({
     const openAddressModal = (user: any) => {
       selectedUser.value = user
       newAddress.value = user.address || ''
+      // Start empty so the admin picks a fresh suggestion from the register; the
+      // current address is shown above the field for reference.
+      newAddressStruct.value = null
       showAddressModal.value = true
     }
 
@@ -473,17 +482,21 @@ export default defineComponent({
       showAddressModal.value = false
       selectedUser.value = null
       newAddress.value = ''
+      newAddressStruct.value = null
     }
 
     const saveAddress = async () => {
       if (!selectedUser.value) return
-      if (!newAddress.value.trim()) {
+      const chosen = newAddressStruct.value
+      if (!chosen || !chosen.value?.trim()) {
         alert(t('users.addressRequired'))
         return
       }
       try {
-        await api.post(`/admin/users/${selectedUser.value.id}/address`, { address: newAddress.value.trim() })
-        selectedUser.value.address = newAddress.value.trim()
+        // Send the composed line the register produced; the backend stores it as
+        // the customer's pickup address.
+        await api.post(`/admin/users/${selectedUser.value.id}/address`, { address: chosen.value.trim() })
+        selectedUser.value.address = chosen.value.trim()
         closeAddressModal()
       } catch (err: any) {
         alert(err.response?.data || t('users.updateAddressError'))
@@ -545,6 +558,7 @@ export default defineComponent({
       newRole,
       topUpAmount,
       newAddress,
+      newAddressStruct,
       newLastName,
       newFirstName,
       newPatronymic,

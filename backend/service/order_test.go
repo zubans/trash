@@ -266,7 +266,7 @@ func (m *mockOrderRepo) SetHoldAmount(ctx context.Context, q repository.Querier,
 func (m *mockOrderRepo) Confirm(ctx context.Context, q repository.Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
-			if o.Status != repository.OrderStatusExecuted {
+			if o.Status != repository.OrderStatusExecuted && o.Status != repository.OrderStatusAssigned {
 				return repository.ErrConflict
 			}
 			o.Status = "COMPLETED"

@@ -14,9 +14,44 @@
       <div class="map-modal-body">
         <div id="executor-leaflet-map" class="leaflet-container-box"></div>
 
+        <!-- Cluster Overlay: several orders sharing one pickup point -->
+        <div v-if="selectedCluster && !selectedOrder" class="order-preview-card cluster-list-card">
+          <button type="button" class="btn-close-card" @click="selectedCluster = null">
+            <i class="ph ph-x"></i>
+          </button>
+          <div class="cluster-title">
+            {{ selectedCluster.length }} заказов по этому адресу
+          </div>
+          <div class="cluster-address">{{ selectedCluster[0].address || 'Адрес не указан' }}</div>
+          <div class="cluster-rows">
+            <button
+              v-for="o in selectedCluster"
+              :key="o.id"
+              type="button"
+              class="cluster-row"
+              @click="openClusterOrder(o)"
+            >
+              <span class="cr-id">#{{ o.id ? o.id.slice(0, 8) : '---' }}</span>
+              <span class="cr-price">{{ currencySymbol }}{{ Number(o.hold_amount).toFixed(2) }}</span>
+              <span class="cr-badge" :class="o.can_accept ? 'ok' : 'far'">
+                {{ o.can_accept ? 'Можно взять' : '> 2 км' }}
+              </span>
+              <i class="ph-bold ph-caret-right cr-arrow"></i>
+            </button>
+          </div>
+        </div>
+
         <!-- Selected Order Overlay Card -->
         <div v-if="selectedOrder" class="order-preview-card">
-          <button type="button" class="btn-close-card" @click="selectedOrder = null">
+          <button
+            v-if="selectedCluster"
+            type="button"
+            class="btn-back-cluster"
+            @click="selectedOrder = null"
+          >
+            <i class="ph-bold ph-arrow-left"></i> К списку
+          </button>
+          <button type="button" class="btn-close-card" @click="selectedOrder = null; selectedCluster = null">
             <i class="ph ph-x"></i>
           </button>
           <div class="op-header">
@@ -73,6 +108,9 @@ export default defineComponent({
     })
 
     const selectedOrder = ref<any>(null)
+    // When several orders share one pickup point they are grouped behind a single
+    // cluster marker; clicking it opens this list instead of a single card.
+    const selectedCluster = ref<any[] | null>(null)
     const accepting = ref(false)
     // Authoritative position last confirmed by the server. The marker and both
     // zone circles are always anchored here — never directly to the props, which
@@ -250,26 +288,70 @@ export default defineComponent({
       if (!markersLayer || !map) return
       markersLayer.clearLayers()
 
+      // Group orders that resolve to (almost) the same pickup point — several
+      // orders in one building or flat geocode to identical coordinates and would
+      // otherwise stack directly on top of one another. Rounding to 5 decimals is
+      // ~1 m, tight enough that only genuinely co-located orders merge.
+      const groups = new Map<string, any[]>()
       mapOrders.value.forEach((order) => {
         const oLat = order.pickup_lat || 55.7558
         const oLon = order.pickup_lon || 37.6173
-        const canAccept = order.can_accept
-
-        const orderIcon = L.divIcon({
-          className: 'order-map-pin',
-          html: `<div class="order-pin-bubble ${canAccept ? 'green' : 'orange'}">
-                  ${canAccept ? '⚡' : '📍'} ${order.hold_amount}₽
-                 </div>`,
-          iconSize: [80, 30],
-          iconAnchor: [40, 15],
-        })
-
-        const marker = L.marker([oLat, oLon], { icon: orderIcon })
-        marker.on('click', () => {
-          selectedOrder.value = order
-        })
-        markersLayer?.addLayer(marker)
+        const key = `${oLat.toFixed(5)},${oLon.toFixed(5)}`
+        const list = groups.get(key)
+        if (list) list.push(order)
+        else groups.set(key, [order])
       })
+
+      groups.forEach((orders) => {
+        const oLat = orders[0].pickup_lat || 55.7558
+        const oLon = orders[0].pickup_lon || 37.6173
+
+        if (orders.length === 1) {
+          const order = orders[0]
+          const canAccept = order.can_accept
+
+          const orderIcon = L.divIcon({
+            className: 'order-map-pin',
+            html: `<div class="order-pin-bubble ${canAccept ? 'green' : 'orange'}">
+                    ${canAccept ? '⚡' : '📍'} ${order.hold_amount}₽
+                   </div>`,
+            iconSize: [80, 30],
+            iconAnchor: [40, 15],
+          })
+
+          const marker = L.marker([oLat, oLon], { icon: orderIcon })
+          marker.on('click', () => {
+            selectedCluster.value = null
+            selectedOrder.value = order
+          })
+          markersLayer?.addLayer(marker)
+        } else {
+          // A distinct marker (purple, order count) signals several stacked
+          // orders; clicking it reveals the mini list rather than one card.
+          const anyAccept = orders.some((o) => o.can_accept)
+          const clusterIcon = L.divIcon({
+            className: 'order-map-pin',
+            html: `<div class="order-cluster-bubble ${anyAccept ? 'has-accept' : ''}">
+                    <span class="cluster-count">${orders.length}</span> заказов
+                   </div>`,
+            iconSize: [96, 32],
+            iconAnchor: [48, 16],
+          })
+
+          const marker = L.marker([oLat, oLon], { icon: clusterIcon })
+          marker.on('click', () => {
+            selectedOrder.value = null
+            selectedCluster.value = orders
+          })
+          markersLayer?.addLayer(marker)
+        }
+      })
+    }
+
+    // Open a single order from the cluster list. The cluster stays set so the
+    // preview card can offer a "back to list" affordance.
+    const openClusterOrder = (order: any) => {
+      selectedOrder.value = order
     }
 
     const acceptMapOrder = async () => {
@@ -279,6 +361,7 @@ export default defineComponent({
         await api.post(`/executor/orders/${selectedOrder.value.id}/accept`)
         emit('order-accepted', selectedOrder.value.id)
         selectedOrder.value = null
+        selectedCluster.value = null
         show.value = false
       } catch (err: any) {
         alert(err.response?.data || 'Ошибка принятия заказа')
@@ -304,6 +387,8 @@ export default defineComponent({
     return {
       show,
       selectedOrder,
+      selectedCluster,
+      openClusterOrder,
       accepting,
       acceptMapOrder,
     }
@@ -390,6 +475,37 @@ export default defineComponent({
   background: #fffbebfb; border: 1px solid #fde68a; color: #b45309;
   padding: 10px 14px; border-radius: 12px; font-size: 13px; text-align: center;
 }
+
+/* Cluster list overlay */
+.cluster-list-card { padding-top: 24px; }
+.cluster-title { font-size: 16px; font-weight: 700; color: #0f172a; padding-right: 28px; }
+.cluster-address { font-size: 13px; color: #64748b; margin: 2px 0 12px; }
+.cluster-rows {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 40vh; overflow-y: auto;
+}
+.cluster-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left; cursor: pointer;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px;
+  padding: 10px 14px; transition: all 0.15s ease;
+}
+.cluster-row:hover { background: #eef2ff; border-color: #c7d2fe; }
+.cr-id { font-size: 13px; font-weight: 700; color: #6366f1; font-family: monospace; }
+.cr-price { font-size: 15px; font-weight: 700; color: #0f172a; margin-left: auto; }
+.cr-badge {
+  font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 99px; white-space: nowrap;
+}
+.cr-badge.ok { background: #dcfce7; color: #15803d; }
+.cr-badge.far { background: #fef3c7; color: #b45309; }
+.cr-arrow { color: #94a3b8; font-size: 14px; }
+
+.btn-back-cluster {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: none; color: #6366f1;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 0; margin-bottom: 10px;
+}
 </style>
 
 <style>
@@ -412,4 +528,19 @@ export default defineComponent({
 }
 .order-pin-bubble.green { background: #10b981; }
 .order-pin-bubble.orange { background: #f59e0b; }
+
+/* Cluster marker: several stacked orders at one point */
+.order-cluster-bubble {
+  padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 700;
+  color: white; white-space: nowrap; text-align: center;
+  background: #7c3aed;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+  border: 2px solid #ffffff;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.order-cluster-bubble.has-accept { background: #4f46e5; }
+.order-cluster-bubble .cluster-count {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 99px; padding: 0 7px; font-size: 13px; font-weight: 800;
+}
 </style>

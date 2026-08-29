@@ -88,6 +88,14 @@
             </div>
             <button
               type="button"
+              class="btn-edit"
+              title="Изменить адрес"
+              @click.prevent="startEditAddress(addr)"
+            >
+              <i class="ph ph-pencil-simple"></i>
+            </button>
+            <button
+              type="button"
               class="btn-trash"
               title="Удалить адрес"
               @click.prevent="removeAddress(idx)"
@@ -97,13 +105,18 @@
           </label>
         </div>
 
-        <!-- Add New Address Form -->
-        <div v-if="customerAddresses.length < 2" class="add-address-form">
+        <!-- Add / Edit Address Form -->
+        <div v-if="customerAddresses.length < 2 || editingAddressId" class="add-address-form">
+          <div v-if="editingAddressId" class="edit-hint-row">
+            <span><i class="ph-bold ph-pencil-simple"></i> Изменение адреса</span>
+            <button type="button" class="btn-cancel-edit" @click="cancelEditAddress">Отмена</button>
+          </div>
           <AddressAutocomplete
             v-model="newAddress"
             class="add-address-field"
-            placeholder="Начните вводить адрес..."
-            hint="Выберите адрес из подсказок и укажите квартиру"
+            :needs-flat="false"
+            placeholder="Начните вводить адрес с номером квартиры..."
+            hint="Введите адрес вместе с квартирой и выберите его из подсказок"
           />
           <button
             type="button"
@@ -111,7 +124,8 @@
             :disabled="!newAddress || addingAddress"
             @click="addNewAddress"
           >
-            <i class="ph-bold ph-plus"></i> Добавить
+            <i class="ph-bold" :class="editingAddressId ? 'ph-check' : 'ph-plus'"></i>
+            {{ editingAddressId ? 'Сохранить изменения' : 'Добавить' }}
           </button>
           <p v-if="addressError" class="address-add-error">{{ addressError }}</p>
         </div>
@@ -152,6 +166,8 @@ export default defineComponent({
     const newAddress = ref<StructuredAddress | null>(null)
     const addingAddress = ref(false)
     const addressError = ref('')
+    // Id of the saved address currently being edited (null = adding a new one).
+    const editingAddressId = ref<string | null>(null)
 
     const emailInput = ref('')
     const savingEmail = ref(false)
@@ -204,16 +220,52 @@ export default defineComponent({
       }
     }
 
+    const startEditAddress = (addr: any) => {
+      editingAddressId.value = addr.id
+      addressError.value = ''
+      // Seed the field with the saved parts so it can be adjusted in place.
+      newAddress.value = {
+        value: addr.address,
+        region: addr.region,
+        city: addr.city,
+        street: addr.street,
+        house: addr.house,
+        flat: addr.flat,
+        fias_id: addr.fias_id,
+        lat: addr.lat,
+        lon: addr.lon,
+        source: addr.source,
+      }
+    }
+
+    const cancelEditAddress = () => {
+      editingAddressId.value = null
+      newAddress.value = null
+      addressError.value = ''
+    }
+
     const addNewAddress = async () => {
       const chosen = newAddress.value
-      if (!chosen || customerAddresses.value.length >= 2 || addingAddress.value) return
+      const editingId = editingAddressId.value
+      // When adding (not editing) the two-address cap applies.
+      if (!chosen || addingAddress.value) return
+      if (!editingId && customerAddresses.value.length >= 2) return
 
       addingAddress.value = true
       addressError.value = ''
       try {
-        // The parts are sent, not a line. Coordinates travel with them, so an
-        // address added here is visible to distance matching — one added
-        // through the old free-text box never was.
+        const wasDefault = editingId
+          ? customerAddresses.value.find((a: any) => a.id === editingId)?.address === defaultAddress.value
+          : false
+
+        // Editing replaces the saved address: remove the old row first so the
+        // new one fits within the two-address cap, then save the new parts.
+        // Coordinates travel with the parts, so the address stays visible to
+        // distance matching.
+        if (editingId) {
+          await api.delete(`/user/address/${editingId}`)
+        }
+
         const res = await api.post('/user/address', {
           address: chosen.value,
           region: chosen.region,
@@ -230,7 +282,12 @@ export default defineComponent({
         if (customerAddresses.value.length === 1) {
           defaultAddress.value = customerAddresses.value[0].address
         }
+        // Keep the edited address active if it was the default before.
+        if (wasDefault) {
+          await setActiveAddress(chosen.value)
+        }
         newAddress.value = null
+        editingAddressId.value = null
       } catch (err: any) {
         // Previously this only reached the console, so a rejected address
         // looked like a button that did nothing.
@@ -270,6 +327,9 @@ export default defineComponent({
       newAddress,
       addingAddress,
       addressError,
+      editingAddressId,
+      startEditAddress,
+      cancelEditAddress,
       emailInput,
       savingEmail,
       emailMsg,
@@ -592,8 +652,44 @@ export default defineComponent({
   background: #fee2e2;
 }
 
-/* Add address form */
+.btn-edit {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-edit:hover {
+  color: #6366f1;
+  background: #eef2ff;
+}
+
+/* Add / edit address form */
 .add-address-field { flex: 1 1 100%; }
+
+.edit-hint-row {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6366f1;
+}
+
+.btn-cancel-edit {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 .address-add-error {
   flex: 1 1 100%;

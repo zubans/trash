@@ -86,6 +86,14 @@
           </div>
           <button
             type="button"
+            class="btn-edit"
+            title="Изменить адрес"
+            @click.prevent="$emit('editAddress', addr)"
+          >
+            <i class="ph ph-pencil-simple"></i>
+          </button>
+          <button
+            type="button"
             class="btn-trash"
             title="Удалить адрес"
             @click.prevent="$emit('removeAddress', idx)"
@@ -95,13 +103,18 @@
         </label>
       </div>
 
-      <!-- Add New Address Form -->
-      <div v-if="customerAddresses.length < 2" class="add-address-form">
+      <!-- Add / Edit Address Form -->
+      <div v-if="customerAddresses.length < 2 || editingAddressId" class="add-address-form">
+        <div v-if="editingAddressId" class="edit-hint-row">
+          <span><i class="ph-bold ph-pencil-simple"></i> Изменение адреса</span>
+          <button type="button" class="btn-cancel-edit" @click="$emit('cancelEditAddress')">Отмена</button>
+        </div>
         <AddressAutocomplete
           class="add-address-field"
           :model-value="newAddress"
-          placeholder="Начните вводить адрес..."
-          hint="Выберите адрес из подсказок и укажите квартиру"
+          :needs-flat="false"
+          placeholder="Начните вводить адрес с номером квартиры..."
+          hint="Введите адрес вместе с квартирой и выберите его из подсказок"
           @update:model-value="$emit('update:newAddress', $event)"
         />
         <button
@@ -110,7 +123,8 @@
           :disabled="!newAddress"
           @click="$emit('addNewAddress')"
         >
-          <i class="ph-bold ph-plus"></i> Добавить
+          <i class="ph-bold" :class="editingAddressId ? 'ph-check' : 'ph-plus'"></i>
+          {{ editingAddressId ? 'Сохранить изменения' : 'Добавить' }}
         </button>
         <p v-if="addressError" class="address-add-error">{{ addressError }}</p>
       </div>
@@ -144,6 +158,7 @@ export default defineComponent({
     defaultAddress: { type: String, default: '' },
     newAddress: { type: Object as PropType<StructuredAddress | null>, default: null },
     addressError: { type: String, default: '' },
+    editingAddressId: { type: String as PropType<string | null>, default: null },
   },
   emits: [
     'update:modelValue',
@@ -151,6 +166,8 @@ export default defineComponent({
     'setActiveAddress',
     'addNewAddress',
     'removeAddress',
+    'editAddress',
+    'cancelEditAddress',
     'emailUpdated',
   ],
   setup(props, { emit }) {
@@ -545,8 +562,50 @@ export default defineComponent({
   color: #ef4444;
 }
 
-/* --- Add Address Form --- */
+.btn-edit {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  margin-left: 4px;
+}
+
+.btn-edit:hover {
+  background: #eef2ff;
+  color: #6366f1;
+}
+
+/* --- Add / Edit Address Form --- */
 .add-address-field { flex: 1 1 100%; }
+
+.edit-hint-row {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6366f1;
+  margin-bottom: 4px;
+}
+
+.btn-cancel-edit {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 .address-add-error {
   flex: 1 1 100%;

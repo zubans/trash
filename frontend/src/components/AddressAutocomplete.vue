@@ -261,14 +261,26 @@ export default defineComponent({
       clearTimeout(debounce)
     })
 
-    // A parent that resets the form clears the field with it.
+    // Keep the field in step with the bound value when the parent drives it:
+    // clearing it resets the box, and seeding a saved address (e.g. when editing
+    // an existing one) fills the box so it can be adjusted in place. Composed
+    // values echoed back by our own publish() match the current query and are
+    // ignored, so this never loops.
     watch(
       () => props.modelValue,
       (next) => {
-        if (next === null && chosen.value !== null) {
-          query.value = ''
-          flat.value = ''
-          chosen.value = null
+        if (next === null) {
+          if (chosen.value !== null) {
+            query.value = ''
+            flat.value = ''
+            chosen.value = null
+          }
+          return
+        }
+        if (next.value && next.value !== query.value) {
+          chosen.value = next
+          flat.value = next.flat || ''
+          query.value = next.value
         }
       },
     )

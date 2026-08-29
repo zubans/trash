@@ -98,6 +98,42 @@ func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 	}
 }
 
+// TestConfirmAssignedOrderPaysExecutor covers early approval: a customer may
+// confirm while the order is still ASSIGNED (the executor never pressed
+// "Исполнил"), and doing so must pay the executor the held amount exactly as the
+// EXECUTED path does — no more, no less.
+func TestConfirmAssignedOrderPaysExecutor(t *testing.T) {
+	srv, orderRepo, txRepo := newMoneyTestService()
+
+	customerID := uuid.New()
+	executorID := uuid.New()
+	lat, lon := 55.75, 37.61
+	order, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	if err != nil {
+		t.Fatalf("unexpected error creating order: %v", err)
+	}
+	holdAmount := order.HoldAmount
+
+	if err := orderRepo.AssignOrder(context.Background(), order.ID, executorID); err != nil {
+		t.Fatalf("failed to assign order: %v", err)
+	}
+
+	// Deliberately skip ExecuteOrder: confirm straight from ASSIGNED.
+	if err := srv.Confirm(context.Background(), customerID, order.ID); err != nil {
+		t.Fatalf("early confirm from ASSIGNED should succeed: %v", err)
+	}
+	// A second confirm must still be refused (order is now COMPLETED).
+	if err := srv.Confirm(context.Background(), customerID, order.ID); err == nil {
+		t.Fatal("second confirm was accepted")
+	}
+
+	executorBalance, _ := txRepo.GetBalance(context.Background(), executorID)
+	expected := mockDefaultBalance + holdAmount
+	if executorBalance != expected {
+		t.Errorf("expected executor to be paid the held amount once (%s), got %s", expected, executorBalance)
+	}
+}
+
 // TestCreateOrderRejectsOverdraft checks that the balance is debited atomically,
 // so a check-then-write race cannot spend money the customer does not have.
 func TestCreateOrderRejectsOverdraft(t *testing.T) {

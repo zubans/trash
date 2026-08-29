@@ -430,8 +430,12 @@ func (s *OrderService) ConfirmOrder(ctx context.Context, orderID uuid.UUID) erro
 		if err != nil {
 			return errors.New("order not found")
 		}
-		if order.Status != repository.OrderStatusExecuted {
-			return errors.New("order must be marked as executed by the executor before confirmation")
+		// The customer may approve either after the executor marked the order as
+		// EXECUTED, or earlier while it is still ASSIGNED — approving early simply
+		// closes the order and pays the executor the held amount, same as the
+		// EXECUTED path below.
+		if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned {
+			return errors.New("order must be assigned or marked as executed before confirmation")
 		}
 		if order.ExecutorID == nil {
 			return errors.New("order has no executor")

@@ -159,11 +159,11 @@
                   <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
                 </button>
                 <button
-                  v-if="order.status === 'EXECUTED'"
+                  v-if="order.status === 'EXECUTED' || order.status === 'ASSIGNED'"
                   type="button"
                   class="btn-action success confirm-btn"
-                  title="Подтвердить выполнение и закрыть заказ"
-                  @click="confirmOrder(order.id)"
+                  :title="order.status === 'EXECUTED' ? 'Подтвердить выполнение и закрыть заказ' : 'Принять заказ досрочно и закрыть его'"
+                  @click="confirmOrder(order.id, order.status)"
                 >
                   <i class="ph-bold ph-check"></i>
                 </button>
@@ -397,9 +397,12 @@
         :user-email="userEmail"
         :customer-addresses="customerAddresses"
         :default-address="defaultAddress"
+        :editing-address-id="editingAddressId"
         @set-active-address="setActiveAddress"
         @add-new-address="addNewAddress"
         @remove-address="removeAddress"
+        @edit-address="startEditAddress"
+        @cancel-edit-address="cancelEditAddress"
       />
 
       <!-- Image Preview Modal -->
@@ -502,6 +505,8 @@ export default defineComponent({
     ])
     const newAddress = ref<StructuredAddress | null>(null)
     const addressSaving = ref(false)
+    // Id of the saved address currently being edited (null = adding a new one).
+    const editingAddressId = ref<string | null>(null)
     const addressError = ref('')
 
     // Orders
@@ -765,7 +770,13 @@ export default defineComponent({
       }
     }
 
-    const confirmOrder = async (orderId: string) => {
+    const confirmOrder = async (orderId: string, status?: string) => {
+      // Confirming an order that the executor has not yet marked as executed
+      // closes it and pays out immediately, so guard the early-approval case.
+      if (status === 'ASSIGNED' &&
+          !confirm('Исполнитель ещё не отметил заказ выполненным. Подтвердить и закрыть заказ досрочно? Средства спишутся исполнителю.')) {
+        return
+      }
       try {
         await api.post(`/customer/orders/${orderId}/confirm`)
         successMsg.value = 'Заказ подтвержден'
@@ -1271,15 +1282,51 @@ export default defineComponent({
       }
     }
 
+    const startEditAddress = (addr: any) => {
+      editingAddressId.value = addr.id
+      addressError.value = ''
+      // Seed the field with the saved parts so it can be adjusted in place.
+      newAddress.value = {
+        value: addr.address,
+        region: addr.region,
+        city: addr.city,
+        street: addr.street,
+        house: addr.house,
+        flat: addr.flat,
+        fias_id: addr.fias_id,
+        lat: addr.lat,
+        lon: addr.lon,
+        source: addr.source,
+      }
+    }
+
+    const cancelEditAddress = () => {
+      editingAddressId.value = null
+      newAddress.value = null
+      addressError.value = ''
+    }
+
     // These used to change the local array and nothing else, so an address
     // added here vanished on the next load and one removed here came back.
     const addNewAddress = async () => {
       const chosen = newAddress.value
+      const editingId = editingAddressId.value
       if (!chosen || addressSaving.value) return
+      if (!editingId && customerAddresses.value.length >= 2) return
 
       addressSaving.value = true
       addressError.value = ''
       try {
+        const wasDefault = editingId
+          ? customerAddresses.value.find((a: any) => a.id === editingId)?.address === defaultAddress.value
+          : false
+
+        // Editing replaces the saved address: remove the old row first so the
+        // new one fits within the two-address cap, then save the new parts.
+        if (editingId) {
+          await api.delete(`/user/address/${editingId}`)
+        }
+
         const res = await api.post('/user/address', {
           address: chosen.value,
           region: chosen.region,
@@ -1293,9 +1340,17 @@ export default defineComponent({
           source: chosen.source,
         })
         customerAddresses.value = res.data.addresses || []
-        defaultAddress.value = chosen.value
-        orderAddress.value = chosen.value
+        // Keep the edited address active if it was the default before; a brand
+        // new address becomes the working one as before.
+        if (!editingId || wasDefault) {
+          defaultAddress.value = chosen.value
+          orderAddress.value = chosen.value
+          if (editingId && wasDefault) {
+            await setActiveAddress(chosen.value)
+          }
+        }
         newAddress.value = null
+        editingAddressId.value = null
       } catch (err: any) {
         addressError.value =
           err?.response?.data?.error || err?.response?.data || 'Не удалось сохранить адрес'
@@ -1397,6 +1452,9 @@ export default defineComponent({
       newAddress,
       addressSaving,
       addressError,
+      editingAddressId,
+      startEditAddress,
+      cancelEditAddress,
       activeOrders,
       historyOrders,
       isHistoryCollapsed,

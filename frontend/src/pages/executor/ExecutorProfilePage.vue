@@ -57,6 +57,33 @@
           </div>
         </div>
 
+        <!-- Email Management -->
+        <div class="section-header">
+          <div class="section-title">
+            <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
+            Электронная почта
+          </div>
+          <div class="section-subtitle">При изменении потребуется повторная верификация</div>
+        </div>
+
+        <div class="email-box mb-4">
+          <div class="input-wrapper">
+            <input
+              v-model="emailInput"
+              type="email"
+              class="form-input"
+              placeholder="example@domain.com"
+            />
+            <button type="button" class="btn-save-email" :disabled="savingEmail || !emailInput || emailInput === currentEmail" @click="saveEmail">
+              <span v-if="savingEmail" class="spinner-sm"></span>
+              <template v-else>Сохранить</template>
+            </button>
+          </div>
+          <div v-if="emailMsg" class="email-msg-text" :class="{ error: emailMsgIsError }">
+            {{ emailMsg }}
+          </div>
+        </div>
+
         <!-- Password Change Section -->
         <div class="section-header">
           <div class="section-title">

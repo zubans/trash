@@ -231,7 +231,7 @@
                 :placeholder="$t('login.pickupAddressPlaceholder')"
                 :hint="$t('login.addressHint')"
                 :flat-placeholder="$t('login.flatNumberPlaceholder')"
-                :needs-flat="role === 'CUSTOMER'"
+                :needs-flat="false"
               />
             </div>
 

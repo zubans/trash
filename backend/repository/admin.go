@@ -135,7 +135,8 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 
 	// Get paginated list with customer address
 	listQuery := fmt.Sprintf(
-		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at, COALESCE(cp.address, '') as address
+		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at, COALESCE(cp.address, '') as address,
+		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, '')
 		 FROM users u
 		 LEFT JOIN customer_profiles cp ON cp.user_id = u.id
 		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
@@ -154,7 +155,8 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		var u User
 		// The password hash is deliberately not selected: it has no use in an
 		// admin listing and must not travel through the application at all.
-		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address)
+		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address,
+			&u.LastName, &u.FirstName, &u.Patronymic)
 		if err != nil {
 			return nil, 0, err
 		}
