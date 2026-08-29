@@ -21,7 +21,7 @@
 
 <script lang="ts">
 import { defineComponent, computed } from 'vue'
-import { useI18n } from '../i18n'
+import { useI18n } from 'vue-i18n'
 
 export default defineComponent({
   name: 'SidebarUtilities',
