@@ -166,6 +166,11 @@ export default defineComponent({
 
 <style scoped>
 .update-banner-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 950;
   margin: 12px 16px;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);

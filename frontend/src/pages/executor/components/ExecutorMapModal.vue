@@ -513,24 +513,27 @@ export default defineComponent({
   display: none !important;
 }
 
-/* Leaflet Custom Marker Pins */
-.user-pin-pulse {
+/* Leaflet Custom Marker Pins.
+   Leaflet injects divIcon HTML outside Vue's scoped DOM, so these selectors
+   must pierce scoping with :deep() — otherwise the marker backgrounds and the
+   cluster's distinct colour never render. */
+:deep(.user-pin-pulse) {
   width: 32px; height: 32px; border-radius: 50%;
   background: #6366f1; color: white;
   display: flex; align-items: center; justify-content: center; font-size: 16px;
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
 }
 
-.order-pin-bubble {
+:deep(.order-pin-bubble) {
   padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 700;
   color: white; white-space: nowrap; text-align: center;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
-.order-pin-bubble.green { background: #10b981; }
-.order-pin-bubble.orange { background: #f59e0b; }
+:deep(.order-pin-bubble.green) { background: #10b981; }
+:deep(.order-pin-bubble.orange) { background: #f59e0b; }
 
 /* Cluster marker: several stacked orders at one point */
-.order-cluster-bubble {
+:deep(.order-cluster-bubble) {
   padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 700;
   color: white; white-space: nowrap; text-align: center;
   background: #7c3aed;
@@ -538,8 +541,8 @@ export default defineComponent({
   border: 2px solid #ffffff;
   display: inline-flex; align-items: center; gap: 5px;
 }
-.order-cluster-bubble.has-accept { background: #4f46e5; }
-.order-cluster-bubble .cluster-count {
+:deep(.order-cluster-bubble.has-accept) { background: #4f46e5; }
+:deep(.order-cluster-bubble .cluster-count) {
   background: rgba(255, 255, 255, 0.25);
   border-radius: 99px; padding: 0 7px; font-size: 13px; font-weight: 800;
 }
