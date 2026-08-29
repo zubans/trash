@@ -48,6 +48,19 @@ func (s *OrderService) WithExecutorGeo(geoRepo repository.ExecutorGeoRepository)
 	return s
 }
 
+// SettingShowUnverifiedCustomerOrders is the system_settings key that controls
+// whether executors may see orders from customers who have not been manually
+// verified. The executor list and the executor map both read it, so the two
+// surfaces stay consistent.
+const SettingShowUnverifiedCustomerOrders = "show_unverified_customer_orders"
+
+// showUnverifiedCustomerOrders reports the flag's value. It defaults to false
+// (hide unverified customers' orders) whenever the setting is unset or unreadable,
+// so the stricter behaviour holds unless an admin explicitly turns it on.
+func showUnverifiedCustomerOrders(settings map[string]string) bool {
+	return settings[SettingShowUnverifiedCustomerOrders] == "1"
+}
+
 // CreateOrderRequest contains the data needed to create an order.
 type CreateOrderRequest struct {
 	ServiceVariantID uuid.UUID `json:"service_variant_id"`
@@ -175,6 +188,19 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 	}
 	if variant.IsAuction {
 		return nil, errors.New("auction variants are ordered through the construction order endpoint")
+	}
+
+	// A variant marked requires_verification may only be ordered by a manually
+	// verified customer. Enforced here, not just hidden in the catalog, so it
+	// cannot be bypassed by posting a known variant id.
+	if s.userRepo != nil {
+		customer, err := s.userRepo.FindByID(ctx, customerID)
+		if err != nil {
+			return nil, err
+		}
+		if err := canCustomerOrderVariant(customer, variant); err != nil {
+			return nil, err
+		}
 	}
 
 	holdAmount, err := s.CalculatePrice(ctx, serviceVariantID, isUrgent, isAsap, false)
@@ -639,6 +665,18 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 		return nil, errors.New("service variant is not available")
 	}
 
+	// Same customer-verification gate as the standard order path, in case the
+	// construction variant is flagged requires_verification.
+	if s.userRepo != nil {
+		customer, err := s.userRepo.FindByID(ctx, customerID)
+		if err != nil {
+			return nil, err
+		}
+		if err := canCustomerOrderVariant(customer, variant); err != nil {
+			return nil, err
+		}
+	}
+
 	var commentPtr *string
 	if strings.TrimSpace(comment) != "" {
 		c := strings.TrimSpace(comment)
@@ -790,6 +828,15 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		executorVerified = executor.IsVerified()
 	}
 
+	// Admin toggle: when on, orders from unverified customers are shown too and
+	// the customer-verification gate below is skipped. Off by default.
+	showUnverified := false
+	if s.settingsRepo != nil {
+		if all, err := s.settingsRepo.GetSettings(ctx); err == nil {
+			showUnverified = showUnverifiedCustomerOrders(all)
+		}
+	}
+
 	orders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, radiusMeters)
 	if err != nil {
 		return nil, err
@@ -799,11 +846,14 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 	for _, o := range orders {
 		s.hydrateServiceVariant(ctx, o)
 
-		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей")
-		customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
-		if err == nil && customer != nil {
-			if !customer.IsVerified() {
-				continue
+		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей"),
+		// unless the admin flag show_unverified_customer_orders is on.
+		if !showUnverified {
+			customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
+			if err == nil && customer != nil {
+				if !customer.IsVerified() {
+					continue
+				}
 			}
 		}
 

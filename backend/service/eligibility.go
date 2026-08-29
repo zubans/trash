@@ -21,6 +21,33 @@ const (
 // ErrExecutorNotEligible reports that an executor may not take a specific order.
 var ErrExecutorNotEligible = errors.New("executor is not eligible for this order")
 
+// ErrCustomerNotEligible reports that a customer may not order a specific service variant.
+var ErrCustomerNotEligible = errors.New("customer is not eligible for this service")
+
+// canCustomerOrderVariant is the single place that decides whether a customer
+// may place an order for a service variant. A variant flagged
+// requires_verification can only be ordered by a manually verified customer —
+// the mirror of canExecutorTakeOrder on the executor side. It is used both when
+// filtering the catalog and when the order is actually created, so the gate
+// cannot be bypassed by posting a known variant id directly. Age (min_age) is
+// deliberately an executor-side gate only: it restricts who may perform the job,
+// not who may request it.
+func canCustomerOrderVariant(customer *repository.User, variant *repository.ServiceNode) error {
+	if customer == nil {
+		return ErrCustomerNotEligible
+	}
+	if customer.Status == "BANNED" {
+		return errors.New("аккаунт заблокирован")
+	}
+	if variant == nil {
+		return nil
+	}
+	if variant.RequiresVerification && !customer.IsVerified() {
+		return errors.New("для этой услуги требуется подтверждённый аккаунт")
+	}
+	return nil
+}
+
 // formatGeo renders a coordinate pair in the "lat,lon" form used by
 // customer_profiles.last_geo. The column is parsed as coordinates by the
 // matching worker, so nothing else may be written into it.

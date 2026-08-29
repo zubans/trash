@@ -119,7 +119,8 @@ func main() {
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
-	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
+		WithEligibility(userRepo, settingsRepo)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(context.Background(), 5*time.Second)
@@ -218,11 +219,16 @@ func main() {
 		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
 		r.With(geoLimiter.Middleware).Get("/geo/suggest", gh.Suggest)
 		r.Get("/settings", ah.GetPublicSettingsHandler)
-		r.Get("/service-categories", sch.ListRootCategories)
-		r.Get("/service-categories/{id}/children", sch.ListChildren)
-		r.Get("/service-categories/{id}/variants", sch.ListCategoryVariants)
-		r.Get("/service-variants", sch.ListVariants)
-		r.Get("/service-variants/{id}", sch.GetVariant)
+		// OptionalAuth so the catalog can hide verification-only services from
+		// unverified customers while staying reachable to anonymous visitors.
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.OptionalAuth)
+			r.Get("/service-categories", sch.ListRootCategories)
+			r.Get("/service-categories/{id}/children", sch.ListChildren)
+			r.Get("/service-categories/{id}/variants", sch.ListCategoryVariants)
+			r.Get("/service-variants", sch.ListVariants)
+			r.Get("/service-variants/{id}", sch.GetVariant)
+		})
 		r.Get("/app/version", arh.GetVersionHandler)
 		// Encrypted VLESS fallback endpoint list. Gated by the X-App-Key header
 		// and AES-256-GCM encrypted in the handler; the plaintext file is never

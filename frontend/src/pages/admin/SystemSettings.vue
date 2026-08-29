@@ -197,6 +197,25 @@
               </div>
             </div>
           </div>
+
+          <div class="toggle-row">
+            <div class="toggle-text">
+              <label class="input-label">Показывать заказы неверифицированных заказчиков</label>
+              <div class="input-hint">
+                Включено — исполнители видят заказы от всех заказчиков (и в списке, и на карте).
+                Выключено — только от заказчиков, верифицированных вручную в админке.
+              </div>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                v-model="values.show_unverified_customer_orders"
+                true-value="1"
+                false-value="0"
+              />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -246,6 +265,7 @@ export default defineComponent({
       min_balance_limit: '0',
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',
+      show_unverified_customer_orders: '0',
     })
 
     const initialValues = ref<Record<string, string>>({ ...values.value })
@@ -423,6 +443,59 @@ export default defineComponent({
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
+}
+
+/* Toggle row (boolean setting) */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #f1f5f9;
+}
+.toggle-text {
+  max-width: 640px;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #cbd5e1;
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  height: 22px;
+  width: 22px;
+  left: 3px;
+  top: 3px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.switch input:checked + .switch-slider {
+  background: #10b981;
+}
+.switch input:checked + .switch-slider::before {
+  transform: translateX(20px);
 }
 
 .input-group {

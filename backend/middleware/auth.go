@@ -162,6 +162,66 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// OptionalAuth populates the request context with the authenticated user when a
+// valid, non-revoked token is present, but never rejects the request when it is
+// absent or invalid. Handlers on otherwise-public endpoints use it to tailor the
+// response to the caller (e.g. hiding verification-only services from unverified
+// customers) while still serving anonymous visitors.
+func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenStr := extractBearerToken(r)
+		if tokenStr == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return m.secret, nil
+		})
+		if err != nil || !token.Valid {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if m.sessions != nil {
+			if revoked, err := m.sessions.IsAccessTokenRevoked(r.Context(), tokenStr); err != nil || revoked {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		sub, ok := claims["sub"].(string)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		userID, err := uuid.Parse(sub)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, err := m.userRepo.FindByID(r.Context(), userID)
+		if err != nil || user == nil || user.Status == "BANNED" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, UserKey, user)
+		ctx = context.WithValue(ctx, TokenKey, tokenStr)
+		ctx = context.WithValue(ctx, RoleKey, user.Role)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // RequireAdmin restricts access to users with the ADMIN role.
 func (m *AuthMiddleware) RequireAdmin(next http.Handler) http.Handler {
 	return RequireRole("ADMIN")(next)

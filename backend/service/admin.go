@@ -639,6 +639,11 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
 	}
+	// Whether executors see orders from customers who are not manually verified.
+	// Only "1" or "0", so it cannot be switched on by a typo.
+	if v, ok := settings["show_unverified_customer_orders"]; ok && v != "0" && v != "1" {
+		return errors.New("setting show_unverified_customer_orders must be 0 or 1")
+	}
 	numericKeys["reject_penalty_share"] = true
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,

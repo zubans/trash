@@ -25,6 +25,31 @@ func NewServiceCatalogHandler(catalogRepo repository.ServiceCatalogRepository) *
 	return &ServiceCatalogHandler{catalogRepo: catalogRepo}
 }
 
+// hideVerificationOnly reports whether the requester is a customer who has not
+// been manually verified. Such customers must not see services flagged
+// requires_verification — they cannot order them (enforced at order creation),
+// so listing them would only mislead. Executors, admins and anonymous visitors
+// are left unaffected; this is populated by the OptionalAuth middleware.
+func hideVerificationOnly(r *http.Request) bool {
+	user := userFromContext(r)
+	return user != nil && user.Role == "CUSTOMER" && !user.IsVerified()
+}
+
+// filterVerificationOnly drops nodes flagged requires_verification when hide is set.
+func filterVerificationOnly(nodes []*repository.ServiceNode, hide bool) []*repository.ServiceNode {
+	if !hide {
+		return nodes
+	}
+	out := make([]*repository.ServiceNode, 0, len(nodes))
+	for _, n := range nodes {
+		if n.RequiresVerification {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 // ListRootCategories handles GET /service-categories.
 func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *http.Request) {
 	nodes, err := h.catalogRepo.GetRootCategories(r.Context(), repository.FilterActive)
@@ -32,7 +57,7 @@ func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *htt
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, nodes)
+	writeJSON(w, filterVerificationOnly(nodes, hideVerificationOnly(r)))
 }
 
 // ListChildren handles GET /service-categories/:id/children.
@@ -47,7 +72,7 @@ func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, nodes)
+	writeJSON(w, filterVerificationOnly(nodes, hideVerificationOnly(r)))
 }
 
 // ListCategoryVariants handles GET /service-categories/:id/variants.
@@ -69,7 +94,7 @@ func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *h
 			variants = append(variants, n)
 		}
 	}
-	writeJSON(w, variants)
+	writeJSON(w, filterVerificationOnly(variants, hideVerificationOnly(r)))
 }
 
 // ListVariants handles GET /service-variants.
@@ -79,7 +104,7 @@ func (h *ServiceCatalogHandler) ListVariants(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, nodes)
+	writeJSON(w, filterVerificationOnly(nodes, hideVerificationOnly(r)))
 }
 
 // GetVariant handles GET /service-variants/:id.
@@ -96,6 +121,12 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// An unverified customer cannot order a verification-only variant, so it must
+	// not be readable by id either — otherwise the gate is only cosmetic.
+	if variant != nil && variant.RequiresVerification && hideVerificationOnly(r) {
+		http.Error(w, "variant not found", http.StatusNotFound)
 		return
 	}
 	writeJSON(w, map[string]interface{}{

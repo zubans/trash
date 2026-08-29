@@ -15,6 +15,11 @@ import (
 type ExecutorGeoService struct {
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
+	// Optional. When wired, the map applies the same customer-verification gate
+	// as the executor order list, honouring the show_unverified_customer_orders
+	// flag, so the map and the list never disagree about which orders are shown.
+	userRepo     repository.UserRepository
+	settingsRepo repository.SettingsRepository
 	// In-memory cache & mutex lock for fast cooldown checks
 	cooldownMap sync.Map
 }
@@ -24,6 +29,14 @@ func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo r
 		geoRepo:   geoRepo,
 		orderRepo: orderRepo,
 	}
+}
+
+// WithEligibility wires the dependencies the map needs to apply the same
+// customer-verification visibility rule as the executor order list.
+func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository, settingsRepo repository.SettingsRepository) *ExecutorGeoService {
+	s.userRepo = userRepo
+	s.settingsRepo = settingsRepo
+	return s
 }
 
 type SetLocationRequest struct {
@@ -203,6 +216,16 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		return nil, err
 	}
 
+	// Admin toggle: same rule the executor order list uses. Off by default, so
+	// unverified customers' orders are hidden on the map too and the two surfaces
+	// agree. On -> show every customer's orders.
+	showUnverified := false
+	if s.settingsRepo != nil {
+		if all, err := s.settingsRepo.GetSettings(ctx); err == nil {
+			showUnverified = showUnverifiedCustomerOrders(all)
+		}
+	}
+
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
@@ -212,6 +235,16 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		if o.PickupLat == nil || o.PickupLon == nil {
 			continue
 		}
+
+		// Hide orders from customers who are not manually verified, unless the
+		// admin flag is on — mirroring the executor order list.
+		if !showUnverified && s.userRepo != nil {
+			customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
+			if err == nil && customer != nil && !customer.IsVerified() {
+				continue
+			}
+		}
+
 		oLat, oLon := *o.PickupLat, *o.PickupLon
 
 		dist := HaversineDistanceKM(lat, lon, oLat, oLon)
