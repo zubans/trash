@@ -1,60 +1,41 @@
 <template>
-  <div v-if="enabled" class="debug-console-root">
-    <!-- Floating toggle -->
-    <button class="dbg-fab" :class="{ 'has-error': errorCount > 0 }" @click="open = !open">
-      <i class="ph-bold ph-bug"></i>
-      <span v-if="errorCount > 0" class="dbg-fab-badge">{{ errorCount }}</span>
-    </button>
+  <div v-if="enabled" class="dbg" :class="{ collapsed }">
+    <div class="dbg-bar" @click="collapsed = !collapsed">
+      <span class="dbg-title">
+        <i class="ph-fill ph-terminal-window"></i>
+        API
+        <span class="dbg-count">{{ logs.length }}</span>
+        <span v-if="errorCount > 0" class="dbg-errs">{{ errorCount }} ERR</span>
+      </span>
+      <span class="dbg-actions" @click.stop>
+        <button type="button" title="Очистить" @click="clear">🗑</button>
+        <button type="button" title="Выключить консоль" @click="disable">⏻</button>
+        <button type="button" :title="collapsed ? 'Развернуть' : 'Свернуть'" @click="collapsed = !collapsed">
+          {{ collapsed ? '▲' : '▼' }}
+        </button>
+      </span>
+    </div>
 
-    <!-- Panel -->
-    <div v-if="open" class="dbg-panel">
-      <div class="dbg-header">
-        <span class="dbg-title">Запросы · {{ logs.length }}</span>
-        <div class="dbg-actions">
-          <button class="dbg-btn" title="Очистить" @click="clear">
-            <i class="ph-bold ph-trash"></i>
-          </button>
-          <button class="dbg-btn" title="Выключить консоль" @click="disable">
-            <i class="ph-bold ph-power"></i>
-          </button>
-          <button class="dbg-btn" title="Свернуть" @click="open = false">
-            <i class="ph-bold ph-x"></i>
-          </button>
-        </div>
-      </div>
-
-      <div class="dbg-list">
+    <div v-show="!collapsed" class="dbg-body">
+      <div ref="logEl" class="dbg-log">
         <div v-if="logs.length === 0" class="dbg-empty">Пока нет запросов…</div>
-        <div
-          v-for="log in reversed"
-          :key="log.id"
-          class="dbg-row"
-          :class="statusClass(log)"
-          @click="expanded === log.id ? (expanded = null) : (expanded = log.id)"
-        >
-          <div class="dbg-row-main">
+        <template v-for="log in logs" :key="log.id">
+          <div class="dbg-line" :class="lineClass(log)">
+            <span class="dbg-time">{{ fmtTime(log.ts) }}</span>
             <span class="dbg-method">{{ log.method }}</span>
-            <span class="dbg-status">{{ log.status ?? (log.error ? 'ERR' : '…') }}</span>
+            <span class="dbg-code">{{ log.status ?? (log.error ? 'ERR' : '…') }}</span>
             <span class="dbg-url">{{ shortUrl(log.url) }}</span>
             <span v-if="log.durationMs != null" class="dbg-dur">{{ log.durationMs }}ms</span>
           </div>
-          <div v-if="expanded === log.id" class="dbg-detail">
-            <div class="dbg-detail-line"><b>URL:</b> {{ log.url }}</div>
-            <div class="dbg-detail-line"><b>Время:</b> {{ formatTime(log.ts) }}</div>
-            <div v-if="log.error" class="dbg-detail-line err"><b>Ошибка:</b> {{ log.error }}</div>
-            <div v-if="log.responseSnippet" class="dbg-detail-line">
-              <b>Ответ:</b>
-              <pre class="dbg-body">{{ log.responseSnippet }}</pre>
-            </div>
-          </div>
-        </div>
+          <div v-if="detail(log)" class="dbg-sub" :class="lineClass(log)">↳ {{ detail(log) }}</div>
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, ref } from 'vue'
+import { defineComponent, ref, computed, watch, nextTick } from 'vue'
 import {
   debugConsoleEnabled,
   debugLogs,
@@ -66,43 +47,64 @@ import {
 export default defineComponent({
   name: 'DebugConsole',
   setup() {
-    const open = ref(false)
-    const expanded = ref<number | null>(null)
+    const collapsed = ref(true)
+    const logEl = ref<HTMLElement | null>(null)
 
     const logs = debugLogs
-    const reversed = computed(() => [...debugLogs.value].reverse())
     const errorCount = computed(
       () => debugLogs.value.filter((l) => l.error || (l.status != null && l.status >= 400)).length,
     )
 
-    const statusClass = (log: DebugLogEntry) => {
-      if (log.error || (log.status != null && log.status >= 400)) return 'is-error'
-      if (log.status != null && log.status < 400) return 'is-ok'
-      return 'is-pending'
+    const lineClass = (log: DebugLogEntry) => {
+      if (log.error || (log.status != null && log.status >= 400)) return 'err'
+      if (log.status != null && log.status < 400) return 'ok'
+      return ''
     }
 
-    const shortUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '')
-    const formatTime = (ts: number) => new Date(ts).toLocaleTimeString()
+    // Strip origin and the /api prefix so the path reads clearly on a phone.
+    const shortUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '') || '/'
+    const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString()
 
-    const clear = () => {
-      clearDebugLogs()
-      expanded.value = null
+    // A dim second line carrying the error message or the response body, so the
+    // reason a call failed (or what an "empty" list actually returned) is visible
+    // without leaving the console.
+    const detail = (log: DebugLogEntry) => {
+      if (log.error) return log.error
+      if (log.responseSnippet) return log.responseSnippet
+      return ''
     }
+
+    const clear = () => clearDebugLogs()
     const disable = () => {
       setDebugConsole(false)
-      open.value = false
+      collapsed.value = true
     }
+
+    // Follow the tail like a terminal, but only when the user is already at the
+    // bottom, so scrolling up to read history is not yanked back down.
+    watch(
+      () => debugLogs.value.length,
+      async () => {
+        const el = logEl.value
+        if (collapsed.value || !el) return
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+        if (atBottom) {
+          await nextTick()
+          el.scrollTop = el.scrollHeight
+        }
+      },
+    )
 
     return {
       enabled: debugConsoleEnabled,
-      open,
-      expanded,
+      collapsed,
+      logEl,
       logs,
-      reversed,
       errorCount,
-      statusClass,
+      lineClass,
       shortUrl,
-      formatTime,
+      fmtTime,
+      detail,
       clear,
       disable,
     }
@@ -111,169 +113,119 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.debug-console-root {
+.dbg {
   position: fixed;
-  z-index: 100000;
-}
-
-.dbg-fab {
-  position: fixed;
-  right: 12px;
-  bottom: 76px;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: none;
-  background: #0f172a;
-  color: #fff;
-  font-size: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  opacity: 0.85;
-}
-.dbg-fab.has-error {
-  background: #b91c1c;
-}
-.dbg-fab-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  background: #ef4444;
-  color: #fff;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99999;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  font-weight: 700;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
+  background: #0b0f14;
+  color: #cfd8e3;
+  border-top: 1px solid #223;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.5);
 }
 
-.dbg-panel {
-  position: fixed;
-  right: 8px;
-  left: 8px;
-  bottom: 128px;
-  max-height: 55vh;
-  background: #0b1220;
-  color: #e2e8f0;
-  border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-.dbg-header {
+.dbg-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  background: #111a2e;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 8px;
+  background: #111823;
+  cursor: pointer;
+  user-select: none;
 }
 .dbg-title {
-  font-size: 13px;
-  font-weight: 700;
-}
-.dbg-actions {
-  display: flex;
-  gap: 6px;
-}
-.dbg-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: none;
-  color: #cbd5e1;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  font-size: 15px;
-  cursor: pointer;
-}
-.dbg-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.dbg-list {
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.dbg-empty {
-  padding: 16px;
-  text-align: center;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.dbg-row {
-  padding: 7px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  font-size: 12px;
-}
-.dbg-row-main {
   display: flex;
   align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.dbg-count {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: #345;
+  color: #bcd;
+}
+.dbg-errs {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: #a33;
+  color: #fdd;
+  font-weight: 700;
+}
+.dbg-actions button {
+  background: transparent;
+  border: none;
+  color: #9ab;
+  font-size: 13px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.dbg-body {
+  max-height: 45vh;
+  display: flex;
+  flex-direction: column;
+}
+.dbg-log {
+  overflow-y: auto;
+  padding: 4px 8px;
+  flex: 1;
+}
+.dbg-empty {
+  padding: 12px;
+  text-align: center;
+  color: #64748b;
+}
+
+.dbg-line {
+  display: flex;
   gap: 8px;
+  align-items: baseline;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.dbg-time {
+  color: #64748b;
 }
 .dbg-method {
-  font-weight: 700;
   color: #93c5fd;
-  min-width: 42px;
-}
-.dbg-status {
   font-weight: 700;
-  min-width: 34px;
+  min-width: 40px;
 }
-.dbg-row.is-ok .dbg-status {
-  color: #4ade80;
-}
-.dbg-row.is-error .dbg-status {
-  color: #f87171;
-}
-.dbg-row.is-pending .dbg-status {
-  color: #fbbf24;
+.dbg-code {
+  font-weight: 700;
+  min-width: 30px;
 }
 .dbg-url {
-  flex: 1;
+  color: #cfd8e3;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #e2e8f0;
 }
 .dbg-dur {
   color: #64748b;
-  font-size: 11px;
+  margin-left: auto;
+  padding-left: 8px;
 }
 
-.dbg-detail {
-  margin-top: 8px;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+.dbg-line.err .dbg-code,
+.dbg-sub.err {
+  color: #ff6b6b;
 }
-.dbg-detail-line {
-  font-size: 11px;
-  margin-bottom: 4px;
-  word-break: break-all;
-  color: #cbd5e1;
+.dbg-line.ok .dbg-code {
+  color: #7fe08a;
 }
-.dbg-detail-line.err {
-  color: #f87171;
-}
-.dbg-body {
-  margin: 4px 0 0;
+
+.dbg-sub {
+  color: #8ea; /* dim response/error body */
   white-space: pre-wrap;
   word-break: break-all;
-  color: #a5b4fc;
-  font-size: 11px;
-  max-height: 160px;
-  overflow: auto;
+  line-height: 1.4;
+  padding: 0 0 3px 8px;
+  opacity: 0.85;
 }
 </style>
