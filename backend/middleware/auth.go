@@ -242,14 +242,23 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// The role in the context comes from the database record loaded by
-			// RequireAuth, not from the token claims.
-			role, ok := r.Context().Value(RoleKey).(string)
-			if !ok {
+			// Authorization follows the user's full role set loaded from the
+			// database by RequireAuth (never the token claims). A user passes if
+			// ANY of their roles is allowed, so a multi-role account (e.g.
+			// EXECUTOR + MODERATOR) reaches every surface either role grants.
+			user, ok := r.Context().Value(UserKey).(*repository.User)
+			if !ok || user == nil {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
-			if _, ok := allowed[role]; !ok {
+			granted := false
+			for role := range allowed {
+				if user.HasRole(role) {
+					granted = true
+					break
+				}
+			}
+			if !granted {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}

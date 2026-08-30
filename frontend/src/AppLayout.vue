@@ -39,6 +39,11 @@
           <span v-if="!sidebarMinimized || isMobile">{{ $t('app.withdrawals') }}</span>
         </router-link>
 
+        <router-link to="/admin/commission" class="nav-item" :class="{ active: currentRouteName === 'admin-commission' }" @click="closeSidebarOnMobile">
+          <i class="ph ph-percent"></i>
+          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.commission') }}</span>
+        </router-link>
+
         <router-link to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
           <i class="ph ph-arrows-left-right"></i>
           <span v-if="!sidebarMinimized || isMobile">{{ $t('app.transactions') }}</span>
@@ -176,6 +181,7 @@ export default defineComponent({
         case 'admin-users': return 'Пользователи'
         case 'admin-topups': return 'Запросы на пополнение'
         case 'admin-withdrawals': return 'Запросы на вывод'
+        case 'admin-commission': return 'Комиссия платформы'
         case 'admin-transactions': return 'Транзакции'
         case 'admin-broadcasts': return 'Рассылки писем'
         case 'admin-shifts': return 'Активные смены'

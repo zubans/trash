@@ -12,6 +12,7 @@
             <span>Поддержка</span>
             <span v-if="hasUnreadSupport" class="support-unread-dot"></span>
           </button>
+          <RoleSwitcher v-if="authStore.switchableRoles.length > 1" />
           <div class="lang-switch-wrapper">
             <LanguageSwitcher />
           </div>
@@ -616,6 +617,7 @@ import { Geolocation } from '@capacitor/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import RoleSwitcher from '../../components/RoleSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
 import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
@@ -632,6 +634,7 @@ export default defineComponent({
   components: {
     UpdateBanner,
     LanguageSwitcher,
+    RoleSwitcher,
     AppLogo,
     ExecutorMapModal,
     ExecutorProfileModal,
@@ -1564,6 +1567,7 @@ export default defineComponent({
     })
 
     return {
+      authStore,
       balanceLoaded,
       isVerified,
       showProfileModal,

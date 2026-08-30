@@ -48,18 +48,32 @@ func (s *OrderService) WithExecutorGeo(geoRepo repository.ExecutorGeoRepository)
 	return s
 }
 
-// SettingShowUnverifiedCustomerOrders is the system_settings key that controls
-// whether executors may see orders from customers who have not been manually
-// verified. The executor list and the executor map both read it, so the two
-// surfaces stay consistent.
-const SettingShowUnverifiedCustomerOrders = "show_unverified_customer_orders"
+// SettingOrderCommissionPercent is the system_settings key holding the
+// platform's share of a completed order, as a percentage of the amount the
+// customer actually paid. Admins edit it in the settings screen.
+const SettingOrderCommissionPercent = "order_commission_percent"
 
-// showUnverifiedCustomerOrders reports the flag's value. It defaults to false
-// (hide unverified customers' orders) whenever the setting is unset or unreadable,
-// so the stricter behaviour holds unless an admin explicitly turns it on.
-func showUnverifiedCustomerOrders(settings map[string]string) bool {
-	return settings[SettingShowUnverifiedCustomerOrders] == "1"
+// commissionOn returns the platform's share of a completed order. The share is
+// clamped to 0..100 percent here as well as in the settings validator: a value
+// outside that range would either pay the executor more than the customer paid
+// or take money escrow is not holding, and neither is worth trusting a settings
+// row about. Rounding happens once, in Scale, and the remainder goes to the
+// executor.
+func commissionOn(amount money.Amount, settings map[string]float64) money.Amount {
+	percent := settings[SettingOrderCommissionPercent]
+	if percent <= 0 {
+		return money.Zero
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	commission := amount.Scale(percent / 100)
+	if commission > amount {
+		commission = amount
+	}
+	return commission
 }
+
 
 // CreateOrderRequest contains the data needed to create an order.
 type CreateOrderRequest struct {
@@ -312,7 +326,7 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	if order.CustomerID == executorID {
 		return errors.New("нельзя брать собственный заказ")
 	}
-	if err := s.checkExecutorEligibility(ctx, executorID, order.ServiceVariantID); err != nil {
+	if err := s.checkExecutorEligibility(ctx, executorID, order); err != nil {
 		return err
 	}
 
@@ -355,21 +369,23 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	return nil
 }
 
-// checkExecutorEligibility loads the executor and the service variant and
-// applies the shared age/verification rules.
-func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID, variantID uuid.UUID) error {
+// checkExecutorEligibility loads the executor, the service variant and the
+// customer, and applies the shared visibility/accept predicate — the same one
+// the order lists use, so an executor can only accept what they can see.
+func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID uuid.UUID, order *repository.Order) error {
 	if s.userRepo == nil {
 		return nil
 	}
-	executor, err := s.userRepo.FindByID(ctx, executorID)
+	viewer, err := s.userRepo.FindByID(ctx, executorID)
 	if err != nil {
 		return errors.New("executor not found")
 	}
-	variant, err := s.catalogRepo.GetNodeByID(ctx, variantID)
+	variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
 	if err != nil {
 		return err
 	}
-	return canExecutorTakeOrder(executor, variant)
+	customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
+	return canViewOrTakeOrder(viewer, customer, variant)
 }
 
 // settingsFloat reads a numeric system setting with a fallback default.
@@ -489,7 +505,15 @@ func (s *OrderService) ConfirmOrder(ctx context.Context, orderID uuid.UUID) erro
 			return err
 		}
 
-		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, *order.ExecutorID, finalAmount, repository.TransactionTypeReward, &order.ID, nil); err != nil {
+		// The platform keeps its share of what the customer paid and the executor
+		// is rewarded the rest. Escrow still drains to exactly zero for this
+		// order: refund + commission + reward = the hold.
+		commission := commissionOn(finalAmount, s.loadSettings(ctx))
+		if err := s.ledger.Commission(ctx, tx, *order.ExecutorID, commission, &order.ID); err != nil {
+			return err
+		}
+
+		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, *order.ExecutorID, finalAmount.Sub(commission), repository.TransactionTypeReward, &order.ID, nil); err != nil {
 			return err
 		}
 
@@ -809,22 +833,9 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		lat, lon = *storedLat, *storedLon
 	}
 
-	executor, _ := s.userRepo.FindByID(ctx, executorID)
-	executorAge := 0
-	executorVerified := false
-	if executor != nil {
-		executorAge = executor.GetAge()
-		executorVerified = executor.IsVerified()
-	}
-
-	// Admin toggle: when on, orders from unverified customers are shown too and
-	// the customer-verification gate below is skipped. Off by default.
-	showUnverified := false
-	if s.settingsRepo != nil {
-		if all, err := s.settingsRepo.GetSettings(ctx); err == nil {
-			showUnverified = showUnverifiedCustomerOrders(all)
-		}
-	}
+	// The viewer's role set and verification decide what they may see; roles are
+	// loaded with the user, so a moderator sees moderator-only orders too.
+	viewer, _ := s.userRepo.FindByID(ctx, executorID)
 
 	orders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, radiusMeters)
 	if err != nil {
@@ -835,26 +846,13 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 	for _, o := range orders {
 		s.hydrateServiceVariant(ctx, o)
 
-		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей"),
-		// unless the admin flag show_unverified_customer_orders is on.
-		if !showUnverified {
-			customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
-			if err == nil && customer != nil {
-				if !customer.IsVerified() {
-					continue
-				}
-			}
-		}
-
-		// 2. Filter: If service variant requires verification, executor must be verified
-		if o.ServiceVariant != nil {
-			if o.ServiceVariant.RequiresVerification && !executorVerified {
-				continue
-			}
-			// 3. Filter: If service variant has age restriction (min_age > 0), executor age must be >= min_age
-			if o.ServiceVariant.MinAge > 0 && executorAge < o.ServiceVariant.MinAge {
-				continue
-			}
+		// One predicate for both the map and this list, and the same one the
+		// accept path enforces: moderator-only orders go to moderators; normal
+		// orders follow the customer-verification segmentation and the standard
+		// executor gates (requires_verification, min_age, ban).
+		customer, _ := s.userRepo.FindByID(ctx, o.CustomerID)
+		if canViewOrTakeOrder(viewer, customer, o.ServiceVariant) != nil {
+			continue
 		}
 
 		filtered = append(filtered, o)

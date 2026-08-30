@@ -15,11 +15,12 @@ import (
 type ExecutorGeoService struct {
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
-	// Optional. When wired, the map applies the same customer-verification gate
-	// as the executor order list, honouring the show_unverified_customer_orders
-	// flag, so the map and the list never disagree about which orders are shown.
+	// Optional. When wired, the map applies the same visibility predicate as the
+	// executor order list (roles, customer verification, moderator-only), so the
+	// map and the list never disagree about which orders are shown.
 	userRepo     repository.UserRepository
 	settingsRepo repository.SettingsRepository
+	catalogRepo  repository.ServiceCatalogRepository
 	// In-memory cache & mutex lock for fast cooldown checks
 	cooldownMap sync.Map
 }
@@ -32,10 +33,11 @@ func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo r
 }
 
 // WithEligibility wires the dependencies the map needs to apply the same
-// customer-verification visibility rule as the executor order list.
-func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository, settingsRepo repository.SettingsRepository) *ExecutorGeoService {
+// visibility predicate as the executor order list.
+func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository, settingsRepo repository.SettingsRepository, catalogRepo repository.ServiceCatalogRepository) *ExecutorGeoService {
 	s.userRepo = userRepo
 	s.settingsRepo = settingsRepo
+	s.catalogRepo = catalogRepo
 	return s
 }
 
@@ -232,14 +234,11 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		return nil, err
 	}
 
-	// Admin toggle: same rule the executor order list uses. Off by default, so
-	// unverified customers' orders are hidden on the map too and the two surfaces
-	// agree. On -> show every customer's orders.
-	showUnverified := false
-	if s.settingsRepo != nil {
-		if all, err := s.settingsRepo.GetSettings(ctx); err == nil {
-			showUnverified = showUnverifiedCustomerOrders(all)
-		}
+	// The viewer's roles and verification drive visibility, exactly like the
+	// executor order list, so the map and the list never disagree.
+	var viewer *repository.User
+	if s.userRepo != nil {
+		viewer, _ = s.userRepo.FindByID(ctx, executorID)
 	}
 
 	var mapOrders []repository.MapOrder
@@ -252,11 +251,16 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 			continue
 		}
 
-		// Hide orders from customers who are not manually verified, unless the
-		// admin flag is on — mirroring the executor order list.
-		if !showUnverified && s.userRepo != nil {
-			customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
-			if err == nil && customer != nil && !customer.IsVerified() {
+		// Same predicate as FindNearbyOrdersForExecutor and the accept path:
+		// moderator-only orders → moderators; normal orders → customer-verification
+		// segmentation plus the standard executor gates.
+		if s.userRepo != nil {
+			customer, _ := s.userRepo.FindByID(ctx, o.CustomerID)
+			var variant *repository.ServiceNode
+			if s.catalogRepo != nil {
+				variant, _ = s.catalogRepo.GetNodeByID(ctx, o.ServiceVariantID)
+			}
+			if canViewOrTakeOrder(viewer, customer, variant) != nil {
 				continue
 			}
 		}

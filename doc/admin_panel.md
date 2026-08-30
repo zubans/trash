@@ -60,8 +60,18 @@ Content-Type: application/json
 | `geofence_penalty_amount` | `FLOAT` | Сумма штрафа за нарушение геозоны смены. |
 | `early_exit_penalty_amount` | `FLOAT` | Сумма штрафа за досрочное завершение смены. |
 | `min_balance_limit` | `FLOAT` | Лимит отрицательного баланса (ухода в минус) исполнителя (по умолчанию `0`). |
+| `order_commission_percent` | `FLOAT` | Комиссия платформы с выполненного заказа, в процентах, `0..100` (по умолчанию `0`). |
 
-### 2.5 Чат поддержки клиентов (`AdminSupportChats.vue`)
+### 2.5 Комиссия платформы (`PlatformCommission.vue`)
+
+- **`GET /api/admin/finances/commission`** — накопленный остаток системного счёта `COMMISSION` и действующая ставка.
+- **`POST /api/admin/finances/commission/payout`** — вывод накопленного из системы, тело `{ "amount": <рубли> }`.
+
+Оба маршрута доступны только роли `ADMIN`; вывод ограничен остатком счёта, а
+идентификатор администратора записывается в журнал операции. Как считается сама
+комиссия — в [`financial_system.md`](./financial_system.md#4b-комиссия-платформы).
+
+### 2.6 Чат поддержки клиентов (`AdminSupportChats.vue`)
 
 - **`GET /api/admin/support/chats`** — получение списка всех пользовательских диалогов с нечитанными сообщениями, ФИО, телефоном и ролью.
 - **`GET /api/support/chats/{chat_id}/messages`** — история диалога с клиентом.

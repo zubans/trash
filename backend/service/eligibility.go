@@ -103,3 +103,41 @@ func canExecutorTakeOrder(executor *repository.User, variant *repository.Service
 	}
 	return nil
 }
+
+// canViewOrTakeOrder is the single predicate that decides whether a viewer (an
+// executor and/or moderator) may both SEE and ACCEPT a given order. The order
+// lists (map + table) and the accept path all go through it, so what an executor
+// can act on never diverges from what they were shown.
+//
+// Rules:
+//   - Moderator-only service: only a MODERATOR may see or take the order; the
+//     normal executor gates do not apply (moderators are trusted staff).
+//   - Normal service: the executor gates (ban, requires_verification, min_age)
+//     apply, and on top of them a customer-verification segmentation —
+//       * an unverified customer's order is visible to everyone (this is what
+//         lets an unverified executor work the unverified pool);
+//       * a verified customer's order is visible only to a verified executor or
+//         to a moderator.
+func canViewOrTakeOrder(viewer *repository.User, customer *repository.User, variant *repository.ServiceNode) error {
+	if viewer == nil {
+		return ErrExecutorNotEligible
+	}
+	if variant != nil && variant.ModeratorOnly {
+		if !viewer.HasRole(repository.RoleModerator) {
+			return ErrExecutorNotEligible
+		}
+		if viewer.Status == "BANNED" {
+			return errors.New("аккаунт заблокирован")
+		}
+		return nil
+	}
+	if err := canExecutorTakeOrder(viewer, variant); err != nil {
+		return err
+	}
+	if customer != nil && customer.IsVerified() {
+		if !viewer.IsVerified() && !viewer.HasRole(repository.RoleModerator) {
+			return ErrExecutorNotEligible
+		}
+	}
+	return nil
+}

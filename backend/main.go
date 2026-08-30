@@ -116,7 +116,7 @@ func main() {
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo)
+		WithEligibility(userRepo, settingsRepo, catalogRepo)
 	// Shift location reports are written through the geo service, so the stored
 	// executor position has a single writer and one set of rules.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
@@ -289,7 +289,7 @@ func main() {
 		// Authenticated executor routes
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
-			r.Use(middleware.RequireRole("EXECUTOR", "ADMIN"))
+			r.Use(middleware.RequireRole("EXECUTOR", "MODERATOR", "ADMIN"))
 			r.Post("/executor/shifts", sh.StartShiftHandler)
 			r.Post("/executor/shifts/end", sh.EndShiftHandler)
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
@@ -317,6 +317,7 @@ func main() {
 			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
 			r.Post("/admin/users/{id}/verified", ah.UpdateUserVerifiedHandler)
 			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
+			r.Post("/admin/users/{id}/roles", ah.UpdateUserRolesHandler)
 			r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
 			r.Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
 			r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
@@ -326,6 +327,8 @@ func main() {
 			r.Get("/admin/finances/withdrawals", ah.GetWithdrawalRequestsHandler)
 			r.Post("/admin/finances/withdrawals/{id}/approve", ah.ApproveWithdrawalRequestsHandler)
 			r.Post("/admin/finances/withdrawals/{id}/reject", ah.RejectWithdrawalRequestsHandler)
+			r.Get("/admin/finances/commission", ah.GetCommissionHandler)
+			r.Post("/admin/finances/commission/payout", ah.PayoutCommissionHandler)
 			r.Get("/admin/transactions", ah.GetTransactionsHandler)
 			r.Get("/admin/finances/reconciliation", ah.GetReconciliationHandler)
 			r.Get("/admin/settings", ah.GetSettingsHandler)

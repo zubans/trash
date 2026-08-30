@@ -49,6 +49,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/WithdrawalRequests.vue'),
       },
       {
+        path: 'commission',
+        name: 'admin-commission',
+        component: () => import('../pages/admin/PlatformCommission.vue'),
+      },
+      {
         path: 'transactions',
         name: 'admin-transactions',
         component: () => import('../pages/admin/TransactionHistory.vue'),
@@ -125,20 +130,35 @@ const routes: Array<RouteRecordRaw> = [
     redirect: () => {
       const authStore = useAuthStore()
       if (authStore.isAuthenticated) {
-        if (authStore.isAdmin) {
-          return '/admin'
-        }
-        if (authStore.isCustomer) {
-          return '/customer'
-        }
-        if (authStore.isExecutor) {
-          return '/executor'
-        }
+        return dashboardHome(authStore)
       }
       return '/login'
     },
   },
 ]
+
+// dashboardHome picks the landing route for a signed-in user, honouring the
+// role they last switched to (activeRole) and falling back to any role they
+// hold. MODERATOR shares the executor dashboard.
+function dashboardHome(authStore: ReturnType<typeof useAuthStore>): string {
+  const active = authStore.activeRole
+  if (active === 'ADMIN' && authStore.isAdmin) return '/admin'
+  if (active === 'CUSTOMER' && authStore.isCustomer) return '/customer'
+  if (active === 'EXECUTOR' && (authStore.isExecutor || authStore.isModerator)) return '/executor'
+  if (authStore.isAdmin) return '/admin'
+  if (authStore.isExecutor || authStore.isModerator) return '/executor'
+  if (authStore.isCustomer) return '/customer'
+  return '/login'
+}
+
+// canAccessRole reports whether the user may open a route gated on requiredRole.
+// A MODERATOR may open the EXECUTOR dashboard (moderator orders live there).
+function canAccessRole(authStore: ReturnType<typeof useAuthStore>, requiredRole: string): boolean {
+  if (!requiredRole) return true
+  if (authStore.hasRole(requiredRole)) return true
+  if (requiredRole === 'EXECUTOR' && authStore.isModerator) return true
+  return false
+}
 
 const router = createRouter({
   history: Capacitor.isNativePlatform() ? createWebHashHistory() : createWebHistory(),
@@ -153,32 +173,16 @@ router.beforeEach((to, _from, next) => {
       next('/login')
     } else {
       const requiredRole = to.meta.role as string
-      if (requiredRole && authStore.role !== requiredRole) {
-        // Unauthorized role - send to correct dashboard
-        if (authStore.isAdmin) {
-          next('/admin')
-        } else if (authStore.isCustomer) {
-          next('/customer')
-        } else if (authStore.isExecutor) {
-          next('/executor')
-        } else {
-          next('/login')
-        }
+      if (!canAccessRole(authStore, requiredRole)) {
+        // Not authorized for this role — send to a dashboard they can use.
+        next(dashboardHome(authStore))
       } else {
         next()
       }
     }
   } else if (to.matched.some((record) => record.meta.requiresGuest)) {
     if (authStore.isAuthenticated) {
-      if (authStore.isAdmin) {
-        next('/admin')
-      } else if (authStore.isCustomer) {
-        next('/customer')
-      } else if (authStore.isExecutor) {
-        next('/executor')
-      } else {
-        next()
-      }
+      next(dashboardHome(authStore))
     } else {
       next()
     }

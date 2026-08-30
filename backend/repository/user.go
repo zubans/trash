@@ -13,10 +13,20 @@ import (
 	"healthlogin/backend/money"
 )
 
+// Role constants. A user's primary role lives in users.role; the full set a
+// user holds lives in user_roles (see migration 039).
+const (
+	RoleCustomer  = "CUSTOMER"
+	RoleExecutor  = "EXECUTOR"
+	RoleModerator = "MODERATOR"
+	RoleAdmin     = "ADMIN"
+)
+
 // User represents a user record in the database.
 type User struct {
 	ID                     uuid.UUID    `json:"id"`
 	Role                   string       `json:"role"`
+	Roles                  []string     `json:"roles,omitempty"`
 	Phone                  string       `json:"phone"`
 	Email                  string       `json:"email"`
 	LastName               string       `json:"last_name"`
@@ -58,6 +68,18 @@ func (u *User) IsVerified() bool {
 	return u.Verified
 }
 
+// HasRole reports whether the user holds the given role. It consults the full
+// role set when loaded, and always falls back to the primary role so a caller
+// that did not load Roles still gets a correct answer for the primary role.
+func (u *User) HasRole(role string) bool {
+	for _, r := range u.Roles {
+		if r == role {
+			return true
+		}
+	}
+	return u.Role == role
+}
+
 // CustomerProfile holds customer-specific profile data.
 type CustomerProfile struct {
 	UserID   uuid.UUID `json:"user_id"`
@@ -76,6 +98,11 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
+	// ListUserRoles returns every role the user holds (from user_roles).
+	ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error)
+	// SetUserRoles replaces the user's role set with the given roles and keeps
+	// users.role (the primary role) pointing at one of them.
+	SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error
 	UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error
 	UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error
 	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error
@@ -125,6 +152,7 @@ func (r *repo) FindByPhone(ctx context.Context, phone string) (*User, error) {
 	if birthDate.Valid {
 		u.BirthDate = &birthDate.Time
 	}
+	r.attachRoles(ctx, &u)
 	return &u, nil
 }
 
@@ -148,6 +176,7 @@ func (r *repo) FindByEmail(ctx context.Context, email string) (*User, error) {
 	if birthDate.Valid {
 		u.BirthDate = &birthDate.Time
 	}
+	r.attachRoles(ctx, &u)
 	return &u, nil
 }
 
@@ -195,7 +224,82 @@ func (r *repo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	if birthDate.Valid {
 		u.BirthDate = &birthDate.Time
 	}
+	r.attachRoles(ctx, &u)
 	return &u, nil
+}
+
+// attachRoles loads the user's full role set into u.Roles. It falls back to the
+// primary role so a user predating the user_roles seed still has a usable set.
+func (r *repo) attachRoles(ctx context.Context, u *User) {
+	roles, err := r.ListUserRoles(ctx, u.ID)
+	if err != nil || len(roles) == 0 {
+		if u.Role != "" {
+			u.Roles = []string{u.Role}
+		}
+		return
+	}
+	u.Roles = roles
+}
+
+func (r *repo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT role FROM user_roles WHERE user_id = $1 ORDER BY role`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var roles []string
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, err
+		}
+		roles = append(roles, role)
+	}
+	return roles, rows.Err()
+}
+
+// SetUserRoles replaces the user's roles atomically and repoints users.role at
+// one of the remaining roles when the current primary is no longer present.
+func (r *repo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = $1`, id); err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if role == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, role); err != nil {
+			return err
+		}
+	}
+	// Keep the primary role consistent: if it was removed, adopt the first of
+	// the new set so the default dashboard still resolves.
+	if len(roles) > 0 {
+		var current string
+		if err := tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id = $1`, id).Scan(&current); err != nil {
+			return err
+		}
+		stillPresent := false
+		for _, role := range roles {
+			if role == current {
+				stillPresent = true
+				break
+			}
+		}
+		if !stillPresent {
+			if _, err := tx.ExecContext(ctx, `UPDATE users SET role = $1 WHERE id = $2`, roles[0], id); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *repo) Create(ctx context.Context, user *User) error {
@@ -209,7 +313,18 @@ func (r *repo) Create(ctx context.Context, user *User) error {
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// Mirror the primary role into user_roles so the multi-role table is the
+	// authoritative set from the moment the account exists.
+	if user.Role != "" {
+		if _, err := r.db.ExecContext(ctx,
+			`INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, user.Role); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *repo) VerifyEmailToken(ctx context.Context, token string) (*User, error) {
@@ -343,9 +458,11 @@ func (r *repo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) er
 	return err
 }
 
+// UpdateRole is the legacy single-role setter: it makes the given role the
+// user's only role, keeping user_roles (the multi-role source of truth) in step
+// so the two never drift.
 func (r *repo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET role = $1 WHERE id = $2`, role, id)
-	return err
+	return r.SetUserRoles(ctx, id, []string{role})
 }
 
 // UpdateVerified sets the manual verification flag. This is the only writer of

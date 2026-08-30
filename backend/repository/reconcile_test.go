@@ -29,6 +29,8 @@ var allTransactionTypes = []TransactionType{
 	TransactionTypeWithdrawalPaid,
 	TransactionTypeTip,
 	TransactionTypeTipReward,
+	TransactionTypeCommission,
+	TransactionTypeCommissionPayout,
 }
 
 func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
@@ -62,6 +64,10 @@ func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 		// balance when the hold was taken, and PAYMENT marks that hold as spent.
 		TransactionTypePayment:        0,
 		TransactionTypeWithdrawalPaid: 0,
+		// Commission moves between two system accounts, so neither side of it
+		// touches the balance of the user it is recorded against.
+		TransactionTypeCommission:       0,
+		TransactionTypeCommissionPayout: 0,
 	}
 
 	for tt, want := range cases {

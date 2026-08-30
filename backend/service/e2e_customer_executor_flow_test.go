@@ -65,7 +65,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		WithExecutorGeo(executorGeoRepo)
 
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo)
+		WithEligibility(userRepo, settingsRepo, catalogRepo)
 
 	// Wired exactly as main.go does it: shift location reports are written
 	// through the geo service, which is what makes the position the map and

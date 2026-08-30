@@ -228,6 +228,7 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 		"phone":         user.Phone,
 		"email":         user.Email,
 		"role":          user.Role,
+		"roles":         user.Roles,
 		"balance":       user.Balance,
 		"status":        user.Status,
 		"first_name":    user.FirstName,

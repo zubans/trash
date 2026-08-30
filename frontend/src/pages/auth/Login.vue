@@ -588,13 +588,20 @@ export default defineComponent({
           }
 
           authStore.login(token, claims.role, claims.phone, claims.sub, response.data.refresh_token)
+          // Load the full role set so multi-role users get the role switcher and
+          // a pure MODERATOR resolves to the executor dashboard.
+          await authStore.fetchMe()
 
           if (claims.role === 'ADMIN') {
             router.push('/admin')
           } else if (claims.role === 'CUSTOMER') {
             router.push('/customer')
-          } else if (claims.role === 'EXECUTOR') {
+          } else if (claims.role === 'EXECUTOR' || claims.role === 'MODERATOR') {
             router.push('/executor')
+          } else if (authStore.isExecutor || authStore.isModerator) {
+            router.push('/executor')
+          } else if (authStore.isCustomer) {
+            router.push('/customer')
           } else {
             error.value = t('login.roleNotSupported')
           }

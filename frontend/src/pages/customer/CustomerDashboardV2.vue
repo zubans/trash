@@ -34,6 +34,11 @@
             <i class="ph-fill ph-user-circle"></i> Профиль и адреса
           </button>
 
+          <div v-if="authStore.switchableRoles.length > 1" class="lang-control">
+            <span>Роль</span>
+            <RoleSwitcher />
+          </div>
+
           <div class="lang-control">
             <span>Язык приложения</span>
             <LanguageSwitcher />
@@ -453,6 +458,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
+import RoleSwitcher from '../../components/RoleSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
 import OrderDetailsModal from './components/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
@@ -469,6 +475,7 @@ export default defineComponent({
   components: {
     UpdateBanner,
     LanguageSwitcher,
+    RoleSwitcher,
     AppLogo,
     OrderDetailsModal,
     CreateOrderModal,
@@ -1460,6 +1467,7 @@ export default defineComponent({
     })
 
     return {
+      authStore,
       userEmail,
       fullName,
       phone,

@@ -75,7 +75,10 @@ type ServiceNode struct {
 	SortOrder            int             `json:"sort_order"`
 	RequiresVerification bool            `json:"requires_verification"`
 	MinAge               int             `json:"min_age"`
-	CreatedAt            time.Time       `json:"created_at"`
+	// ModeratorOnly marks a service whose orders are visible to and acceptable
+	// by moderators only (see migration 040).
+	ModeratorOnly bool      `json:"moderator_only"`
+	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt            time.Time       `json:"updated_at"`
 	// DeletedAt is set when the node was retired. The row stays in place so
 	// that orders which reference it keep resolving; nothing in the catalog
@@ -177,7 +180,7 @@ func NewServiceCatalogRepository(db *sql.DB) ServiceCatalogRepository {
 
 const serviceNodeColumns = `
     id, parent_id, code, name, description, node_type, base_price,
-    is_auction, is_active, sort_order, COALESCE(requires_verification, false), COALESCE(min_age, 0), created_at, updated_at, deleted_at
+    is_auction, is_active, sort_order, COALESCE(requires_verification, false), COALESCE(min_age, 0), COALESCE(moderator_only, false), created_at, updated_at, deleted_at
 `
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows.
@@ -190,7 +193,7 @@ func scanServiceNodeInto(s rowScanner) (*ServiceNode, error) {
 	err := s.Scan(
 		&n.ID, &n.ParentID, &n.Code, &n.Name, &n.Description, &n.NodeType,
 		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.RequiresVerification,
-		&n.MinAge, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
+		&n.MinAge, &n.ModeratorOnly, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -250,13 +253,13 @@ func (r *serviceCatalogRepo) CreateNode(ctx context.Context, node *ServiceNode) 
 	defer tx.Rollback()
 
 	query := `
-        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, moderator_only, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     `
 	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Code, node.Name, node.Description,
 		node.NodeType, node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
-		node.RequiresVerification, node.MinAge, node.CreatedAt, node.UpdatedAt,
+		node.RequiresVerification, node.MinAge, node.ModeratorOnly, node.CreatedAt, node.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -330,13 +333,13 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 	query := `
         UPDATE service_nodes
         SET parent_id = $2, name = $3, description = $4, base_price = $5,
-            is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, updated_at = $11
+            is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, moderator_only = $11, updated_at = $12
         WHERE id = $1 AND deleted_at IS NULL
     `
 	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Name, node.Description,
 		node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
-		node.RequiresVerification, node.MinAge, node.UpdatedAt,
+		node.RequiresVerification, node.MinAge, node.ModeratorOnly, node.UpdatedAt,
 	)
 	if err != nil {
 		return err

@@ -61,7 +61,9 @@
 
         <div class="cell-name" :title="formatFullName(u)">{{ formatFullName(u) }}</div>
 
-        <div class="cell-role">{{ u.role }}</div>
+        <div class="cell-role">
+          <span v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])" :key="r" class="role-chip">{{ r }}</span>
+        </div>
 
         <div class="cell-amount">{{ currencySymbol }}{{ Number(u.balance || 0).toFixed(2) }}</div>
 
@@ -104,8 +106,8 @@
               <button class="dropdown-item" @click="openTopUpModal(u)">
                 <i class="ph-bold ph-wallet"></i> Пополнить баланс
               </button>
-              <button class="dropdown-item" @click="openRoleModal(u)">
-                <i class="ph-bold ph-user-gear"></i> Изменить роль
+              <button class="dropdown-item" @click="openRolesModal(u)">
+                <i class="ph-bold ph-user-gear"></i> Роли
               </button>
               <button class="dropdown-item" @click="openAddressModal(u)">
                 <i class="ph-bold ph-map-pin"></i> Редактировать адрес
@@ -162,6 +164,26 @@
         :options="editableRoleOptions"
         :label="$t('users.newRole')"
       />
+    </va-modal>
+
+    <!-- Multi-role Modal -->
+    <va-modal
+      v-model="showRolesModal"
+      title="Роли пользователя"
+      :ok-text="$t('users.save')"
+      :cancel-text="$t('users.cancel')"
+      @ok="saveRoles"
+      @cancel="closeRolesModal"
+    >
+      <p class="mb-2">{{ $t('users.user') }}: <strong>{{ selectedUser?.phone }}</strong></p>
+      <p class="mb-2 text-secondary">Пользователь может иметь несколько ролей одновременно.</p>
+      <div class="roles-check-list">
+        <label v-for="role in allRoles" :key="role.value" class="roles-check-row">
+          <input type="checkbox" :value="role.value" v-model="newRoles" />
+          <span>{{ role.label }}</span>
+        </label>
+      </div>
+      <p v-if="newRoles.length === 0" class="roles-warn">Выберите хотя бы одну роль.</p>
     </va-modal>
 
     <!-- Top Up Balance Modal -->
@@ -361,6 +383,48 @@ export default defineComponent({
     const showRoleModal = ref(false)
     const selectedUser = ref<any>(null)
     const newRole = ref<{ text: string; value: string } | string>('CUSTOMER')
+
+    // Multi-role editing.
+    const allRoles = [
+      { value: 'CUSTOMER', label: 'Заказчик' },
+      { value: 'EXECUTOR', label: 'Исполнитель' },
+      { value: 'MODERATOR', label: 'Модератор' },
+      { value: 'ADMIN', label: 'Администратор' },
+    ]
+    const showRolesModal = ref(false)
+    const newRoles = ref<string[]>([])
+
+    const openRolesModal = (user: any) => {
+      selectedUser.value = user
+      newRoles.value = (user.roles && user.roles.length ? [...user.roles] : [user.role]).filter(Boolean)
+      showRolesModal.value = true
+    }
+
+    const closeRolesModal = () => {
+      showRolesModal.value = false
+      selectedUser.value = null
+      newRoles.value = []
+    }
+
+    const saveRoles = async () => {
+      if (!selectedUser.value) return
+      if (newRoles.value.length === 0) {
+        alert('Выберите хотя бы одну роль')
+        return
+      }
+      try {
+        await api.post(`/admin/users/${selectedUser.value.id}/roles`, { roles: newRoles.value })
+        selectedUser.value.roles = [...newRoles.value]
+        // Keep the primary role coherent if it was removed.
+        if (!newRoles.value.includes(selectedUser.value.role)) {
+          selectedUser.value.role = newRoles.value[0]
+        }
+        closeRolesModal()
+      } catch (err: any) {
+        alert(err.response?.data || 'Ошибка обновления ролей')
+        console.error(err)
+      }
+    }
 
     const openRoleModal = (user: any) => {
       selectedUser.value = user
@@ -566,6 +630,12 @@ export default defineComponent({
       openRoleModal,
       closeRoleModal,
       saveRole,
+      allRoles,
+      showRolesModal,
+      newRoles,
+      openRolesModal,
+      closeRolesModal,
+      saveRoles,
       openTopUpModal,
       closeTopUpModal,
       submitTopUp,
@@ -758,6 +828,42 @@ export default defineComponent({
   font-weight: 600;
   color: #64748b;
   letter-spacing: 0.5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.role-chip {
+  background: #eef2ff;
+  color: #4f46e5;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.roles-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.roles-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.roles-warn {
+  color: #dc2626;
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 .cell-amount {

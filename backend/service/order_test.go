@@ -823,10 +823,11 @@ type mockAccounts struct {
 
 func newMockAccounts() *mockAccounts {
 	return &mockAccounts{balances: map[string]money.Amount{
-		repository.AccountEscrow:   0,
-		repository.AccountFines:    0,
-		repository.AccountDeposits: 0,
-		repository.AccountPayouts:  0,
+		repository.AccountEscrow:     0,
+		repository.AccountFines:      0,
+		repository.AccountDeposits:   0,
+		repository.AccountPayouts:    0,
+		repository.AccountCommission: 0,
 	}}
 }
 
@@ -843,6 +844,20 @@ func (m *mockAccounts) Debit(ctx context.Context, q repository.Querier, code str
 		return repository.ErrUnknownSystemAccount
 	}
 	m.balances[code] = m.balances[code].Sub(amount)
+	return nil
+}
+
+// DebitAvailable mirrors the guarded debit in the real repository: an account
+// may not be taken below zero by a payout.
+func (m *mockAccounts) DebitAvailable(ctx context.Context, q repository.Querier, code string, amount money.Amount) error {
+	balance, ok := m.balances[code]
+	if !ok {
+		return repository.ErrUnknownSystemAccount
+	}
+	if balance < amount {
+		return repository.ErrInsufficientFunds
+	}
+	m.balances[code] = balance.Sub(amount)
 	return nil
 }
 
@@ -976,4 +991,12 @@ func TestOrderService_TipOrder_Rejections(t *testing.T) {
 			t.Fatal("expected an oversized tip to be rejected")
 		}
 	})
+}
+
+func (m *mockUserRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
+	return nil
 }

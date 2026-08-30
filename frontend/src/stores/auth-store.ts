@@ -9,6 +9,7 @@ export interface CurrentUser {
   phone: string
   email: string
   role: string
+  roles?: string[]
   status: string
   balance: number
   first_name: string
@@ -68,10 +69,23 @@ export const useAuthStore = defineStore('auth', {
     // localStorage is checked first so the mobile app can restore the session
     // after restart (cookies for the API origin are not visible in WebView).
     const token = getStoredItem('token') || getCookie('token') || ''
+    const role = getStoredItem('role') || getCookie('role') || ''
+    let roles: string[] = []
+    try {
+      const raw = getStoredItem('roles')
+      if (raw) roles = JSON.parse(raw)
+    } catch {
+      roles = []
+    }
+    if (roles.length === 0 && role) roles = [role]
     return {
       token,
       userID: getStoredItem('userID') || getCookie('userID') || parseJwtSub(token),
-      role: getStoredItem('role') || getCookie('role') || '',
+      role,
+      // Every role the user holds (multi-role). Permissions key off this set.
+      roles,
+      // The role whose dashboard is currently shown; the user switches it in the UI.
+      activeRole: getStoredItem('activeRole') || role,
       phone: getStoredItem('phone') || getCookie('phone') || '',
       currency: 'RUB',
       // null means "not loaded yet" and is deliberately distinct from a zero
@@ -90,15 +104,40 @@ export const useAuthStore = defineStore('auth', {
         .filter((part) => part && part.trim())
         .join(' ')
     },
-    isAdmin: (state) => state.role === 'ADMIN',
-    isCustomer: (state) => state.role === 'CUSTOMER',
-    isExecutor: (state) => state.role === 'EXECUTOR',
+    // The effective role set: the multi-role list when loaded, else the single
+    // primary role. Permissions and menus key off membership here.
+    roleSet: (state): string[] => (state.roles.length ? state.roles : state.role ? [state.role] : []),
+    hasRole(): (role: string) => boolean {
+      const set = this.roleSet
+      return (role: string) => set.includes(role)
+    },
+    isAdmin(): boolean {
+      return this.roleSet.includes('ADMIN')
+    },
+    isCustomer(): boolean {
+      return this.roleSet.includes('CUSTOMER')
+    },
+    isExecutor(): boolean {
+      return this.roleSet.includes('EXECUTOR')
+    },
+    isModerator(): boolean {
+      return this.roleSet.includes('MODERATOR')
+    },
+    // Roles the user can switch the UI between (MODERATOR shares the executor
+    // dashboard, so it is not offered as a separate switch target).
+    switchableRoles(): string[] {
+      return this.roleSet.filter((r) => r === 'CUSTOMER' || r === 'EXECUTOR' || r === 'ADMIN')
+    },
   },
   actions: {
     login(token: string, role: string, phone: string, userID: string, refreshToken?: string) {
       this.token = token
       this.userID = userID
       this.role = role
+      // The full set arrives from fetchMe; seed it with the primary role so the
+      // UI is coherent immediately after login.
+      this.roles = role ? [role] : []
+      this.activeRole = role
       this.phone = phone
       this.user = null
       storeSession(token, refreshToken)
@@ -109,16 +148,31 @@ export const useAuthStore = defineStore('auth', {
       setStoredItem('token', token)
       setStoredItem('userID', userID)
       setStoredItem('role', role)
+      setStoredItem('roles', JSON.stringify(this.roles))
+      setStoredItem('activeRole', this.activeRole)
       setStoredItem('phone', phone)
     },
     logout() {
       this.token = ''
       this.userID = ''
       this.role = ''
+      this.roles = []
+      this.activeRole = ''
       this.phone = ''
       this.currency = 'RUB'
       this.user = null
+      setStoredItem('roles', '')
+      setStoredItem('activeRole', '')
       clearSession()
+    },
+    // Switch which role's dashboard the UI shows. Callers navigate afterwards.
+    setActiveRole(role: string) {
+      if (!this.roleSet.includes(role)) return
+      this.activeRole = role
+      setStoredItem('activeRole', role)
+      setCookie('role', role, 1)
+      setStoredItem('role', role)
+      this.role = role
     },
 
     /**
@@ -133,6 +187,15 @@ export const useAuthStore = defineStore('auth', {
         const res = await api.get('/auth/me')
         this.user = res.data as CurrentUser
         this.role = this.user.role || this.role
+        // Adopt the authoritative role set. Keep the active role if it is still
+        // held, otherwise fall back to the primary role.
+        const loaded = this.user.roles && this.user.roles.length ? this.user.roles : this.role ? [this.role] : []
+        this.roles = loaded
+        setStoredItem('roles', JSON.stringify(loaded))
+        if (!loaded.includes(this.activeRole)) {
+          this.activeRole = this.role
+          setStoredItem('activeRole', this.activeRole)
+        }
         this.phone = this.user.phone || this.phone
         this.userError = ''
         return this.user

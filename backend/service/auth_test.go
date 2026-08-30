@@ -622,3 +622,11 @@ func TestUndeliveredResetCodeIsCleared(t *testing.T) {
 		t.Errorf("an undeliverable code must not stay stored, found %q", repo.lastCode)
 	}
 }
+
+func (m *mockRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
+	return nil
+}

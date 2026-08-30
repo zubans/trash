@@ -428,6 +428,9 @@ func (m *mockLedgerAccounts) Credit(ctx context.Context, q repository.Querier, c
 func (m *mockLedgerAccounts) Debit(ctx context.Context, q repository.Querier, code string, amount money.Amount) error {
 	return nil
 }
+func (m *mockLedgerAccounts) DebitAvailable(ctx context.Context, q repository.Querier, code string, amount money.Amount) error {
+	return nil
+}
 func (m *mockLedgerAccounts) Get(ctx context.Context, code string) (*repository.SystemAccount, error) {
 	return &repository.SystemAccount{Code: code}, nil
 }
@@ -442,5 +445,13 @@ func (m *mockUserRepository) UpdatePassword(ctx context.Context, userID uuid.UUI
 			return nil
 		}
 	}
+	return nil
+}
+
+func (m *mockUserRepository) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepository) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
 	return nil
 }

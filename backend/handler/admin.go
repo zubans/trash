@@ -148,6 +148,39 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"message": "role updated successfully"})
 }
 
+// UpdateUserRolesHandler replaces the full set of roles a user holds
+// (multi-role). Admin-only.
+func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Roles []string `json:"roles"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.adminService.UpdateUserRoles(r.Context(), userID, admin.ID, req.Roles); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "roles updated successfully"})
+}
+
 // UpdateUserAddressHandler updates a customer's pickup address (admin-only).
 func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
@@ -422,6 +455,47 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 		"books_open":                report.BooksOpen,
 		"escrow_mismatch":           report.EscrowMismatch,
 	})
+}
+
+// GetCommissionHandler reports the platform's collected commission and the rate
+// it is charged at.
+func (h *AdminHandler) GetCommissionHandler(w http.ResponseWriter, r *http.Request) {
+	commission, err := h.adminService.GetCommission(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(commission)
+}
+
+// PayoutCommissionHandler withdraws collected commission out of the system. The
+// route sits behind RequireAdmin, so the caller is always an admin; the admin
+// on the request is what gets recorded against the payout.
+func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Request) {
+	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Amount money.Amount `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	commission, err := h.adminService.PayoutCommission(r.Context(), adminUser.ID, req.Amount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(commission)
 }
 
 // GetTransactionsHandler retrieves audit logs of transactions.

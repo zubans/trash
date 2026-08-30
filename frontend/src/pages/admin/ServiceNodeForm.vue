@@ -174,6 +174,12 @@
           <span class="toggle-switch"></span>
           <span class="toggle-label">Только верифицированные</span>
         </label>
+
+        <label class="toggle-item">
+          <input v-model="form.moderator_only" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Только для модераторов</span>
+        </label>
       </div>
     </div>
 
@@ -228,6 +234,7 @@ export default defineComponent({
           is_active: props.node.is_active ?? true,
           sort_order: props.node.sort_order || 1,
           requires_verification: props.node.requires_verification || false,
+          moderator_only: props.node.moderator_only || false,
           min_age: props.node.min_age || 0,
         }
       }
@@ -244,6 +251,7 @@ export default defineComponent({
         is_active: true,
         sort_order: 1,
         requires_verification: false,
+        moderator_only: false,
         min_age: 0,
       }
     }
@@ -274,6 +282,7 @@ export default defineComponent({
         is_active: form.value.is_active,
         sort_order: form.value.sort_order,
         requires_verification: form.value.requires_verification,
+        moderator_only: form.value.moderator_only,
         min_age: form.value.min_age || 0,
       }
 

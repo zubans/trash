@@ -100,9 +100,11 @@ func (s *MatchingService) StartMatchingWorker(ctx context.Context, interval time
 	log.Printf("[MatchingWorker] Started background matching every %v", interval)
 }
 
-// executorEligible re-uses the shared executor/variant rules so automatic
-// matching cannot hand out an order that the executor is not allowed to take.
-func (s *MatchingService) executorEligible(ctx context.Context, executorID, variantID uuid.UUID) bool {
+// executorEligible re-uses the shared visibility/accept predicate so automatic
+// matching cannot hand out an order that the executor is not allowed to take —
+// including moderator-only orders (moderators only) and the customer-verification
+// segmentation.
+func (s *MatchingService) executorEligible(ctx context.Context, executorID uuid.UUID, order *repository.Order, customer *repository.User) bool {
 	if s.userRepo == nil || s.catalogRepo == nil {
 		return true
 	}
@@ -110,11 +112,11 @@ func (s *MatchingService) executorEligible(ctx context.Context, executorID, vari
 	if err != nil {
 		return false
 	}
-	variant, err := s.catalogRepo.GetNodeByID(ctx, variantID)
+	variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
 	if err != nil {
 		return false
 	}
-	return canExecutorTakeOrder(executor, variant) == nil
+	return canViewOrTakeOrder(executor, customer, variant) == nil
 }
 
 // MatchOrders executes the matching cycle.
@@ -148,19 +150,19 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 	// 3. Match each order
 	radiusKM := s.autoMatchRadiusKM(ctx)
 	for _, order := range orders {
-		// Assign orders only from verified customers if customer exists
+		// The customer's verification and the order's moderator flag decide who
+		// may be auto-assigned, via the same predicate the manual pool uses.
+		var customer *repository.User
 		if s.userRepo != nil {
-			if customer, err := s.userRepo.FindByID(ctx, order.CustomerID); err == nil && customer != nil && !customer.IsVerified() {
-				continue
-			}
+			customer, _ = s.userRepo.FindByID(ctx, order.CustomerID)
 		}
 
 		var matchedExecutorID uuid.UUID
 		for execID := range activeExecutors {
-			if !s.executorEligible(ctx, execID, order.ServiceVariantID) {
+			if execID == order.CustomerID {
 				continue
 			}
-			if execID == order.CustomerID {
+			if !s.executorEligible(ctx, execID, order, customer) {
 				continue
 			}
 			if !s.withinAutoMatchRadius(ctx, execID, order, radiusKM) {

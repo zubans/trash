@@ -39,7 +39,8 @@
     "updateAvailable": "Update available",
     "installUpdate": "Install",
     "updateRequired": "Update required",
-    "reconciliation": "Reconciliation"
+    "reconciliation": "Reconciliation",
+    "commission": "Platform commission"
   },
   "users": {
     "title": "User Management",
@@ -184,7 +185,9 @@
     "reset": "Reset",
     "saveSuccess": "Settings saved successfully.",
     "loadError": "Failed to load system settings.",
-    "saveError": "Failed to save settings."
+    "saveError": "Failed to save settings.",
+    "orderCommissionPercent": "Commission on a completed order (%)",
+    "orderCommissionHint": "The share of the order amount the platform keeps on confirmation. The executor is rewarded the rest."
   },
   "customer": {
     "title": "Customer Dashboard",
@@ -421,5 +424,24 @@
     "loadFailed": "Could not load the reconciliation",
     "run": "Run reconciliation",
     "runNote": "Every run recomputes everything server-side and republishes the metrics, so forcing it here settles the alert instead of waiting for the nightly pass."
+  },
+  "commission": {
+    "title": "Platform commission",
+    "balance": "Collected on the commission account",
+    "rate": "Current rate",
+    "explainer": "When an order is confirmed the platform keeps a share of what the customer paid, and the executor is rewarded the rest. What is kept accumulates on the COMMISSION system account and is reconciled like every other account.",
+    "rateHint": "The rate is set in system settings.",
+    "goToSettings": "Change the rate",
+    "payoutTitle": "Withdraw",
+    "payoutHint": "Only an admin may withdraw. The amount leaves the commission account and the system, and the entry is recorded against your account.",
+    "amount": "Amount",
+    "withdrawAll": "Everything",
+    "withdraw": "Withdraw",
+    "confirmTitle": "Confirm the withdrawal",
+    "confirmMessage": "Withdraw {amount} from the commission account? This cannot be undone.",
+    "success": "Withdrawal complete.",
+    "loadFailed": "Could not load the commission data.",
+    "payoutFailed": "The withdrawal failed.",
+    "refresh": "Refresh"
   }
 }

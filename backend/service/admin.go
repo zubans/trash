@@ -268,6 +268,64 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	return nil
 }
 
+// validRoles is the closed set of roles an admin may assign.
+var validRoles = map[string]struct{}{
+	repository.RoleCustomer:  {},
+	repository.RoleExecutor:  {},
+	repository.RoleModerator: {},
+	repository.RoleAdmin:     {},
+}
+
+// UpdateUserRoles replaces the full set of roles a user holds. It mirrors the
+// single-role guards (a user cannot lose their own admin rights, and the last
+// admin cannot be demoted) and ends the user's sessions so the client re-reads
+// its roles.
+func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid.UUID, roles []string) error {
+	// Normalise: dedupe and validate.
+	seen := map[string]struct{}{}
+	clean := make([]string, 0, len(roles))
+	for _, role := range roles {
+		if _, ok := validRoles[role]; !ok {
+			return fmt.Errorf("invalid role: %s", role)
+		}
+		if _, dup := seen[role]; dup {
+			continue
+		}
+		seen[role] = struct{}{}
+		clean = append(clean, role)
+	}
+	if len(clean) == 0 {
+		return errors.New("у пользователя должна быть хотя бы одна роль")
+	}
+
+	current, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	// Guard the admin role the same way single-role updates do.
+	_, keepsAdmin := seen[repository.RoleAdmin]
+	if current.HasRole(repository.RoleAdmin) && !keepsAdmin {
+		if userID == adminID {
+			return errors.New("нельзя снять роль администратора с самого себя")
+		}
+		admins, err := s.adminRepo.CountAdmins(ctx)
+		if err != nil {
+			return err
+		}
+		if admins <= 1 {
+			return errors.New("нельзя снять роль с последнего администратора")
+		}
+	}
+
+	if err := s.userRepo.SetUserRoles(ctx, userID, clean); err != nil {
+		return err
+	}
+	s.revokeSessions(ctx, userID, "roles change")
+	log.Printf("[AUDIT] admin %s set roles of user %s: %v -> %v", adminID, userID, current.Roles, clean)
+	return nil
+}
+
 // UpdateUserAddress sets the address a user's orders start from (admin-only).
 //
 // "Update" here means "make this the default address": the row is upserted and
@@ -574,6 +632,7 @@ func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[st
 	profile := map[string]interface{}{
 		"id":         user.ID,
 		"role":       user.Role,
+		"roles":      user.Roles,
 		"phone":      user.Phone,
 		"email":      user.Email,
 		"balance":    user.Balance,
@@ -632,12 +691,11 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
 	}
-	// Whether executors see orders from customers who are not manually verified.
-	// Only "1" or "0", so it cannot be switched on by a typo.
-	if v, ok := settings["show_unverified_customer_orders"]; ok && v != "0" && v != "1" {
-		return errors.New("setting show_unverified_customer_orders must be 0 or 1")
-	}
 	numericKeys["reject_penalty_share"] = true
+	// The platform's share of a completed order. Bounded below with the other
+	// numeric settings and above right here, because a share over 100% would pay
+	// the executor a negative reward.
+	numericKeys[SettingOrderCommissionPercent] = true
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,
 		"max_active_orders":                       true,
@@ -655,6 +713,9 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 			if key == "reject_penalty_share" && v > 1 {
 				return errors.New("setting reject_penalty_share must be between 0 and 1")
 			}
+			if key == SettingOrderCommissionPercent && v > 100 {
+				return errors.New("setting " + SettingOrderCommissionPercent + " must be between 0 and 100")
+			}
 		}
 		if positiveIntKeys[key] {
 			v, err := strconv.Atoi(value)
@@ -667,6 +728,73 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 		}
 	}
 	return s.settingsRepo.UpdateSettings(ctx, settings)
+}
+
+// Commission is what the admin screen shows about the platform's cut: how much
+// has been collected and is still sitting on the commission account, and the
+// rate currently being charged.
+type Commission struct {
+	Balance money.Amount `json:"balance"`
+	Percent float64      `json:"percent"`
+}
+
+// GetCommission reports the commission account balance and the current rate.
+func (s *AdminService) GetCommission(ctx context.Context) (*Commission, error) {
+	if s.ledger == nil {
+		return nil, errors.New("ledger is not configured")
+	}
+	account, err := s.ledger.AccountBalance(ctx, repository.AccountCommission)
+	if err != nil {
+		return nil, err
+	}
+	return &Commission{Balance: account.Balance, Percent: s.commissionPercent(ctx)}, nil
+}
+
+// commissionPercent reads the configured rate, falling back to zero when the
+// setting is missing or unreadable — charging nothing is the safe direction to
+// fail in.
+func (s *AdminService) commissionPercent(ctx context.Context) float64 {
+	if s.settingsRepo == nil {
+		return 0
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return 0
+	}
+	percent, err := strconv.ParseFloat(settings[SettingOrderCommissionPercent], 64)
+	if err != nil {
+		return 0
+	}
+	return percent
+}
+
+// PayoutCommission withdraws collected commission out of the system. Only an
+// admin reaches this — the route requires the role — and the admin is recorded
+// on the entry, so a payout always has a name against it.
+//
+// The debit is guarded by the account balance, so two admins paying out at once
+// cannot together withdraw more than has been collected.
+func (s *AdminService) PayoutCommission(ctx context.Context, adminID uuid.UUID, amount money.Amount) (*Commission, error) {
+	if !amount.IsPositive() {
+		return nil, errors.New("amount must be greater than zero")
+	}
+	if s.ledger == nil {
+		return nil, errors.New("ledger is not configured")
+	}
+
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		return s.ledger.Payout(ctx, tx, repository.AccountCommission, adminID, amount,
+			repository.TransactionTypeCommissionPayout, &adminID)
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrInsufficientFunds) {
+			return nil, errors.New("commission account holds less than the requested amount")
+		}
+		return nil, err
+	}
+	log.Printf("[AUDIT] admin %s withdrew %s from the commission account", adminID, amount)
+
+	return s.GetCommission(ctx)
 }
 
 // BroadcastEmailRequest defines payload for email broadcast.

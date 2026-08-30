@@ -350,3 +350,11 @@ func (m *mockUserRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, new
 	}
 	return nil
 }
+
+func (m *mockUserRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
+	return nil
+}

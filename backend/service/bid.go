@@ -86,7 +86,8 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 		if err != nil {
 			return nil, err
 		}
-		if err := canExecutorTakeOrder(executor, variant); err != nil {
+		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
+		if err := canViewOrTakeOrder(executor, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -165,7 +166,8 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 		if err != nil {
 			return errors.New("executor not found")
 		}
-		if err := canExecutorTakeOrder(executor, variant); err != nil {
+		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
+		if err := canViewOrTakeOrder(executor, customer, variant); err != nil {
 			return err
 		}
 		shift, err := s.shiftRepo.GetActiveShift(ctx, bid.ExecutorID)

@@ -12,6 +12,7 @@ export interface ServiceNode {
   is_active: boolean
   sort_order: number
   requires_verification?: boolean
+  moderator_only?: boolean
   min_age?: number
   // Set when the node was retired. The catalog never returns deleted nodes to
   // the app; the admin panel asks for them explicitly.

@@ -23,6 +23,10 @@ const (
 	// AccountPayouts holds money reserved by pending withdrawal requests and
 	// releases it outward when a payout is approved.
 	AccountPayouts = "PAYOUTS"
+	// AccountCommission collects the platform's share of every completed order.
+	// It is the one account whose balance is the platform's own money rather
+	// than money it is holding for somebody, and only an admin may pay it out.
+	AccountCommission = "COMMISSION"
 )
 
 // ErrUnknownSystemAccount is returned for a code with no account.
@@ -42,6 +46,11 @@ type SystemAccountRepository interface {
 	// user balance movement and the two must commit together.
 	Credit(ctx context.Context, q Querier, code string, amount money.Amount) error
 	Debit(ctx context.Context, q Querier, code string, amount money.Amount) error
+	// DebitAvailable subtracts only if the account holds that much, atomically.
+	// Returns ErrInsufficientFunds when it does not. Debit is unguarded because
+	// its callers are the other half of a movement that already established the
+	// money is there; this is for paying money out of an account on request.
+	DebitAvailable(ctx context.Context, q Querier, code string, amount money.Amount) error
 	List(ctx context.Context) ([]SystemAccount, error)
 	Get(ctx context.Context, code string) (*SystemAccount, error)
 }
@@ -81,6 +90,29 @@ func (r *systemAccountRepo) move(ctx context.Context, q Querier, code string, de
 		delta, code)
 	if errors.Is(err, ErrConflict) {
 		return ErrUnknownSystemAccount
+	}
+	return err
+}
+
+// DebitAvailable subtracts in a single guarded statement, so two concurrent
+// payouts cannot both pass a balance check and push the account negative.
+func (r *systemAccountRepo) DebitAvailable(ctx context.Context, q Querier, code string, amount money.Amount) error {
+	if amount.IsNegative() {
+		return errors.New("debit amount must not be negative")
+	}
+	if amount.IsZero() {
+		return nil
+	}
+	err := execExpectingOne(ctx, r.exec(ctx, q),
+		`UPDATE system_accounts SET balance = balance - $1, updated_at = now() WHERE code = $2 AND balance >= $1`,
+		amount, code)
+	if errors.Is(err, ErrConflict) {
+		// Either the account does not exist or it does not hold enough. Tell the
+		// two apart so an unknown code is not reported as a money problem.
+		if _, getErr := r.Get(ctx, code); getErr != nil {
+			return getErr
+		}
+		return ErrInsufficientFunds
 	}
 	return err
 }

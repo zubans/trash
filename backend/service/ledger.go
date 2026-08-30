@@ -43,6 +43,13 @@ func (l *Ledger) GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount
 	return l.transactions.GetBalance(ctx, userID)
 }
 
+// AccountBalance reads a system account. Admin surfaces show the commission
+// account this way; services never need it to move money, because every
+// movement already names the account it faces.
+func (l *Ledger) AccountBalance(ctx context.Context, code string) (*repository.SystemAccount, error) {
+	return l.accounts.Get(ctx, code)
+}
+
 // History returns a user's ledger entries.
 func (l *Ledger) History(ctx context.Context, userID uuid.UUID) ([]*repository.Transaction, error) {
 	return l.transactions.GetTransactionsByUserID(ctx, userID)
@@ -151,6 +158,51 @@ func (l *Ledger) Settle(ctx context.Context, tx *sql.Tx, from, to string, userID
 		return err
 	}
 	if err := l.accounts.Credit(ctx, tx, to, amount); err != nil {
+		return err
+	}
+	return l.record(ctx, tx, entry{UserID: userID, AdminID: adminID, Type: kind, Account: from, Amount: amount})
+}
+
+// Commission moves the platform's share of a completed order from escrow to the
+// commission account, inside the confirmation transaction. It is recorded
+// against the executor and the order, so the entry can be traced back to the
+// payout it was taken out of. Escrow is debited unguarded like every other
+// order movement: the money is already held for this order, and the caller
+// splits exactly what it holds between the executor and this account.
+func (l *Ledger) Commission(ctx context.Context, tx *sql.Tx, executorID uuid.UUID, amount money.Amount, orderID *uuid.UUID) error {
+	if !amount.IsPositive() {
+		return nil
+	}
+	if err := l.accounts.Debit(ctx, tx, repository.AccountEscrow, amount); err != nil {
+		return err
+	}
+	if err := l.accounts.Credit(ctx, tx, repository.AccountCommission, amount); err != nil {
+		return err
+	}
+	return l.record(ctx, tx, entry{
+		UserID:  executorID,
+		OrderID: orderID,
+		Type:    repository.TransactionTypeCommission,
+		Account: repository.AccountEscrow,
+		Amount:  amount,
+	})
+}
+
+// Payout sends money out of a system account to the outside world, but only if
+// the account actually holds it. Settle is the unguarded version, used where
+// the money was reserved earlier and is known to be there; this one is for
+// paying out an account on request, where the amount is whatever the caller
+// asked for and an unguarded debit would let the account go negative.
+//
+// Returns repository.ErrInsufficientFunds when the account holds less.
+func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, adminID *uuid.UUID) error {
+	if !amount.IsPositive() {
+		return nil
+	}
+	if err := l.accounts.DebitAvailable(ctx, tx, from, amount); err != nil {
+		return err
+	}
+	if err := l.accounts.Credit(ctx, tx, repository.AccountDeposits, amount); err != nil {
 		return err
 	}
 	return l.record(ctx, tx, entry{UserID: userID, AdminID: adminID, Type: kind, Account: from, Amount: amount})

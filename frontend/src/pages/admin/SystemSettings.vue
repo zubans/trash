@@ -102,6 +102,24 @@
                 <span class="input-suffix">x</span>
               </div>
             </div>
+
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">{{ $t('settings.orderCommissionPercent') }}</label>
+                <div class="input-hint">{{ $t('settings.orderCommissionHint') }}</div>
+              </div>
+              <div class="input-wrapper has-suffix">
+                <input
+                  v-model="values.order_commission_percent"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="100"
+                  required
+                />
+                <span class="input-suffix">%</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -198,24 +216,6 @@
             </div>
           </div>
 
-          <div class="toggle-row">
-            <div class="toggle-text">
-              <label class="input-label">Показывать заказы неверифицированных заказчиков</label>
-              <div class="input-hint">
-                Включено — исполнители видят заказы от всех заказчиков (и в списке, и на карте).
-                Выключено — только от заказчиков, верифицированных вручную в админке.
-              </div>
-            </div>
-            <label class="switch">
-              <input
-                type="checkbox"
-                v-model="values.show_unverified_customer_orders"
-                true-value="1"
-                false-value="0"
-              />
-              <span class="switch-slider"></span>
-            </label>
-          </div>
         </div>
       </div>
 
@@ -261,11 +261,11 @@ export default defineComponent({
       increased_tariff_coeff: '2.0',
       urgent_tariff_coeff: '3.0',
       asap_tariff_coeff: '8.0',
+      order_commission_percent: '0',
       auto_match_radius_km: '10',
       min_balance_limit: '0',
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',
-      show_unverified_customer_orders: '0',
     })
 
     const initialValues = ref<Record<string, string>>({ ...values.value })

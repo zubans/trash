@@ -32,6 +32,12 @@ const (
 	// passes through ESCROW in one transaction, so the pair nets to zero there.
 	TransactionTypeTip       TransactionType = "TIP"
 	TransactionTypeTipReward TransactionType = "TIP_REWARD"
+	// TransactionTypeCommission records the platform's share of a completed
+	// order moving from escrow to the commission account;
+	// TransactionTypeCommissionPayout records an admin paying that account out
+	// of the system. Neither touches a user balance.
+	TransactionTypeCommission       TransactionType = "COMMISSION"
+	TransactionTypeCommissionPayout TransactionType = "COMMISSION_PAYOUT"
 )
 
 // ledgerSigns declares how each transaction type moves a user's balance. This is
@@ -58,6 +64,11 @@ var ledgerSigns = map[TransactionType]int{
 	// one transaction through ESCROW.
 	TransactionTypeTip:       -1,
 	TransactionTypeTipReward: +1,
+	// Commission moves between two system accounts. The user it is recorded
+	// against — the executor whose order it came from, the admin who paid it
+	// out — is there to make the entry findable, not to move their balance.
+	TransactionTypeCommission:       0,
+	TransactionTypeCommissionPayout: 0,
 }
 
 // LedgerSign reports how a transaction type moves the balance, and whether the
