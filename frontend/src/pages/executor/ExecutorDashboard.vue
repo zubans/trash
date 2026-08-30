@@ -1334,7 +1334,11 @@ export default defineComponent({
 
       chatInputText.value = ''
 
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      // Native WebViews silently swallow ws.send(), so on mobile the text would
+      // never reach the server (images go over REST and worked). Use the
+      // WebSocket only on the web; otherwise the REST endpoint, which persists
+      // and broadcasts to the room just the same.
+      if (!Capacitor.isNativePlatform() && ws.value && ws.value.readyState === WebSocket.OPEN) {
         ws.value.send(JSON.stringify({ text }))
         return
       }
