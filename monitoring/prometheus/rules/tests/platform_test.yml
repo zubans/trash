@@ -185,3 +185,20 @@ tests:
             exp_annotations:
               summary: "На / осталось меньше 10 ГБ"
               description: "Свободно 8GiB. Полный диск останавливает PostgreSQL и загрузку вложений. Кандидаты на чистку: releases/, uploads/, docker builder prune, docker image prune."
+
+  # /boot and /boot/efi are tiny boot partitions that permanently sit under the
+  # gigabyte thresholds; they must never page. Even with ~1 GiB free, neither
+  # disk alert fires because they are excluded by mountpoint.
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4", mountpoint="/boot"}'
+        values: '1073741824x240'    # 1 GiB
+      - series: 'node_filesystem_avail_bytes{fstype="vfat", mountpoint="/boot/efi"}'
+        values: '1073741824x240'    # 1 GiB
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: HostDiskFillingUp
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: HostDiskLow
+        exp_alerts: []

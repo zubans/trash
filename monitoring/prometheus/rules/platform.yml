@@ -231,9 +231,13 @@ groups:
       # an alert that fires while there is more free space than the whole
       # database will ever use, which is how a channel gets muted. What matters
       # is whether there is room to write, and that is a number of gigabytes.
+      # /boot and /boot/efi are excluded: they are inherently tiny (1-2 GB) boot
+      # partitions that sit permanently under the gigabyte thresholds below, so
+      # they only ever produce false pages — the disks that can actually stop
+      # PostgreSQL or attachment uploads are the data volumes, not these.
       - alert: HostDiskFillingUp
         expr: |
-          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} < 10 * 1024 * 1024 * 1024
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint!~"/boot|/boot/efi"} < 10 * 1024 * 1024 * 1024
         for: 30m
         labels:
           severity: page
@@ -245,7 +249,7 @@ groups:
       # A ticket at 25G leaves days of room to act rather than minutes.
       - alert: HostDiskLow
         expr: |
-          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} < 25 * 1024 * 1024 * 1024
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint!~"/boot|/boot/efi"} < 25 * 1024 * 1024 * 1024
         for: 2h
         labels:
           severity: ticket
