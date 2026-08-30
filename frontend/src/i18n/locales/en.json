@@ -266,7 +266,7 @@
     "successBidAccepted": "Bid accepted and executor assigned successfully!",
     "errorBidAccepted": "Failed to accept bid.",
     "address": "Address",
-    "pickupAddress": "Pickup address",
+    "pickupAddress": "Order address",
     "addressChangeHint": "Address is taken from your profile. Contact administrator to change it.",
     "orderType": "Order Type",
     "errorInvalidOrderType": "Please select a service variant",

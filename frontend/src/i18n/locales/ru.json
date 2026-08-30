@@ -268,7 +268,7 @@
     "successBidAccepted": "Ставка принята, исполнитель назначен!",
     "errorBidAccepted": "Не удалось принять ставку.",
     "address": "Адрес",
-    "pickupAddress": "Адрес забора мусора",
+    "pickupAddress": "Адрес заказа",
     "addressChangeHint": "Адрес берётся из вашего профиля. Для изменения обратитесь к администратору.",
     "orderType": "Тип заказа",
     "errorInvalidOrderType": "Выберите вид услуги",
