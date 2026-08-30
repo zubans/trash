@@ -105,6 +105,9 @@
             <i class="ph-fill ph-user-circle"></i>
             <span class="user-phone-text">{{ phone || '7 999 999 99 99' }}</span>
           </div>
+          <button class="btn-logout" title="Выйти из аккаунта" @click="doLogout">
+            <i class="ph-bold ph-sign-out"></i>
+          </button>
         </div>
       </header>
 
