@@ -134,14 +134,16 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		return nil, 0, err
 	}
 
-	// Get paginated list with customer address. The multi-role set is fetched
-	// separately (attachRoles) rather than joined here, so that a missing or
-	// empty user_roles table can never take down the whole admin listing.
+	// Get paginated list with the customer's default address. The address now
+	// lives in the unified `addresses` table (migration 037 dropped
+	// customer_profiles.address), so it is read from there. The multi-role set is
+	// fetched separately (attachRoles) so a missing user_roles table can never
+	// take down the whole admin listing.
 	listQuery := fmt.Sprintf(
-		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at, COALESCE(cp.address, '') as address,
+		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at,
+		        COALESCE((SELECT a.address FROM addresses a WHERE a.user_id = u.id AND a.is_default LIMIT 1), '') AS address,
 		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, '')
 		 FROM users u
-		 LEFT JOIN customer_profiles cp ON cp.user_id = u.id
 		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argCount, argCount+1,
 	)
