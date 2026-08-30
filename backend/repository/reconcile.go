@@ -260,20 +260,44 @@ func (r *reconcileRepo) unknownTransactionTypes(ctx context.Context) ([]string, 
 	return unknown, rows.Err()
 }
 
-// holdAnomalies finds orders whose held amount contradicts their status. A
-// finished order still holding money, or a live paid order holding none, is the
-// signature of a refund or payout that ran without its state transition.
+// holdAnomalies finds orders whose held amount contradicts their status: a
+// finished order still holding money, or a live order that held money and no
+// longer does — the signature of a refund or payout that ran without its state
+// transition.
+//
+// "Holds nothing" on its own is not evidence of anything. Two kinds of live
+// order legitimately hold nothing: an auction, which holds nothing until a bid
+// is accepted, and an ordinary order for a free service, where there was never
+// anything to hold. Reporting those meant the check fired on correct data, and
+// a check that fires on correct data is one people learn to scroll past.
+//
+// The discriminator is the log rather than the current price. Ledger.Reserve
+// returns without writing anything when the amount is zero, so a free order has
+// no HOLD entry at all, while an order that was paid for has one whether or not
+// the price has been edited since. That keeps the answer right even when a
+// service is repriced after the fact.
 func (r *reconcileRepo) holdAnomalies(ctx context.Context, tolerance money.Amount) ([]OrderHoldAnomaly, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT o.id, o.customer_id, o.status::text, o.hold_amount,
 		       CASE
 		           WHEN o.status IN ('COMPLETED', 'CANCELED') THEN 'finished order still holds money'
-		           ELSE 'live non-auction order holds nothing'
+		           ELSE 'live order no longer holds the money it took'
 		       END AS reason
 		FROM orders o
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE (o.status IN ('COMPLETED', 'CANCELED') AND o.hold_amount > $1)
-		   OR (o.status IN ('ASSIGNED', 'EXECUTED') AND sn.is_auction = FALSE AND o.hold_amount <= $1)
+		   OR (
+		        o.status IN ('ASSIGNED', 'EXECUTED')
+		        AND sn.is_auction = FALSE
+		        AND o.hold_amount <= $1
+		        -- Money was taken for this order once. Without this the check
+		        -- reports every free order, which is a supported case, not a
+		        -- fault.
+		        AND EXISTS (
+		            SELECT 1 FROM transactions t
+		            WHERE t.order_id = o.id AND t.type = 'HOLD'
+		        )
+		      )
 		ORDER BY o.created_at DESC
 		LIMIT 500`, tolerance)
 	if err != nil {

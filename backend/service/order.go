@@ -74,7 +74,6 @@ func commissionOn(amount money.Amount, settings map[string]float64) money.Amount
 	return commission
 }
 
-
 // CreateOrderRequest contains the data needed to create an order.
 type CreateOrderRequest struct {
 	ServiceVariantID uuid.UUID `json:"service_variant_id"`
@@ -297,6 +296,12 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 	}
 
 	metrics.OrderEvent("created")
+	if !order.HoldAmount.IsPositive() {
+		// A free service is a supported case, so this is a fact to publish
+		// rather than a fault to report — but it must be published, or the
+		// order leaves no trace in any money metric at all.
+		metrics.OrderCreatedFree()
+	}
 	s.hydrateServiceVariant(ctx, order)
 	return order, nil
 }

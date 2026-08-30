@@ -974,9 +974,19 @@
           "legendFormat": "{{event}}",
           "refId": "S",
           "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(healthlogin_orders_free_created_total[10m]) * 60)",
+          "legendFormat": "бесплатные",
+          "refId": "Z",
+          "instant": false
         }
       ],
-      "description": "",
+      "description": "Бесплатные услуги поддерживаются, и такой заказ не двигает денег вовсе — в счётчиках сумм его не видно. Отдельная линия нужна, чтобы «выручки нет» не путалось с «все заказы были бесплатные».",
       "fieldConfig": {
         "defaults": {
           "color": {

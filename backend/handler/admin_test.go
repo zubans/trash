@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -454,4 +455,70 @@ func (m *mockUserRepository) ListUserRoles(ctx context.Context, id uuid.UUID) ([
 
 func (m *mockUserRepository) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
 	return nil
+}
+
+// The admin form binds numeric settings to <input type="number">, and Vue casts
+// those back to JSON numbers. Decoding straight into map[string]string rejected
+// the whole request with "invalid request body", so editing the commission rate
+// — or any tariff coefficient — could not be saved at all.
+func TestUpdateSettingsHandlerAcceptsNumbers(t *testing.T) {
+	h, _, _, sr := setupTestHandler()
+
+	body := `{"order_commission_percent": 15, "asap_tariff_coeff": 8.50, "currency": "RUB"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	h.UpdateSettingsHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := sr.settings["order_commission_percent"]; got != "15" {
+		t.Errorf("stored commission rate = %q, expected \"15\"", got)
+	}
+	// The digits the client sent are kept rather than round-tripped as a float.
+	if got := sr.settings["asap_tariff_coeff"]; got != "8.50" {
+		t.Errorf("stored coefficient = %q, expected \"8.50\"", got)
+	}
+	if got := sr.settings["currency"]; got != "RUB" {
+		t.Errorf("stored currency = %q, expected \"RUB\"", got)
+	}
+}
+
+// A rate the settings validator refuses must still come back as a 400 naming
+// the setting, not be quietly stored.
+func TestUpdateSettingsHandlerRejectsOutOfRangeCommission(t *testing.T) {
+	h, _, _, sr := setupTestHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/settings",
+		strings.NewReader(`{"order_commission_percent": 150}`))
+	w := httptest.NewRecorder()
+
+	h.UpdateSettingsHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+	if _, stored := sr.settings["order_commission_percent"]; stored {
+		t.Error("a rejected rate was stored anyway")
+	}
+}
+
+// A value that is neither text nor a number names the offending key, instead of
+// failing the whole request with an unattributed "invalid request body".
+func TestUpdateSettingsHandlerNamesTheBadSetting(t *testing.T) {
+	h, _, _, _ := setupTestHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/settings",
+		strings.NewReader(`{"currency": {"code": "RUB"}}`))
+	w := httptest.NewRecorder()
+
+	h.UpdateSettingsHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "currency") {
+		t.Errorf("error does not name the setting: %s", w.Body.String())
+	}
 }

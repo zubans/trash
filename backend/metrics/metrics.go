@@ -91,6 +91,17 @@ var (
 		Help:      "Assignment attempts by the background matcher, by outcome.",
 	}, []string{"result"})
 
+	// Free services are supported, and an order for one moves no money at all:
+	// no hold, no ledger entry, nothing in the amount counters. Without a count
+	// of its own such an order is invisible, and "no revenue today" becomes
+	// indistinguishable from "every order today was free" — which is the
+	// difference between a quiet day and a mispriced service.
+	ordersFree = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "orders_free_created_total",
+		Help:      "Orders created for a service that costs nothing, so no money was held.",
+	})
+
 	// Marketplace depth, refreshed by the matcher on every pass. Orders queued
 	// with nobody on shift is the failure mode that looks fine in the request
 	// counters: everything answers 200 and no work gets done.
@@ -245,7 +256,7 @@ func init() {
 		httpRequests, httpDuration, httpInFlight,
 		authEvents,
 		orderEvents, bidEvents, shiftEvents, matchingAssignments,
-		ordersSearching, shiftsActive,
+		ordersSearching, shiftsActive, ordersFree,
 		ledgerEntries, ledgerAmount, ledgerErrors,
 		reconcileOK, reconcileLastRun, reconcileFindings, reconcileDrift, reconcileFailures,
 		workerRuns, workerDuration, workerLastSuccess,
@@ -298,6 +309,11 @@ func AuthEvent(event, result string) { authEvents.WithLabelValues(event, result)
 
 // OrderEvent records an order lifecycle transition.
 func OrderEvent(event string) { orderEvents.WithLabelValues(event).Inc() }
+
+// OrderCreatedFree records an order that held nothing because the service is
+// free. It is counted in addition to the ordinary "created" event, not instead
+// of it: the order is a real order, it just moves no money.
+func OrderCreatedFree() { ordersFree.Inc() }
 
 // BidEvent records an auction event.
 func BidEvent(event string) { bidEvents.WithLabelValues(event).Inc() }

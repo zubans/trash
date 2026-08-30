@@ -250,13 +250,17 @@
 import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../services/api'
+import { toSettingsPayload } from '../../utils/settingsPayload'
 
 export default defineComponent({
   name: 'SystemSettings',
   setup() {
     const { t } = useI18n()
 
-    const values = ref<Record<string, string>>({
+    // Not Record<string, string>: Vue casts `<input type="number">` back to a
+    // number, so an edited field genuinely holds one until it is normalised on
+    // the way out.
+    const values = ref<Record<string, string | number>>({
       standard_tariff_coeff: '1.0',
       increased_tariff_coeff: '2.0',
       urgent_tariff_coeff: '3.0',
@@ -268,7 +272,7 @@ export default defineComponent({
       executor_location_send_interval_seconds: '5',
     })
 
-    const initialValues = ref<Record<string, string>>({ ...values.value })
+    const initialValues = ref<Record<string, string | number>>({ ...values.value })
 
     const currencyOptions = [
       { label: 'Российский рубль (₽ RUB)', value: 'RUB' },
@@ -315,8 +319,12 @@ export default defineComponent({
       errorMsg.value = ''
       loading.value = true
       try {
-        await api.post('/admin/settings', values.value)
-        initialValues.value = { ...values.value }
+        const payload = toSettingsPayload(values.value)
+        await api.post('/admin/settings', payload)
+        // Adopt the normalised values, so the unsaved-changes indicator compares
+        // like with like instead of 15 against "15".
+        values.value = payload
+        initialValues.value = { ...payload }
         successMsg.value = t('settings.saveSuccess')
       } catch (err: any) {
         errorMsg.value = err.response?.data || t('settings.saveError')

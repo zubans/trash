@@ -545,11 +545,38 @@ func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request
 }
 
 // UpdateSettingsHandler updates system settings.
+//
+// Values arrive as either JSON strings or JSON numbers. Settings are stored as
+// text, and this used to decode straight into map[string]string — which meant
+// one numeric value failed the whole request with an opaque "invalid request
+// body". The admin form binds numeric fields to <input type="number">, and Vue
+// hands those back as real numbers, so editing a tariff or the commission rate
+// sent a number and could not be saved at all.
 func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	var req map[string]string
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	// Numbers keep the digits the client sent instead of going through a float,
+	// so 8.50 is stored as written rather than as 8.5.
+	decoder.UseNumber()
+
+	var raw map[string]interface{}
+	if err := decoder.Decode(&raw); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	req := make(map[string]string, len(raw))
+	for key, value := range raw {
+		switch v := value.(type) {
+		case string:
+			req[key] = v
+		case json.Number:
+			req[key] = v.String()
+		default:
+			// Anything else is a client bug, and naming the key beats making an
+			// admin guess which field of a dozen was rejected.
+			http.Error(w, "setting "+key+" must be a string or a number", http.StatusBadRequest)
+			return
+		}
 	}
 
 	if err := h.adminService.UpdateSettings(r.Context(), req); err != nil {
