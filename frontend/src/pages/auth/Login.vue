@@ -1,5 +1,6 @@
 <template>
   <div class="split-layout">
+    <RoleSelectOverlay v-if="showRoleSelect" :roles="roleSelectRoles" @select="onRoleSelected" />
     <!-- MOBILE HEADER (visible on screen width <= 900px) -->
     <header class="app-header">
       <AppLogo />
@@ -357,6 +358,7 @@ import api, { formatApiError } from '../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
+import RoleSelectOverlay from '../../components/RoleSelectOverlay.vue'
 import { formatPhoneMask, cleanPhoneDigits } from '../../utils/phoneMask'
 
 function parseJwt(token: string) {
@@ -377,7 +379,7 @@ function parseJwt(token: string) {
 
 export default defineComponent({
   name: 'Login',
-  components: { LanguageSwitcher, AddressAutocomplete, AppLogo },
+  components: { LanguageSwitcher, AddressAutocomplete, AppLogo, RoleSelectOverlay },
   setup() {
     const router = useRouter()
     const route = useRoute()
@@ -388,6 +390,44 @@ export default defineComponent({
     const mode = ref<'login' | 'register'>('login')
     const displayPhone = ref('')
     const phone = ref('')
+
+    // Role selection after login: shown when the account holds more than one
+    // dashboard role (e.g. customer + executor) so the user picks how to work now.
+    const showRoleSelect = ref(false)
+    const roleSelectRoles = ref<string[]>([])
+
+    const ROLE_HOME: Record<string, string> = {
+      CUSTOMER: '/customer',
+      EXECUTOR: '/executor',
+      MODERATOR: '/executor',
+      ADMIN: '/admin',
+    }
+
+    const routeForRole = (r: string) => {
+      const home = ROLE_HOME[r] || '/login'
+      if (home === '/login') {
+        error.value = t('login.roleNotSupported')
+        return
+      }
+      router.push(home)
+    }
+
+    // Decide where to land after a successful login. Multi-role accounts get the
+    // picker; single-role accounts go straight to their dashboard.
+    const finishLogin = (primaryRole: string) => {
+      if (authStore.switchableRoles.length > 1) {
+        roleSelectRoles.value = authStore.switchableRoles
+        showRoleSelect.value = true
+        return
+      }
+      routeForRole(primaryRole || authStore.activeRole)
+    }
+
+    const onRoleSelected = (r: string) => {
+      authStore.setActiveRole(r)
+      showRoleSelect.value = false
+      routeForRole(r)
+    }
 
     const onPhoneKeydown = (e: KeyboardEvent) => {
       const target = e.target as HTMLInputElement
@@ -588,23 +628,11 @@ export default defineComponent({
           }
 
           authStore.login(token, claims.role, claims.phone, claims.sub, response.data.refresh_token)
-          // Load the full role set so multi-role users get the role switcher and
-          // a pure MODERATOR resolves to the executor dashboard.
+          // Load the full role set first: it decides whether to show the role
+          // picker (multi-role) and lets a pure MODERATOR resolve to the executor
+          // dashboard.
           await authStore.fetchMe()
-
-          if (claims.role === 'ADMIN') {
-            router.push('/admin')
-          } else if (claims.role === 'CUSTOMER') {
-            router.push('/customer')
-          } else if (claims.role === 'EXECUTOR' || claims.role === 'MODERATOR') {
-            router.push('/executor')
-          } else if (authStore.isExecutor || authStore.isModerator) {
-            router.push('/executor')
-          } else if (authStore.isCustomer) {
-            router.push('/customer')
-          } else {
-            error.value = t('login.roleNotSupported')
-          }
+          finishLogin(claims.role)
         } else {
           const payload: any = {
             phone: phone.value,
@@ -670,6 +698,9 @@ export default defineComponent({
       message,
       loading,
       handleSubmit,
+      showRoleSelect,
+      roleSelectRoles,
+      onRoleSelected,
       showForgotModal,
       resetStep,
       resetEmail,
