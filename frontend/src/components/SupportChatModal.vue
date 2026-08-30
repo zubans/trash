@@ -137,6 +137,7 @@ import api, { resolveFileUrl } from '../services/api'
 import { useAuthStore } from '../stores/auth-store'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { cameraPromptLabels } from '../utils/cameraLabels'
 import { compressImage } from '../utils/imageCompressor'
 
 export default defineComponent({
@@ -290,6 +291,7 @@ export default defineComponent({
             allowEditing: false,
             resultType: CameraResultType.Uri,
             source: CameraSource.Prompt,
+            ...cameraPromptLabels(),
           })
 
           if (photo.webPath && chatId.value) {

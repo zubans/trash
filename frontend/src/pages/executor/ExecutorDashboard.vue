@@ -634,6 +634,7 @@ import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick
 import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { cameraPromptLabels } from '../../utils/cameraLabels'
 import { Geolocation } from '@capacitor/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
@@ -1360,6 +1361,7 @@ export default defineComponent({
             allowEditing: false,
             resultType: CameraResultType.Uri,
             source: CameraSource.Prompt,
+            ...cameraPromptLabels(),
           })
 
           if (photo.webPath && selectedChatOrder.value) {

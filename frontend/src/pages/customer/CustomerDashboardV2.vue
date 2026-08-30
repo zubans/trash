@@ -455,6 +455,7 @@ import type { StructuredAddress } from '../../components/AddressAutocomplete.vue
 import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { cameraPromptLabels } from '../../utils/cameraLabels'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
@@ -1039,6 +1040,7 @@ export default defineComponent({
             allowEditing: false,
             resultType: CameraResultType.Uri,
             source: CameraSource.Prompt,
+            ...cameraPromptLabels(),
           })
 
           if (photo.webPath && openChatOrderId.value) {

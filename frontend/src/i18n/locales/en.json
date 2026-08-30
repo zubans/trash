@@ -384,6 +384,12 @@
     "details": "Details",
     "hours": "hours"
   },
+  "camera": {
+    "header": "Add photo",
+    "cancel": "Cancel",
+    "fromGallery": "Choose from gallery",
+    "takePicture": "Take photo"
+  },
   "orderStatus": {
     "SEARCHING": "Searching",
     "ASSIGNED": "Assigned",

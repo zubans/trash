@@ -416,6 +416,12 @@
     "details": "Подробнее",
     "hours": "ч."
   },
+  "camera": {
+    "header": "Добавить фото",
+    "cancel": "Отмена",
+    "fromGallery": "Выбрать из галереи",
+    "takePicture": "Сделать фото"
+  },
   "orderStatus": {
     "SEARCHING": "Поиск",
     "ASSIGNED": "Назначен",
