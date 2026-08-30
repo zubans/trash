@@ -87,6 +87,18 @@
           <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
         </router-link>
       </div>
+
+      <!-- Sidebar utilities: language + logout live here, not in the header. -->
+      <div class="sidebar-footer">
+        <div v-if="!sidebarMinimized || isMobile" class="sidebar-lang">
+          <span>Язык</span>
+          <LanguageSwitcher />
+        </div>
+        <button class="sidebar-logout" title="Выйти из аккаунта" @click="doLogout">
+          <i class="ph-bold ph-sign-out"></i>
+          <span v-if="!sidebarMinimized || isMobile">Выйти из аккаунта</span>
+        </button>
+      </div>
     </aside>
 
     <!-- Main Content Area -->
@@ -105,9 +117,6 @@
             <i class="ph-fill ph-user-circle"></i>
             <span class="user-phone-text">{{ phone || '7 999 999 99 99' }}</span>
           </div>
-          <button class="btn-logout" title="Выйти из аккаунта" @click="doLogout">
-            <i class="ph-bold ph-sign-out"></i>
-          </button>
         </div>
       </header>
 
@@ -384,6 +393,53 @@ export default defineComponent({
 
 .nav-item i {
   font-size: 20px;
+}
+
+/* Sidebar footer: language + logout, pinned to the bottom. */
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar-lang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #f8fafc;
+  border-radius: 12px;
+}
+.sidebar-lang span {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+.sidebar-logout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  color: #ef4444;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  font-family: inherit;
+}
+.sidebar-logout i {
+  font-size: 20px;
+}
+.sidebar-logout:hover {
+  background: #fef2f2;
+}
+.sidebar.minimized .sidebar-logout {
+  justify-content: center;
 }
 
 /* Main Content Wrapper */

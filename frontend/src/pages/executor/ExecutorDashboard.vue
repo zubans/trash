@@ -6,21 +6,42 @@
         <div class="logo">
           <AppLogo />
         </div>
-        <div class="header-controls">
-          <button type="button" class="btn-support-header position-relative" title="Поддержка" @click="openSupportChat">
-            <i class="ph-bold ph-headset"></i>
-            <span>Поддержка</span>
-            <span v-if="hasUnreadSupport" class="support-unread-dot"></span>
-          </button>
-          <RoleSwitcher v-if="authStore.switchableRoles.length > 1" />
-          <div class="lang-switch-wrapper">
-            <LanguageSwitcher />
-          </div>
-          <button type="button" class="control-icon" :title="$t('common.logout')" @click="handleLogout">
-            <i class="ph-bold ph-sign-out"></i>
+        <button type="button" class="hamburger-btn position-relative" title="Меню" @click="menuOpen = true">
+          <i class="ph-bold ph-list"></i>
+          <span v-if="hasUnreadSupport" class="support-unread-dot"></span>
+        </button>
+      </header>
+
+      <!-- --- Сайдбар (выдвижное меню) --- -->
+      <div :class="['sidebar-overlay', { open: menuOpen }]" @click="menuOpen = false"></div>
+      <aside :class="['sidebar', { open: menuOpen }]">
+        <div class="sidebar-header">
+          <h2>Меню</h2>
+          <button type="button" class="close-btn" title="Закрыть" @click="menuOpen = false">
+            <i class="ph-bold ph-x"></i>
           </button>
         </div>
-      </header>
+        <nav class="sidebar-nav">
+          <button type="button" class="nav-item position-relative" @click="menuOpen = false; openSupportChat()">
+            <i class="ph-fill ph-headset"></i> Поддержка
+            <span v-if="hasUnreadSupport" class="support-unread-dot nav-dot"></span>
+          </button>
+          <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/profile')">
+            <i class="ph-fill ph-user-circle"></i> Профиль
+          </button>
+          <div v-if="authStore.switchableRoles.length > 1" class="lang-control">
+            <span>Роль</span>
+            <RoleSwitcher />
+          </div>
+          <div class="lang-control">
+            <span>Язык приложения</span>
+            <LanguageSwitcher />
+          </div>
+          <button type="button" class="nav-item logout" @click="menuOpen = false; handleLogout()">
+            <i class="ph-bold ph-sign-out"></i> Выйти из аккаунта
+          </button>
+        </nav>
+      </aside>
 
       <!-- Toast Container -->
       <div class="toast-container">
@@ -660,6 +681,7 @@ export default defineComponent({
     const isVerified = computed(() => authStore.user?.is_verified ?? false)
     const status = ref('ACTIVE')
     const showProfileModal = ref(false)
+    const menuOpen = ref(false)
 
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
@@ -1568,6 +1590,7 @@ export default defineComponent({
 
     return {
       authStore,
+      menuOpen,
       balanceLoaded,
       isVerified,
       showProfileModal,
@@ -1859,6 +1882,73 @@ export default defineComponent({
   cursor: pointer; transition: all 0.2s ease;
 }
 .control-icon:hover { color: var(--text-title, #0f172a); border-color: rgba(0,0,0,0.1); }
+
+/* --- Гамбургер + выдвижной сайдбар (по аналогии с заказчиком) --- */
+.hamburger-btn {
+  width: 44px; height: 44px; background: #ffffff; border: 1px solid rgba(0,0,0,0.05); border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--text-title, #0f172a);
+  cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+}
+.hamburger-btn:hover { border-color: rgba(0,0,0,0.12); box-shadow: 0 4px 14px rgba(15,23,42,0.08); }
+.hamburger-btn:active { transform: scale(0.95); }
+.hamburger-btn .support-unread-dot { top: 8px; right: 8px; }
+
+.sidebar-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  z-index: 1000; opacity: 0; pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.sidebar-overlay.open { opacity: 1; pointer-events: auto; }
+
+.sidebar {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 85%; max-width: 340px;
+  background: #ffffff; z-index: 1001;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex; flex-direction: column;
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.12);
+  border-top-left-radius: 24px; border-bottom-left-radius: 24px;
+}
+.sidebar.open { transform: translateX(0); }
+
+.sidebar-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 24px 20px; border-bottom: 1px solid #f1f5f9;
+}
+.sidebar-header h2 { font-size: 18px; font-weight: 800; color: var(--text-title, #0f172a); margin: 0; }
+.close-btn {
+  background: #f1f5f9; border: none; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+  color: var(--text-muted, #64748b); cursor: pointer; transition: background 0.2s ease;
+}
+.close-btn:hover { background: #e2e8f0; }
+
+.sidebar-nav {
+  padding: 16px; flex: 1;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 15px 16px; border: none; border-radius: 16px;
+  background: transparent; text-align: left;
+  color: var(--text-title, #0f172a); font-family: inherit; font-weight: 700; font-size: 15px;
+  cursor: pointer; transition: background 0.2s ease;
+}
+.nav-item i { font-size: 22px; color: #6366f1; }
+.nav-item:hover { background: #f8fafc; }
+.nav-item:active { background: #f1f5f9; }
+.nav-item.logout { color: #ef4444; margin-top: auto; }
+.nav-item.logout i { color: #ef4444; }
+.nav-item .nav-dot { top: 14px; left: 34px; right: auto; }
+
+.lang-control {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 16px; background: #f8fafc; border-radius: 16px; margin: 6px 0;
+}
+.lang-control span { font-weight: 700; font-size: 14px; color: var(--text-title, #0f172a); }
 
 /* --- Profile Card (New Compact Design) --- */
 .profile-card {

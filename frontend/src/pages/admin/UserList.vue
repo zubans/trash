@@ -138,6 +138,65 @@
       </div>
     </div>
 
+    <!-- Mobile card list (shown instead of the table on phones) -->
+    <div class="user-cards mb-4">
+      <div v-for="u in users" :key="u.id" class="user-card">
+        <div class="uc-top">
+          <div class="uc-avatar" :class="getAvatarClass(u.role)">{{ getAvatarChar(u.role) }}</div>
+          <div class="uc-id">
+            <div class="uc-phone">{{ u.phone }}</div>
+            <div class="uc-name">{{ formatFullName(u) }}</div>
+          </div>
+          <button class="uc-menu-btn" :class="{ open: cardMenuId === u.id }" @click="cardMenuId = cardMenuId === u.id ? null : u.id">
+            <i class="ph-bold ph-dots-three-vertical"></i>
+          </button>
+        </div>
+
+        <div class="uc-chips">
+          <span v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])" :key="r" class="role-chip">{{ r }}</span>
+          <span class="status-pill" :class="u.status === 'ACTIVE' ? 'success' : 'danger'">{{ u.status }}</span>
+          <span class="verify-chip" :class="u.is_verified ? 'verified' : 'unverified'">
+            <i :class="u.is_verified ? 'ph-fill ph-seal-check' : 'ph ph-seal'"></i>
+            {{ u.is_verified ? 'Верифицирован' : 'Не верифицирован' }}
+          </span>
+        </div>
+
+        <div class="uc-meta">
+          <div class="uc-meta-row">
+            <span>Баланс</span><b>{{ currencySymbol }}{{ Number(u.balance || 0).toFixed(2) }}</b>
+          </div>
+          <div class="uc-meta-row">
+            <span>Адрес</span><b class="uc-addr">{{ u.address || '—' }}</b>
+          </div>
+          <div class="uc-meta-row">
+            <span>Регистрация</span><b>{{ formatDate(u.created_at).split(',')[0] }}</b>
+          </div>
+        </div>
+
+        <div class="uc-quick">
+          <button class="uc-quick-btn topup" @click="openTopUpModal(u)">
+            <i class="ph-bold ph-plus-circle"></i> Пополнить
+          </button>
+        </div>
+
+        <!-- Expandable action sheet -->
+        <div v-if="cardMenuId === u.id" class="uc-actions">
+          <button @click="openNameModal(u); cardMenuId = null"><i class="ph-bold ph-user"></i> ФИО</button>
+          <button @click="openRolesModal(u); cardMenuId = null"><i class="ph-bold ph-user-gear"></i> Роли</button>
+          <button @click="openAddressModal(u); cardMenuId = null"><i class="ph-bold ph-map-pin"></i> Адрес</button>
+          <button @click="toggleUserVerified(u); cardMenuId = null">
+            <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
+            {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
+          </button>
+          <button class="danger" @click="toggleUserStatus(u); cardMenuId = null">
+            <i class="ph-bold" :class="u.status === 'ACTIVE' ? 'ph-prohibit' : 'ph-check'"></i>
+            {{ u.status === 'ACTIVE' ? 'Заблокировать' : 'Активировать' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="users.length === 0" class="uc-empty">Пользователи не найдены</div>
+    </div>
+
     <!-- Pagination -->
     <div class="d-flex justify-content-between align-items-center mt-3">
       <span class="text-muted font-weight-500">{{ $t('users.total', { count: totalUsers }) }}</span>
@@ -276,6 +335,8 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const users = ref<any[]>([])
+    // Which mobile card's action sheet is open (null = none).
+    const cardMenuId = ref<string | null>(null)
     const totalUsers = ref(0)
     const page = ref(1)
     const limit = ref(10)
@@ -593,6 +654,7 @@ export default defineComponent({
 
     return {
       users,
+      cardMenuId,
       totalUsers,
       page,
       limit,
@@ -1098,6 +1160,163 @@ export default defineComponent({
   margin: 4px 0;
 }
 
+/* Mobile card list: hidden on desktop, replaces the table on phones. */
+.user-cards {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+}
+.user-card {
+  background: #ffffff;
+  border: 1px solid #eef1f6;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+}
+.uc-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.uc-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 16px;
+  color: #fff;
+  background: #6366f1;
+  flex-shrink: 0;
+}
+.uc-id {
+  flex: 1;
+  min-width: 0;
+}
+.uc-phone {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.uc-name {
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.uc-menu-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #eef1f6;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.uc-menu-btn.open {
+  background: #eef2ff;
+  color: #4f46e5;
+  border-color: #c7d2fe;
+}
+.uc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.uc-meta {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.uc-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.uc-meta-row span {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+.uc-meta-row b {
+  color: #0f172a;
+  font-weight: 600;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.uc-addr {
+  white-space: nowrap;
+}
+.uc-quick {
+  margin-top: 12px;
+}
+.uc-quick-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px;
+  border-radius: 12px;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #ecfdf5;
+  color: #059669;
+}
+.uc-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.uc-actions button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid #eef1f6;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.uc-actions button i {
+  font-size: 16px;
+  color: #6366f1;
+}
+.uc-actions button.danger {
+  grid-column: 1 / -1;
+  background: #fef2f2;
+  color: #ef4444;
+  border-color: #fee2e2;
+}
+.uc-actions button.danger i {
+  color: #ef4444;
+}
+.uc-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 24px;
+  font-size: 14px;
+}
+
 @media (max-width: 768px) {
   .table-toolbar {
     flex-direction: column;
@@ -1115,12 +1334,12 @@ export default defineComponent({
     flex: 1;
     min-width: 120px;
   }
+  /* Swap the wide table for cards. */
   .grid-table {
-    min-width: 780px;
+    display: none;
   }
-  .user-list {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  .user-cards {
+    display: flex;
   }
 }
 </style>
