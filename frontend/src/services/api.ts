@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { Capacitor } from '@capacitor/core'
+import { debugConsoleEnabled, pushLog, updateLog, snippet } from './debugLog'
 
 function resolveApiUrl(): string {
   const isNative = Capacitor.isNativePlatform()
@@ -133,6 +134,56 @@ api.interceptors.request.use((config) => {
   }
   return config
 })
+
+// Debug request logging. Records nothing unless debug mode is on, so ordinary
+// users pay no cost. The /api prefix and auth header are already applied above,
+// so what is logged is what actually goes on the wire.
+api.interceptors.request.use((config) => {
+  if (debugConsoleEnabled.value) {
+    const base = config.baseURL || ''
+    const url = config.url || ''
+    const fullURL = url.startsWith('http') ? url : `${base}${url}`
+    const id = pushLog({
+      ts: Date.now(),
+      method: (config.method || 'get').toUpperCase(),
+      url: fullURL,
+    })
+    ;(config as any).__debugId = id
+    ;(config as any).__debugStart =
+      typeof performance !== 'undefined' ? performance.now() : Date.now()
+  }
+  return config
+})
+
+function logOutcome(config: any, status: number | undefined, ok: boolean, body: unknown, errText?: string) {
+  if (!config || config.__debugId == null) return
+  const start = config.__debugStart
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  updateLog(config.__debugId, {
+    status,
+    ok,
+    durationMs: typeof start === 'number' ? Math.round(now - start) : undefined,
+    responseSnippet: snippet(body),
+    error: errText,
+  })
+}
+
+api.interceptors.response.use(
+  (response) => {
+    logOutcome(response.config, response.status, true, response.data)
+    return response
+  },
+  (error) => {
+    logOutcome(
+      error.config,
+      error.response?.status,
+      false,
+      error.response?.data,
+      error.message,
+    )
+    return Promise.reject(error)
+  },
+)
 
 // Session handling.
 //
