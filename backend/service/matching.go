@@ -63,6 +63,24 @@ func (s *MatchingService) autoMatchRadiusKM(ctx context.Context) float64 {
 	return defaultAutoMatchRadiusKM
 }
 
+// SettingAutoMatchingEnabled is the system_settings key that turns automatic
+// assignment on or off. It defaults to OFF: with it off, orders are only ever
+// taken by an executor pressing "take", never assigned by the worker.
+const SettingAutoMatchingEnabled = "auto_matching_enabled"
+
+// autoMatchingEnabled reports whether the worker may assign orders. Off unless an
+// admin explicitly turns it on, so the default behaviour is manual-only.
+func (s *MatchingService) autoMatchingEnabled(ctx context.Context) bool {
+	if s.settingsRepo == nil {
+		return false
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return false
+	}
+	return settings[SettingAutoMatchingEnabled] == "1"
+}
+
 // withinAutoMatchRadius reports whether an order is close enough to an executor
 // to be assigned automatically.
 //
@@ -121,6 +139,12 @@ func (s *MatchingService) executorEligible(ctx context.Context, executorID uuid.
 
 // MatchOrders executes the matching cycle.
 func (s *MatchingService) MatchOrders(ctx context.Context) error {
+	// Automatic assignment is opt-in. While it is off (the default), the worker
+	// does nothing and orders are taken only by an executor pressing "take".
+	if !s.autoMatchingEnabled(ctx) {
+		return nil
+	}
+
 	// 1. Get all searching orders
 	orders, err := s.orderRepo.GetPendingOrders(ctx)
 	if err != nil {

@@ -216,6 +216,25 @@
             </div>
           </div>
 
+          <div class="toggle-row">
+            <div class="toggle-text">
+              <label class="input-label">Автоматическое назначение заказов</label>
+              <div class="input-hint">
+                Включено — свободные заказы автоматически назначаются ближайшему исполнителю на смене (без нажатия «Взять заказ»).
+                Выключено — исполнитель берёт заказы только вручную.
+              </div>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                v-model="values.auto_matching_enabled"
+                true-value="1"
+                false-value="0"
+              />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
         </div>
       </div>
 
@@ -270,6 +289,7 @@ export default defineComponent({
       min_balance_limit: '0',
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',
+      auto_matching_enabled: '0',
     })
 
     const initialValues = ref<Record<string, string | number>>({ ...values.value })

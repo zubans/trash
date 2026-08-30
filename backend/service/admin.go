@@ -691,6 +691,11 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
 	}
+	// Whether the background worker auto-assigns orders. Off by default; only
+	// "1" or "0" so it cannot be switched on by a typo.
+	if v, ok := settings["auto_matching_enabled"]; ok && v != "0" && v != "1" {
+		return errors.New("setting auto_matching_enabled must be 0 or 1")
+	}
 	numericKeys["reject_penalty_share"] = true
 	// The platform's share of a completed order. Bounded below with the other
 	// numeric settings and above right here, because a share over 100% would pay

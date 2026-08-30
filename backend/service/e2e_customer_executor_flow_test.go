@@ -416,6 +416,12 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		t.Fatalf("this executor must have no stored position for the test to mean anything, got (%v, %v)", lat, lon)
 	}
 
+	// Automatic matching is off by default; turn it on so this test exercises the
+	// geography filtering rather than passing because the worker did nothing.
+	if err := settingsRepo.UpdateSettings(ctx, map[string]string{"auto_matching_enabled": "1"}); err != nil {
+		t.Fatalf("failed to enable auto matching: %v", err)
+	}
+
 	if err := matchingService.MatchOrders(ctx); err != nil {
 		t.Fatalf("matching cycle failed: %v", err)
 	}

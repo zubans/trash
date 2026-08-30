@@ -86,6 +86,15 @@ func newMatchingFixture(t *testing.T, settings map[string]string) *matchingFixtu
 		Status:     repository.ShiftStatusActive,
 	}}}
 
+	// Automatic matching is off by default in production; these tests exercise
+	// the matching logic itself, so enable it unless a case overrides the flag.
+	if settings == nil {
+		settings = map[string]string{}
+	}
+	if _, ok := settings["auto_matching_enabled"]; !ok {
+		settings["auto_matching_enabled"] = "1"
+	}
+
 	geoRepo := newFakeGeoRepo()
 	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo()).
 		WithGeo(geoRepo, &mockSettingsRepo{settings: settings})
@@ -122,6 +131,20 @@ func TestMatching_AssignsExecutorInsideRadius(t *testing.T) {
 	}
 	if !f.assigned(t) {
 		t.Error("expected the nearby executor to be assigned the order")
+	}
+}
+
+// With automatic matching turned off (the production default), even an executor
+// standing next to the pickup is left alone — orders are taken manually.
+func TestMatching_DisabledLeavesOrderUnassigned(t *testing.T) {
+	f := newMatchingFixture(t, map[string]string{"auto_matching_enabled": "0"})
+	f.geoRepo.set(f.executorID, 55.7520, 37.6010) // right next to the pickup
+
+	if err := f.srv.MatchOrders(context.Background()); err != nil {
+		t.Fatalf("unexpected error matching orders: %v", err)
+	}
+	if f.assigned(t) {
+		t.Error("auto-matching is disabled; the order must stay unassigned")
 	}
 }
 
