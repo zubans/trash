@@ -134,11 +134,12 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		return nil, 0, err
 	}
 
-	// Get paginated list with customer address
+	// Get paginated list with customer address. The multi-role set is fetched
+	// separately (attachRoles) rather than joined here, so that a missing or
+	// empty user_roles table can never take down the whole admin listing.
 	listQuery := fmt.Sprintf(
 		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at, COALESCE(cp.address, '') as address,
-		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, ''),
-		        COALESCE((SELECT string_agg(ur.role, ',' ORDER BY ur.role) FROM user_roles ur WHERE ur.user_id = u.id), u.role) AS roles
+		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, '')
 		 FROM users u
 		 LEFT JOIN customer_profiles cp ON cp.user_id = u.id
 		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
@@ -157,19 +158,53 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		var u User
 		// The password hash is deliberately not selected: it has no use in an
 		// admin listing and must not travel through the application at all.
-		var rolesCSV string
 		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address,
-			&u.LastName, &u.FirstName, &u.Patronymic, &rolesCSV)
+			&u.LastName, &u.FirstName, &u.Patronymic)
 		if err != nil {
 			return nil, 0, err
 		}
-		if rolesCSV != "" {
-			u.Roles = strings.Split(rolesCSV, ",")
-		}
 		users = append(users, &u)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	r.attachRoles(ctx, users)
 
 	return users, total, nil
+}
+
+// attachRoles populates each user's multi-role set from user_roles. It is
+// deliberately best-effort: any failure (most importantly the table not existing
+// yet because migration 039 has not run) is swallowed and leaves Roles empty, so
+// the admin user list still renders — the client falls back to the primary role.
+func (r *adminRepo) attachRoles(ctx context.Context, users []*User) {
+	if len(users) == 0 {
+		return
+	}
+	placeholders := make([]string, len(users))
+	args := make([]interface{}, len(users))
+	byID := make(map[uuid.UUID]*User, len(users))
+	for i, u := range users {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = u.ID
+		byID[u.ID] = u
+	}
+	query := "SELECT user_id, role FROM user_roles WHERE user_id IN (" + strings.Join(placeholders, ", ") + ") ORDER BY role"
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid uuid.UUID
+		var role string
+		if err := rows.Scan(&uid, &role); err != nil {
+			return
+		}
+		if u, ok := byID[uid]; ok {
+			u.Roles = append(u.Roles, role)
+		}
+	}
 }
 
 func (r *adminRepo) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error) {

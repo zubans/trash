@@ -1,5 +1,13 @@
+-- +migrate no-transaction
 -- 038_order_commission.sql
 -- Platform commission on completed orders.
+--
+-- This migration must run OUTSIDE a transaction: PostgreSQL refuses
+-- "ALTER TYPE ... ADD VALUE" inside a transaction block, so wrapping it (the
+-- default) makes the whole migration fail, which in turn blocks every later
+-- migration (e.g. 039 user_roles) from applying. Every statement below is
+-- individually idempotent (IF NOT EXISTS / ON CONFLICT), so running without the
+-- wrapping transaction is safe to re-run.
 --
 -- A completed order used to drain escrow entirely to the executor. Now a
 -- configurable share of the final amount is kept by the platform, and it has to
