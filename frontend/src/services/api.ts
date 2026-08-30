@@ -64,9 +64,12 @@ api.interceptors.request.use((config) => {
 })
 
 // Build a WebSocket URL for the chat endpoint based on the active API base URL.
-// Native apps use plain ws:// against the mobile HTTP port, while the web uses
-// wss:// against the HTTPS port. The /api prefix matches the backend route
-// mounting so SPA and API paths never collide.
+// The scheme follows the API origin (https -> wss, http -> ws) and is forced to
+// the secure wss:// whenever the app runs in a secure context — the native app
+// (androidScheme: 'https') and any https web page. An insecure ws:// opened from
+// a secure origin is mixed content: the WebView blocks or silently drops it,
+// which is why chat sends went missing on mobile. The /api prefix matches the
+// backend route mounting so SPA and API paths never collide.
 export function buildChatWebSocketUrl(orderId: string): string {
   // The token is read here rather than passed in. Callers used to hand over
   // authStore.token, which is written at login and never again: after the first
@@ -81,7 +84,19 @@ export function buildChatWebSocketUrl(orderId: string): string {
   if (!base && typeof window !== 'undefined') {
     base = window.location.origin
   }
-  const wsBase = base.replace(/^http/, 'ws').replace(/\/$/, '')
+  let wsBase = base.replace(/^http/, 'ws').replace(/\/$/, '')
+
+  // Never open an insecure ws:// from a secure context. Only a plain-http local
+  // dev origin is allowed to stay on ws://.
+  if (wsBase.startsWith('ws://')) {
+    const secureContext =
+      Capacitor.isNativePlatform() ||
+      (typeof window !== 'undefined' && window.location.protocol === 'https:')
+    if (secureContext) {
+      wsBase = 'wss://' + wsBase.slice('ws://'.length)
+    }
+  }
+
   return `${wsBase}/api/chats/${orderId}/ws?token=${encodeURIComponent(token)}`
 }
 
