@@ -20,14 +20,35 @@
       <div ref="logEl" class="dbg-log">
         <div v-if="logs.length === 0" class="dbg-empty">Пока нет запросов…</div>
         <template v-for="log in logs" :key="log.id">
-          <div class="dbg-line" :class="lineClass(log)">
+          <!-- Tap a request to expand its full details. -->
+          <div class="dbg-line" :class="[lineClass(log), { open: isOpen(log.id) }]" @click="toggle(log.id)">
+            <span class="dbg-caret">{{ isOpen(log.id) ? '▾' : '▸' }}</span>
             <span class="dbg-time">{{ fmtTime(log.ts) }}</span>
             <span class="dbg-method">{{ log.method }}</span>
             <span class="dbg-code">{{ log.status ?? (log.error ? 'ERR' : '…') }}</span>
             <span class="dbg-url">{{ shortUrl(log.url) }}</span>
             <span v-if="log.durationMs != null" class="dbg-dur">{{ log.durationMs }}ms</span>
           </div>
-          <div v-if="detail(log)" class="dbg-sub" :class="lineClass(log)">↳ {{ detail(log) }}</div>
+
+          <div v-if="isOpen(log.id)" class="dbg-detail">
+            <div class="dbg-drow"><b>URL</b><span>{{ log.url }}</span></div>
+            <div class="dbg-drow"><b>Метод</b><span>{{ log.method }}</span></div>
+            <div class="dbg-drow">
+              <b>Статус</b><span>{{ log.status ?? '—' }}{{ log.ok === false ? ' · ошибка' : '' }}</span>
+            </div>
+            <div class="dbg-drow"><b>Время</b><span>{{ fmtTime(log.ts) }}</span></div>
+            <div v-if="log.durationMs != null" class="dbg-drow"><b>Длит.</b><span>{{ log.durationMs }} ms</span></div>
+            <div v-if="log.error" class="dbg-drow err"><b>Ошибка</b><span>{{ log.error }}</span></div>
+            <div v-if="log.responseSnippet" class="dbg-dbody">
+              <div class="dbg-dbody-head">
+                <b>Ответ</b>
+                <button type="button" class="dbg-copy" @click.stop="copy(log)">
+                  {{ copiedId === log.id ? 'скопировано' : 'копировать' }}
+                </button>
+              </div>
+              <pre class="dbg-pre">{{ log.responseSnippet }}</pre>
+            </div>
+          </div>
         </template>
       </div>
     </div>
@@ -49,6 +70,10 @@ export default defineComponent({
   setup() {
     const collapsed = ref(true)
     const logEl = ref<HTMLElement | null>(null)
+    // Which request rows are expanded to show their details. A Set (reassigned on
+    // change) lets several be open at once.
+    const openIds = ref<Set<number>>(new Set())
+    const copiedId = ref<number | null>(null)
 
     const logs = debugLogs
     const errorCount = computed(
@@ -65,16 +90,30 @@ export default defineComponent({
     const shortUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '') || '/'
     const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString()
 
-    // A dim second line carrying the error message or the response body, so the
-    // reason a call failed (or what an "empty" list actually returned) is visible
-    // without leaving the console.
-    const detail = (log: DebugLogEntry) => {
-      if (log.error) return log.error
-      if (log.responseSnippet) return log.responseSnippet
-      return ''
+    const isOpen = (id: number) => openIds.value.has(id)
+    const toggle = (id: number) => {
+      const next = new Set(openIds.value)
+      next.has(id) ? next.delete(id) : next.add(id)
+      openIds.value = next
     }
 
-    const clear = () => clearDebugLogs()
+    const copy = async (log: DebugLogEntry) => {
+      const text = `${log.method} ${log.url}\nСтатус: ${log.status ?? '—'}\n${log.error ? 'Ошибка: ' + log.error + '\n' : ''}${log.responseSnippet || ''}`
+      try {
+        await navigator.clipboard.writeText(text)
+        copiedId.value = log.id
+        setTimeout(() => {
+          if (copiedId.value === log.id) copiedId.value = null
+        }, 1200)
+      } catch {
+        // clipboard unavailable — ignore
+      }
+    }
+
+    const clear = () => {
+      clearDebugLogs()
+      openIds.value = new Set()
+    }
     const disable = () => {
       setDebugConsole(false)
       collapsed.value = true
@@ -101,10 +140,13 @@ export default defineComponent({
       logEl,
       logs,
       errorCount,
+      copiedId,
       lineClass,
       shortUrl,
       fmtTime,
-      detail,
+      isOpen,
+      toggle,
+      copy,
       clear,
       disable,
     }
@@ -188,6 +230,20 @@ export default defineComponent({
   align-items: baseline;
   line-height: 1.5;
   white-space: nowrap;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.dbg-line:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.dbg-line.open {
+  background: rgba(255, 255, 255, 0.07);
+}
+.dbg-caret {
+  color: #64748b;
+  width: 10px;
+  flex-shrink: 0;
 }
 .dbg-time {
   color: #64748b;
@@ -212,20 +268,75 @@ export default defineComponent({
   padding-left: 8px;
 }
 
-.dbg-line.err .dbg-code,
-.dbg-sub.err {
+.dbg-line.err .dbg-code {
   color: #ff6b6b;
 }
 .dbg-line.ok .dbg-code {
   color: #7fe08a;
 }
 
-.dbg-sub {
-  color: #8ea; /* dim response/error body */
+/* Expanded detail block */
+.dbg-detail {
+  margin: 2px 0 6px 14px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid #334;
+  border-radius: 6px;
+}
+.dbg-drow {
+  display: flex;
+  gap: 8px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.dbg-drow b {
+  color: #7f93ad;
+  min-width: 56px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+.dbg-drow span {
+  color: #dbe4ee;
+}
+.dbg-drow.err b,
+.dbg-drow.err span {
+  color: #ff6b6b;
+}
+.dbg-dbody {
+  margin-top: 6px;
+}
+.dbg-dbody-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+.dbg-dbody-head b {
+  color: #7f93ad;
+  font-weight: 600;
+}
+.dbg-copy {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #bcd;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.dbg-copy:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.dbg-pre {
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+  color: #a5d6b0;
   line-height: 1.4;
-  padding: 0 0 3px 8px;
-  opacity: 0.85;
+  max-height: 200px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 6px 8px;
+  border-radius: 4px;
 }
 </style>

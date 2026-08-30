@@ -163,7 +163,9 @@ function logOutcome(config: any, status: number | undefined, ok: boolean, body: 
     status,
     ok,
     durationMs: typeof start === 'number' ? Math.round(now - start) : undefined,
-    responseSnippet: snippet(body),
+    // A larger cap than the default: the body is only rendered when a row is
+    // expanded, so keeping more of it makes the details actually useful.
+    responseSnippet: snippet(body, 4000),
     error: errText,
   })
 }
