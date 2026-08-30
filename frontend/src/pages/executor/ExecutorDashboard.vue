@@ -1929,6 +1929,12 @@ export default defineComponent({
 .sidebar-nav {
   padding: 16px; flex: 1;
   display: flex; flex-direction: column; gap: 6px;
+  /* The menu scrolls rather than being clipped by the fixed-height sidebar:
+     min-height lets this flex child shrink below its content, and contained
+     overscroll keeps the page behind the overlay still. */
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 .nav-item {
   display: flex; align-items: center; gap: 12px;

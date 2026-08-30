@@ -11,93 +11,106 @@
     <aside :class="['sidebar', { 'minimized': sidebarMinimized }]">
       <div class="logo">
         <AppLogo :hide-text="sidebarMinimized && !isMobile" />
+        <!-- Icon only: there is no room for the label beside the logo, so the
+             accessible name comes from aria-label rather than visible text. -->
+        <button
+          class="logo-logout"
+          type="button"
+          title="Выйти из аккаунта"
+          aria-label="Выйти из аккаунта"
+          @click="doLogout"
+        >
+          <i class="ph-bold ph-sign-out"></i>
+        </button>
       </div>
 
-      <div v-if="!sidebarMinimized || isMobile" class="nav-section">Управление</div>
-      <div class="nav-list">
-        <router-link to="/admin/users" class="nav-item" :class="{ active: currentRouteName === 'admin-users' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-users"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.users') }}</span>
-        </router-link>
+      <!-- Only the nav scrolls: the logo stays put and the footer below stays
+           reachable, which is the whole point on a phone. -->
+      <div class="sidebar-scroll">
+        <div v-if="!sidebarMinimized || isMobile" class="nav-section">Управление</div>
+        <div class="nav-list">
+          <router-link to="/admin/users" class="nav-item" :class="{ active: currentRouteName === 'admin-users' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-users"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.users') }}</span>
+          </router-link>
 
-        <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
-          <div class="nav-icon-wrap">
-            <i class="ph ph-chats-teardrop"></i>
-            <span v-if="unreadSupportCount > 0 && sidebarMinimized && !isMobile" class="nav-dot-badge"></span>
-          </div>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.supportChats') }}</span>
-          <span v-if="unreadSupportCount > 0 && (!sidebarMinimized || isMobile)" class="nav-badge">{{ unreadSupportCount }}</span>
-        </router-link>
+          <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
+            <div class="nav-icon-wrap">
+              <i class="ph ph-chats-teardrop"></i>
+              <span v-if="unreadSupportCount > 0 && sidebarMinimized && !isMobile" class="nav-dot-badge"></span>
+            </div>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.supportChats') }}</span>
+            <span v-if="unreadSupportCount > 0 && (!sidebarMinimized || isMobile)" class="nav-badge">{{ unreadSupportCount }}</span>
+          </router-link>
 
-        <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
-          <i class="ph-fill ph-wallet"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.topups') }}</span>
-        </router-link>
+          <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
+            <i class="ph-fill ph-wallet"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.topups') }}</span>
+          </router-link>
 
-        <router-link to="/admin/withdrawals" class="nav-item" :class="{ active: currentRouteName === 'admin-withdrawals' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-bank"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.withdrawals') }}</span>
-        </router-link>
+          <router-link to="/admin/withdrawals" class="nav-item" :class="{ active: currentRouteName === 'admin-withdrawals' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-bank"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.withdrawals') }}</span>
+          </router-link>
 
-        <router-link to="/admin/commission" class="nav-item" :class="{ active: currentRouteName === 'admin-commission' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-percent"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.commission') }}</span>
-        </router-link>
+          <router-link to="/admin/commission" class="nav-item" :class="{ active: currentRouteName === 'admin-commission' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-percent"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.commission') }}</span>
+          </router-link>
 
-        <router-link to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-arrows-left-right"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.transactions') }}</span>
-        </router-link>
+          <router-link to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-arrows-left-right"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.transactions') }}</span>
+          </router-link>
 
-        <router-link to="/admin/reconciliation" class="nav-item" :class="{ active: currentRouteName === 'admin-reconciliation' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-scales"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.reconciliation') }}</span>
-        </router-link>
+          <router-link to="/admin/reconciliation" class="nav-item" :class="{ active: currentRouteName === 'admin-reconciliation' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-scales"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.reconciliation') }}</span>
+          </router-link>
 
-        <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-megaphone"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>
-        </router-link>
+          <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-megaphone"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>
+          </router-link>
+        </div>
+
+        <div v-if="!sidebarMinimized || isMobile" class="nav-section">Система</div>
+        <div class="nav-list">
+          <router-link to="/admin/shifts" class="nav-item" :class="{ active: currentRouteName === 'admin-shifts' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-clock-user"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeShifts') }}</span>
+          </router-link>
+
+          <router-link to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-package"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeOrders') }}</span>
+          </router-link>
+
+          <router-link to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-check-circle"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.completedOrders') }}</span>
+          </router-link>
+
+          <router-link to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-list-dashes"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.serviceCatalog') }}</span>
+          </router-link>
+
+          <router-link to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-gear"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
+          </router-link>
+        </div>
       </div>
 
-      <div v-if="!sidebarMinimized || isMobile" class="nav-section">Система</div>
-      <div class="nav-list">
-        <router-link to="/admin/shifts" class="nav-item" :class="{ active: currentRouteName === 'admin-shifts' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-clock-user"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeShifts') }}</span>
-        </router-link>
-
-        <router-link to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-package"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeOrders') }}</span>
-        </router-link>
-
-        <router-link to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-check-circle"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.completedOrders') }}</span>
-        </router-link>
-
-        <router-link to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-list-dashes"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.serviceCatalog') }}</span>
-        </router-link>
-
-        <router-link to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
-          <i class="ph ph-gear"></i>
-          <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
-        </router-link>
-      </div>
-
-      <!-- Sidebar utilities: language + logout live here, not in the header. -->
-      <div class="sidebar-footer">
-        <div v-if="!sidebarMinimized || isMobile" class="sidebar-lang">
+      <!-- Language lives here; logout sits at the top next to the logo. The
+           whole footer is dropped when minimized, so an empty bordered strip is
+           not left behind. -->
+      <div v-if="!sidebarMinimized || isMobile" class="sidebar-footer">
+        <div class="sidebar-lang">
           <span>Язык</span>
           <LanguageSwitcher />
         </div>
-        <button class="sidebar-logout" title="Выйти из аккаунта" @click="doLogout">
-          <i class="ph-bold ph-sign-out"></i>
-          <span v-if="!sidebarMinimized || isMobile">Выйти из аккаунта</span>
-        </button>
       </div>
     </aside>
 
@@ -278,8 +291,40 @@ export default defineComponent({
 .logo {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 32px;
   padding: 0 4px;
+}
+
+/* Logout, pinned to the top row beside the logo. */
+.logo-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #ef4444;
+  font-size: 20px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.logo-logout:hover {
+  background: #fef2f2;
+}
+
+/* Minimized, the 80px rail has no room for two things side by side, so the
+   button drops under the logo mark instead of being squeezed out of view. */
+.sidebar.minimized .logo {
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
 }
 
 .logo-container {
@@ -315,6 +360,38 @@ export default defineComponent({
   font-weight: 700;
   color: #5c60f5;
   letter-spacing: 0.3px;
+}
+
+/* The scrolling part of the sidebar.
+   The sidebar is a fixed-height flex column, so without this the nav simply
+   overflowed it and .admin-app's overflow:hidden clipped whatever did not fit.
+   On a phone that put the footer — language and "Выйти из аккаунта" — below the
+   fold with no way to scroll to it. */
+.sidebar-scroll {
+  flex: 1;
+  /* A flex child refuses to shrink below its content without this, which would
+     keep the overflow on the sidebar instead of moving it in here. */
+  min-height: 0;
+  overflow-y: auto;
+  /* Scrolling to the end of the menu must not start dragging the page behind
+     the open overlay. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  border-radius: 999px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .nav-section {
@@ -395,7 +472,7 @@ export default defineComponent({
   font-size: 20px;
 }
 
-/* Sidebar footer: language + logout, pinned to the bottom. */
+/* Sidebar footer: the language switcher, pinned to the bottom. */
 .sidebar-footer {
   margin-top: auto;
   padding-top: 12px;
@@ -416,30 +493,6 @@ export default defineComponent({
   font-size: 13px;
   font-weight: 600;
   color: #64748b;
-}
-.sidebar-logout {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border: none;
-  background: transparent;
-  border-radius: 12px;
-  color: #ef4444;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  font-family: inherit;
-}
-.sidebar-logout i {
-  font-size: 20px;
-}
-.sidebar-logout:hover {
-  background: #fef2f2;
-}
-.sidebar.minimized .sidebar-logout {
-  justify-content: center;
 }
 
 /* Main Content Wrapper */
@@ -548,7 +601,11 @@ export default defineComponent({
     top: 0;
     left: 0;
     bottom: 0;
+    /* 100vh can exceed what is actually visible while a mobile browser's
+       toolbars are showing, which would push the footer off screen again even
+       with the nav scrolling. dvh tracks the visible viewport. */
     height: 100vh;
+    height: 100dvh;
     z-index: 1000;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
     transform: translateX(0);
@@ -560,6 +617,12 @@ export default defineComponent({
   .sidebar.minimized {
     transform: translateX(-100%);
     width: 260px !important;
+  }
+
+  /* In the installed app the home indicator sits over the bottom of the screen;
+     without this the logout ends up underneath it. Resolves to 0 elsewhere. */
+  .sidebar-footer {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .sidebar-backdrop {
