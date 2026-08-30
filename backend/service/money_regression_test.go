@@ -192,7 +192,7 @@ func TestEndShiftEarlyChargesPenalty(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
 	settings := &mockSettingsRepo{settings: map[string]string{"shift_early_exit_penalty": "50"}}
-	srv := NewShiftService(shiftRepo, nil, NewLedger(txRepo, newMockAccounts()), settings, &mockOrderRepo{}, nil, nil)
+	srv := NewShiftService(shiftRepo, NewLedger(txRepo, newMockAccounts()), settings, &mockOrderRepo{}, nil, nil)
 
 	executorID := uuid.New()
 	if _, err := shiftRepo.StartShift(context.Background(), executorID, 3); err != nil {

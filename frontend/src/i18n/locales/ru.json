@@ -176,7 +176,7 @@
     "increasedTariffCoeff": "Коэффициент повышенного тарифа (x)",
     "urgentTariffCoeff": "Коэффициент срочного тарифа (x)",
     "asapTariffCoeff": "Коэффициент ASAP-тарифа (x)",
-    "fineAmount": "Штраф за нарушение SLA",
+    "autoMatchRadiusKm": "Радиус автоназначения заказов",
     "minBalanceLimit": "Максимально допустимый лимит ухода в минус (₽)",
     "currency": "Валюта",
     "executorLocationInterval": "Интервал отправки GPS координат (сек)",

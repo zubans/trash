@@ -112,7 +112,10 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inside, err := h.shiftService.RecordLocationWithResult(r.Context(), user.ID, req.Latitude, req.Longitude)
+	// "stored" reports whether the position was actually taken; the location
+	// rules may decline a move that looks like a district change inside its
+	// cooldown. The old "is_inside" flag went with the geofence it described.
+	stored, err := h.shiftService.RecordLocation(r.Context(), user.ID, req.Latitude, req.Longitude)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -120,7 +123,7 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"is_inside": inside})
+	json.NewEncoder(w).Encode(map[string]bool{"stored": stored})
 }
 
 // GetActiveShiftHandler handles GET /executor/shifts/active.

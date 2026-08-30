@@ -4,6 +4,7 @@ strapi-backend/
 
 # Self-signed certificates for local HTTPS development
 /certs/
+.claude/
 
 # Android release signing material
 healthlogin-release.keystore

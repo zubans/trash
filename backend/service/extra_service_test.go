@@ -390,7 +390,7 @@ func TestChatService_Extended(t *testing.T) {
 
 func TestShiftService_Extended(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
-	srv := NewShiftService(shiftRepo, nil, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil, nil)
+	srv := NewShiftService(shiftRepo, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil, nil)
 
 	execID := uuid.New()
 	shift, err := srv.StartShift(context.Background(), execID, 3)
@@ -514,7 +514,7 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 func TestMatchingService_MatchOrders(t *testing.T) {
 	orderRepo := &mockOrderRepo{}
 	shiftRepo := &mockShiftRepo{}
-	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo(), nil)
+	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo())
 
 	// When no pending orders exist
 	err := srv.MatchOrders(context.Background())
@@ -525,18 +525,6 @@ func TestMatchingService_MatchOrders(t *testing.T) {
 	// Test StartMatchingWorker
 	srv.StartMatchingWorker(context.Background(), 10*time.Millisecond)
 	time.Sleep(25 * time.Millisecond)
-}
-
-func TestGeo_ParsePolygon(t *testing.T) {
-	poly, err := parsePolygon(`[{"lat": 55.75, "lon": 37.61}, {"lat": 55.76, "lon": 37.62}]`)
-	if err != nil || len(poly) != 2 {
-		t.Fatalf("failed parsing polygon: %v", err)
-	}
-
-	_, err = parsePolygon("invalid json")
-	if err == nil {
-		t.Error("expected error for invalid polygon json")
-	}
 }
 
 func TestAuthService_NewAuthService(t *testing.T) {

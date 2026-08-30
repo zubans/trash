@@ -77,11 +77,7 @@ func (m *mockUserRepository) UpdateBalance(ctx context.Context, id uuid.UUID, ba
 	return nil
 }
 
-func (m *mockUserRepository) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
-	return nil
-}
-
-func (m *mockUserRepository) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
+func (m *mockUserRepository) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
 }
 
@@ -111,14 +107,6 @@ func (m *mockUserRepository) ResetPasswordWithCode(ctx context.Context, email, c
 
 func (m *mockUserRepository) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
-}
-
-func (m *mockUserRepository) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
-	if m.addresses == nil {
-		m.addresses = make(map[uuid.UUID]string)
-	}
-	m.addresses[userID] = address
-	return nil
 }
 
 func (m *mockUserRepository) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {

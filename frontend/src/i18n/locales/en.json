@@ -176,7 +176,7 @@
     "increasedTariffCoeff": "Increased Tariff Coefficient (x)",
     "urgentTariffCoeff": "Urgent Tariff Coefficient (x)",
     "asapTariffCoeff": "ASAP Tariff Coefficient (x)",
-    "fineAmount": "SLA Violation Fine Amount",
+    "autoMatchRadiusKm": "Automatic assignment radius",
     "minBalanceLimit": "Maximum Allowed Negative Balance Limit",
     "currency": "Currency",
     "executorLocationInterval": "GPS location send interval (sec)",

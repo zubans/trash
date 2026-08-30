@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,24 +12,79 @@ import (
 	"healthlogin/backend/repository"
 )
 
+// defaultAutoMatchRadiusKM bounds automatic assignment. It matches the radius
+// the executor map shows orders within, so the worker can only hand out orders
+// the executor would have seen and could plausibly travel to.
+const defaultAutoMatchRadiusKM = 10.0
+
 // MatchingService matches searching orders with active executors.
 type MatchingService struct {
-	orderRepo   repository.OrderRepository
-	shiftRepo   repository.ShiftRepository
-	userRepo    repository.UserRepository
-	catalogRepo repository.ServiceCatalogRepository
-	db          *sql.DB
+	orderRepo    repository.OrderRepository
+	shiftRepo    repository.ShiftRepository
+	userRepo     repository.UserRepository
+	catalogRepo  repository.ServiceCatalogRepository
+	geoRepo      repository.ExecutorGeoRepository
+	settingsRepo repository.SettingsRepository
 }
 
 // NewMatchingService creates a new MatchingService.
-func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo repository.ShiftRepository, userRepo repository.UserRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *MatchingService {
+func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo repository.ShiftRepository, userRepo repository.UserRepository, catalogRepo repository.ServiceCatalogRepository) *MatchingService {
 	return &MatchingService{
 		orderRepo:   orderRepo,
 		shiftRepo:   shiftRepo,
 		userRepo:    userRepo,
 		catalogRepo: catalogRepo,
-		db:          db,
 	}
+}
+
+// WithGeo attaches the stores automatic matching needs to bound assignment by
+// distance. Without them the worker cannot tell how far an executor is from an
+// order, and refuses to assign rather than guessing.
+func (s *MatchingService) WithGeo(geoRepo repository.ExecutorGeoRepository, settingsRepo repository.SettingsRepository) *MatchingService {
+	s.geoRepo = geoRepo
+	s.settingsRepo = settingsRepo
+	return s
+}
+
+// autoMatchRadiusKM reads the configured bound, falling back to the default.
+func (s *MatchingService) autoMatchRadiusKM(ctx context.Context) float64 {
+	if s.settingsRepo == nil {
+		return defaultAutoMatchRadiusKM
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return defaultAutoMatchRadiusKM
+	}
+	if v, ok := settings["auto_match_radius_km"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			return f
+		}
+	}
+	return defaultAutoMatchRadiusKM
+}
+
+// withinAutoMatchRadius reports whether an order is close enough to an executor
+// to be assigned automatically.
+//
+// An unknown position is a "no", never a free pass. Letting an unlocatable
+// executor through is how an order ends up assigned to somebody on the other
+// side of the country, who can only cancel it.
+func (s *MatchingService) withinAutoMatchRadius(ctx context.Context, executorID uuid.UUID, order *repository.Order, radiusKM float64) bool {
+	if order.PickupLat == nil || order.PickupLon == nil {
+		return false
+	}
+	if s.geoRepo == nil {
+		return false
+	}
+	execLat, execLon, _, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
+	if err != nil {
+		log.Printf("[MatchingWorker] failed to read location for executor %s: %v", executorID, err)
+		return false
+	}
+	if execLat == nil || execLon == nil {
+		return false
+	}
+	return HaversineDistanceKM(*order.PickupLat, *order.PickupLon, *execLat, *execLon) <= radiusKM
 }
 
 // StartMatchingWorker starts a background loop that runs matching periodically.
@@ -76,35 +129,11 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 		return nil
 	}
 
-	// 2. Fetch all geozones
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, type, center_latitude, center_longitude, radius_meters, coordinates FROM geozones`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var zones []*repository.Geozone
-	for rows.Next() {
-		var g repository.Geozone
-		var coordinatesRaw []byte
-		err := rows.Scan(&g.ID, &g.Name, &g.Type, &g.CenterLatitude, &g.CenterLongitude, &g.RadiusMeters, &coordinatesRaw)
-		if err != nil {
-			return err
-		}
-		if coordinatesRaw != nil {
-			cStr := string(coordinatesRaw)
-			g.Coordinates = &cStr
-		}
-		zones = append(zones, &g)
-	}
-
-	// 3. Fetch all active shifts
+	// 2. Fetch all active shifts
 	activeShifts, err := s.shiftRepo.GetActiveShifts(ctx)
 	if err != nil {
 		return err
 	}
-	// Published before the early return: a queue with nobody on shift is the
-	// case worth seeing, and returning early used to leave the gauges stale.
 	metrics.SetMarketplaceDepth(len(orders), len(activeShifts))
 	if len(activeShifts) == 0 {
 		return nil
@@ -116,96 +145,38 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 		activeExecutors[shift.ExecutorID] = shift
 	}
 
-	// 4. Match each order
+	// 3. Match each order
+	radiusKM := s.autoMatchRadiusKM(ctx)
 	for _, order := range orders {
-		// Assign orders only from verified customers, mirroring the manual
-		// order feeds ("показ заказов только от верифицированных пользователей").
+		// Assign orders only from verified customers if customer exists
 		if s.userRepo != nil {
 			if customer, err := s.userRepo.FindByID(ctx, order.CustomerID); err == nil && customer != nil && !customer.IsVerified() {
 				continue
 			}
 		}
 
-		// Prefer order pickup coordinates; fall back to customer profile last_geo.
-		var lat, lon float64
-		hasCoords := false
-		if order.PickupLat != nil && order.PickupLon != nil {
-			lat = *order.PickupLat
-			lon = *order.PickupLon
-			hasCoords = true
-		} else {
-			var lastGeo string
-			err = s.db.QueryRowContext(ctx, `SELECT last_geo FROM customer_profiles WHERE user_id = $1`, order.CustomerID).Scan(&lastGeo)
-			if err != nil && err != sql.ErrNoRows {
-				log.Printf("[MatchingWorker] Failed to query last_geo for customer %s: %v", order.CustomerID, err)
-				continue
-			}
-			if lastGeo != "" {
-				parts := strings.Split(lastGeo, ",")
-				if len(parts) == 2 {
-					var err1, err2 error
-					lat, err1 = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-					lon, err2 = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-					hasCoords = err1 == nil && err2 == nil
-				}
-			}
-		}
-
-		// Resolve Customer Geozone ID (default to Geozone 1 if empty or unparseable)
-		geozoneID := 1
-		if hasCoords {
-			for _, zone := range zones {
-				isInside := false
-				if zone.Type == "CIRCLE" {
-					if zone.CenterLatitude != nil && zone.CenterLongitude != nil && zone.RadiusMeters != nil {
-						isInside = IsWithinRadius(lat, lon, *zone.CenterLatitude, *zone.CenterLongitude, int(*zone.RadiusMeters))
-					}
-				} else if zone.Type == "POLYGON" {
-					if zone.Coordinates != nil {
-						poly, err := parsePolygon(*zone.Coordinates)
-						if err == nil {
-							isInside = IsPointInPolygon(Point{Lat: lat, Lon: lon}, poly)
-						}
-					}
-				}
-				if isInside {
-					geozoneID = zone.ID
-					break
-				}
-			}
-		}
-
-		// Find executor in the same geozone who is active, eligible for this
-		// service variant and does not have an assigned order.
 		var matchedExecutorID uuid.UUID
 		for execID := range activeExecutors {
-			// Age / verification restrictions apply to automatic assignment too.
 			if !s.executorEligible(ctx, execID, order.ServiceVariantID) {
 				continue
 			}
 			if execID == order.CustomerID {
 				continue
 			}
-			// Check executor work area geozone
-			var execWorkAreaID int
-			err = s.db.QueryRowContext(ctx, `SELECT work_area_id FROM executor_profiles WHERE user_id = $1`, execID).Scan(&execWorkAreaID)
-			if err != nil {
+			if !s.withinAutoMatchRadius(ctx, execID, order, radiusKM) {
 				continue
 			}
 
-			if execWorkAreaID == geozoneID {
-				// Check if this executor already has an assigned order
-				var hasAssigned bool
-				err = s.db.QueryRowContext(ctx, `
-					SELECT EXISTS(
-						SELECT 1 FROM orders
-						WHERE executor_id = $1 AND status = 'ASSIGNED'
-					)`, execID).Scan(&hasAssigned)
-
-				if err == nil && !hasAssigned {
-					matchedExecutorID = execID
-					break
-				}
+			// One assigned order at a time: an executor already carrying one is
+			// not a candidate.
+			assigned, err := s.orderRepo.CountActiveOrdersByExecutor(ctx, execID)
+			if err != nil {
+				log.Printf("[MatchingWorker] failed to count assigned orders for executor %s: %v", execID, err)
+				continue
+			}
+			if assigned == 0 {
+				matchedExecutorID = execID
+				break
 			}
 		}
 
@@ -217,7 +188,7 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 			} else {
 				metrics.MatchingAssignment("assigned")
 				metrics.OrderEvent("assigned")
-				log.Printf("[MatchingWorker] Matched order %s with executor %s in Zone %d", order.ID, matchedExecutorID, geozoneID)
+				log.Printf("[MatchingWorker] Matched order %s with executor %s", order.ID, matchedExecutorID)
 			}
 		}
 	}

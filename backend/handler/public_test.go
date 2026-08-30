@@ -92,11 +92,7 @@ func (m *mockUserRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance 
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
-	return nil
-}
-
-func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
+func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
 }
 
@@ -131,10 +127,6 @@ func (m *mockUserRepo) ResetPasswordWithCode(ctx context.Context, email, code, n
 
 func (m *mockUserRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
-}
-
-func (m *mockUserRepo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
-	return nil
 }
 
 func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {

@@ -167,6 +167,22 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}, nil
 }
 
+// RecordLiveLocation stores a position the executor's app reports on its own
+// during a shift.
+//
+// It deliberately goes through the same rules as a move made on the map: the
+// passive channel would otherwise be a way around the district-change cooldown,
+// since an executor could post any coordinates they liked. A move that those
+// rules reject is not an error — the ping is telemetry, not a command — so the
+// outcome is reported as a boolean and the caller decides what to say about it.
+func (s *ExecutorGeoService) RecordLiveLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
+	resp, err := s.SetLocation(ctx, executorID, SetLocationRequest{Lat: lat, Lon: lon})
+	if err != nil {
+		return false, err
+	}
+	return resp.Success, nil
+}
+
 // LocationResponse reports the executor's authoritative stored position. It is
 // the single source of truth the map UI centers on, so the client never has to
 // guess from a possibly stale device fix.

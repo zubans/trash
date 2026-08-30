@@ -23,6 +23,8 @@ import (
 // AuthService handles user registration and authentication.
 type AuthService struct {
 	repo        repository.UserRepository
+	addressRepo repository.AddressRepository
+	execGeoRepo repository.ExecutorGeoRepository
 	refreshRepo repository.RefreshTokenRepository
 	tokenRepo   repository.TokenRepository
 	resolver    AddressResolver
@@ -55,6 +57,18 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, res
 		mailer = NewSmtpMailSender()
 	}
 	return &AuthService{repo: repo, resolver: resolver, mailer: mailer, secret: []byte(secret)}
+}
+
+// WithAddresses attaches the address repository used during registration.
+func (s *AuthService) WithAddresses(addressRepo repository.AddressRepository) *AuthService {
+	s.addressRepo = addressRepo
+	return s
+}
+
+// WithExecutorGeo attaches the executor geo repository for setting initial location.
+func (s *AuthService) WithExecutorGeo(execGeoRepo repository.ExecutorGeoRepository) *AuthService {
+	s.execGeoRepo = execGeoRepo
+	return s
 }
 
 // WithSessionStorage attaches the stores that back session handling: refresh
@@ -202,30 +216,44 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		return nil, err
 	}
 
-	// Save profile and base address location for both CUSTOMER and EXECUTOR
-	// Note: client supplied coordinates are stored for this user only. They are
-	// deliberately NOT written into the shared geocoding cache — anyone could
-	// otherwise register with someone else's address and repoint it.
-	var lastGeo string
+	// Resolve coordinates for initial address if not provided
+	var resLat, resLon *float64
 	if lat != nil && lon != nil {
-		lastGeo = formatGeo(*lat, *lon)
+		resLat = lat
+		resLon = lon
 	} else if s.resolver != nil {
-		// No coordinates from the client: resolve the typed address once so the
-		// executor's starting location is set. Best-effort — a failure leaves
-		// lastGeo empty rather than blocking registration.
 		if geo, err := s.resolver.Resolve(ctx, normalizedAddress); err == nil && geo != nil {
-			lastGeo = fmt.Sprintf("%f,%f", geo.Lat, geo.Lon)
+			l := geo.Lat
+			ln := geo.Lon
+			resLat = &l
+			resLon = &ln
 		}
 	}
 
-	if err := s.repo.CreateCustomerProfile(ctx, created.ID, normalizedAddress, lastGeo); err != nil {
-		return nil, err
+	fullName := strings.TrimSpace(fmt.Sprintf("%s %s %s", lastName, firstName, patronymic))
+	if role == "CUSTOMER" {
+		if err := s.repo.CreateCustomerProfile(ctx, created.ID, fullName); err != nil {
+			return nil, err
+		}
+	}
+
+	if s.addressRepo != nil {
+		addrRecord := parsedAddress.ToRecord()
+		addrRecord.UserID = created.ID
+		addrRecord.IsDefault = true
+		if resLat != nil && resLon != nil {
+			addrRecord.Lat = resLat
+			addrRecord.Lon = resLon
+		}
+		if _, err := s.addressRepo.Add(ctx, created.ID, addrRecord); err != nil {
+			log.Printf("[AuthService] failed to save initial address for user %s: %v", created.ID, err)
+		}
 	}
 
 	// Set initial executor location
-	if role == "EXECUTOR" && lastGeo != "" {
-		if err := s.repo.UpdateLastGeo(ctx, created.ID, lastGeo); err != nil {
-			log.Printf("[AuthService] failed to store initial geo for %s: %v", created.ID, err)
+	if role == "EXECUTOR" && resLat != nil && resLon != nil && s.execGeoRepo != nil {
+		if err := s.execGeoRepo.UpdateExecutorLocation(ctx, created.ID, *resLat, *resLon, false); err != nil {
+			log.Printf("[AuthService] failed to store initial executor geo for %s: %v", created.ID, err)
 		}
 	}
 

@@ -15,20 +15,35 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// ShiftService manages executor shifts and geofence checks.
+// ExecutorLocationRecorder stores a position an executor reports while working.
+// ShiftService owns shifts, not whereabouts, so it delegates: the stored
+// position has exactly one writer and one set of rules, in ExecutorGeoService.
+type ExecutorLocationRecorder interface {
+	RecordLiveLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error)
+}
+
+// ShiftService manages executor shifts.
 type ShiftService struct {
 	shiftRepo    repository.ShiftRepository
-	geozoneRepo  repository.GeozoneRepository
 	ledger       *Ledger
 	settingsRepo repository.SettingsRepository
 	orderRepo    repository.OrderRepository
 	catalogRepo  repository.ServiceCatalogRepository
+	locations    ExecutorLocationRecorder
 	db           *sql.DB
 }
 
 // NewShiftService creates a ShiftService.
-func NewShiftService(shiftRepo repository.ShiftRepository, geozoneRepo repository.GeozoneRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *ShiftService {
-	return &ShiftService{shiftRepo: shiftRepo, geozoneRepo: geozoneRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo, catalogRepo: catalogRepo, db: db}
+func NewShiftService(shiftRepo repository.ShiftRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *ShiftService {
+	return &ShiftService{shiftRepo: shiftRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo, catalogRepo: catalogRepo, db: db}
+}
+
+// WithExecutorLocation attaches the store that shift location reports are
+// written through. Without it RecordLocation reports that it cannot store
+// anything, rather than accepting positions and dropping them.
+func (s *ShiftService) WithExecutorLocation(recorder ExecutorLocationRecorder) *ShiftService {
+	s.locations = recorder
+	return s
 }
 
 // StartShift begins a new shift for an executor and schedules auto-end timer.
@@ -215,10 +230,6 @@ func (s *ShiftService) finishShift(ctx context.Context, executorID uuid.UUID) (*
 	return updated, nil
 }
 
-func (s *ShiftService) geofenceFineAmount(ctx context.Context) money.Amount {
-	return money.FromRubles(s.settingsFloat(ctx, "geofence_fine_amount", 500.0))
-}
-
 // earlyExitPenaltyAmount returns the fine charged when an executor ends a
 // shift before its planned end time.
 func (s *ShiftService) earlyExitPenaltyAmount(ctx context.Context) money.Amount {
@@ -241,89 +252,25 @@ func (s *ShiftService) settingsFloat(ctx context.Context, key string, defaultVal
 	return defaultValue
 }
 
-// RecordLocation stores a GPS point, checks geofence compliance and penalizes
-// the executor after three consecutive violations.
-func (s *ShiftService) RecordLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
-	_, err := s.RecordLocationWithResult(ctx, executorID, lat, lon)
-	return err
-}
-
-// RecordLocationWithResult stores a GPS point and returns whether the point is
-// inside the executor geofence.
-func (s *ShiftService) RecordLocationWithResult(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
+// RecordLocation stores the position an executor's app reports during a shift.
+//
+// The position is what automatic matching measures distance against, so a
+// report that is accepted but not stored would leave matching working from a
+// stale fix. The boolean says whether the position was actually taken: the
+// location rules can decline a move (a district change still inside its
+// cooldown), which is a legitimate outcome rather than a failure.
+func (s *ShiftService) RecordLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
+	// A nil shift with no error also means "not on shift": the repository
+	// reports an absent row that way, so checking only the error would accept
+	// positions from an executor who is not working.
 	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	if err != nil {
+	if err != nil || shift == nil {
 		return false, errors.New("no active shift")
 	}
-
-	inside := true
-	if s.geozoneRepo != nil {
-		geozone, err := s.geozoneRepo.FindByExecutor(ctx, executorID)
-		if err == nil && geozone != nil {
-			inside, err = s.IsWithinGeozone(ctx, geozone, lat, lon)
-			if err != nil {
-				log.Printf("[ShiftService] geozone check failed for executor %s: %v", executorID, err)
-				inside = true
-			}
-		}
+	if s.locations == nil {
+		return false, errors.New("executor location storage is not configured")
 	}
-
-	if err := s.shiftRepo.AddGPSLog(ctx, shift.ID, lat, lon, inside); err != nil {
-		return inside, err
-	}
-
-	if inside {
-		return inside, nil
-	}
-	metrics.ShiftEvent("geofence_violation")
-
-	logs, err := s.shiftRepo.GetLastGPSLogs(ctx, shift.ID, 3)
-	if err != nil {
-		log.Printf("[ShiftService] failed to load gps logs for shift %s: %v", shift.ID, err)
-		return inside, nil
-	}
-	if len(logs) < 3 {
-		return inside, nil
-	}
-	for _, v := range logs {
-		if v {
-			return inside, nil
-		}
-	}
-
-	fine := s.geofenceFineAmount(ctx)
-	if s.ledger != nil {
-		if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-			return s.ledger.Charge(ctx, tx, executorID, repository.AccountFines, fine, repository.TransactionTypeFine, nil)
-		}); err != nil {
-			log.Printf("[ShiftService] failed to charge fine for executor %s: %v", executorID, err)
-		}
-	}
-
-	if err := s.shiftRepo.Penalize(ctx, shift.ID, fine); err != nil {
-		log.Printf("[ShiftService] failed to penalize shift %s: %v", shift.ID, err)
-	}
-	metrics.ShiftEvent("geofence_penalty")
-	return inside, nil
-}
-
-// IsWithinGeozone checks whether a point is inside the executor working area.
-func (s *ShiftService) IsWithinGeozone(ctx context.Context, geozone *repository.Geozone, lat, lon float64) (bool, error) {
-	switch geozone.Type {
-	case string(repository.GeozoneTypeCircle):
-		if geozone.CenterLatitude == nil || geozone.CenterLongitude == nil || geozone.RadiusMeters == nil {
-			return false, errors.New("invalid circle geozone")
-		}
-		return IsWithinRadius(lat, lon, *geozone.CenterLatitude, *geozone.CenterLongitude, int(*geozone.RadiusMeters)), nil
-	case string(repository.GeozoneTypePolygon):
-		polygon := make([]Point, len(geozone.Polygon))
-		for i, p := range geozone.Polygon {
-			polygon[i] = Point{Lat: p.Lat, Lon: p.Lon}
-		}
-		return IsPointInPolygon(Point{Lat: lat, Lon: lon}, polygon), nil
-	default:
-		return false, errors.New("unknown geozone type")
-	}
+	return s.locations.RecordLiveLocation(ctx, executorID, lat, lon)
 }
 
 // ExecutorHistoryResult contains orders and transaction history for an executor.

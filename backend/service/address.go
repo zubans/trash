@@ -119,8 +119,8 @@ func ParseAddressLine(line string) Address {
 // recomposed rather than trusted, so the line shown to a person always matches
 // the parts beside it — including the apartment, which used to be appended by
 // the client and could disagree with what was stored.
-func (a Address) ToRecord() repository.CustomerAddress {
-	return repository.CustomerAddress{
+func (a Address) ToRecord() repository.Address {
+	return repository.Address{
 		Address: a.Compose(),
 		Region:  strings.TrimSpace(a.Region),
 		City:    strings.TrimSpace(a.City),
@@ -136,7 +136,7 @@ func (a Address) ToRecord() repository.CustomerAddress {
 
 // AddressFromRecord rebuilds the working address from a stored row, filling the
 // parts from the display line for rows written before they were stored.
-func AddressFromRecord(rec repository.CustomerAddress) Address {
+func AddressFromRecord(rec repository.Address) Address {
 	addr := Address{
 		Value:  rec.Address,
 		Region: rec.Region,

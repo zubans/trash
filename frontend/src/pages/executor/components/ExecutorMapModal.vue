@@ -134,8 +134,8 @@ export default defineComponent({
     // Pull the authoritative stored position from the backend. This is what the
     // marker and both zone circles must anchor to, because the server decides
     // "within circle" vs "district change" against exactly this point. Props
-    // (device GPS / dashboard's last_geo) are only a fallback for an executor
-    // who has no stored location yet.
+    // (the device's own GPS fix) are only a fallback for an executor who has no
+    // stored location yet.
     const fetchServerLocation = async (): Promise<boolean> => {
       try {
         const res = await api.get('/executor/location')

@@ -122,15 +122,15 @@
           <div class="form-grid">
             <div class="input-group">
               <div class="input-header">
-                <label class="input-label">{{ $t('settings.fineAmount') }}</label>
+                <label class="input-label">{{ $t('settings.autoMatchRadiusKm') }}</label>
               </div>
               <div class="input-wrapper has-prefix">
-                <span class="input-prefix">₽</span>
+                <span class="input-prefix">км</span>
                 <input
-                  v-model="values.geofence_fine_amount"
+                  v-model="values.auto_match_radius_km"
                   type="number"
-                  step="1"
-                  min="0"
+                  step="0.5"
+                  min="0.5"
                   required
                 />
               </div>
@@ -261,7 +261,7 @@ export default defineComponent({
       increased_tariff_coeff: '2.0',
       urgent_tariff_coeff: '3.0',
       asap_tariff_coeff: '8.0',
-      geofence_fine_amount: '500',
+      auto_match_radius_km: '10',
       min_balance_limit: '0',
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',

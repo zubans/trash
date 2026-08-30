@@ -467,10 +467,6 @@ func (m *orderMockShiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fi
 	return nil
 }
 
-func (m *orderMockShiftRepo) SaveGPSLog(ctx context.Context, log *repository.GPSLog) error {
-	return nil
-}
-
 func (m *orderMockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
 	return nil
 }
@@ -483,24 +479,11 @@ func (m *orderMockShiftRepo) UpdateShiftStatus(ctx context.Context, shiftID uuid
 	return nil
 }
 
-func (m *orderMockShiftRepo) AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error {
-	return nil
-}
-
-func (m *orderMockShiftRepo) GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error) {
-	return nil, nil
-}
-
-func (m *orderMockShiftRepo) GetGeozoneByID(ctx context.Context, id int) (*repository.Geozone, error) {
-	return nil, nil
-}
-
 type mockUserRepo struct {
-	lastGeo map[uuid.UUID]string
 }
 
 func newMockUserRepo() *mockUserRepo {
-	return &mockUserRepo{lastGeo: make(map[uuid.UUID]string)}
+	return &mockUserRepo{}
 }
 
 func (m *mockUserRepo) FindByPhone(ctx context.Context, phone string) (*repository.User, error) {
@@ -522,11 +505,7 @@ func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verifie
 func (m *mockUserRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
 	return nil
 }
-func (m *mockUserRepo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
-	m.lastGeo[id] = lastGeo
-	return nil
-}
-func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
+func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
 }
 func (m *mockUserRepo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
@@ -549,9 +528,6 @@ func (m *mockUserRepo) ResetPasswordWithCode(ctx context.Context, email, code, n
 }
 func (m *mockUserRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
-}
-func (m *mockUserRepo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
-	return nil
 }
 func (m *mockUserRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	return nil
@@ -664,13 +640,11 @@ func TestOrderService_CreateOrder(t *testing.T) {
 	customerID := uuid.New()
 	lat, lon := 55.7558, 37.6173
 	order, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
-	// last_geo is parsed as "lat,lon" by the matching worker, so only
-	// coordinates may be written into it — never the address string.
-	if userRepo.lastGeo[customerID] != formatGeo(lat, lon) {
-		t.Errorf("expected last_geo to hold coordinates, got %q", userRepo.lastGeo[customerID])
-	}
 	if err != nil {
 		t.Fatalf("unexpected error creating order: %v", err)
+	}
+	if order.PickupLat == nil || *order.PickupLat != lat || order.PickupLon == nil || *order.PickupLon != lon {
+		t.Errorf("expected pickup coordinates to be saved on order, got lat=%v, lon=%v", order.PickupLat, order.PickupLon)
 	}
 	if order.HoldAmount != money.FromRubles(100) {
 		t.Errorf("expected hold amount 100.0, got %s", order.HoldAmount)

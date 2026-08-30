@@ -31,17 +31,7 @@ type Shift struct {
 	FineAmount    money.Amount `json:"fine_amount"`
 }
 
-// GPSLog represents a single recorded coordinate.
-type GPSLog struct {
-	ID         uuid.UUID
-	ShiftID    uuid.UUID
-	Latitude   float64
-	Longitude  float64
-	IsInside   bool
-	RecordedAt time.Time
-}
-
-// ShiftRepository defines storage operations for shifts and GPS logs.
+// ShiftRepository defines storage operations for shifts.
 type ShiftRepository interface {
 	Create(ctx context.Context, shift *Shift) error
 	GetActiveShift(ctx context.Context, executorID uuid.UUID) (*Shift, error)
@@ -59,8 +49,6 @@ type ShiftRepository interface {
 	GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error)
 
 	StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*Shift, error)
-	AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error
-	GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error)
 }
 
 // shiftRepo implements ShiftRepository using *sql.DB.
@@ -181,7 +169,8 @@ func (r *shiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.
 func (r *shiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
-		 FROM shifts WHERE executor_id = $1
+		 FROM shifts
+		 WHERE executor_id = $1
 		 ORDER BY started_at DESC
 		 LIMIT 1`,
 		executorID,
@@ -191,15 +180,6 @@ func (r *shiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.
 		return nil, err
 	}
 	return &s, nil
-}
-
-func (r *shiftRepo) saveGPSLog(ctx context.Context, log *GPSLog) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO shift_gps_logs (id, shift_id, latitude, longitude, is_inside, recorded_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		log.ID, log.ShiftID, log.Latitude, log.Longitude, log.IsInside, log.RecordedAt,
-	)
-	return err
 }
 
 // StartShift creates and persists a new active shift.
@@ -217,39 +197,4 @@ func (r *shiftRepo) StartShift(ctx context.Context, executorID uuid.UUID, durati
 		return nil, err
 	}
 	return shift, nil
-}
-
-// AddGPSLog records a coordinate and whether it was inside the geozone.
-func (r *shiftRepo) AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error {
-	log := &GPSLog{
-		ID:         uuid.New(),
-		ShiftID:    shiftID,
-		Latitude:   lat,
-		Longitude:  lon,
-		IsInside:   isInside,
-		RecordedAt: time.Now(),
-	}
-	return r.saveGPSLog(ctx, log)
-}
-
-// GetLastGPSLogs returns recent inside/outside flags for a shift.
-func (r *shiftRepo) GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT is_inside FROM shift_gps_logs WHERE shift_id = $1 ORDER BY recorded_at DESC LIMIT $2`,
-		shiftID, count,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var logs []bool
-	for rows.Next() {
-		var isInside bool
-		if err := rows.Scan(&isInside); err != nil {
-			return nil, err
-		}
-		logs = append(logs, isInside)
-	}
-	return logs, rows.Err()
 }

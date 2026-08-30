@@ -50,29 +50,6 @@ func (m *mockShiftRepo) UpdateShiftStatus(ctx context.Context, shiftID uuid.UUID
 	return errors.New("not found")
 }
 
-func (m *mockShiftRepo) AddGPSLog(ctx context.Context, shiftID uuid.UUID, lat, lon float64, isInside bool) error {
-	m.logs = append(m.logs, isInside)
-	return nil
-}
-
-func (m *mockShiftRepo) GetLastGPSLogs(ctx context.Context, shiftID uuid.UUID, count int) ([]bool, error) {
-	if len(m.logs) == 0 {
-		return []bool{}, nil
-	}
-	if count > len(m.logs) {
-		count = len(m.logs)
-	}
-	result := make([]bool, 0, count)
-	for i := len(m.logs) - 1; i >= len(m.logs)-count; i-- {
-		result = append(result, m.logs[i])
-	}
-	return result, nil
-}
-
-func (m *mockShiftRepo) GetGeozoneByID(ctx context.Context, id int) (*repository.Geozone, error) {
-	return nil, nil
-}
-
 func (m *mockShiftRepo) GetActiveShifts(ctx context.Context) ([]*repository.Shift, error) {
 	return m.shifts, nil
 }
@@ -139,13 +116,9 @@ func (m *mockShiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID u
 	return last, nil
 }
 
-func (m *mockShiftRepo) SaveGPSLog(ctx context.Context, log *repository.GPSLog) error {
-	return nil
-}
-
 func TestShiftService_StartShift(t *testing.T) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, nil, nil, nil, nil, nil, nil)
+	srv := NewShiftService(repo, nil, nil, nil, nil, nil)
 
 	executorID := uuid.New()
 
@@ -176,38 +149,6 @@ func TestShiftService_IsWithinRadius(t *testing.T) {
 	if IsWithinRadius(55.7558, 37.6173, 55.4087, 37.9063, 5000.0) {
 		t.Error("expected Domodedovo Airport to be outside 5km of Moscow Center")
 	}
-}
-
-func TestShiftService_IsPointInPolygon(t *testing.T) {
-	// A simple 4x4 square polygon
-	poly := []Point{
-		{Lat: 0.0, Lon: 0.0},
-		{Lat: 0.0, Lon: 4.0},
-		{Lat: 4.0, Lon: 4.0},
-		{Lat: 4.0, Lon: 0.0},
-	}
-
-	// Case 1: Inside
-	if !IsPointInPolygon(Point{Lat: 2.0, Lon: 2.0}, poly) {
-		t.Error("expected point (2,2) to be inside the square polygon")
-	}
-
-	// Case 2: Outside
-	if IsPointInPolygon(Point{Lat: 5.0, Lon: 5.0}, poly) {
-		t.Error("expected point (5,5) to be outside the square polygon")
-	}
-}
-
-type mockGeozoneRepo struct {
-	geozone *repository.Geozone
-}
-
-func (m *mockGeozoneRepo) FindByID(ctx context.Context, id int) (*repository.Geozone, error) {
-	return m.geozone, nil
-}
-
-func (m *mockGeozoneRepo) FindByExecutor(ctx context.Context, userID uuid.UUID) (*repository.Geozone, error) {
-	return m.geozone, nil
 }
 
 type mockShiftTransactionRepo struct {
@@ -244,52 +185,113 @@ func (m *mockShiftTransactionRepo) HasTip(ctx context.Context, q repository.Quer
 	return false, nil
 }
 
-func TestShiftService_RecordLocation_Penalty(t *testing.T) {
+// recordedLocation is what a fake recorder captured, so a test can assert that
+// the coordinates reached the store rather than being accepted and dropped.
+type recordedLocation struct {
+	executorID uuid.UUID
+	lat, lon   float64
+}
+
+type fakeLocationRecorder struct {
+	calls  []recordedLocation
+	stored bool
+	err    error
+}
+
+func (f *fakeLocationRecorder) RecordLiveLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
+	f.calls = append(f.calls, recordedLocation{executorID: executorID, lat: lat, lon: lon})
+	return f.stored, f.err
+}
+
+func newShiftServiceForLocation(recorder ExecutorLocationRecorder) (*ShiftService, *mockShiftRepo) {
 	repo := &mockShiftRepo{}
-	centerLat := 55.7558
-	centerLon := 37.6173
-	radius := 100.0
-	geoRepo := &mockGeozoneRepo{
-		geozone: &repository.Geozone{
-			ID:              1,
-			Type:            string(repository.GeozoneTypeCircle),
-			CenterLatitude:  &centerLat,
-			CenterLongitude: &centerLon,
-			RadiusMeters:    &radius,
-		},
+	srv := NewShiftService(repo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil, nil, nil)
+	if recorder != nil {
+		srv = srv.WithExecutorLocation(recorder)
 	}
-	srv := NewShiftService(repo, geoRepo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil, nil, nil)
+	return srv, repo
+}
+
+// A reported position is only useful if it is actually stored: automatic
+// matching measures distance against it, so a report that is accepted and
+// dropped leaves matching working from a stale fix.
+func TestShiftService_RecordLocationPersistsCoordinates(t *testing.T) {
+	recorder := &fakeLocationRecorder{stored: true}
+	srv, _ := newShiftServiceForLocation(recorder)
 
 	executorID := uuid.New()
-	shift, err := srv.StartShift(context.Background(), executorID, 1)
-	if err != nil {
+	if _, err := srv.StartShift(context.Background(), executorID, 1); err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
 
-	// Three consecutive coordinates far outside the 100m geozone.
-	for i := 0; i < 3; i++ {
-		if err := srv.RecordLocation(context.Background(), executorID, 55.80, 37.70); err != nil {
-			t.Fatalf("unexpected error recording location: %v", err)
-		}
+	stored, err := srv.RecordLocation(context.Background(), executorID, 55.80, 37.70)
+	if err != nil {
+		t.Fatalf("unexpected error recording location: %v", err)
+	}
+	if !stored {
+		t.Errorf("expected the position to be reported as stored")
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("expected exactly one write to the location store, got %d", len(recorder.calls))
+	}
+	got := recorder.calls[0]
+	if got.executorID != executorID || got.lat != 55.80 || got.lon != 37.70 {
+		t.Errorf("location store received %+v, want executor %s at (55.80, 37.70)", got, executorID)
+	}
+}
+
+// The location rules may decline a move that looks like a district change
+// inside its cooldown. That is a legitimate outcome, not a failure.
+func TestShiftService_RecordLocationReportsDeclinedMove(t *testing.T) {
+	recorder := &fakeLocationRecorder{stored: false}
+	srv, _ := newShiftServiceForLocation(recorder)
+
+	executorID := uuid.New()
+	if _, err := srv.StartShift(context.Background(), executorID, 1); err != nil {
+		t.Fatalf("unexpected error starting shift: %v", err)
 	}
 
-	if len(repo.logs) != 3 {
-		t.Fatalf("expected 3 gps logs, got %d", len(repo.logs))
+	stored, err := srv.RecordLocation(context.Background(), executorID, 55.80, 37.70)
+	if err != nil {
+		t.Fatalf("a declined move must not be an error, got: %v", err)
 	}
-	for i, v := range repo.logs {
-		if v {
-			t.Errorf("expected log %d to be outside", i)
-		}
+	if stored {
+		t.Errorf("expected the declined move to be reported as not stored")
 	}
-	if shift.Status != repository.ShiftStatusPenalized {
-		t.Errorf("expected shift status PENALIZED, got %s", shift.Status)
+}
+
+// Without an active shift there is nothing to report a position against.
+func TestShiftService_RecordLocationRequiresActiveShift(t *testing.T) {
+	recorder := &fakeLocationRecorder{stored: true}
+	srv, _ := newShiftServiceForLocation(recorder)
+
+	if _, err := srv.RecordLocation(context.Background(), uuid.New(), 55.80, 37.70); err == nil {
+		t.Fatal("expected an error when the executor has no active shift")
+	}
+	if len(recorder.calls) != 0 {
+		t.Errorf("nothing should be written without an active shift, got %d writes", len(recorder.calls))
+	}
+}
+
+// A service assembled without a location store must say so rather than accept
+// positions and silently discard them.
+func TestShiftService_RecordLocationWithoutStoreFails(t *testing.T) {
+	srv, _ := newShiftServiceForLocation(nil)
+
+	executorID := uuid.New()
+	if _, err := srv.StartShift(context.Background(), executorID, 1); err != nil {
+		t.Fatalf("unexpected error starting shift: %v", err)
+	}
+
+	if _, err := srv.RecordLocation(context.Background(), executorID, 55.80, 37.70); err == nil {
+		t.Fatal("expected an error when no location store is configured")
 	}
 }
 
 func TestShiftService_EarlyEnd(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
-	srv := NewShiftService(repo, nil, NewLedger(txRepo, newMockAccounts()), nil, nil, nil, nil)
+	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, nil, nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(context.Background(), executorID, 3)
@@ -319,7 +321,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
 	orderRepo := &mockOrderRepo{}
-	srv := NewShiftService(repo, nil, NewLedger(txRepo, newMockAccounts()), nil, orderRepo, nil, nil)
+	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, orderRepo, nil, nil)
 
 	executorID := uuid.New()
 	customerID := uuid.New()

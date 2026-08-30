@@ -101,11 +101,7 @@ func (m *mockRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance mone
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
-	return nil
-}
-
-func (m *mockRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
+func (m *mockRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
 }
 
@@ -182,10 +178,6 @@ func (m *mockRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email,
 		}
 	}
 	return nil, errors.New("user not found")
-}
-
-func (m *mockRepo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
-	return nil
 }
 
 func (m *mockRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {

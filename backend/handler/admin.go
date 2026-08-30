@@ -451,8 +451,9 @@ func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.R
 		"shift_early_exit_penalty": settings["shift_early_exit_penalty"],
 		"executor_location_send_interval_seconds": settings["executor_location_send_interval_seconds"],
 		// Whether executor apps should report their position during a shift.
-		// The geofence check and its fine hang off those reports, so this stays
-		// off until an administrator turns it on deliberately.
+		// Those reports are what keeps the stored position fresh for the map and
+		// for automatic matching. The geofence this was named after is gone; the
+		// key is kept so existing installations keep their setting.
 		"geofence_tracking_enabled": settings["geofence_tracking_enabled"],
 	})
 }
@@ -532,7 +533,7 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // writeAddresses renders the saved-address list the profile page expects.
-func writeAddresses(w http.ResponseWriter, addresses []repository.CustomerAddress, err error) {
+func writeAddresses(w http.ResponseWriter, addresses []repository.Address, err error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrAddressLimitReached):
@@ -618,7 +619,7 @@ func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.R
 	}
 
 	var (
-		addresses []repository.CustomerAddress
+		addresses []repository.Address
 		err       error
 	)
 	if id, parseErr := uuid.Parse(req.ID); parseErr == nil {

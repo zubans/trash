@@ -32,7 +32,7 @@ type AdminService struct {
 	userRepo      repository.UserRepository
 	adminRepo     repository.AdminRepository
 	settingsRepo  repository.SettingsRepository
-	addressRepo   repository.CustomerAddressRepository
+	addressRepo   repository.AddressRepository
 	ledger        *Ledger
 	reconcileRepo repository.ReconciliationRepository
 	sessions      SessionRevoker
@@ -64,14 +64,14 @@ func NewAdminService(
 	}
 }
 
-// WithAddresses attaches the saved-address store used by the customer profile.
-func (s *AdminService) WithAddresses(addressRepo repository.CustomerAddressRepository) *AdminService {
+// WithAddresses attaches the saved-address store used by user profiles.
+func (s *AdminService) WithAddresses(addressRepo repository.AddressRepository) *AdminService {
 	s.addressRepo = addressRepo
 	return s
 }
 
-// ListAddresses returns a customer's saved pickup addresses.
-func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]repository.CustomerAddress, error) {
+// ListAddresses returns a user's saved pickup addresses.
+func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
@@ -79,12 +79,7 @@ func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]r
 }
 
 // AddAddress saves a new pickup address.
-//
-// The address arrives already split into its parts when it came from the
-// suggestion list. A client that still sends a single line — the mobile builds
-// in people's hands do — has it split here, so those keep working and are no
-// longer held to the old numeric-house-number format.
-func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address Address) ([]repository.CustomerAddress, error) {
+func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address Address) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
@@ -94,8 +89,8 @@ func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address
 	return s.addressRepo.Add(ctx, userID, address.ToRecord())
 }
 
-// DeleteAddress removes one of the customer's addresses.
-func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+// DeleteAddress removes one of the user's addresses.
+func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
@@ -103,16 +98,15 @@ func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid
 }
 
 // SetDefaultAddress marks which address new orders should start from.
-func (s *AdminService) SetDefaultAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.CustomerAddress, error) {
+func (s *AdminService) SetDefaultAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
 	return s.addressRepo.SetDefault(ctx, userID, addressID)
 }
 
-// SetDefaultAddressByValue is the same, for clients that identify an address by
-// its text.
-func (s *AdminService) SetDefaultAddressByValue(ctx context.Context, userID uuid.UUID, address string) ([]repository.CustomerAddress, error) {
+// SetDefaultAddressByValue is the same, for clients that identify an address by its text.
+func (s *AdminService) SetDefaultAddressByValue(ctx context.Context, userID uuid.UUID, address string) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
 	}
@@ -274,7 +268,11 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	return nil
 }
 
-// UpdateUserAddress updates a customer's pickup address (admin-only).
+// UpdateUserAddress sets the address a user's orders start from (admin-only).
+//
+// "Update" here means "make this the default address": the row is upserted and
+// promoted, so an admin correcting an address changes the one the customer
+// actually orders from rather than quietly adding a second, unused entry.
 func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	if strings.TrimSpace(address) == "" {
 		return errors.New("address is required")
@@ -283,11 +281,16 @@ func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, 
 	if err := parsed.Validate(); err != nil {
 		return err
 	}
-	normalizedAddress := parsed.Compose()
+	if s.addressRepo == nil {
+		return errors.New("address storage is not configured")
+	}
 	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	return s.userRepo.UpdateCustomerAddress(ctx, userID, normalizedAddress)
+	record := parsed.ToRecord()
+	record.IsDefault = true
+	_, err := s.addressRepo.Add(ctx, userID, record)
+	return err
 }
 
 // UpdateUserName updates a user's full name (admin-only).
@@ -582,18 +585,7 @@ func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[st
 		"address":    "",
 	}
 
-	cp, err := s.userRepo.GetCustomerProfile(ctx, userID)
-	if err != nil {
-		log.Printf("[GetProfile] failed to load customer profile for %s: %v", userID, err)
-	} else if cp != nil {
-		profile["address"] = cp.Address
-		profile["last_geo"] = cp.LastGeo.String
-	}
-
-	// Saved addresses. "address" and "default_address" carry the same value so
-	// that the dashboards, which read the former, keep working alongside the
-	// profile page, which reads the latter.
-	profile["addresses"] = []repository.CustomerAddress{}
+	profile["addresses"] = []repository.Address{}
 	if s.addressRepo != nil {
 		addresses, err := s.addressRepo.List(ctx, userID)
 		if err != nil {
@@ -629,13 +621,14 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 		"increased_tariff_coeff": true,
 		"urgent_tariff_coeff":    true,
 		"asap_tariff_coeff":      true,
-		"geofence_fine_amount":   true,
 		"min_balance_limit":      true,
+		// How far automatic matching may reach when assigning an order.
+		"auto_match_radius_km": true,
 	}
 	numericKeys["shift_early_exit_penalty"] = true
-	// Enabling this makes executor apps report their position, which is what
-	// arms the geofence fine. Only "1" or "0" are accepted so it cannot be
-	// switched on by a typo.
+	// Enabling this makes executor apps report their position, which keeps the
+	// stored position fresh for the map and for automatic matching. Only "1" or
+	// "0" are accepted so it cannot be switched on by a typo.
 	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
 	}

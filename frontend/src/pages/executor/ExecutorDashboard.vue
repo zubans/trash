@@ -908,18 +908,17 @@ export default defineComponent({
         fullName.value = authStore.fullName
       }
       try {
-        const userProfRes = await api.get('/user/profile')
-        if (userProfRes.data) {
-          if (userProfRes.data.last_geo) {
-            const parts = userProfRes.data.last_geo.split(',')
-            if (parts.length === 2) {
-              const lat = parseFloat(parts[0])
-              const lon = parseFloat(parts[1])
-              if (!isNaN(lat) && !isNaN(lon)) {
-                currentLat.value = lat
-                currentLon.value = lon
-              }
-            }
+        // The executor's position comes from /executor/location, which is the
+        // authoritative stored one — the same the map centres on and matching
+        // measures against. It used to be parsed out of the profile's last_geo
+        // string, which no longer exists.
+        const locRes = await api.get('/executor/location')
+        if (locRes.data?.has_location) {
+          const lat = Number(locRes.data.lat)
+          const lon = Number(locRes.data.lon)
+          if (!isNaN(lat) && !isNaN(lon)) {
+            currentLat.value = lat
+            currentLon.value = lon
           }
         }
         const custProfRes = await api.get('/customer/profile')
@@ -1069,14 +1068,16 @@ export default defineComponent({
       }
     }
 
-    // Geofence reporting. POST /executor/shifts/location is what runs the
-    // geozone check and, after three consecutive points outside, charges the
-    // fine — and nothing in the app ever called it, so the whole mechanism and
-    // its geofence_fine_amount setting were inert.
+    // Location reporting. POST /executor/shifts/location keeps the executor's
+    // stored position fresh: it is what the map centres on and what automatic
+    // matching measures distance against, so without it both work from the
+    // position captured at registration.
     //
-    // It stays off until an administrator sets geofence_tracking_enabled: this
-    // takes real money from executors, and turning it on is their decision, not
-    // a side effect of shipping the plumbing.
+    // It stays off until an administrator enables tracking, because reporting a
+    // position continuously is a decision about the executor's privacy and
+    // battery, not a side effect of shipping the plumbing. The geofence it was
+    // originally built for is gone; the setting name is kept so existing
+    // installations do not silently change behaviour.
     const geofenceTrackingEnabled = ref(false)
     const geofenceIntervalSec = ref(60)
     let geofenceTimer: any = null

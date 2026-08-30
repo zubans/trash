@@ -281,11 +281,6 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
 		}
 	}
-	if s.userRepo != nil && order.PickupLat != nil && order.PickupLon != nil {
-		if err := s.userRepo.UpdateLastGeo(ctx, customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
-			log.Printf("[OrderService] failed to update last_geo for %s: %v", customerID, err)
-		}
-	}
 
 	metrics.OrderEvent("created")
 	s.hydrateServiceVariant(ctx, order)
@@ -713,12 +708,6 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 
 	if err := s.orderRepo.Create(ctx, nil, order); err != nil {
 		return nil, err
-	}
-
-	if s.userRepo != nil && order.PickupLat != nil && order.PickupLon != nil {
-		if err := s.userRepo.UpdateLastGeo(ctx, customerID, formatGeo(*order.PickupLat, *order.PickupLon)); err != nil {
-			log.Printf("[OrderService] failed to update last_geo for %s: %v", customerID, err)
-		}
 	}
 
 	// Create the chat room for the new order. Non-fatal if it fails.

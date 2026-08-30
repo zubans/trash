@@ -70,7 +70,6 @@ func main() {
 	tokenRepo := repository.NewTokenRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
-	geozoneRepo := repository.NewGeozoneRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	bidRepo := repository.NewBidRepository(db)
 	chatRepo := repository.NewChatRepository(db)
@@ -79,7 +78,7 @@ func main() {
 	reviewRepo := repository.NewReviewRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	executorGeoRepo := repository.NewExecutorGeoRepository(db)
-	addressRepo := repository.NewCustomerAddressRepository(db)
+	addressRepo := repository.NewAddressRepository(db)
 	reconcileRepo := repository.NewReconciliationRepository(db)
 	systemAccountRepo := repository.NewSystemAccountRepository(db)
 
@@ -106,6 +105,8 @@ func main() {
 	// AuthService owns everything session related: issuing access tokens,
 	// rotating refresh tokens and blacklisting revoked access tokens.
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, addressSuggester, mailer).
+		WithAddresses(addressRepo).
+		WithExecutorGeo(executorGeoRepo).
 		WithSessionStorage(refreshRepo, tokenRepo)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
 		WithSessions(authService).
@@ -114,13 +115,19 @@ func main() {
 		WithReconciliation(reconcileRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo)
-	shiftService := service.NewShiftService(shiftRepo, geozoneRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
-	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo, db)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
+		WithEligibility(userRepo, settingsRepo)
+	// Shift location reports are written through the geo service, so the stored
+	// executor position has a single writer and one set of rules.
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
+		WithExecutorLocation(executorGeoService)
+	// Automatic matching is bounded by distance, which needs the executor's
+	// stored position and the configured radius.
+	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
+		WithGeo(executorGeoRepo, settingsRepo)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
-	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo)
 
 	// Start background order matcher
 	matchingService.StartMatchingWorker(context.Background(), 5*time.Second)

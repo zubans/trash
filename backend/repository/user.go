@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,10 +60,11 @@ func (u *User) IsVerified() bool {
 
 // CustomerProfile holds customer-specific profile data.
 type CustomerProfile struct {
-	UserID   uuid.UUID      `json:"user_id"`
-	FullName string         `json:"full_name"`
-	Address  string         `json:"address"`
-	LastGeo  sql.NullString `json:"last_geo"`
+	UserID   uuid.UUID `json:"user_id"`
+	FullName string    `json:"full_name"`
+	DeviceOS string    `json:"device_os,omitempty"`
+	DeviceID string    `json:"device_id,omitempty"`
+	DeviceIP string    `json:"device_ip,omitempty"`
 }
 
 // UserRepository defines storage operations for users.
@@ -78,10 +78,8 @@ type UserRepository interface {
 	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
 	UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error
 	UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error
-	UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error
-	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error
+	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error
 	GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error)
-	UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error
 	VerifyEmailToken(ctx context.Context, token string) (*User, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error
 	SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error
@@ -362,73 +360,33 @@ func (r *repo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Am
 	return err
 }
 
-func (r *repo) UpdateLastGeo(ctx context.Context, id uuid.UUID, lastGeo string) error {
+func (r *repo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
-		 VALUES ($1, '', '', $2)
-		 ON CONFLICT (user_id) DO UPDATE SET last_geo = $2`,
-		id, lastGeo,
+		`INSERT INTO customer_profiles (user_id, full_name)
+		 VALUES ($1, $2)
+		 ON CONFLICT (user_id) DO UPDATE SET full_name = $2`,
+		userID, fullName,
 	)
 	return err
 }
 
-// CreateCustomerProfile stores the profile and registers the address as the
-// customer's first saved one, so the profile page lists what registration
-// captured instead of showing an empty list next to a working order form.
-func (r *repo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, address, lastGeo string) error {
-	if _, err := r.db.ExecContext(ctx,
-		`INSERT INTO customer_profiles (user_id, full_name, address, last_geo)
-		 VALUES ($1, '', $2, $3)
-		 ON CONFLICT (user_id) DO UPDATE SET address = $2, last_geo = $3`,
-		userID, address, lastGeo,
-	); err != nil {
-		return err
-	}
-	return r.saveDefaultAddress(ctx, userID, address)
-}
-
 func (r *repo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error) {
 	var p CustomerProfile
+	var devOS, devID, devIP sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		`SELECT user_id, full_name, address, last_geo FROM customer_profiles WHERE user_id = $1`,
+		`SELECT user_id, full_name, device_os, device_id, device_ip FROM customer_profiles WHERE user_id = $1`,
 		userID,
-	).Scan(&p.UserID, &p.FullName, &p.Address, &p.LastGeo)
+	).Scan(&p.UserID, &p.FullName, &devOS, &devID, &devIP)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &CustomerProfile{UserID: userID}, nil
 		}
 		return nil, err
 	}
+	p.DeviceOS = devOS.String
+	p.DeviceID = devID.String
+	p.DeviceIP = devIP.String
 	return &p, nil
-}
-
-func (r *repo) UpdateCustomerAddress(ctx context.Context, userID uuid.UUID, address string) error {
-	if _, err := r.db.ExecContext(ctx,
-		`INSERT INTO customer_profiles (user_id, full_name, address)
-		 VALUES ($1, '', $2)
-		 ON CONFLICT (user_id) DO UPDATE SET address = $2`,
-		userID, address,
-	); err != nil {
-		return err
-	}
-	return r.saveDefaultAddress(ctx, userID, address)
-}
-
-// saveDefaultAddress keeps customer_addresses in step with the profile address,
-// so the two never disagree about where a customer orders from.
-func (r *repo) saveDefaultAddress(ctx context.Context, userID uuid.UUID, address string) error {
-	if strings.TrimSpace(address) == "" {
-		return nil
-	}
-	if _, err := r.db.ExecContext(ctx,
-		`UPDATE customer_addresses SET is_default = FALSE WHERE user_id = $1 AND is_default`, userID); err != nil {
-		return err
-	}
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO customer_addresses (user_id, address, is_default) VALUES ($1, $2, TRUE)
-		 ON CONFLICT (user_id, address) DO UPDATE SET is_default = TRUE`,
-		userID, address)
-	return err
 }
 
 // UpdateUserEmail records a requested address as pending and sends the user a
