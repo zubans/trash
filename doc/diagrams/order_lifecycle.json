@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Моя услуга — Жизненный цикл заказа и ветвления",
+    "output": "doc/diagrams/order_lifecycle.html",
+    "viewBox": [980, 680],
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "golden-rail",
+        "label": "Основной путь (Golden Path)",
+        "focus": ["created", "searching", "assigned", "executed", "completed"],
+        "note": "Стандартный цикл: создание заказа, холд средств, гео-поиск, выполнение и выплата исполнителю."
+      },
+      {
+        "id": "auction-and-cancel",
+        "label": "Аукцион и отмена по таймауту",
+        "focus": ["searching", "assigned", "auction", "canceled_refund"],
+        "note": "Перевод неразобранных заказов в открытый аукцион и автоматическая отмена с полным возвратом."
+      },
+      {
+        "id": "disputes-and-penalties",
+        "label": "Штрафы, споры и переназначение",
+        "focus": ["assigned", "executed", "reassigning", "canceled_penalty", "completed", "dispute", "admin_settled"],
+        "note": "Сброс заказа исполнителем со штрафом, возврат в поиск, споры по качеству и арбитраж администратора."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Магистраль выполнения заказа" },
+    { "id": "waiting", "label": "Шлюз аукциона и споров" },
+    { "id": "recovery", "label": "Контроллер переназначения" },
+    { "id": "terminal", "label": "Финальные исходы" }
+  ],
+  "states": [
+    { "id": "created", "type": "start", "label": "Создан", "sublabel": "Холд средств заблокирован", "lane": "main", "col": 0, "step": "01", "tag": "холд" },
+    { "id": "searching", "type": "active", "label": "Поиск", "sublabel": "Матчинг в радиусе 5с", "lane": "main", "col": 1, "step": "02", "tag": "подбор" },
+    { "id": "assigned", "type": "decision", "label": "Назначен", "sublabel": "Исполнитель в пути", "lane": "main", "col": 2, "step": "03", "tag": "активен" },
+    { "id": "executed", "type": "waiting", "label": "Выполнен", "sublabel": "Фотоотчет загружен", "lane": "main", "col": 3, "step": "04", "tag": "отчет" },
+    { "id": "completed", "type": "success", "label": "Завершен", "sublabel": "Выплата и отзывы", "lane": "main", "col": 4, "step": "05", "tag": "расчет" },
+    { "id": "auction", "type": "waiting", "label": "Аукцион / Ставки", "sublabel": "Таймаут поиска SLA", "lane": "waiting", "col": 0, "tag": "аукцион" },
+    { "id": "reassigning", "type": "active", "label": "Переназначение", "sublabel": "Штраф исполнителю", "lane": "recovery", "col": 1, "tag": "повтор" },
+    { "id": "dispute", "type": "waiting", "label": "В споре", "sublabel": "Претензия по качеству", "lane": "waiting", "col": 2, "tag": "арбитраж" },
+    { "id": "canceled_refund", "type": "failure", "label": "Отменен (Возврат)", "sublabel": "100% холда разблокировано", "lane": "terminal", "col": 0, "tag": "финал" },
+    { "id": "canceled_penalty", "type": "failure", "label": "Отменен (Штраф)", "sublabel": "Удержан штраф за срыв", "lane": "terminal", "col": 1, "tag": "финал" },
+    { "id": "admin_settled", "type": "success", "label": "Решен админом", "sublabel": "Вердикт арбитража", "lane": "terminal", "col": 2, "tag": "финал" }
+  ],
+  "transitions": [
+    { "from": "assigned", "to": "auction", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "auction", "to": "canceled_refund", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "executed", "to": "reassigning", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "reassigning", "to": "canceled_penalty", "variant": "security", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "completed", "to": "dispute", "variant": "dashed", "route": "straight", "fromSide": "bottom", "toSide": "top" },
+    { "from": "dispute", "to": "admin_settled", "variant": "emphasis", "route": "straight", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Основная магистраль",
+      "items": [
+        "Заказчик создает заказ: сумма замораживается на счете AccountHolds",
+        "Фоновый воркер назначает ближайшего исполнителя на активной смене",
+        "Исполнитель загружает фото подтверждения, заказчик подтверждает, средства переводятся"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Аукцион и промежуточные шлюзы",
+      "items": [
+        "Неразобранные заказы по истечении таймаута переходят в открытый аукцион ставок",
+        "Открытие спора заказчиком замораживает выплату до рассмотрения админом"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Финальные ветвления",
+      "items": [
+        "Отмена на этапе поиска возвращает 100% холда на баланс заказчика",
+        "Срыв заказа или поздняя отмена списывает штраф в пользу пострадавшей стороны",
+        "Арбитраж администратора выносит обязательное финальное распределение денег"
+      ]
+    }
+  ]
+}

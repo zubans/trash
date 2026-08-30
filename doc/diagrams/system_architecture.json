@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Моя услуга — Архитектура системы, CI/CD и бэкенда",
+    "output": "doc/diagrams/system_architecture.html",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "views": [
+      {
+        "id": "full-system",
+        "label": "Общая экосистема и CI/CD",
+        "focus": ["github_ci", "docker_hub", "clients_app", "clients_web", "nginx_ingress", "router_mw", "auth_svc", "ledger_svc", "order_svc", "workers_engine", "shift_geo_svc", "dadata_api", "postgres_store", "prom_metrics", "grafana_dash"],
+        "note": "Сквозной обзор: автоматизация CI/CD, клиентские приложения, WebSocket, сервисы Go, база данных и телеметрия."
+      },
+      {
+        "id": "cicd-deployment",
+        "label": "CI/CD и автодеплой",
+        "focus": ["github_ci", "docker_hub", "nginx_ingress", "router_mw"],
+        "note": "Сборка Docker-образов бэкенда/фронтенда и Android APK в GitHub Actions, публикация в Registry и деплой на сервер."
+      },
+      {
+        "id": "realtime-ws",
+        "label": "WebSocket и живые заказы",
+        "focus": ["clients_app", "clients_web", "nginx_ingress", "router_mw", "order_svc", "shift_geo_svc"],
+        "note": "Двунаправленный WebSocket для мгновенных обновлений заказов, live GPS-трекинга исполнителей на карте и чата."
+      },
+      {
+        "id": "backend-deep-dive",
+        "label": "Внутренняя структура бэкенда",
+        "focus": ["router_mw", "auth_svc", "ledger_svc", "order_svc", "workers_engine", "shift_geo_svc", "postgres_store"],
+        "note": "Детальное устройство Go-бэкенда: роутер Chi, WS-хаб, менеджер сессий, автомат заказов, леджер и воркеры."
+      },
+      {
+        "id": "financial-ledger",
+        "label": "Финансовый леджер",
+        "focus": ["clients_web", "router_mw", "order_svc", "ledger_svc", "postgres_store"],
+        "note": "Двойная запись, холдирование при заказе, балансы пользователей, распределение комиссий и выплаты."
+      }
+    ]
+  },
+  "components": [
+    { "id": "github_ci", "type": "cloud", "label": "GitHub Actions", "sublabel": "CI/CD и сборка APK", "brand": "github-actions", "pos": [40, 60], "size": [130, 60], "tag": "Автоматизация" },
+    { "id": "docker_hub", "type": "cloud", "label": "Docker Registry", "sublabel": "Реестр контейнеров", "brand": "docker", "pos": [240, 60], "size": [130, 60], "tag": "OCI Образы" },
+    { "id": "clients_app", "type": "external", "label": "Мобильный клиент", "sublabel": "Android / RuStore", "pos": [40, 200], "size": [130, 60], "tag": "Заказчик / Исполнитель" },
+    { "id": "clients_web", "type": "external", "label": "Веб-панель", "sublabel": "Vue 3 / Vite", "brand": "vue", "pos": [40, 340], "size": [130, 60], "tag": "Админка и опции" },
+    { "id": "nginx_ingress", "type": "security", "label": "Nginx Ingress", "sublabel": "HTTPS и WSS :443", "pos": [240, 270], "size": [130, 60], "tag": "Обратный прокси" },
+    { "id": "router_mw", "type": "backend", "label": "Chi Router & WS", "sublabel": "REST и WebSocket хаб", "brand": "go", "pos": [430, 200], "size": [130, 60], "tag": "HTTP и WSS :8080" },
+    { "id": "auth_svc", "type": "backend", "label": "AuthService", "sublabel": "Сессии и JWT токены", "brand": "go", "pos": [430, 340], "size": [130, 60], "tag": "Авторизация RBAC" },
+    { "id": "ledger_svc", "type": "backend", "label": "Сервис леджера", "sublabel": "Двойная запись денег", "brand": "go", "pos": [640, 90], "size": [130, 60], "tag": "Холды и балансы" },
+    { "id": "order_svc", "type": "backend", "label": "OrderService", "sublabel": "Автомат статусов", "brand": "go", "pos": [640, 230], "size": [130, 60], "tag": "Жизненный цикл" },
+    { "id": "workers_engine", "type": "backend", "label": "Движок воркеров", "sublabel": "Матчинг / SLA / Гео", "brand": "go", "pos": [640, 370], "size": [130, 60], "tag": "Фоновые циклы" },
+    { "id": "shift_geo_svc", "type": "backend", "label": "Shift & Geo", "sublabel": "Live GPS и смены", "brand": "go", "pos": [640, 510], "size": [130, 60], "tag": "Присутствие и карта" },
+    { "id": "dadata_api", "type": "cloud", "label": "DaData Geo API", "sublabel": "Подсказки и координаты", "pos": [850, 90], "size": [130, 60], "tag": "Внешний сервис" },
+    { "id": "postgres_store", "type": "database", "label": "PostgreSQL DB", "sublabel": "Единое хранилище :5432", "brand": "postgresql", "pos": [850, 230], "size": [130, 60], "tag": "Адреса, заказы, балансы" },
+    { "id": "prom_metrics", "type": "cloud", "label": "Prometheus", "sublabel": "Сбор метрик :9090", "brand": "prometheus", "pos": [850, 370], "size": [130, 60], "tag": "Алерты и TSDB" },
+    { "id": "grafana_dash", "type": "cloud", "label": "Grafana", "sublabel": "Дашборды :3000", "brand": "grafana", "pos": [1060, 370], "size": [120, 60], "tag": "Телеметрия" }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Контур CI/CD и автодеплоя", "wraps": ["github_ci", "docker_hub"], "pad": 12 },
+    { "kind": "region", "label": "Продакшн инфраструктура", "wraps": ["nginx_ingress", "router_mw", "auth_svc", "ledger_svc", "order_svc", "workers_engine", "shift_geo_svc", "postgres_store", "prom_metrics", "grafana_dash"], "pad": 16 },
+    { "kind": "security-group", "label": "Ядро бэкенда и сервисов Go", "wraps": ["router_mw", "auth_svc", "ledger_svc", "order_svc", "workers_engine", "shift_geo_svc"], "pad": 12 }
+  ],
+  "connections": [
+    { "from": "github_ci", "to": "docker_hub", "label": "сборка и push", "variant": "emphasis" },
+    { "from": "docker_hub", "to": "router_mw", "label": "деплой образа", "variant": "dashed", "route": "orthogonal-h", "labelAt": [385, 140] },
+    { "from": "clients_app", "to": "nginx_ingress", "label": "HTTPS и WSS", "variant": "emphasis" },
+    { "from": "clients_web", "to": "nginx_ingress", "label": "HTTPS и WSS" },
+    { "from": "nginx_ingress", "to": "router_mw", "label": "proxy pass", "variant": "emphasis", "route": "orthogonal-h", "labelAt": [395, 250] },
+    { "from": "router_mw", "to": "auth_svc", "label": "проверка JWT", "variant": "security", "route": "orthogonal-v" },
+    { "from": "router_mw", "to": "order_svc", "label": "REST и WS", "variant": "emphasis", "route": "orthogonal-h", "labelAt": [600, 230] },
+    { "from": "order_svc", "to": "ledger_svc", "label": "холды и выплаты", "route": "orthogonal-v" },
+    { "from": "order_svc", "to": "workers_engine", "label": "события заказа", "variant": "emphasis", "route": "orthogonal-v" },
+    { "from": "workers_engine", "to": "shift_geo_svc", "label": "смены", "route": "orthogonal-v" },
+    { "from": "ledger_svc", "to": "dadata_api", "label": "геокодинг", "variant": "dashed" },
+    { "from": "order_svc", "to": "postgres_store", "label": "SQL транзакции", "variant": "emphasis" },
+    { "from": "shift_geo_svc", "to": "postgres_store", "label": "live GPS", "route": "orthogonal-h", "labelAt": [805, 410] },
+    { "from": "postgres_store", "to": "prom_metrics", "label": "экспорт метрик", "variant": "dashed", "route": "orthogonal-v" },
+    { "from": "prom_metrics", "to": "grafana_dash", "label": "PromQL", "variant": "emphasis" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "CI/CD и автодеплой", "items": ["Многоэтапный конвейер GitHub Actions (сборка Go бэкенда, Vue фронтенда, релизного Android APK)", "Публикация контейнеров в Docker Registry и раскатка по SSH через Docker Compose"] },
+    { "dot": "emerald", "title": "WebSockets и Real-time", "items": ["Двунаправленный канал WebSocket (WSS), проксируемый Nginx в WS-хаб на Go Chi", "Мгновенное вещание статусов заказов, трекинг GPS исполнителей на карте и чат"] },
+    { "dot": "amber", "title": "Ядро сервисов", "items": ["OrderService: управление жизненным циклом (SEARCHING -> ASSIGNED -> COMPLETED)", "Сервис леджера: строгая двойная запись, холды на счете заказчика и комиссии", "Shift & Geo: контроль смен, прием GPS-сигналов и фильтрация в радиусе"] },
+    { "dot": "violet", "title": "Данные и телеметрия", "items": ["PostgreSQL: хранение единых адресов, заказов, пользователей и финансовых проводок", "Prometheus и Grafana: непрерывный сбор метрик, хранение 30 дней и алерты"] }
+  ]
+}
