@@ -632,6 +632,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { cameraPromptLabels } from '../../utils/cameraLabels'
@@ -667,6 +668,7 @@ export default defineComponent({
   },
   setup() {
     const router = useRouter()
+    const { t } = useI18n()
     const authStore = useAuthStore()
 
     const phone = ref('')
@@ -1079,12 +1081,19 @@ export default defineComponent({
     const acceptOrder = async (orderId: string) => {
       try {
         await api.post(`/executor/orders/${orderId}/accept`)
-        successMsg.value = 'Заказ принят в работу!'
+        successMsg.value = t('executor.successOrderAccepted', 'Заказ принят в работу!')
         await fetchAssignedOrders()
         await fetchAvailableOrders()
       } catch (err: any) {
         const rawErr = err.response?.data
-        errorMsg.value = typeof rawErr === 'string' ? rawErr : (rawErr?.error || 'Ошибка принятия заказа')
+        const rawText = typeof rawErr === 'string' ? rawErr : (rawErr?.error || '')
+        if (rawText.includes('executor has no active shift') || rawText.includes('no active shift') || rawText.includes('нет активной смены')) {
+          errorMsg.value = t('executor.noActiveShift')
+        } else if (rawText.includes('penalized') || rawText.includes('оштрафована')) {
+          errorMsg.value = t('executor.shiftPenalized')
+        } else {
+          errorMsg.value = rawText || t('executor.errorAcceptOrder', 'Ошибка принятия заказа')
+        }
       }
     }
 

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from './auth-store'
+import api from '../services/api'
 
 describe('useAuthStore', () => {
   beforeEach(() => {
@@ -72,7 +73,7 @@ describe('useAuthStore', () => {
       birth_date: '', age: 30, is_verified: true,
     }
 
-    // The network call is left unmocked: it rejects, which is the failure path.
+    vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('Network error'))
     await store.fetchMe()
 
     expect(store.balance).toBe(1500)

@@ -148,6 +148,11 @@ type ServiceCatalogRepository interface {
 	// GetNodeByID returns the node even when it was deleted, because orders
 	// placed before the deletion still have to render their service.
 	GetNodeByID(ctx context.Context, id uuid.UUID) (*ServiceNode, error)
+	// GetNodesByIDs resolves a set of nodes in one query, for the list
+	// endpoints that need the service variant of every row they return. Like
+	// GetNodeByID it includes deleted nodes, and like it, an id with no node is
+	// simply absent from the result rather than an error.
+	GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*ServiceNode, error)
 	// GetNodeByCode looks up a live node only; a deleted code is free to be
 	// taken by a new node.
 	GetNodeByCode(ctx context.Context, code string) (*ServiceNode, error)
@@ -469,6 +474,25 @@ func (r *serviceCatalogRepo) GetNodeByID(ctx context.Context, id uuid.UUID) (*Se
 		"SELECT "+serviceNodeColumns+" FROM service_nodes WHERE id = $1", id,
 	)
 	return scanServiceNode(row)
+}
+
+func (r *serviceCatalogRepo) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*ServiceNode, error) {
+	result := make(map[uuid.UUID]*ServiceNode, len(ids))
+	placeholders, args := idList(ids)
+	if len(args) == 0 {
+		return result, nil
+	}
+	nodes, err := r.queryNodes(ctx,
+		"SELECT "+serviceNodeColumns+" FROM service_nodes WHERE id IN ("+placeholders+")",
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		result[n.ID] = n
+	}
+	return result, nil
 }
 
 func (r *serviceCatalogRepo) GetNodeByCode(ctx context.Context, code string) (*ServiceNode, error) {

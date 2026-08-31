@@ -17,6 +17,7 @@ import (
 type ReconcileWorker struct {
 	repo      repository.ReconciliationRepository
 	tolerance money.Amount
+	guard func(func() error) error
 }
 
 // NewReconcileWorker creates a ReconcileWorker.
@@ -27,10 +28,10 @@ func NewReconcileWorker(repo repository.ReconciliationRepository, tolerance mone
 // Start runs a pass immediately and then on every interval.
 func (w *ReconcileWorker) Start(interval time.Duration) {
 	go func() {
-		w.Run()
+		w.runGuarded()
 		ticker := time.NewTicker(interval)
 		for range ticker.C {
-			w.Run()
+			w.runGuarded()
 		}
 	}()
 	log.Printf("[ReconcileWorker] Balance reconciliation scheduled every %v", interval)
@@ -81,4 +82,24 @@ func (w *ReconcileWorker) Run() {
 	for _, a := range report.HoldAnomalies {
 		log.Printf("[ALERT] order %s (%s): hold %s — %s", a.OrderID, a.Status, a.HoldAmount, a.Reason)
 	}
+}
+
+// runGuarded runs one pass under the job's advisory lock when a Leader is
+// wired. The pass only reads and reports, so a duplicate run is harmless — but
+// it would raise the same alert twice, which is noise nobody needs.
+func (w *ReconcileWorker) runGuarded() {
+	if w.guard == nil {
+		w.Run()
+		return
+	}
+	_ = w.guard(func() error {
+		w.Run()
+		return nil
+	})
+}
+
+// WithLeader makes this worker run at most once across every process.
+func (w *ReconcileWorker) WithLeader(leader *Leader, name string) *ReconcileWorker {
+	w.guard = leader.Guard(name)
+	return w
 }

@@ -1,28 +1,43 @@
 <template>
   <div v-if="show" class="map-modal-overlay" @click.self="show = false">
-    <div class="map-modal-card">
-      <div class="map-modal-header">
-        <div>
-          <h3 class="map-modal-title">Редактирование местоположения и карта заказов</h3>
-          <p class="map-modal-subtitle">Кликните на карту за пределами круга 0.5 км, чтобы сменить рабочий район</p>
+    <div class="bottom-sheet">
+      <!-- Шапка -->
+      <div class="sheet-header">
+        <div class="drag-handle"></div>
+        <div class="header-content">
+          <div class="header-text">
+            <h2>{{ $t('executor.workAreaTitle', 'Район работы') }}</h2>
+            <p>{{ $t('executor.workAreaSubtitle', 'Нажмите на карту за пределами круга, чтобы сместить центр зоны (0.5 км)') }}</p>
+          </div>
+          <button type="button" class="close-btn" :aria-label="$t('common.close', 'Закрыть')" @click="show = false">
+            <i class="ph-bold ph-x"></i>
+          </button>
         </div>
-        <button type="button" class="btn-close" aria-label="Закрыть" @click="show = false">
-          <i class="ph ph-x"></i>
-        </button>
       </div>
 
-      <div class="map-modal-body">
+      <!-- Карта -->
+      <div class="map-area">
         <div id="executor-leaflet-map" class="leaflet-container-box"></div>
 
-        <!-- Recenter on the executor's own position -->
-        <button type="button" class="map-fab" title="Моё местоположение" @click="recenterOnMe">
+        <!-- Кнопки зума -->
+        <div class="zoom-controls">
+          <button type="button" class="zoom-btn" title="Увеличить" @click="zoomIn">
+            <i class="ph-bold ph-plus"></i>
+          </button>
+          <button type="button" class="zoom-btn" title="Уменьшить" @click="zoomOut">
+            <i class="ph-bold ph-minus"></i>
+          </button>
+        </div>
+
+        <!-- Геолокация -->
+        <button type="button" class="location-btn" title="Моё местоположение" @click="recenterOnMe">
           <i class="ph-fill ph-navigation-arrow"></i>
         </button>
 
         <!-- Cluster Overlay: several orders sharing one pickup point -->
         <div v-if="selectedCluster && !selectedOrder" class="order-preview-card cluster-list-card">
           <button type="button" class="btn-close-card" @click="selectedCluster = null">
-            <i class="ph ph-x"></i>
+            <i class="ph-bold ph-x"></i>
           </button>
           <div class="cluster-title">
             {{ selectedCluster.length }} заказов по этому адресу
@@ -63,7 +78,7 @@
             <i class="ph-bold ph-arrow-left"></i> К списку
           </button>
           <button type="button" class="btn-close-card" @click="selectedOrder = null; selectedCluster = null">
-            <i class="ph ph-x"></i>
+            <i class="ph-bold ph-x"></i>
           </button>
           <div class="op-header">
             <span class="op-id">#{{ selectedOrder?.id ? selectedOrder.id.slice(0, 8) : '---' }}</span>
@@ -98,7 +113,8 @@
 </template>
 
 <script lang="ts">
-import {defineComponent, ref, computed, watch, nextTick} from 'vue'
+import { defineComponent, ref, computed, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '../../../services/api'
@@ -113,26 +129,19 @@ export default defineComponent({
   },
   emits: ['update:modelValue', 'order-accepted', 'location-changed'],
   setup(props, { emit }) {
+    const { t } = useI18n()
     const show = computed({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
     })
 
     const selectedOrder = ref<any>(null)
-    // When several orders share one pickup point they are grouped behind a single
-    // cluster marker; clicking it opens this list instead of a single card.
     const selectedCluster = ref<any[] | null>(null)
     const accepting = ref(false)
-    // Authoritative position last confirmed by the server. The marker and both
-    // zone circles are always anchored here — never directly to the props, which
-    // can be stale — so an on-screen drag is measured against the same origin the
-    // backend uses when it decides "within circle" vs "district change".
+
     const serverLat = ref(props.currentLat)
     const serverLon = ref(props.currentLon)
-    // Guards against overlapping set-location requests. Without it a single
-    // gesture can fire both `dragend` and a trailing map `click`; the second
-    // request lands inside the 0.5 km circle of the just-moved point and comes
-    // back rejected as a within-circle move, even though the real move was far.
+
     let moving = false
     let map: L.Map | null = null
     let markersLayer: L.LayerGroup | null = null
@@ -142,11 +151,6 @@ export default defineComponent({
 
     const mapOrders = ref<any[]>([])
 
-    // Pull the authoritative stored position from the backend. This is what the
-    // marker and both zone circles must anchor to, because the server decides
-    // "within circle" vs "district change" against exactly this point. Props
-    // (the device's own GPS fix) are only a fallback for an executor who has no
-    // stored location yet.
     const fetchServerLocation = async (): Promise<boolean> => {
       try {
         const res = await api.get('/executor/location')
@@ -182,16 +186,16 @@ export default defineComponent({
           map = null
         }
 
-        // Initialize Leaflet map with initial center and default zoom 14 (~2.5km radius view)
-        map = L.map(container).setView([serverLat.value, serverLon.value], 14)
+        // Initialize Leaflet map without default zoomControl (custom controls used)
+        map = L.map(container, { zoomControl: false }).setView([serverLat.value, serverLon.value], 14)
 
-        // Tile layer attached immediately
+        // Tile layer
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '© OpenStreetMap',
         }).addTo(map)
 
-        // 10km Outer Circle — kept very faint, just a hint of the overview zone.
+        // 10km Outer Circle — faint overview hint
         zone50kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 10000,
           color: '#5c60f5',
@@ -201,8 +205,7 @@ export default defineComponent({
           fillOpacity: 0.02,
         }).addTo(map)
 
-        // 0.5km (500m) Accept Circle — the brand dashed "search radius" from the
-        // template.
+        // 0.5km (500m) Search Zone Circle from template
         zone2kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 500,
           color: '#5c60f5',
@@ -212,12 +215,15 @@ export default defineComponent({
           fillOpacity: 0.08,
         }).addTo(map)
 
-        // User Draggable Marker
+        // User Draggable Dot Marker with Pulse
         const userIcon = L.divIcon({
-          className: 'user-marker-pin',
-          html: `<div class="user-pin-pulse"><i class="ph-bold ph-navigation-arrow"></i></div>`,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
+          className: 'zone-dot-wrapper',
+          html: `<div class="zone-dot-marker">
+                   <div class="zone-dot-pulse"></div>
+                   <div class="zone-dot"></div>
+                 </div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
         })
 
         userMarker = L.marker([serverLat.value, serverLon.value], {
@@ -230,7 +236,6 @@ export default defineComponent({
           await handleManualLocationChange(position.lat, position.lng)
         })
 
-        // Move marker directly when clicking anywhere on the map
         map.on('click', async (event: L.LeafletMouseEvent) => {
           const { lat, lng } = event.latlng
           if (userMarker) {
@@ -242,7 +247,6 @@ export default defineComponent({
         markersLayer = L.layerGroup().addTo(map)
         fetchMapOrders()
 
-        // Scale view bounds to 5 * pickup zone diameter (500m radius -> 1000m diameter -> 5000m view diameter = 2500m view radius)
         const updateViewBounds = () => {
           if (!map) return
           map.invalidateSize()
@@ -257,9 +261,6 @@ export default defineComponent({
       })
     }
 
-    // Snap the marker and both zone circles to a single point, and remember it
-    // as the authoritative server position. Every outcome routes through here so
-    // the map never drifts away from what the backend has stored.
     const anchorTo = (lat: number, lon: number) => {
       serverLat.value = lat
       serverLon.value = lon
@@ -269,9 +270,6 @@ export default defineComponent({
     }
 
     const handleManualLocationChange = async (lat: number, lon: number) => {
-      // Drop the gesture if a request is already in flight: a drag can emit both
-      // `dragend` and a trailing map `click`, and letting the second one through
-      // is exactly what produced the spurious "within circle" rejection.
       if (moving) return
       moving = true
       try {
@@ -286,7 +284,6 @@ export default defineComponent({
           fetchMapOrders()
         } else if (res.data && !res.data.success) {
           alert(res.data.message || 'Ручное перемещение отклонено')
-          // The server echoes the position it kept; realign everything to it.
           anchorTo(res.data.lat ?? serverLat.value, res.data.lon ?? serverLon.value)
         }
       } catch (err: any) {
@@ -301,10 +298,6 @@ export default defineComponent({
       if (!markersLayer || !map) return
       markersLayer.clearLayers()
 
-      // Group orders that resolve to (almost) the same pickup point — several
-      // orders in one building or flat geocode to identical coordinates and would
-      // otherwise stack directly on top of one another. Rounding to 5 decimals is
-      // ~1 m, tight enough that only genuinely co-located orders merge.
       const groups = new Map<string, any[]>()
       mapOrders.value.forEach((order) => {
         const oLat = order.pickup_lat || 55.7558
@@ -324,13 +317,10 @@ export default defineComponent({
           const hot = !!(order.is_asap || order.is_urgent)
           const price = Number(order.hold_amount || 0).toFixed(0)
 
-          // A white pill pinned above the point (tail tip at the coordinate).
-          // iconSize 0 + an absolutely-positioned child let the pill be any width
-          // while its tail always lands exactly on the pickup point.
           const orderIcon = L.divIcon({
             className: 'tmpl-marker',
             html: `<div class="tmpl-pin ${hot ? 'hot' : ''} ${order.can_accept ? 'acceptable' : ''}">
-                     <i class="ph-fill ${hot ? 'ph-lightning' : 'ph-package'} tmpl-pin-icon"></i>
+                     <i class="ph-fill ${hot ? 'ph-lightning' : 'ph-package'} pin-icon"></i>
                      <span>${price} ${props.currencySymbol}</span>
                    </div>`,
             iconSize: [0, 0],
@@ -344,15 +334,13 @@ export default defineComponent({
           })
           markersLayer?.addLayer(marker)
         } else {
-          // A white pill with a red outline and a count badge signals several
-          // stacked orders; clicking it opens the list.
           const anyAccept = orders.some((o) => o.can_accept)
           const clusterIcon = L.divIcon({
             className: 'tmpl-marker',
-            html: `<div class="tmpl-pin cluster ${anyAccept ? 'acceptable' : ''}">
-                     <i class="ph-fill ph-stack tmpl-pin-icon"></i>
+            html: `<div class="cluster-pin ${anyAccept ? 'acceptable' : ''}">
+                     <i class="ph-fill ph-stack pin-icon"></i>
                      <span>Заказы</span>
-                     <div class="tmpl-cluster-badge">${orders.length}</div>
+                     <div class="notification-badge">${orders.length}</div>
                    </div>`,
             iconSize: [0, 0],
             iconAnchor: [0, 0],
@@ -368,13 +356,18 @@ export default defineComponent({
       })
     }
 
-    // Open a single order from the cluster list. The cluster stays set so the
-    // preview card can offer a "back to list" affordance.
     const openClusterOrder = (order: any) => {
       selectedOrder.value = order
     }
 
-    // Recenter the map on the executor's own position.
+    const zoomIn = () => {
+      if (map) map.zoomIn()
+    }
+
+    const zoomOut = () => {
+      if (map) map.zoomOut()
+    }
+
     const recenterOnMe = () => {
       if (map) map.setView([serverLat.value, serverLon.value], 15, { animate: true })
     }
@@ -389,7 +382,15 @@ export default defineComponent({
         selectedCluster.value = null
         show.value = false
       } catch (err: any) {
-        alert(err.response?.data || 'Ошибка принятия заказа')
+        const rawErr = err.response?.data
+        const rawText = typeof rawErr === 'string' ? rawErr : (rawErr?.error || '')
+        if (rawText.includes('executor has no active shift') || rawText.includes('no active shift') || rawText.includes('нет активной смены')) {
+          alert(t('executor.noActiveShift'))
+        } else if (rawText.includes('penalized') || rawText.includes('оштрафована')) {
+          alert(t('executor.shiftPenalized'))
+        } else {
+          alert(rawText || t('executor.errorAcceptOrder', 'Ошибка принятия заказа'))
+        }
       } finally {
         accepting.value = false
       }
@@ -397,10 +398,6 @@ export default defineComponent({
 
     watch(show, async (val) => {
       if (!val) return
-      // Resolve the center from the server every time the modal opens, so it
-      // always reflects the last confirmed position instead of whatever props
-      // happened to hold when this component was first mounted. Fall back to the
-      // props only when the backend has no stored location yet.
       const hasServer = await fetchServerLocation()
       if (!hasServer) {
         serverLat.value = props.currentLat
@@ -413,143 +410,414 @@ export default defineComponent({
       show,
       selectedOrder,
       selectedCluster,
-      openClusterOrder,
-      recenterOnMe,
       accepting,
+      openClusterOrder,
       acceptMapOrder,
+      recenterOnMe,
+      zoomIn,
+      zoomOut,
     }
   },
 })
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap');
+
+:root {
+  --brand-primary: #5c60f5;
+  --brand-primary-rgb: 92, 96, 245;
+  --danger: #ef4444;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --surface: #ffffff;
+  --map-bg: #e2e8f0;
+}
 
 .map-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px; z-index: 9999;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  animation: fadeIn 0.2s ease-out;
+  font-family: 'Nunito', sans-serif;
 }
 
-.map-modal-card {
-  background: #ffffff;
-  border-radius: 28px;
-  width: 100%; max-width: 900px; height: 85vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  overflow: hidden; position: relative;
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.map-modal-header {
-  padding: 20px 24px; display: flex; justify-content: space-between; align-items: center;
-  border-bottom: 1px solid #f1f5f9;
-}
-.map-modal-title { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0; }
-.map-modal-subtitle { font-size: 13px; color: #64748b; margin: 2px 0 0 0; }
-
-.btn-close {
-  width: 36px; height: 36px; border-radius: 50%; border: none;
-  background: #f1f5f9; color: #64748b; font-size: 18px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-}
-
-.map-modal-body {
-  flex: 1; position: relative; width: 100%; height: 100%;
-}
-
-.leaflet-container-box {
-  width: 100%; height: 100%;
-}
-
-/* Floating "my location" button, bottom-right. */
-.map-fab {
-  position: absolute; bottom: 24px; right: 20px;
-  width: 52px; height: 52px; border-radius: 50%;
-  background: #ffffff; border: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 22px; color: #5c60f5;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
-  z-index: 1000; transition: transform 0.15s ease;
-}
-.map-fab:active { transform: scale(0.94); }
-
-/* Selected Order Card Overlay */
-.order-preview-card {
-  position: absolute; bottom: 24px; left: 24px; right: 24px;
-  background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  border-radius: 20px; padding: 20px;
-  box-shadow: 0 20px 40px -10px rgba(0,0,0,0.15);
-  z-index: 1000; animation: slideUp 0.3s ease;
+/* Модальное окно (Bottom Sheet) */
+.bottom-sheet {
+  width: 100%;
+  max-width: 480px;
+  height: 85vh;
+  background: #e2e8f0;
+  position: relative;
+  overflow: hidden;
+  border-top-left-radius: 32px;
+  border-top-right-radius: 32px;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: 'Nunito', sans-serif;
 }
 
 @keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* --- ЧИСТАЯ ШАПКА --- */
+.sheet-header {
+  background: #ffffff;
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  position: relative;
+  z-index: 100;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+}
+
+/* Индикатор свайпа (Drag handle) */
+.drag-handle {
+  width: 40px;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.header-text h2 {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.5px;
+  font-family: 'Nunito', sans-serif;
+}
+
+.header-text p {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.4;
+  margin: 0;
+  font-family: 'Nunito', sans-serif;
+}
+
+.close-btn {
+  background: #f1f5f9;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #64748b;
+  border: none;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.close-btn:active {
+  background: #e2e8f0;
+}
+
+/* --- КАРТА --- */
+.map-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.leaflet-container-box {
+  width: 100%;
+  height: 100%;
+}
+
+/* Кнопки зума */
+.zoom-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 500;
+}
+
+.zoom-btn {
+  background: transparent;
+  border: none;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.zoom-btn:first-child {
+  border-bottom: 1px solid #f1f5f9;
+}
+.zoom-btn:active {
+  background: #f8fafc;
+}
+
+/* Кнопка геолокации */
+.location-btn {
+  position: absolute;
+  bottom: 30px;
+  right: 20px;
+  background: #ffffff;
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  color: #5c60f5;
+  z-index: 500;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.location-btn:active {
+  transform: scale(0.92);
+}
+
+/* Selected Order Overlay Card */
+.order-preview-card {
+  position: absolute;
+  bottom: 20px;
+  left: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.2);
+  z-index: 600;
+  animation: cardSlideUp 0.25s ease-out;
+  font-family: 'Nunito', sans-serif;
+}
+
+@keyframes cardSlideUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 .btn-close-card {
-  position: absolute; top: 12px; right: 12px;
-  background: transparent; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: #f1f5f9;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 14px;
+  cursor: pointer;
 }
 
-.op-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.op-id { font-size: 14px; font-weight: 700; color: #6366f1; font-family: monospace; }
-.op-price { font-size: 18px; font-weight: 700; color: #0f172a; }
-.op-address { font-size: 14px; color: #475569; margin-bottom: 6px; }
-.op-distance { font-size: 13px; color: #64748b; }
+.op-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.op-id {
+  font-size: 14px;
+  font-weight: 800;
+  color: #5c60f5;
+  font-family: monospace;
+}
+.op-price {
+  font-size: 20px;
+  font-weight: 900;
+  color: #0f172a;
+}
+.op-address {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 6px;
+}
+.op-distance {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
 
 .btn-accept-map {
-  width: 100%; padding: 12px; border-radius: 14px; border: none;
-  background: #10b981; color: white; font-weight: 600; font-size: 15px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 16px;
+  border: none;
+  background: #10b981;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
   transition: all 0.2s ease;
+  font-family: 'Nunito', sans-serif;
 }
-.btn-accept-map:hover { background: #059669; }
+.btn-accept-map:hover {
+  background: #059669;
+}
+.btn-accept-map:active {
+  transform: scale(0.98);
+}
 
 .btn-disabled-hint {
-  background: #fffbebfb; border: 1px solid #fde68a; color: #b45309;
-  padding: 10px 14px; border-radius: 12px; font-size: 13px; text-align: center;
+  background: #fffbebfb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
 }
 
 /* Cluster list overlay */
-.cluster-list-card { padding-top: 24px; }
-.cluster-title { font-size: 16px; font-weight: 700; color: #0f172a; padding-right: 28px; }
-.cluster-address { font-size: 13px; color: #64748b; margin: 2px 0 12px; }
+.cluster-list-card {
+  padding-top: 22px;
+}
+.cluster-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: #0f172a;
+  padding-right: 28px;
+}
+.cluster-address {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  margin: 2px 0 12px;
+}
 .cluster-rows {
-  display: flex; flex-direction: column; gap: 8px;
-  max-height: 40vh; overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 .cluster-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  width: 100%; text-align: left; cursor: pointer;
-  background: #f8fafc; border: none; border-radius: 14px;
-  padding: 10px 12px; transition: background 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: #f8fafc;
+  border: none;
+  border-radius: 16px;
+  padding: 10px 14px;
+  transition: background 0.15s ease;
+  font-family: 'Nunito', sans-serif;
 }
-.cluster-item:hover { background: #eef2ff; }
-.ci-left { display: flex; align-items: center; gap: 10px; }
+.cluster-item:hover {
+  background: #eef2ff;
+}
+.ci-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .ci-icon {
-  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
-  background: #ffffff; display: flex; align-items: center; justify-content: center;
-  color: #5c60f5; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5c60f5;
+  font-size: 18px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
-.ci-icon.hot { color: #f59e0b; }
-.ci-text { display: flex; flex-direction: column; }
-.ci-price { font-weight: 900; font-size: 16px; color: #0f172a; }
-.ci-dist { font-size: 11px; font-weight: 700; }
-.ci-dist.ok { color: #15803d; }
-.ci-dist.far { color: #b45309; }
-.ci-arrow { color: #cbd5e1; font-size: 16px; }
+.ci-icon.hot {
+  color: #f59e0b;
+}
+.ci-text {
+  display: flex;
+  flex-direction: column;
+}
+.ci-price {
+  font-weight: 900;
+  font-size: 16px;
+  color: #0f172a;
+}
+.ci-dist {
+  font-size: 12px;
+  font-weight: 700;
+}
+.ci-dist.ok {
+  color: #15803d;
+}
+.ci-dist.far {
+  color: #b45309;
+}
+.ci-arrow {
+  color: #cbd5e1;
+  font-size: 16px;
+}
 
 .btn-back-cluster {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: transparent; border: none; color: #6366f1;
-  font-size: 13px; font-weight: 600; cursor: pointer;
-  padding: 0; margin-bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #5c60f5;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 10px;
+  font-family: 'Nunito', sans-serif;
 }
 </style>
 
@@ -558,66 +826,147 @@ export default defineComponent({
   display: none !important;
 }
 
-/* Leaflet Custom Marker Pins. This block is intentionally global (not scoped):
-   Leaflet injects the divIcon HTML into its own map panes, outside the
-   component's scoped DOM, so plain global selectors are what reach it. */
-
-/* Executor location: brand dot with a white ring and a pulsing halo. */
-.user-pin-pulse {
+/* User dot marker */
+.zone-dot-marker {
   position: relative;
-  width: 20px; height: 20px; border-radius: 50%;
-  background: #5c60f5; color: transparent;
-  border: 3px solid #ffffff;
-  box-shadow: 0 2px 8px rgba(92, 96, 245, 0.5);
-}
-.user-pin-pulse::before {
-  content: ''; position: absolute;
-  top: -6px; left: -6px; right: -6px; bottom: -6px;
-  background: rgba(92, 96, 245, 0.3); border-radius: 50%;
-  animation: tmpl-pulse-dot 2s infinite;
-}
-@keyframes tmpl-pulse-dot {
-  0% { transform: scale(0.6); opacity: 1; }
-  100% { transform: scale(2); opacity: 0; }
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* Order pin: a white pill whose tail tip sits on the pickup point. The 0x0
-   icon means this child is positioned relative to the exact coordinate. */
+.zone-dot {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  background: #5c60f5;
+  border: 4px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(92, 96, 245, 0.4);
+  z-index: 2;
+}
+
+.zone-dot-pulse {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  background: rgba(92, 96, 245, 0.25);
+  border-radius: 50%;
+  animation: zone-pulse 2s infinite;
+  z-index: 1;
+}
+
+@keyframes zone-pulse {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* Single Order Pin */
 .tmpl-pin {
-  position: absolute; left: 0; top: 0;
+  position: absolute;
+  left: 0;
+  top: 0;
   transform: translate(-50%, -100%);
-  display: inline-flex; align-items: center; gap: 6px;
-  background: #ffffff; color: #0f172a;
-  padding: 8px 14px; border-radius: 20px;
-  font-family: 'Nunito', 'Outfit', sans-serif;
-  font-weight: 800; font-size: 15px; white-space: nowrap;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
-  cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .tmpl-pin::after {
-  content: ''; position: absolute;
-  bottom: -6px; left: 50%; transform: translateX(-50%);
-  border-width: 6px 6px 0; border-style: solid;
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px 6px 0;
+  border-style: solid;
   border-color: #ffffff transparent transparent transparent;
 }
 .tmpl-pin:hover {
   transform: translate(-50%, -100%) scale(1.05);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
-.tmpl-pin-icon { font-size: 16px; color: #64748b; }
-.tmpl-pin.hot .tmpl-pin-icon { color: #f59e0b; }
-.tmpl-pin.acceptable .tmpl-pin-icon { color: #10b981; }
+.tmpl-pin-icon {
+  font-size: 16px;
+  color: #5c60f5;
+}
+.tmpl-pin.hot .tmpl-pin-icon {
+  color: #f59e0b;
+}
+.tmpl-pin.acceptable .tmpl-pin-icon {
+  color: #10b981;
+}
 
-/* Cluster pin: red outline + count badge. */
-.tmpl-pin.cluster {
-  border: 2px solid #ef4444; padding: 6px 12px;
+/* Cluster Pin */
+.cluster-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  background: #ffffff;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  color: #0f172a;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-.tmpl-pin.cluster .tmpl-pin-icon { color: #ef4444; }
-.tmpl-cluster-badge {
-  position: absolute; top: -8px; right: -8px;
-  background: #ef4444; color: #fff;
-  font-size: 12px; font-weight: 900; line-height: 1;
-  min-width: 20px; padding: 3px 6px; border-radius: 10px; text-align: center;
-  border: 2px solid #ffffff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+.cluster-pin::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px 6px 0;
+  border-style: solid;
+  border-color: #ffffff transparent transparent transparent;
+}
+.cluster-pin:hover {
+  transform: translate(-50%, -100%) scale(1.05);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+.cluster-pin.acceptable .pin-icon {
+  color: #10b981;
+}
+.pin-icon {
+  color: #5c60f5;
+  font-size: 16px;
+}
+.notification-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 </style>

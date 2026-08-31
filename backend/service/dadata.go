@@ -28,7 +28,22 @@ type DaData struct {
 	client  *http.Client
 	apiKey  string
 	baseURL string
+	// inflight bounds how many requests may be at the provider at once.
+	//
+	// The client's timeout bounds one request, not the number of them. When the
+	// provider slows down, address entry does not: every keystroke from every
+	// user starts another call, each holding a goroutine and a connection for
+	// up to the timeout, and the pile grows for as long as the provider stays
+	// slow. This caps the pile; callers past the cap fail fast with
+	// ErrAddressProviderBusy, which the API already knows how to report.
+	inflight chan struct{}
 }
+
+// defaultDaDataConcurrency is the ceiling on simultaneous provider calls. It is
+// deliberately small: address entry is served from the geocode cache for
+// anything already seen, and a queue that outlives the caller's patience helps
+// nobody.
+const defaultDaDataConcurrency = 8
 
 const daDataSuggestURL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address"
 
@@ -48,12 +63,19 @@ func NewDaData() *DaData {
 	if key == "" {
 		return nil
 	}
+	concurrency := defaultDaDataConcurrency
+	if v := strings.TrimSpace(os.Getenv("DADATA_MAX_CONCURRENCY")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			concurrency = n
+		}
+	}
 	return &DaData{
 		// Address entry is interactive: a suggestion that arrives after the
 		// next keystroke is worthless, so the timeout is short.
-		client:  &http.Client{Timeout: 4 * time.Second},
-		apiKey:  key,
-		baseURL: daDataSuggestURL,
+		client:   &http.Client{Timeout: 4 * time.Second},
+		apiKey:   key,
+		baseURL:  daDataSuggestURL,
+		inflight: make(chan struct{}, concurrency),
 	}
 }
 
@@ -118,6 +140,19 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Token "+d.apiKey)
+
+	// Take a slot, or report the provider as busy. Waiting for one would just
+	// move the queue from the provider to here, and the caller is a person
+	// typing an address.
+	if d.inflight != nil {
+		select {
+		case d.inflight <- struct{}{}:
+			defer func() { <-d.inflight }()
+		default:
+			metrics.UpstreamResult("dadata", "suggest", "throttled", 0)
+			return nil, ErrAddressProviderBusy
+		}
+	}
 
 	started := time.Now()
 	resp, err := d.client.Do(req)

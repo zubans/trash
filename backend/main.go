@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -40,6 +41,7 @@ func main() {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer db.Close()
+	configurePool(db)
 
 	if err := waitForDB(db); err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -66,14 +68,28 @@ func main() {
 	// Repositories
 	userRepo := repository.New(db)
 	adminRepo := repository.NewAdminRepository(db)
-	settingsRepo := repository.NewSettingsRepository(db)
+	// system_settings is a handful of rows read on the pricing, eligibility and
+	// matching paths — several times per request, and inside worker loops. The
+	// cache is written through, so an admin's change still applies to the next
+	// order; the TTL only bounds staleness from writes this process did not make.
+	settingsRepo := repository.NewCachedSettingsRepository(
+		repository.NewSettingsRepository(db),
+		time.Duration(getEnvInt("SETTINGS_CACHE_TTL_SEC", 10))*time.Second,
+	)
 	tokenRepo := repository.NewTokenRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	bidRepo := repository.NewBidRepository(db)
 	chatRepo := repository.NewChatRepository(db)
-	catalogRepo := repository.NewServiceCatalogRepository(db)
+	// Every order rendered in a list resolves its service variant, and the
+	// eligibility predicate reads that variant's flags for every order it judges.
+	// The catalog itself changes only when an admin edits it, and those edits go
+	// through this same repository and flush the cache.
+	catalogRepo := repository.NewCachedServiceCatalogRepository(
+		repository.NewServiceCatalogRepository(db),
+		time.Duration(getEnvInt("CATALOG_CACHE_TTL_SEC", 60))*time.Second,
+	)
 	appReleaseRepo := repository.NewAppReleaseRepository(db)
 	reviewRepo := repository.NewReviewRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
@@ -129,31 +145,43 @@ func main() {
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 
+	// Every periodic job below changes state that must change once — a refund, a
+	// penalty, an assignment. The leader guard makes each tick run on a single
+	// process, so a second replica skips it rather than doing the work twice.
+	// With one process it costs one advisory lock per tick and nothing else.
+	leader := worker.NewLeader(db)
+
 	// Start background order matcher
+	matchingService.WithLeaderGuard(leader.Guard("matching"))
 	matchingService.StartMatchingWorker(context.Background(), 5*time.Second)
 
 	// Start background workers
-	slaWorker := worker.NewSLAWorker(db, orderService, chatService, ledger)
+	slaWorker := worker.NewSLAWorker(db, orderService, chatService, ledger).
+		WithLeader(leader, "sla")
 	slaWorker.Start(30 * time.Second)
 
-	auctionWorker := worker.NewAuctionWorker(db, orderService)
+	auctionWorker := worker.NewAuctionWorker(db, orderService).
+		WithLeader(leader, "auction")
 	auctionWorker.Start(1 * time.Minute)
 
 	// Orders that carry no pickup coordinates — an older client that sent none
 	// and whose address could not be resolved at creation, or orders that
 	// predate coordinate capture — are invisible on the executor map. This
 	// backfills them through the address resolver, off the request path.
-	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, addressSuggester)
+	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, addressSuggester).
+		WithLeader(leader, "geocode_backfill")
 	geocodeWorker.Start(1 * time.Minute)
 
 	// The only thing that closes an expired shift: one periodic scan, which also
 	// picks up shifts that were running when the process restarted.
-	shiftWorker := worker.NewShiftWorker(shiftService)
+	shiftWorker := worker.NewShiftWorker(shiftService).
+		WithLeader(leader, "shift_autoclose")
 	shiftWorker.Start(1 * time.Minute)
 
 	// Nightly books check. It reports and never repairs: a balance that drifted
 	// away from its ledger is a bug worth seeing, not a number to overwrite.
-	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01))
+	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
+		WithLeader(leader, "reconcile")
 	reconcileWorker.Start(24 * time.Hour)
 
 	// Expired refresh tokens are dropped daily; used ones are kept until they
@@ -436,6 +464,32 @@ func newServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// configurePool bounds the connection pool.
+//
+// The point is the bound, not the size. An unconfigured pool has no limit on
+// open connections, so a client surge opens them until Postgres refuses with
+// "sorry, too many connections" — an outage rather than a queue. With a limit
+// the queue forms inside the process, where it is visible (the pool gauges
+// registered by metrics.RegisterDB report WaitCount and WaitDuration) and where
+// waiting requests still hold their place in line.
+//
+// Idle is kept equal to open on purpose: the default of two idle connections
+// means every surge above two pays connection setup again, which is the cost
+// this is meant to avoid. The default of 25 leaves room under a stock
+// max_connections=100 for the workers' own traffic, a migration run and a psql
+// session, and is overridable for a host tuned differently.
+func configurePool(db *sql.DB) {
+	maxOpen := getEnvInt("DB_MAX_OPEN_CONNS", 25)
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxOpen)
+	// Recycle idle connections so a pool that ballooned during a spike returns
+	// to a small steady state, and cap total lifetime so a long-lived process
+	// picks up server-side changes (a restarted database, a rotated password).
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	log.Printf("[db] pool limited to %d open connections", maxOpen)
+}
+
 // waitForDB retries db.Ping with a short backoff until the database is ready.
 func waitForDB(db *sql.DB) error {
 	var err error
@@ -473,6 +527,19 @@ func corsMiddleware(next http.Handler) http.Handler {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// getEnvInt reads a positive integer setting, falling back when it is unset or
+// unparseable. A malformed value takes the default rather than the process:
+// tuning knobs must not be able to stop the service from starting.
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+		log.Printf("[config] %s=%q is not a positive integer, using %d", key, v, fallback)
 	}
 	return fallback
 }

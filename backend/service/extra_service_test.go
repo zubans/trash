@@ -259,6 +259,13 @@ func (m *mockExecutorGeoRepo) GetExecutorLocation(ctx context.Context, executorI
 	lon := 37.6173
 	return &lat, &lon, nil, nil
 }
+func (m *mockExecutorGeoRepo) GetExecutorLocations(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]repository.ExecutorPosition, error) {
+	out := make(map[uuid.UUID]repository.ExecutorPosition, len(executorIDs))
+	for _, id := range executorIDs {
+		out[id] = repository.ExecutorPosition{Lat: 55.7558, Lon: 37.6173}
+	}
+	return out, nil
+}
 func (m *mockExecutorGeoRepo) CreateGeoAlert(ctx context.Context, alert *repository.GeoAlert) error {
 	return nil
 }

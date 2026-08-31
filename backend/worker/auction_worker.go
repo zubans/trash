@@ -16,6 +16,7 @@ import (
 type AuctionWorker struct {
 	db           *sql.DB
 	orderService *service.OrderService
+	guard func(func() error) error
 }
 
 // NewAuctionWorker creates a new AuctionWorker.
@@ -28,7 +29,7 @@ func (w *AuctionWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := metrics.TrackWorker("auction", w.CheckExpiredAuctions); err != nil {
+			if err := metrics.TrackWorker("auction", func() error { return w.runGuarded(w.CheckExpiredAuctions) }); err != nil {
 				log.Printf("[AuctionWorker] Error checking expired auctions: %v", err)
 			}
 		}
@@ -85,4 +86,20 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	}
 
 	return nil
+}
+
+// guard runs one tick under the job's advisory lock when a Leader is wired, so
+// a second replica skips the tick instead of duplicating it. Unset means run
+// directly, which is what a single-process deployment and the tests do.
+func (w *AuctionWorker) runGuarded(job func() error) error {
+	if w.guard == nil {
+		return job()
+	}
+	return w.guard(job)
+}
+
+// WithLeader makes this worker run at most once across every process.
+func (w *AuctionWorker) WithLeader(leader *Leader, name string) *AuctionWorker {
+	w.guard = leader.Guard(name)
+	return w
 }

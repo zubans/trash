@@ -86,32 +86,86 @@ type CreateOrderRequest struct {
 	Lon              *float64  `json:"lon,omitempty"`
 }
 
+// hydrateServiceVariant fills in an order's service variant and executor
+// identity. It is the single-order form of hydrateServiceVariants, which is
+// what the list endpoints use; both share one implementation so a rendered
+// order looks the same whichever path produced it.
 func (s *OrderService) hydrateServiceVariant(ctx context.Context, order *repository.Order) {
 	if order == nil {
 		return
 	}
-	if variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID); err == nil && variant != nil {
-		order.ServiceVariant = variant
+	s.hydrateServiceVariants(ctx, []*repository.Order{order})
+}
+
+// hydrateServiceVariants fills in a whole page of orders with two queries.
+//
+// Doing this one order at a time cost two queries per row — the variant and,
+// for assigned orders, the executor — on every list endpoint the apps poll. The
+// lookups are batched here; the per-order field mapping is unchanged.
+func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*repository.Order) {
+	if len(orders) == 0 {
+		return
 	}
-	if order.ExecutorID != nil && s.userRepo != nil {
-		if execUser, err := s.userRepo.FindByID(ctx, *order.ExecutorID); err == nil && execUser != nil {
-			order.ExecutorPhone = execUser.Phone
-			var nameParts []string
-			if execUser.FirstName != "" {
-				nameParts = append(nameParts, execUser.FirstName)
-			}
-			if execUser.Patronymic != "" {
-				nameParts = append(nameParts, execUser.Patronymic)
-			}
-			if execUser.LastName != "" {
-				runes := []rune(strings.TrimSpace(execUser.LastName))
-				if len(runes) > 0 {
-					nameParts = append(nameParts, string(runes[0])+".")
-				}
-			}
-			order.ExecutorName = strings.Join(nameParts, " ")
+
+	variantIDs := make([]uuid.UUID, 0, len(orders))
+	executorIDs := make([]uuid.UUID, 0, len(orders))
+	for _, o := range orders {
+		if o == nil {
+			continue
+		}
+		variantIDs = append(variantIDs, o.ServiceVariantID)
+		if o.ExecutorID != nil {
+			executorIDs = append(executorIDs, *o.ExecutorID)
 		}
 	}
+
+	variants := map[uuid.UUID]*repository.ServiceNode{}
+	if s.catalogRepo != nil {
+		if loaded, err := s.catalogRepo.GetNodesByIDs(ctx, variantIDs); err == nil {
+			variants = loaded
+		}
+	}
+	executors := map[uuid.UUID]*repository.User{}
+	if s.userRepo != nil && len(executorIDs) > 0 {
+		if loaded, err := s.userRepo.FindByIDs(ctx, executorIDs); err == nil {
+			executors = loaded
+		}
+	}
+
+	for _, o := range orders {
+		if o == nil {
+			continue
+		}
+		if variant := variants[o.ServiceVariantID]; variant != nil {
+			o.ServiceVariant = variant
+		}
+		if o.ExecutorID == nil {
+			continue
+		}
+		if execUser := executors[*o.ExecutorID]; execUser != nil {
+			o.ExecutorPhone = execUser.Phone
+			o.ExecutorName = shortDisplayName(execUser)
+		}
+	}
+}
+
+// shortDisplayName renders "Имя Отчество Ф." — the form the apps show for an
+// order's executor.
+func shortDisplayName(u *repository.User) string {
+	var nameParts []string
+	if u.FirstName != "" {
+		nameParts = append(nameParts, u.FirstName)
+	}
+	if u.Patronymic != "" {
+		nameParts = append(nameParts, u.Patronymic)
+	}
+	if u.LastName != "" {
+		runes := []rune(strings.TrimSpace(u.LastName))
+		if len(runes) > 0 {
+			nameParts = append(nameParts, string(runes[0])+".")
+		}
+	}
+	return strings.Join(nameParts, " ")
 }
 
 func (s *OrderService) loadSettings(ctx context.Context) map[string]float64 {
@@ -757,9 +811,7 @@ func (s *OrderService) GetAvailableConstructionOrders(ctx context.Context) ([]*r
 	if err != nil {
 		return nil, err
 	}
-	for _, o := range orders {
-		s.hydrateServiceVariant(ctx, o)
-	}
+	s.hydrateServiceVariants(ctx, orders)
 	return orders, nil
 }
 
@@ -778,13 +830,15 @@ func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Con
 		return nil, err
 	}
 
+	// Variants, executors and the customers the filter below inspects, all in a
+	// fixed number of queries rather than one set per order.
+	s.hydrateServiceVariants(ctx, orders)
+	customers := s.customersOf(ctx, orders)
+
 	filtered := []*repository.Order{}
 	for _, o := range orders {
-		s.hydrateServiceVariant(ctx, o)
-
 		// 1. Filter: Customer MUST be verified ("показ заказов только от верифицированных пользователей")
-		customer, err := s.userRepo.FindByID(ctx, o.CustomerID)
-		if err == nil && customer != nil {
+		if customer := customers[o.CustomerID]; customer != nil {
 			if !customer.IsVerified() {
 				continue
 			}
@@ -813,9 +867,7 @@ func (s *OrderService) FindNearbyOrders(ctx context.Context, lat, lon float64, r
 	if err != nil {
 		return nil, err
 	}
-	for _, o := range orders {
-		s.hydrateServiceVariant(ctx, o)
-	}
+	s.hydrateServiceVariants(ctx, orders)
 	return orders, nil
 }
 
@@ -847,16 +899,16 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		return nil, err
 	}
 
+	s.hydrateServiceVariants(ctx, orders)
+	customers := s.customersOf(ctx, orders)
+
 	filtered := []*repository.Order{}
 	for _, o := range orders {
-		s.hydrateServiceVariant(ctx, o)
-
 		// One predicate for both the map and this list, and the same one the
 		// accept path enforces: moderator-only orders go to moderators; normal
 		// orders follow the customer-verification segmentation and the standard
 		// executor gates (requires_verification, min_age, ban).
-		customer, _ := s.userRepo.FindByID(ctx, o.CustomerID)
-		if canViewOrTakeOrder(viewer, customer, o.ServiceVariant) != nil {
+		if canViewOrTakeOrder(viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
 			continue
 		}
 
@@ -866,15 +918,36 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 	return filtered, nil
 }
 
+// customersOf batch-loads the customers who placed the given orders, for the
+// list filters that inspect the customer's verification state.
+//
+// A failed load yields an empty map, which the callers read as "no customer
+// information" — the same thing a failed per-order lookup used to produce, and
+// the reading the eligibility rules already handle.
+func (s *OrderService) customersOf(ctx context.Context, orders []*repository.Order) map[uuid.UUID]*repository.User {
+	if s.userRepo == nil || len(orders) == 0 {
+		return map[uuid.UUID]*repository.User{}
+	}
+	ids := make([]uuid.UUID, 0, len(orders))
+	for _, o := range orders {
+		if o != nil {
+			ids = append(ids, o.CustomerID)
+		}
+	}
+	loaded, err := s.userRepo.FindByIDs(ctx, ids)
+	if err != nil {
+		return map[uuid.UUID]*repository.User{}
+	}
+	return loaded
+}
+
 // ListAssigned returns orders assigned to an executor.
 func (s *OrderService) ListAssigned(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
 	orders, err := s.orderRepo.GetExecutorAssignedOrders(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
-	for _, o := range orders {
-		s.hydrateServiceVariant(ctx, o)
-	}
+	s.hydrateServiceVariants(ctx, orders)
 	return orders, nil
 }
 
@@ -884,8 +957,6 @@ func (s *OrderService) ListByCustomer(ctx context.Context, customerID uuid.UUID)
 	if err != nil {
 		return nil, err
 	}
-	for _, o := range orders {
-		s.hydrateServiceVariant(ctx, o)
-	}
+	s.hydrateServiceVariants(ctx, orders)
 	return orders, nil
 }

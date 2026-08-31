@@ -280,28 +280,46 @@ type ExecutorHistoryResult struct {
 }
 
 // GetExecutorFinancialHistory retrieves order and transaction logs for an executor.
+// hydrateHistoryVariants attaches the service variant to each order in a
+// history page, resolving the whole page in one query instead of one per order.
+func (s *ShiftService) hydrateHistoryVariants(ctx context.Context, orders []repository.Order) {
+	if s.catalogRepo == nil || len(orders) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(orders))
+	for i := range orders {
+		ids = append(ids, orders[i].ServiceVariantID)
+	}
+	variants, err := s.catalogRepo.GetNodesByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range orders {
+		if variant := variants[orders[i].ServiceVariantID]; variant != nil {
+			orders[i].ServiceVariant = variant
+		}
+	}
+}
+
 func (s *ShiftService) GetExecutorFinancialHistory(ctx context.Context, executorID uuid.UUID) (*ExecutorHistoryResult, error) {
 	res := &ExecutorHistoryResult{
 		Orders:       []repository.Order{},
 		Transactions: []*repository.Transaction{},
 	}
 
+	// Both lists are bounded by the repository's default page size. This screen
+	// shows a recent history; an executor with years of orders behind them used
+	// to pull every one of them, and every ledger entry, on each open.
 	if s.orderRepo != nil {
-		orders, err := s.orderRepo.FindAllByExecutor(ctx, executorID)
+		orders, err := s.orderRepo.FindAllByExecutor(ctx, executorID, 0)
 		if err == nil && orders != nil {
-			for i := range orders {
-				if s.catalogRepo != nil {
-					if variant, err := s.catalogRepo.GetNodeByID(ctx, orders[i].ServiceVariantID); err == nil {
-						orders[i].ServiceVariant = variant
-					}
-				}
-			}
+			s.hydrateHistoryVariants(ctx, orders)
 			res.Orders = orders
 		}
 	}
 
 	if s.ledger != nil {
-		txs, err := s.ledger.History(ctx, executorID)
+		txs, err := s.ledger.History(ctx, executorID, 0)
 		if err == nil && txs != nil {
 			res.Transactions = txs
 		}

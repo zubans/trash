@@ -223,6 +223,44 @@ export function getRefreshToken(): string {
   }
 }
 
+let proactiveTimer: any = null
+
+function scheduleProactiveRefresh(token: string) {
+  if (proactiveTimer) {
+    clearTimeout(proactiveTimer)
+    proactiveTimer = null
+  }
+  try {
+    const base64Url = token.split('.')[1]
+    if (!base64Url) return
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+    const jsonPayload = decodeURIComponent(
+      window.atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+    const claims = JSON.parse(jsonPayload)
+    if (typeof claims.exp === 'number') {
+      const expiresMs = claims.exp * 1000
+      const nowMs = Date.now()
+      // Refresh 2 minutes before expiration (or halfway if lifetime is very short)
+      const refreshInMs = Math.max(10000, expiresMs - nowMs - 2 * 60 * 1000)
+      proactiveTimer = setTimeout(async () => {
+        try {
+          if (getRefreshToken()) {
+            await refreshSession()
+          }
+        } catch (e) {
+          console.warn('[auth] proactive refresh failed, will retry on demand:', e)
+        }
+      }, refreshInMs)
+    }
+  } catch {
+    // ignore parse errors
+  }
+}
+
 export function storeSession(token: string, refreshToken?: string) {
   try {
     localStorage.setItem('token', token)
@@ -233,6 +271,9 @@ export function storeSession(token: string, refreshToken?: string) {
     // localStorage may be unavailable in some environments
   }
   setSessionCookie('token', token)
+  if (token) {
+    scheduleProactiveRefresh(token)
+  }
 }
 
 function setSessionCookie(name: string, value: string) {
@@ -242,6 +283,10 @@ function setSessionCookie(name: string, value: string) {
 }
 
 export function clearSession() {
+  if (proactiveTimer) {
+    clearTimeout(proactiveTimer)
+    proactiveTimer = null
+  }
   for (const name of ['token', 'userID', 'role', 'phone']) {
     document.cookie = `${name}=; Max-Age=0; path=/;`
   }
@@ -270,16 +315,19 @@ function redirectToLogin() {
 // the backend answers by ending every session.
 let refreshInFlight: Promise<string> | null = null
 
-async function refreshSession(): Promise<string> {
+export async function refreshSession(): Promise<string> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) {
     throw new Error('no refresh token')
   }
 
+  const baseUrl = (api.defaults.baseURL || '').replace(/\/$/, '')
+  const refreshUrl = baseUrl.endsWith('/api') ? `${baseUrl}/auth/refresh` : `${baseUrl}/api/auth/refresh`
+
   // A bare axios call: this must not go through the interceptor below, or a
   // failing refresh would try to refresh itself.
   const res = await axios.post(
-    `${api.defaults.baseURL || ''}/auth/refresh`,
+    refreshUrl,
     { refresh_token: refreshToken },
     { headers: { 'Content-Type': 'application/json' } }
   )

@@ -32,6 +32,15 @@
           <p>Напишите нам, если у вас возникли вопросы или нужна помощь. Администратор ответит в ближайшее время.</p>
         </div>
 
+        <!-- The server returns the most recent page, so older history is
+             reachable on request rather than loaded with every open. -->
+        <div v-if="canLoadOlder" class="support-load-older">
+          <button type="button" :disabled="loadingOlder" @click="loadOlderMessages">
+            <i v-if="loadingOlder" class="ph ph-spinner spinner"></i>
+            <span>{{ loadingOlder ? 'Загрузка...' : 'Показать более ранние сообщения' }}</span>
+          </button>
+        </div>
+
         <div
           v-for="msg in messages"
           :key="msg.id"
@@ -165,6 +174,13 @@ export default defineComponent({
     const showImageModal = ref(false)
     const previewUrl = ref('')
 
+    // Mirrors repository.DefaultMessagePageSize: a full page back means there
+    // is probably more history above it.
+    const PAGE_SIZE = 100
+    const hasOlder = ref(false)
+    const loadingOlder = ref(false)
+    const canLoadOlder = computed(() => hasOlder.value && messages.value.length > 0)
+
     let pollTimer: any = null
 
     const closeModal = () => {
@@ -212,16 +228,79 @@ export default defineComponent({
       })
     }
 
+    const readMessages = (res: any) =>
+      Array.isArray(res.data) ? res.data : (res.data?.messages || [])
+
+    // Full read of the most recent page. Used when the chat is opened; the
+    // server decides how much "recent" is.
     const fetchMessages = async () => {
       if (!chatId.value) return
       try {
         const res = await api.get(`/support/chats/${chatId.value}/messages`)
-        const data = Array.isArray(res.data) ? res.data : (res.data?.messages || [])
+        const data = readMessages(res)
         const isChanged = data.length !== messages.value.length
         messages.value = data
+        // A short first page means the conversation is fully loaded; a full one
+        // means there may be more above it.
+        hasOlder.value = data.length >= PAGE_SIZE
         if (isChanged) scrollToBottom()
       } catch (err) {
         console.error('[SupportChatModal] failed to fetch messages:', err)
+      }
+    }
+
+    // Fetch the page above what is on screen and prepend it, keeping the view
+    // where the reader left it rather than jumping.
+    const loadOlderMessages = async () => {
+      if (!chatId.value || loadingOlder.value) return
+      const oldest = messages.value[0]
+      if (!oldest?.created_at) return
+
+      loadingOlder.value = true
+      const container = messagesContainerRef.value
+      const heightBefore = container ? container.scrollHeight : 0
+      try {
+        const res = await api.get(`/support/chats/${chatId.value}/messages`, {
+          params: { before: oldest.created_at },
+        })
+        const data = readMessages(res)
+        hasOlder.value = data.length >= PAGE_SIZE
+        if (data.length) {
+          messages.value = [...data, ...messages.value]
+          nextTick(() => {
+            if (container) {
+              container.scrollTop = container.scrollHeight - heightBefore
+            }
+          })
+        }
+      } catch (err) {
+        console.error('[SupportChatModal] failed to load older messages:', err)
+      } finally {
+        loadingOlder.value = false
+      }
+    }
+
+    // What the timer calls: ask only for what arrived since the newest message
+    // already on screen. The poll used to re-download the entire conversation
+    // every few seconds, which grew with the length of the chat.
+    const fetchNewMessages = async () => {
+      if (!chatId.value) return
+      const newest = messages.value[messages.value.length - 1]
+      if (!newest?.created_at) {
+        await fetchMessages()
+        return
+      }
+      try {
+        const res = await api.get(`/support/chats/${chatId.value}/messages`, {
+          params: { after: newest.created_at },
+        })
+        const data = readMessages(res)
+        if (data.length) {
+          messages.value = [...messages.value, ...data]
+          scrollToBottom()
+        }
+      } catch (err) {
+        console.error('[SupportChatModal] failed to fetch new messages:', err)
       }
     }
 
@@ -245,7 +324,7 @@ export default defineComponent({
 
     const startPolling = () => {
       stopPolling()
-      pollTimer = setInterval(fetchMessages, 3000)
+      pollTimer = setInterval(fetchNewMessages, 3000)
     }
 
     const stopPolling = () => {
@@ -383,6 +462,9 @@ export default defineComponent({
     })
 
     return {
+      canLoadOlder,
+      loadingOlder,
+      loadOlderMessages,
       authStore,
       loading,
       sending,
@@ -519,6 +601,26 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.support-load-older {
+  display: flex;
+  justify-content: center;
+}
+
+.support-load-older button {
+  border: none;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.support-load-older button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .support-loading, .support-welcome {

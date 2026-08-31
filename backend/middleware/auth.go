@@ -66,11 +66,35 @@ func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionCheck
 	if jwtSecret == "" {
 		jwtSecret = "dev-secret-change-me"
 	}
-	return &AuthMiddleware{
+	m := &AuthMiddleware{
 		userRepo:     userRepo,
 		sessions:     sessions,
 		secret:       []byte(jwtSecret),
 		userCacheTTL: authCacheTTL(),
+	}
+	if m.userCacheTTL > 0 {
+		go m.collectUserCache()
+	}
+	return m
+}
+
+// collectUserCache drops expired entries.
+//
+// Without it the cache is a map that only ever grows: an entry is written for
+// every user who makes a request and is never removed, so a process that has
+// been up for months holds a copy of every user who signed in during that time.
+// Expiry alone does not free anything — a stale entry is ignored on read but
+// still occupies its slot.
+func (m *AuthMiddleware) collectUserCache() {
+	ticker := time.NewTicker(10 * time.Minute)
+	for range ticker.C {
+		now := time.Now()
+		m.userCache.Range(func(key, value any) bool {
+			if entry, ok := value.(cachedUser); ok && now.After(entry.expires) {
+				m.userCache.Delete(key)
+			}
+			return true
+		})
 	}
 }
 

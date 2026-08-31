@@ -55,7 +55,9 @@ type OrderRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*Order, error)
 	GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, error)
 	FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error)
-	FindAllByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error)
+	// FindAllByExecutor returns an executor's orders, most recently finished
+	// first, capped at limit (see DefaultHistoryPageSize).
+	FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]Order, error)
 	FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]Order, error)
 	GetPendingOrders(ctx context.Context) ([]*Order, error)
 	// GetOrdersMissingCoordinates returns searching orders that have an address
@@ -77,6 +79,11 @@ type OrderRepository interface {
 	SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error
 	AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error
 	CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
+	// CountActiveOrdersByExecutors answers the same question for a set of
+	// executors in one query. The matching worker asks it once per candidate
+	// per cycle; executors with no assigned order are absent from the result,
+	// which reads as a count of zero.
+	CountActiveOrdersByExecutors(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]int, error)
 	CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
 
 	GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error)
@@ -188,10 +195,10 @@ func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error) {
+func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]Order, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC`,
-		executorID,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC LIMIT $2`,
+		executorID, historyLimit(limit),
 	)
 	if err != nil {
 		return nil, err
@@ -472,6 +479,34 @@ func (r *orderRepo) CountActiveOrdersByExecutor(ctx context.Context, executorID 
 		executorID,
 	).Scan(&count)
 	return count, err
+}
+
+func (r *orderRepo) CountActiveOrdersByExecutors(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(executorIDs))
+	placeholders, args := idList(executorIDs)
+	if len(args) == 0 {
+		return counts, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT executor_id, COUNT(*) FROM orders
+		 WHERE status = 'ASSIGNED' AND executor_id IN (`+placeholders+`)
+		 GROUP BY executor_id`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id uuid.UUID
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, err
+		}
+		counts[id] = count
+	}
+	return counts, rows.Err()
 }
 
 func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {

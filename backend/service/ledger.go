@@ -50,9 +50,10 @@ func (l *Ledger) AccountBalance(ctx context.Context, code string) (*repository.S
 	return l.accounts.Get(ctx, code)
 }
 
-// History returns a user's ledger entries.
-func (l *Ledger) History(ctx context.Context, userID uuid.UUID) ([]*repository.Transaction, error) {
-	return l.transactions.GetTransactionsByUserID(ctx, userID)
+// History returns a user's most recent ledger entries, capped at limit (zero
+// means the repository's default page size).
+func (l *Ledger) History(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Transaction, error) {
+	return l.transactions.GetTransactionsByUserID(ctx, userID, limit)
 }
 
 // HasTip reports whether an order was already tipped. Called inside the tip

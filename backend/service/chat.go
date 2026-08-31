@@ -48,6 +48,22 @@ type ChatRoom struct {
 	Register   chan *ChatClient
 	Unregister chan *ChatClient
 	Broadcast  chan []byte
+
+	// refs counts the connections holding this room, and is guarded by the
+	// service's mutex — the same one that hands the room out.
+	//
+	// The room used to remove itself from the service once its last client
+	// unregistered. A connection that had just taken the room pointer, and had
+	// not yet reached its blocking send on Register, would then be left sending
+	// to a goroutine that had already returned: the handler blocked forever,
+	// holding a socket and a goroutine that nothing would ever free. Counting
+	// holders under the lock that hands out the room closes that window,
+	// because a room cannot be retired while somebody is still on their way to
+	// registering with it.
+	refs int
+	// done is closed when the last holder leaves, which is what stops the
+	// room's goroutine.
+	done chan struct{}
 }
 
 // ChatService manages WebSocket session groups, message processing, and history retrieval.
@@ -80,11 +96,34 @@ func (s *ChatService) getOrCreateRoom(ctx context.Context, orderID, chatID uuid.
 			Register:   make(chan *ChatClient),
 			Unregister: make(chan *ChatClient),
 			Broadcast:  make(chan []byte),
+			done:       make(chan struct{}),
 		}
 		s.rooms[orderID] = room
 		go s.runRoom(ctx, room)
 	}
+	// The caller now holds the room and must call releaseRoom when its
+	// connection ends. Taken under the same lock that created or found it, so
+	// the room cannot be retired between the two.
+	room.refs++
 	return room
+}
+
+// releaseRoom gives up one hold on a room, retiring it when the last one goes.
+func (s *ChatService) releaseRoom(room *ChatRoom) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room.refs--
+	if room.refs > 0 {
+		return
+	}
+	// Only remove the entry if it is still this room: a room retired here and
+	// re-created by a later connection would otherwise be dropped from under
+	// its new holders.
+	if current, ok := s.rooms[room.OrderID]; ok && current == room {
+		delete(s.rooms, room.OrderID)
+	}
+	close(room.done)
 }
 
 func (s *ChatService) runRoom(ctx context.Context, room *ChatRoom) {
@@ -97,12 +136,15 @@ func (s *ChatService) runRoom(ctx context.Context, room *ChatRoom) {
 				delete(room.Clients, client)
 				close(client.Send)
 			}
-			if len(room.Clients) == 0 {
-				s.mu.Lock()
-				delete(s.rooms, room.OrderID)
-				s.mu.Unlock()
-				return
+		case <-room.done:
+			// The last holder has left and the room is already out of the
+			// service's map. Anything still registered here is a client whose
+			// reader has gone; close its writer so the goroutine ends.
+			for client := range room.Clients {
+				delete(room.Clients, client)
+				close(client.Send)
 			}
+			return
 		case message := <-room.Broadcast:
 			for client := range room.Clients {
 				select {
@@ -132,7 +174,10 @@ func (c *ChatClient) WritePump() {
 // ReadPump listens for messages from the WebSocket client and broadcasts them.
 func (s *ChatService) ReadPump(ctx context.Context, client *ChatClient, room *ChatRoom) {
 	defer func() {
+		// Unregister first, release second: while this connection still holds
+		// the room, its goroutine is guaranteed to be running to receive this.
 		room.Unregister <- client
+		s.releaseRoom(room)
 		client.Conn.Close()
 	}()
 
@@ -271,8 +316,10 @@ func (s *ChatService) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) (
 	return s.chatRepo.GetUnreadOrderIDs(ctx, userID)
 }
 
-// GetMessages retrieves all saved messages for an order's chat room (verifying participant access).
-func (s *ChatService) GetMessages(ctx context.Context, orderID, userID uuid.UUID) ([]*repository.Message, error) {
+// GetMessages retrieves a window of an order chat's history, verifying that the
+// caller participates in the conversation. The window is the caller's to choose
+// (see repository.MessageQuery); an empty query yields the most recent page.
+func (s *ChatService) GetMessages(ctx context.Context, orderID, userID uuid.UUID, q repository.MessageQuery) ([]*repository.Message, error) {
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, err
@@ -292,7 +339,7 @@ func (s *ChatService) GetMessages(ctx context.Context, orderID, userID uuid.UUID
 		}
 	}
 
-	return s.chatRepo.GetMessages(ctx, chat.ID)
+	return s.chatRepo.GetMessages(ctx, chat.ID, q)
 }
 
 // SendMessage saves a chat message via REST and broadcasts it to active WS clients.
@@ -585,12 +632,12 @@ func (s *ChatService) authorizeSupportChat(ctx context.Context, chatID, userID u
 	return nil
 }
 
-// GetSupportMessages returns all messages for a support chat the caller owns.
-func (s *ChatService) GetSupportMessages(ctx context.Context, chatID, userID uuid.UUID, role string) ([]*repository.Message, error) {
+// GetSupportMessages returns a window of a support chat the caller owns.
+func (s *ChatService) GetSupportMessages(ctx context.Context, chatID, userID uuid.UUID, role string, q repository.MessageQuery) ([]*repository.Message, error) {
 	if err := s.authorizeSupportChat(ctx, chatID, userID, role); err != nil {
 		return nil, err
 	}
-	return s.chatRepo.GetSupportMessages(ctx, chatID)
+	return s.chatRepo.GetSupportMessages(ctx, chatID, q)
 }
 
 // SaveSupportMessage saves a new support text message.
@@ -629,9 +676,10 @@ func (s *ChatService) CanAccessAttachment(ctx context.Context, userID uuid.UUID,
 	return s.chatRepo.CanAccessAttachment(ctx, userID, fileURL)
 }
 
-// GetAdminSupportChatList returns all user support chats for Telegram-style admin UI.
+// GetAdminSupportChatList returns the most recently active support chats for
+// the Telegram-style admin UI, capped by the repository's page size.
 func (s *ChatService) GetAdminSupportChatList(ctx context.Context) ([]*repository.SupportChatListItem, error) {
-	return s.chatRepo.GetAdminSupportChatList(ctx)
+	return s.chatRepo.GetAdminSupportChatList(ctx, 0)
 }
 
 // MarkSupportMessagesAsRead marks unread messages in a support chat as read.

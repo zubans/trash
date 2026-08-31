@@ -239,6 +239,28 @@ migrate:
 	$(call compose,exec backend ./migrate)
 	@echo "Migrations applied."
 
+# Enable pg_stat_statements, the per-query time record that makes a slow
+# database readable after the fact ("which query burned the time?").
+#
+# It is a separate target rather than a migration on purpose: the extension can
+# only be created once the library is preloaded (see the db service's command in
+# docker-compose.yml), and a migration that fails on a host without it would
+# stop the backend from starting at all. Run once per database, after a compose
+# up that picked up the new command.
+pg-stats:
+	@echo "Enabling pg_stat_statements..."
+	$(call compose,exec db psql -U $${DB_USER:-healthlogin} -d $${DB_NAME:-healthlogin} \
+		-c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
+	@echo "Enabled. Top queries by total time:"
+	@echo "  make pg-top"
+
+# The queries that cost the most wall-clock time since the last reset. This is
+# the first thing to look at after a load test.
+PG_TOP_SQL = SELECT calls, round(total_exec_time::numeric, 1) AS total_ms, round(mean_exec_time::numeric, 2) AS mean_ms, left(query, 120) AS query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;
+
+pg-top:
+	$(call compose,exec db psql -U $${DB_USER:-healthlogin} -d $${DB_NAME:-healthlogin} -c "$(PG_TOP_SQL)")
+
 # Check that stored balances still equal the sum of the transaction log.
 # Exits non-zero when they do not, so it can be used as a deployment gate.
 # The backend also runs this nightly and logs the result.

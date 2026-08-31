@@ -183,7 +183,11 @@ export default defineComponent({
       window.addEventListener('resize', handleResize)
       window.addEventListener('support-unread-updated', fetchUnreadSupport)
       fetchUnreadSupport()
-      unreadTimer = setInterval(fetchUnreadSupport, 3000)
+      // 15s, not 3s: this badge counts unread support messages across every
+      // chat, which is a scan of the message table on the server. A support
+      // reply is not something the admin needs to learn about within three
+      // seconds, and the cost was paid by every open admin tab, constantly.
+      unreadTimer = setInterval(fetchUnreadSupport, 15000)
     })
 
     onUnmounted(() => {

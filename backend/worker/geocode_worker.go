@@ -23,6 +23,7 @@ type GeocodeBackfillWorker struct {
 	orderRepo repository.OrderRepository
 	resolver  service.AddressResolver
 	batchSize int
+	guard func(func() error) error
 }
 
 // NewGeocodeBackfillWorker creates a GeocodeBackfillWorker.
@@ -35,7 +36,7 @@ func (w *GeocodeBackfillWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := metrics.TrackWorker("geocode_backfill", w.Run); err != nil {
+			if err := metrics.TrackWorker("geocode_backfill", func() error { return w.runGuarded(w.Run) }); err != nil {
 				log.Printf("[GeocodeBackfillWorker] Error backfilling coordinates: %v", err)
 			}
 		}
@@ -77,4 +78,20 @@ func (w *GeocodeBackfillWorker) Run() error {
 	}
 
 	return nil
+}
+
+// guard runs one tick under the job's advisory lock when a Leader is wired, so
+// a second replica skips the tick instead of duplicating it. Unset means run
+// directly, which is what a single-process deployment and the tests do.
+func (w *GeocodeBackfillWorker) runGuarded(job func() error) error {
+	if w.guard == nil {
+		return job()
+	}
+	return w.guard(job)
+}
+
+// WithLeader makes this worker run at most once across every process.
+func (w *GeocodeBackfillWorker) WithLeader(leader *Leader, name string) *GeocodeBackfillWorker {
+	w.guard = leader.Guard(name)
+	return w
 }

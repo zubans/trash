@@ -98,6 +98,16 @@ func (m *mockCatalogRepo) GetNodeByID(ctx context.Context, id uuid.UUID) (*repos
 	return nil, sql.ErrNoRows
 }
 
+func (m *mockCatalogRepo) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.ServiceNode, error) {
+	found := make(map[uuid.UUID]*repository.ServiceNode, len(ids))
+	for _, id := range ids {
+		if n, ok := m.nodes[id]; ok {
+			found[id] = n
+		}
+	}
+	return found, nil
+}
+
 func (m *mockCatalogRepo) GetNodeByCode(ctx context.Context, code string) (*repository.ServiceNode, error) {
 	for _, n := range m.nodes {
 		if n.Code == code && !n.IsDeleted() {

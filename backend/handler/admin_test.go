@@ -50,6 +50,16 @@ func (m *mockUserRepository) FindByID(ctx context.Context, id uuid.UUID) (*repos
 	return u, nil
 }
 
+func (m *mockUserRepository) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.User, error) {
+	found := make(map[uuid.UUID]*repository.User, len(ids))
+	for _, id := range ids {
+		if u, ok := m.users[id]; ok {
+			found[id] = u
+		}
+	}
+	return found, nil
+}
+
 func (m *mockUserRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	if u, ok := m.users[id]; ok {
 		u.Status = status
@@ -411,7 +421,7 @@ func (m *mockLedgerTxRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t 
 	return nil
 }
 
-func (m *mockLedgerTxRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*repository.Transaction, error) {
+func (m *mockLedgerTxRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Transaction, error) {
 	return nil, nil
 }
 

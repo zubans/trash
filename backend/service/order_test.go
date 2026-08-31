@@ -127,6 +127,20 @@ func (m *mockOrderRepo) CountActiveOrdersByExecutor(ctx context.Context, executo
 	return count, nil
 }
 
+func (m *mockOrderRepo) CountActiveOrdersByExecutors(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(executorIDs))
+	for _, id := range executorIDs {
+		n, err := m.CountActiveOrdersByExecutor(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			counts[id] = n
+		}
+	}
+	return counts, nil
+}
+
 func (m *mockOrderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
 	var count int
 	for _, o := range m.orders {
@@ -293,8 +307,25 @@ func (m *mockOrderRepo) Cancel(ctx context.Context, q repository.Querier, orderI
 	return repository.ErrConflict
 }
 
+// FindNearbyOrders mirrors the real repository: searching orders that carry
+// coordinates and fall within the radius. It used to be a stub returning
+// nothing, which was harmless while the map filtered in Go and read every
+// pending order — now that the map asks the repository to bound the search,
+// a stub here would silently make the map look empty.
 func (m *mockOrderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
-	return nil, nil
+	var nearby []*repository.Order
+	for _, o := range m.orders {
+		if o.Status != repository.OrderStatusSearching {
+			continue
+		}
+		if o.PickupLat == nil || o.PickupLon == nil {
+			continue
+		}
+		if HaversineDistanceKM(lat, lon, *o.PickupLat, *o.PickupLon)*1000 <= float64(radiusMeters) {
+			nearby = append(nearby, o)
+		}
+	}
+	return nearby, nil
 }
 
 func (m *mockOrderRepo) Execute(ctx context.Context, q repository.Querier, orderID uuid.UUID) error {
@@ -365,6 +396,15 @@ func (m *mockCatalogRepo) GetNodeByID(ctx context.Context, id uuid.UUID) (*repos
 		return nil, nil
 	}
 	return n, nil
+}
+func (m *mockCatalogRepo) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.ServiceNode, error) {
+	found := make(map[uuid.UUID]*repository.ServiceNode, len(ids))
+	for _, id := range ids {
+		if n, ok := m.nodes[id]; ok {
+			found[id] = n
+		}
+	}
+	return found, nil
 }
 func (m *mockCatalogRepo) GetNodeByCode(ctx context.Context, code string) (*repository.ServiceNode, error) {
 	for _, n := range m.nodes {
@@ -495,6 +535,19 @@ func (m *mockUserRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.
 	birth := time.Now().AddDate(-30, 0, 0)
 	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", Verified: true, BirthDate: &birth}, nil
 }
+func (m *mockUserRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.User, error) {
+	// Mirrors FindByID above, so a caller batching lookups sees the same users
+	// as one asking for them one at a time.
+	found := make(map[uuid.UUID]*repository.User, len(ids))
+	for _, id := range ids {
+		u, err := m.FindByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		found[id] = u
+	}
+	return found, nil
+}
 func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	return nil
 }
@@ -536,7 +589,7 @@ func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID
 	return nil
 }
 
-func (m *mockOrderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID) ([]repository.Order, error) {
+func (m *mockOrderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]repository.Order, error) {
 	return nil, nil
 }
 
@@ -580,7 +633,7 @@ func (m *mockTransactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-func (m *mockTransactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*repository.Transaction, error) {
+func (m *mockTransactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Transaction, error) {
 	return nil, nil
 }
 

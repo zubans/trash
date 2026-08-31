@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,6 +128,39 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 	http.ServeFile(w, r, full)
 }
 
+// messageQueryFrom reads the history window from the query string.
+//
+//	?limit=N     how many messages to return (capped by the repository)
+//	?after=TS    only messages newer than TS — what a poll should ask for
+//	?before=TS   the newest messages older than TS — scrolling back
+//
+// Timestamps are RFC3339, the format the API already renders created_at in, so
+// a client can hand back a value it was given without reformatting it. An
+// unparseable value is ignored rather than rejected: the fallback is the most
+// recent page, which is a sane answer for a chat screen, whereas a 400 would
+// leave the user staring at an empty conversation.
+func messageQueryFrom(r *http.Request) repository.MessageQuery {
+	var q repository.MessageQuery
+	params := r.URL.Query()
+
+	if v := params.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			q.Limit = n
+		}
+	}
+	if v := params.Get("after"); v != "" {
+		if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			q.After = &ts
+		}
+	}
+	if v := params.Get("before"); v != "" {
+		if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			q.Before = &ts
+		}
+	}
+	return q
+}
+
 // GetMessagesHandler retrieves history of messages.
 func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
@@ -142,7 +176,7 @@ func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	messages, err := h.chatService.GetMessages(r.Context(), orderID, user.ID)
+	messages, err := h.chatService.GetMessages(r.Context(), orderID, user.ID, messageQueryFrom(r))
 	if err != nil {
 		log.Printf("[GetMessagesHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -450,7 +484,7 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user.ID, user.Role)
+	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user.ID, user.Role, messageQueryFrom(r))
 	if err != nil {
 		writeChatError(w, err)
 		return

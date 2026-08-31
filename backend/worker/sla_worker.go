@@ -20,6 +20,7 @@ type SLAWorker struct {
 	orderService *service.OrderService
 	chatService  *service.ChatService
 	ledger       *service.Ledger
+	guard func(func() error) error
 }
 
 // NewSLAWorker creates a new SLAWorker. The ledger is required: the downgrade
@@ -39,7 +40,7 @@ func (w *SLAWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			if err := metrics.TrackWorker("sla", w.CheckSLAOverdue); err != nil {
+			if err := metrics.TrackWorker("sla", func() error { return w.runGuarded(w.CheckSLAOverdue) }); err != nil {
 				log.Printf("[SLAWorker] Error checking overdue orders: %v", err)
 			}
 		}
@@ -164,4 +165,20 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	})
 
 	return nil
+}
+
+// guard runs one tick under the job's advisory lock when a Leader is wired, so
+// a second replica skips the tick instead of duplicating it. Unset means run
+// directly, which is what a single-process deployment and the tests do.
+func (w *SLAWorker) runGuarded(job func() error) error {
+	if w.guard == nil {
+		return job()
+	}
+	return w.guard(job)
+}
+
+// WithLeader makes this worker run at most once across every process.
+func (w *SLAWorker) WithLeader(leader *Leader, name string) *SLAWorker {
+	w.guard = leader.Guard(name)
+	return w
 }

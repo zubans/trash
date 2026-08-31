@@ -152,6 +152,13 @@
               <p>История сообщений пуста. Напишите сообщение первыми.</p>
             </div>
             <template v-else>
+              <!-- The server returns the most recent page; older history is
+                   fetched on request rather than on every poll. -->
+              <div v-if="canLoadOlder" class="load-older-row">
+                <button type="button" :disabled="loadingOlder" @click="loadOlderMessages">
+                  {{ loadingOlder ? 'Загрузка...' : 'Показать более ранние сообщения' }}
+                </button>
+              </div>
               <div
                 v-for="msg in messages"
                 :key="msg.id"
@@ -259,6 +266,13 @@ export default defineComponent({
 
     const loading = ref(false)
     const messagesLoading = ref(false)
+
+    // Mirrors repository.DefaultMessagePageSize: a full page back means there
+    // is probably more history above it.
+    const PAGE_SIZE = 100
+    const hasOlder = ref(false)
+    const loadingOlder = ref(false)
+    const canLoadOlder = computed(() => hasOlder.value && messages.value.length > 0)
     const uploading = ref(false)
     const dropdownOpen = ref(false)
     const messagesContainerRef = ref<any>(null)
@@ -294,6 +308,61 @@ export default defineComponent({
       )
     })
 
+    // Incremental refresh of the conversation on screen: ask for what arrived
+    // after the newest message already loaded, and append it. Re-reading the
+    // whole conversation on a timer made the cost of an open admin tab grow
+    // with the length of the conversation it happened to be showing.
+    const pollOpenConversation = async () => {
+      const chat = selectedChat.value
+      if (!chat) return
+      const newest = messages.value[messages.value.length - 1]
+      try {
+        const res = await api.get(`/support/chats/${chat.chat_id}/messages`, {
+          params: newest?.created_at ? { after: newest.created_at } : {},
+        })
+        const incoming = res.data || []
+        if (!incoming.length) return
+        // Without a reference point this was a full read, so it replaces
+        // rather than appends.
+        messages.value = newest?.created_at ? [...messages.value, ...incoming] : incoming
+        scrollToBottom()
+      } catch (err) {
+        console.error('Failed to refresh support messages:', err)
+      }
+    }
+
+    // Fetch the page above what is on screen and prepend it, holding the
+    // reader's position instead of jumping.
+    const loadOlderMessages = async () => {
+      const chat = selectedChat.value
+      if (!chat || loadingOlder.value) return
+      const oldest = messages.value[0]
+      if (!oldest?.created_at) return
+
+      loadingOlder.value = true
+      const container = messagesContainerRef.value
+      const heightBefore = container ? container.scrollHeight : 0
+      try {
+        const res = await api.get(`/support/chats/${chat.chat_id}/messages`, {
+          params: { before: oldest.created_at },
+        })
+        const older = res.data || []
+        hasOlder.value = older.length >= PAGE_SIZE
+        if (older.length) {
+          messages.value = [...older, ...messages.value]
+          nextTick(() => {
+            if (container) {
+              container.scrollTop = container.scrollHeight - heightBefore
+            }
+          })
+        }
+      } catch (err) {
+        console.error('Failed to load older support messages:', err)
+      } finally {
+        loadingOlder.value = false
+      }
+    }
+
     const selectChat = async (chat: any) => {
       selectedChat.value = chat
       messagesLoading.value = true
@@ -301,6 +370,7 @@ export default defineComponent({
       try {
         const res = await api.get(`/support/chats/${chat.chat_id}/messages`)
         messages.value = res.data || []
+        hasOlder.value = messages.value.length >= PAGE_SIZE
         chat.unread_count = 0
         window.dispatchEvent(new Event('support-unread-updated'))
         scrollToBottom()
@@ -438,16 +508,14 @@ export default defineComponent({
     onMounted(() => {
       fetchChats()
       window.addEventListener('click', closeDropdown)
+      // The chat list is expensive per row (last message and unread count are
+      // resolved per conversation), so it refreshes on a slow timer. The open
+      // conversation stays responsive because it asks only for messages newer
+      // than the last one on screen, which costs almost nothing.
       pollInterval = setInterval(() => {
         fetchChats()
-        if (selectedChat.value) {
-          api.get(`/support/chats/${selectedChat.value.chat_id}/messages`).then(res => {
-            if (res.data) {
-              messages.value = res.data
-            }
-          })
-        }
-      }, 5000)
+        pollOpenConversation()
+      }, 15000)
     })
 
     onUnmounted(() => {
@@ -464,6 +532,9 @@ export default defineComponent({
       inputText,
       loading,
       messagesLoading,
+      canLoadOlder,
+      loadingOlder,
+      loadOlderMessages,
       uploading,
       dropdownOpen,
       messagesContainerRef,
@@ -881,6 +952,27 @@ export default defineComponent({
 }
 
 /* Chat History Area */
+.load-older-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.load-older-row button {
+  border: none;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.load-older-row button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .chat-history {
   flex: 1;
   padding: 28px;

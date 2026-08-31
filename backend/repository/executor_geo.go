@@ -30,8 +30,22 @@ type MapOrder struct {
 type ExecutorGeoRepository interface {
 	UpdateExecutorLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64, isManual bool) error
 	GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error)
+	// GetExecutorLocations resolves the stored positions of several executors
+	// in one query, for the matching worker: it compares every candidate
+	// against every waiting order, and asking per candidate made the cost of a
+	// cycle the product of the two.
+	//
+	// Executors with no stored position are absent from the result, which
+	// callers must read as "position unknown" — never as a free pass.
+	GetExecutorLocations(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]ExecutorPosition, error)
 	CreateGeoAlert(ctx context.Context, alert *GeoAlert) error
 	GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]GeoAlert, error)
+}
+
+// ExecutorPosition is an executor's stored working position.
+type ExecutorPosition struct {
+	Lat float64
+	Lon float64
 }
 
 type executorGeoRepository struct {
@@ -65,6 +79,38 @@ func (r *executorGeoRepository) UpdateExecutorLocation(ctx context.Context, exec
 	`
 	_, err := r.db.ExecContext(ctx, query, lat, lon, executorID)
 	return err
+}
+
+func (r *executorGeoRepository) GetExecutorLocations(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]ExecutorPosition, error) {
+	positions := make(map[uuid.UUID]ExecutorPosition, len(executorIDs))
+	placeholders, args := idList(executorIDs)
+	if len(args) == 0 {
+		return positions, nil
+	}
+
+	// Rows with a missing coordinate are filtered out in SQL rather than
+	// returned as a partial position: half a coordinate pair is not a location,
+	// and the callers treat an absent entry as "unknown" already.
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT user_id, current_lat, current_lon FROM executor_profiles
+		 WHERE user_id IN (`+placeholders+`)
+		   AND current_lat IS NOT NULL AND current_lon IS NOT NULL`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id uuid.UUID
+		var pos ExecutorPosition
+		if err := rows.Scan(&id, &pos.Lat, &pos.Lon); err != nil {
+			return nil, err
+		}
+		positions[id] = pos
+	}
+	return positions, rows.Err()
 }
 
 func (r *executorGeoRepository) GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error) {

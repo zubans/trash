@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
@@ -68,7 +69,9 @@ type ChatRepository interface {
 	CreateChat(ctx context.Context, orderID uuid.UUID) (*Chat, error)
 	SaveMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error)
 	SaveMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
-	GetMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error)
+	// GetMessages returns a bounded window of an order chat's history, always
+	// oldest-first. See MessageQuery for how the window is chosen.
+	GetMessages(ctx context.Context, chatID uuid.UUID, q MessageQuery) ([]*Message, error)
 	DeactivateChat(ctx context.Context, chatID uuid.UUID) error
 	MarkMessagesAsDelivered(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
 	MarkMessagesAsRead(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
@@ -83,10 +86,15 @@ type ChatRepository interface {
 	// CanAccessAttachment reports whether a user is a participant of the chat
 	// that a stored file belongs to.
 	CanAccessAttachment(ctx context.Context, userID uuid.UUID, fileURL string) (bool, error)
-	GetSupportMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error)
+	// GetSupportMessages is GetMessages for a support conversation.
+	GetSupportMessages(ctx context.Context, chatID uuid.UUID, q MessageQuery) ([]*Message, error)
 	SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error)
 	SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
-	GetAdminSupportChatList(ctx context.Context) ([]*SupportChatListItem, error)
+	// GetAdminSupportChatList returns support conversations for the admin
+	// inbox, most recently active first, capped at limit (see
+	// DefaultHistoryPageSize). The admin UI polls this, and every row costs two
+	// correlated subqueries, so it must not be allowed to grow unbounded.
+	GetAdminSupportChatList(ctx context.Context, limit int) ([]*SupportChatListItem, error)
 	MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error
 	BanSupportChat(ctx context.Context, chatID uuid.UUID, duration string) error
 	UnbanSupportChat(ctx context.Context, chatID uuid.UUID) error
@@ -156,13 +164,81 @@ func (r *chatRepo) SaveMessageWithAttachment(ctx context.Context, chatID, sender
 	return &m, nil
 }
 
-func (r *chatRepo) GetMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error) {
-	query := `
-		SELECT id, chat_id, sender_id, text, COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
-		FROM messages
-		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
-		ORDER BY created_at ASC`
-	rows, err := r.db.QueryContext(ctx, query, chatID)
+// MessageQuery bounds a read of chat history.
+//
+// It exists because the history used to be returned in full, on an endpoint the
+// clients poll: a long-running conversation re-sent every message it had ever
+// held, several times a minute. The three shapes below are the three things a
+// chat client actually needs.
+type MessageQuery struct {
+	// Limit caps how many messages come back. Zero means DefaultMessagePageSize,
+	// and anything above MaxMessagePageSize is clamped to it — the page size is
+	// the protection here, so a client cannot opt out of it.
+	Limit int
+	// Before asks for the newest messages older than this instant: paging
+	// upwards through history as the user scrolls back.
+	Before *time.Time
+	// After asks for the oldest messages newer than this instant: what a poll
+	// needs, which is only what it has not already seen.
+	After *time.Time
+}
+
+const (
+	// DefaultMessagePageSize is what a client that asks for no window gets: the
+	// most recent messages, which is what a freshly opened chat shows.
+	DefaultMessagePageSize = 100
+	// MaxMessagePageSize caps what any single request can pull.
+	MaxMessagePageSize = 500
+)
+
+func (q MessageQuery) limit() int {
+	switch {
+	case q.Limit <= 0:
+		return DefaultMessagePageSize
+	case q.Limit > MaxMessagePageSize:
+		return MaxMessagePageSize
+	default:
+		return q.Limit
+	}
+}
+
+// queryMessages reads one window of a conversation. Order chats and support
+// chats have identical message tables and identical paging rules, so they share
+// this; table is an internal constant, never anything a caller supplies.
+//
+// The result is always oldest-first, whichever direction the window was taken
+// in — the clients render ascending and should not have to care.
+func (r *chatRepo) queryMessages(ctx context.Context, table string, chatID uuid.UUID, q MessageQuery) ([]*Message, error) {
+	const columns = `id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at`
+
+	where := "chat_id = $1 AND COALESCE(is_deleted, false) = false"
+	args := []interface{}{chatID}
+
+	// Ascending only when paging forward from a known point: that is the one
+	// case where the first rows in creation order are the wanted ones. Every
+	// other case wants the newest, so it reads descending and is reversed below.
+	ascending := false
+	switch {
+	case q.After != nil:
+		args = append(args, *q.After)
+		where += fmt.Sprintf(" AND created_at > $%d", len(args))
+		ascending = true
+	case q.Before != nil:
+		args = append(args, *q.Before)
+		where += fmt.Sprintf(" AND created_at < $%d", len(args))
+	}
+
+	direction := "DESC"
+	if ascending {
+		direction = "ASC"
+	}
+	args = append(args, q.limit())
+	query := fmt.Sprintf(
+		"SELECT %s FROM %s WHERE %s ORDER BY created_at %s LIMIT $%d",
+		columns, table, where, direction, len(args),
+	)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +253,20 @@ func (r *chatRepo) GetMessages(ctx context.Context, chatID uuid.UUID) ([]*Messag
 		}
 		messages = append(messages, &m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if !ascending {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
+	}
 	return messages, nil
+}
+
+func (r *chatRepo) GetMessages(ctx context.Context, chatID uuid.UUID, q MessageQuery) ([]*Message, error) {
+	return r.queryMessages(ctx, "messages", chatID, q)
 }
 
 func (r *chatRepo) DeactivateChat(ctx context.Context, chatID uuid.UUID) error {
@@ -354,28 +443,8 @@ func (r *chatRepo) CanAccessAttachment(ctx context.Context, userID uuid.UUID, fi
 	return allowed, nil
 }
 
-func (r *chatRepo) GetSupportMessages(ctx context.Context, chatID uuid.UUID) ([]*Message, error) {
-	query := `
-		SELECT id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at
-		FROM support_messages
-		WHERE chat_id = $1 AND COALESCE(is_deleted, false) = false
-		ORDER BY created_at ASC`
-	rows, err := r.db.QueryContext(ctx, query, chatID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	messages := make([]*Message, 0)
-	for rows.Next() {
-		var m Message
-		err := rows.Scan(&m.ID, &m.ChatID, &m.SenderID, &m.Text, &m.Status, &m.FileURL, &m.FileName, &m.FileType, &m.FileSize, &m.IsDeleted, &m.CreatedAt, &m.ReadAt, &m.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		messages = append(messages, &m)
-	}
-	return messages, nil
+func (r *chatRepo) GetSupportMessages(ctx context.Context, chatID uuid.UUID, q MessageQuery) ([]*Message, error) {
+	return r.queryMessages(ctx, "support_messages", chatID, q)
 }
 
 func (r *chatRepo) SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error) {
@@ -407,7 +476,7 @@ func (r *chatRepo) SaveSupportMessageWithAttachment(ctx context.Context, chatID,
 	return &m, nil
 }
 
-func (r *chatRepo) GetAdminSupportChatList(ctx context.Context) ([]*SupportChatListItem, error) {
+func (r *chatRepo) GetAdminSupportChatList(ctx context.Context, limit int) ([]*SupportChatListItem, error) {
 	query := `
 		SELECT 
 			sc.id,
@@ -427,8 +496,9 @@ func (r *chatRepo) GetAdminSupportChatList(ctx context.Context) ([]*SupportChatL
 		LEFT JOIN support_messages sm ON sm.chat_id = sc.id AND sm.sender_id = u.id AND sm.read_at IS NULL
 		GROUP BY sc.id, sc.user_id, u.phone, u.first_name, u.last_name, u.patronymic, u.role, sc.is_banned, sc.banned_until
 		ORDER BY COALESCE((SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1), sc.created_at) DESC
+		LIMIT $1
 	`
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.QueryContext(ctx, query, historyLimit(limit))
 	if err != nil {
 		return nil, err
 	}

@@ -96,6 +96,13 @@ type UserRepository interface {
 	FindByEmailVerificationToken(ctx context.Context, token string) (*User, error)
 	Create(ctx context.Context, user *User) error
 	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
+	// FindByIDs loads a set of users, with their roles, in two queries rather
+	// than two per user. It exists for the list endpoints, which need one user
+	// per row to answer "may this viewer see this order" and used to ask the
+	// database once per row to find out. Ids that do not exist are simply
+	// absent from the result — a missing user is a normal outcome for a caller
+	// filtering a list, not an error.
+	FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
 	// ListUserRoles returns every role the user holds (from user_roles).
@@ -226,6 +233,103 @@ func (r *repo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	}
 	r.attachRoles(ctx, &u)
 	return &u, nil
+}
+
+// FindByIDs loads several users at once. See the interface for why.
+//
+// The column list is deliberately the same one FindByID reads: callers use the
+// two interchangeably, and a batch that returned a thinner user would make the
+// eligibility predicate behave differently depending on which path loaded its
+// input.
+func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error) {
+	result := make(map[uuid.UUID]*User, len(ids))
+	placeholders, args := idList(ids)
+	if len(args) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
+		 FROM users WHERE id IN (`+placeholders+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u User
+		var email, pendingEmail, token, resetCode sql.NullString
+		var resetExp, birthDate sql.NullTime
+		if err := rows.Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		u.Email = email.String
+		u.PendingEmail = pendingEmail.String
+		u.EmailVerificationToken = token.String
+		u.PasswordResetCode = resetCode.String
+		if resetExp.Valid {
+			u.PasswordResetExpiresAt = &resetExp.Time
+		}
+		if birthDate.Valid {
+			u.BirthDate = &birthDate.Time
+		}
+		result[u.ID] = &u
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := r.attachRolesBatch(ctx, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// attachRolesBatch fills Roles for every loaded user in one query, applying the
+// same fallback to the primary role that attachRoles applies for one user.
+func (r *repo) attachRolesBatch(ctx context.Context, users map[uuid.UUID]*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(users))
+	for id := range users {
+		ids = append(ids, id)
+	}
+	placeholders, args := idList(ids)
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT user_id, role FROM user_roles WHERE user_id IN (`+placeholders+`) ORDER BY role`,
+		args...,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var uid uuid.UUID
+		var role string
+		if err := rows.Scan(&uid, &role); err != nil {
+			return err
+		}
+		if u, ok := users[uid]; ok {
+			u.Roles = append(u.Roles, role)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Same fallback as the single-user path: a user with no user_roles row (one
+	// predating the migration 039 seed) still holds their primary role.
+	for _, u := range users {
+		if len(u.Roles) == 0 && u.Role != "" {
+			u.Roles = []string{u.Role}
+		}
+	}
+	return nil
 }
 
 // attachRoles loads the user's full role set into u.Roles. It falls back to the

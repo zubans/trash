@@ -228,10 +228,16 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 	const overviewRadiusKM = 10.0
 	acceptRadiusKM := getAcceptRadiusKM()
 
-	// Use existing orderRepo to get searching orders
-	pendingOrders, err := s.orderRepo.GetPendingOrders(ctx)
+	// Bound the search at the database rather than in this loop. Reading every
+	// searching order in the country and discarding all but the nearby ones made
+	// the cost of this endpoint grow with the whole marketplace — on a screen
+	// every executor keeps open and polls.
+	pendingOrders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, int(overviewRadiusKM*1000))
 	if err != nil {
 		return nil, err
+	}
+	if len(pendingOrders) == 0 {
+		return nil, nil
 	}
 
 	// The viewer's roles and verification drive visibility, exactly like the
@@ -241,12 +247,17 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		viewer, _ = s.userRepo.FindByID(ctx, executorID)
 	}
 
+	// Everything the predicate needs, in two queries instead of two per order.
+	// The predicate itself is unchanged and still the only thing deciding
+	// visibility: only how its inputs are loaded is different.
+	customers, variants := s.eligibilityInputs(ctx, pendingOrders)
+
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
-		// Only orders that already carry coordinates are considered. Resolving
-		// them here would put a network call inside the loop; coordinate capture
-		// at order creation and the backfill worker fill them instead.
+		// FindNearbyOrders only returns orders that carry coordinates, so the
+		// dereference below is safe; the guard stays as a belt-and-braces check
+		// in case the query's contract ever changes.
 		if o.PickupLat == nil || o.PickupLon == nil {
 			continue
 		}
@@ -255,12 +266,7 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		// moderator-only orders → moderators; normal orders → customer-verification
 		// segmentation plus the standard executor gates.
 		if s.userRepo != nil {
-			customer, _ := s.userRepo.FindByID(ctx, o.CustomerID)
-			var variant *repository.ServiceNode
-			if s.catalogRepo != nil {
-				variant, _ = s.catalogRepo.GetNodeByID(ctx, o.ServiceVariantID)
-			}
-			if canViewOrTakeOrder(viewer, customer, variant) != nil {
+			if canViewOrTakeOrder(viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
 				continue
 			}
 		}
@@ -278,6 +284,36 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 	}
 
 	return mapOrders, nil
+}
+
+// eligibilityInputs batch-loads the customers and service variants that
+// canViewOrTakeOrder needs for a page of orders.
+//
+// A lookup failure yields a missing map entry rather than an error, matching
+// what the per-order calls did before: the predicate already treats a nil
+// customer or variant as "no extra restriction", and one unreadable row must
+// not blank out the whole map.
+func (s *ExecutorGeoService) eligibilityInputs(ctx context.Context, orders []*repository.Order) (map[uuid.UUID]*repository.User, map[uuid.UUID]*repository.ServiceNode) {
+	customerIDs := make([]uuid.UUID, 0, len(orders))
+	variantIDs := make([]uuid.UUID, 0, len(orders))
+	for _, o := range orders {
+		customerIDs = append(customerIDs, o.CustomerID)
+		variantIDs = append(variantIDs, o.ServiceVariantID)
+	}
+
+	customers := map[uuid.UUID]*repository.User{}
+	if s.userRepo != nil {
+		if loaded, err := s.userRepo.FindByIDs(ctx, customerIDs); err == nil {
+			customers = loaded
+		}
+	}
+	variants := map[uuid.UUID]*repository.ServiceNode{}
+	if s.catalogRepo != nil {
+		if loaded, err := s.catalogRepo.GetNodesByIDs(ctx, variantIDs); err == nil {
+			variants = loaded
+		}
+	}
+	return customers, variants
 }
 
 func (s *ExecutorGeoService) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {

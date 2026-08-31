@@ -48,7 +48,7 @@ func (m *mockChatRepo) SaveMessage(ctx context.Context, chatID, senderID uuid.UU
 	return msg, nil
 }
 
-func (m *mockChatRepo) GetMessages(ctx context.Context, chatID uuid.UUID) ([]*repository.Message, error) {
+func (m *mockChatRepo) GetMessages(ctx context.Context, chatID uuid.UUID, q repository.MessageQuery) ([]*repository.Message, error) {
 	var list []*repository.Message
 	for _, msg := range m.messages {
 		if msg.ChatID == chatID {
@@ -116,7 +116,7 @@ func (m *mockChatRepo) UpdateMessage(ctx context.Context, messageID, senderID uu
 func (m *mockChatRepo) GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*repository.SupportChat, error) {
 	return &repository.SupportChat{ID: uuid.New(), UserID: userID}, nil
 }
-func (m *mockChatRepo) GetSupportMessages(ctx context.Context, chatID uuid.UUID) ([]*repository.Message, error) {
+func (m *mockChatRepo) GetSupportMessages(ctx context.Context, chatID uuid.UUID, q repository.MessageQuery) ([]*repository.Message, error) {
 	return nil, nil
 }
 func (m *mockChatRepo) SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*repository.Message, error) {
@@ -125,7 +125,7 @@ func (m *mockChatRepo) SaveSupportMessage(ctx context.Context, chatID, senderID 
 func (m *mockChatRepo) SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
 	return &repository.Message{ID: uuid.New(), ChatID: chatID, SenderID: senderID, Text: text}, nil
 }
-func (m *mockChatRepo) GetAdminSupportChatList(ctx context.Context) ([]*repository.SupportChatListItem, error) {
+func (m *mockChatRepo) GetAdminSupportChatList(ctx context.Context, limit int) ([]*repository.SupportChatListItem, error) {
 	return nil, nil
 }
 func (m *mockChatRepo) MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error {
@@ -151,19 +151,19 @@ func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	_, _ = chatRepo.SaveMessage(context.Background(), chat.ID, customerID, "Hello!")
 
 	// Case 1: Customer should access messages
-	msgs, err := srv.GetMessages(context.Background(), order.ID, customerID)
+	msgs, err := srv.GetMessages(context.Background(), order.ID, customerID, repository.MessageQuery{})
 	if err != nil || len(msgs) != 1 {
 		t.Errorf("expected customer to access messages, got err: %v, len: %d", err, len(msgs))
 	}
 
 	// Case 2: Executor should access messages
-	msgs, err = srv.GetMessages(context.Background(), order.ID, executorID)
+	msgs, err = srv.GetMessages(context.Background(), order.ID, executorID, repository.MessageQuery{})
 	if err != nil || len(msgs) != 1 {
 		t.Errorf("expected executor to access messages, got err: %v", err)
 	}
 
 	// Case 3: Stranger should NOT access messages (should return error)
-	_, err = srv.GetMessages(context.Background(), order.ID, strangerID)
+	_, err = srv.GetMessages(context.Background(), order.ID, strangerID, repository.MessageQuery{})
 	if err == nil {
 		t.Error("expected error for stranger accessing messages")
 	}
@@ -237,16 +237,16 @@ func TestChatService_SupportChatOwnership(t *testing.T) {
 	chatRepo := &mockChatRepo{supportOwners: map[uuid.UUID]uuid.UUID{chatID: owner}}
 	svc := NewChatService(chatRepo, &mockOrderRepo{})
 
-	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "CUSTOMER"); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "CUSTOMER", repository.MessageQuery{}); !errors.Is(err, ErrForbidden) {
 		t.Errorf("stranger must not read the chat, got %v", err)
 	}
 	if _, err := svc.SaveSupportMessage(context.Background(), chatID, stranger, "CUSTOMER", "hi"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("stranger must not write to the chat, got %v", err)
 	}
-	if _, err := svc.GetSupportMessages(context.Background(), chatID, owner, "CUSTOMER"); err != nil {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, owner, "CUSTOMER", repository.MessageQuery{}); err != nil {
 		t.Errorf("owner must be able to read the chat: %v", err)
 	}
-	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "ADMIN"); err != nil {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "ADMIN", repository.MessageQuery{}); err != nil {
 		t.Errorf("admin must be able to read any chat: %v", err)
 	}
 }

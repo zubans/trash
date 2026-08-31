@@ -42,6 +42,19 @@ func (f *fakeGeoRepo) GetExecutorLocation(ctx context.Context, executorID uuid.U
 	return &lat, &lon, nil, nil
 }
 
+func (f *fakeGeoRepo) GetExecutorLocations(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]repository.ExecutorPosition, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[uuid.UUID]repository.ExecutorPosition, len(executorIDs))
+	for _, id := range executorIDs {
+		if pos, ok := f.positions[id]; ok {
+			out[id] = repository.ExecutorPosition{Lat: pos[0], Lon: pos[1]}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeGeoRepo) CreateGeoAlert(ctx context.Context, alert *repository.GeoAlert) error { return nil }
 
 func (f *fakeGeoRepo) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {
@@ -72,12 +85,16 @@ func newMatchingFixture(t *testing.T, settings map[string]string) *matchingFixtu
 	orderID := uuid.New()
 
 	lat, lon := pickupLat, pickupLon
+	// A real service variant, because eligibility resolves the order's variant
+	// and an order whose variant cannot be resolved is not assignable — the same
+	// answer the production repository gives for an unknown id.
 	orderRepo := &mockOrderRepo{orders: []*repository.Order{{
-		ID:         orderID,
-		CustomerID: customerID,
-		Status:     "SEARCHING",
-		PickupLat:  &lat,
-		PickupLon:  &lon,
+		ID:               orderID,
+		CustomerID:       customerID,
+		ServiceVariantID: standardVariantID,
+		Status:           "SEARCHING",
+		PickupLat:        &lat,
+		PickupLon:        &lon,
 	}}}
 
 	shiftRepo := &mockShiftRepo{shifts: []*repository.Shift{{
@@ -230,5 +247,56 @@ func TestMatching_WithoutGeoAssignsNothing(t *testing.T) {
 	}
 	if f.assigned(t) {
 		t.Error("matching without a location store must not assign orders")
+	}
+}
+
+// One executor must not be handed two orders by the same cycle.
+//
+// The worker used to re-count an executor's assigned orders from the database
+// before every pairing, which made this true as a side effect. The count is now
+// loaded once per cycle, so the cycle has to remember what it has already
+// handed out — this test is what holds that in place.
+func TestMatching_AssignsAtMostOneOrderPerExecutorPerCycle(t *testing.T) {
+	customerID := uuid.New()
+	executorID := uuid.New()
+
+	lat, lon := pickupLat, pickupLon
+	orders := []*repository.Order{}
+	for i := 0; i < 3; i++ {
+		orders = append(orders, &repository.Order{
+			ID:               uuid.New(),
+			CustomerID:       customerID,
+			ServiceVariantID: standardVariantID,
+			Status:           "SEARCHING",
+			PickupLat:        &lat,
+			PickupLon:        &lon,
+		})
+	}
+	orderRepo := &mockOrderRepo{orders: orders}
+
+	shiftRepo := &mockShiftRepo{shifts: []*repository.Shift{{
+		ID:         uuid.New(),
+		ExecutorID: executorID,
+		Status:     repository.ShiftStatusActive,
+	}}}
+
+	geoRepo := newFakeGeoRepo()
+	geoRepo.positions[executorID] = [2]float64{pickupLat, pickupLon}
+
+	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo()).
+		WithGeo(geoRepo, &mockSettingsRepo{settings: map[string]string{"auto_matching_enabled": "1"}})
+
+	if err := srv.MatchOrders(context.Background()); err != nil {
+		t.Fatalf("MatchOrders: %v", err)
+	}
+
+	assigned := 0
+	for _, o := range orderRepo.orders {
+		if o.ExecutorID != nil && *o.ExecutorID == executorID {
+			assigned++
+		}
+	}
+	if assigned != 1 {
+		t.Errorf("executor was assigned %d orders in one cycle, want exactly 1", assigned)
 	}
 }

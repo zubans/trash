@@ -9,6 +9,28 @@ services:
     # Migrations are applied by the backend on start (repository.Migrate), not by
     # the entrypoint init scripts: those only run once on an empty volume, which
     # is why schema changes used to be patched in from Go code at runtime.
+    #
+    # The stock image ships development defaults (128MB shared_buffers, 4MB
+    # work_mem) that do not reflect the host. The values below assume a few GB of
+    # RAM and are deliberately modest, because this container shares the machine
+    # with the backend, nginx, the mail server and the monitoring stack.
+    #
+    # max_connections is 200 against an application pool of 25 (DB_MAX_OPEN_CONNS):
+    # the headroom is for the workers' own traffic, a migration run, psql and the
+    # postgres_exporter, not for the application to grow into.
+    #
+    # pg_stat_statements is what makes a load test readable afterwards — without
+    # it there is no record of which query burned the time.
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c log_min_duration_statement=200ms
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # The database is reachable only from the compose network. Publish 5432 to
@@ -42,6 +64,11 @@ services:
       DB_USER: ${DB_USER:-healthlogin}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       DB_NAME: ${DB_NAME:-healthlogin}
+      # Upper bound on connections this process opens. Without a bound a client
+      # surge exhausts max_connections and the database starts refusing
+      # connections outright; with one, the queue forms in the process and shows
+      # up in the pool metrics instead.
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-25}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://moya-usluga.ru}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TLS_CERT_FILE: /app/certs/localhost-cert.pem

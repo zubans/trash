@@ -177,7 +177,7 @@ func (m *mockShiftTransactionRepo) RunInTx(ctx context.Context, fn func(*sql.Tx)
 	return fn(nil)
 }
 
-func (m *mockShiftTransactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*repository.Transaction, error) {
+func (m *mockShiftTransactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Transaction, error) {
 	return nil, nil
 }
 

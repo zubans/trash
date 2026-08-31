@@ -99,7 +99,11 @@ type TransactionRepository interface {
 	// Returns ErrInsufficientFunds when it does not.
 	Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error
 	CreateTransaction(ctx context.Context, tx *sql.Tx, t *Transaction) error
-	GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*Transaction, error)
+	// GetTransactionsByUserID returns a user's ledger entries, newest first,
+	// capped at limit. A limit of zero or less means DefaultHistoryPageSize:
+	// this feeds a history screen, and an account with years of activity must
+	// not be able to make one request read its entire past.
+	GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*Transaction, error)
 	// HasTip reports whether the customer already tipped this order, so a tip is
 	// charged at most once. Runs inside the caller's transaction so the check
 	// and the write are one atomic step.
@@ -201,11 +205,11 @@ func (r *transactionRepo) querierAny(ctx context.Context, q Querier) Querier {
 	return r.db
 }
 
-func (r *transactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]*Transaction, error) {
+func (r *transactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*Transaction, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, user_id, order_id, type, amount, admin_id, created_at
-		 FROM transactions WHERE user_id = $1 ORDER BY created_at DESC`,
-		userID,
+		 FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+		userID, historyLimit(limit),
 	)
 	if err != nil {
 		return nil, err

@@ -61,6 +61,22 @@ func (m *mockRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.User
 	return nil, sql.ErrNoRows
 }
 
+func (m *mockRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.User, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	found := make(map[uuid.UUID]*repository.User, len(ids))
+	for _, id := range ids {
+		for _, u := range m.users {
+			if u.ID == id {
+				found[id] = u
+				break
+			}
+		}
+	}
+	return found, nil
+}
+
 func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	for _, u := range m.users {
 		if u.ID == id {
