@@ -14,6 +14,11 @@
       <div class="map-modal-body">
         <div id="executor-leaflet-map" class="leaflet-container-box"></div>
 
+        <!-- Recenter on the executor's own position -->
+        <button type="button" class="map-fab" title="Моё местоположение" @click="recenterOnMe">
+          <i class="ph-fill ph-navigation-arrow"></i>
+        </button>
+
         <!-- Cluster Overlay: several orders sharing one pickup point -->
         <div v-if="selectedCluster && !selectedOrder" class="order-preview-card cluster-list-card">
           <button type="button" class="btn-close-card" @click="selectedCluster = null">
@@ -28,15 +33,21 @@
               v-for="o in selectedCluster"
               :key="o.id"
               type="button"
-              class="cluster-row"
+              class="cluster-item"
               @click="openClusterOrder(o)"
             >
-              <span class="cr-id">#{{ o.id ? o.id.slice(0, 8) : '---' }}</span>
-              <span class="cr-price">{{ currencySymbol }}{{ Number(o.hold_amount).toFixed(2) }}</span>
-              <span class="cr-badge" :class="o.can_accept ? 'ok' : 'far'">
-                {{ o.can_accept ? 'Можно взять' : '> 2 км' }}
-              </span>
-              <i class="ph-bold ph-caret-right cr-arrow"></i>
+              <div class="ci-left">
+                <div class="ci-icon" :class="{ hot: o.is_asap || o.is_urgent }">
+                  <i class="ph-fill" :class="(o.is_asap || o.is_urgent) ? 'ph-lightning' : 'ph-package'"></i>
+                </div>
+                <div class="ci-text">
+                  <div class="ci-price">{{ currencySymbol }}{{ Number(o.hold_amount).toFixed(0) }}</div>
+                  <div class="ci-dist" :class="o.can_accept ? 'ok' : 'far'">
+                    {{ o.can_accept ? 'Можно взять' : '> 2 км' }}
+                  </div>
+                </div>
+              </div>
+              <i class="ph-bold ph-caret-right ci-arrow"></i>
             </button>
           </div>
         </div>
@@ -180,23 +191,25 @@ export default defineComponent({
           attribution: '© OpenStreetMap',
         }).addTo(map)
 
-        // 10km Outer Circle
+        // 10km Outer Circle — kept very faint, just a hint of the overview zone.
         zone50kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 10000,
-          color: '#6366f1',
+          color: '#5c60f5',
           weight: 1,
-          dashArray: '6, 6',
-          fillColor: '#6366f1',
-          fillOpacity: 0.03,
+          dashArray: '4, 8',
+          fillColor: '#5c60f5',
+          fillOpacity: 0.02,
         }).addTo(map)
 
-        // 0.5km (500m) Accept Circle
+        // 0.5km (500m) Accept Circle — the brand dashed "search radius" from the
+        // template.
         zone2kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 500,
-          color: '#10b981',
+          color: '#5c60f5',
           weight: 2,
-          fillColor: '#10b981',
-          fillOpacity: 0.12,
+          dashArray: '8, 6',
+          fillColor: '#5c60f5',
+          fillOpacity: 0.08,
         }).addTo(map)
 
         // User Draggable Marker
@@ -308,15 +321,20 @@ export default defineComponent({
 
         if (orders.length === 1) {
           const order = orders[0]
-          const canAccept = order.can_accept
+          const hot = !!(order.is_asap || order.is_urgent)
+          const price = Number(order.hold_amount || 0).toFixed(0)
 
+          // A white pill pinned above the point (tail tip at the coordinate).
+          // iconSize 0 + an absolutely-positioned child let the pill be any width
+          // while its tail always lands exactly on the pickup point.
           const orderIcon = L.divIcon({
-            className: 'order-map-pin',
-            html: `<div class="order-pin-bubble ${canAccept ? 'green' : 'orange'}">
-                    ${canAccept ? '⚡' : '📍'} ${order.hold_amount}₽
+            className: 'tmpl-marker',
+            html: `<div class="tmpl-pin ${hot ? 'hot' : ''} ${order.can_accept ? 'acceptable' : ''}">
+                     <i class="ph-fill ${hot ? 'ph-lightning' : 'ph-package'} tmpl-pin-icon"></i>
+                     <span>${price} ${props.currencySymbol}</span>
                    </div>`,
-            iconSize: [80, 30],
-            iconAnchor: [40, 15],
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
           })
 
           const marker = L.marker([oLat, oLon], { icon: orderIcon })
@@ -326,16 +344,18 @@ export default defineComponent({
           })
           markersLayer?.addLayer(marker)
         } else {
-          // A distinct marker (purple, order count) signals several stacked
-          // orders; clicking it reveals the mini list rather than one card.
+          // A white pill with a red outline and a count badge signals several
+          // stacked orders; clicking it opens the list.
           const anyAccept = orders.some((o) => o.can_accept)
           const clusterIcon = L.divIcon({
-            className: 'order-map-pin',
-            html: `<div class="order-cluster-bubble ${anyAccept ? 'has-accept' : ''}">
-                    <span class="cluster-count">${orders.length}</span> заказов
+            className: 'tmpl-marker',
+            html: `<div class="tmpl-pin cluster ${anyAccept ? 'acceptable' : ''}">
+                     <i class="ph-fill ph-stack tmpl-pin-icon"></i>
+                     <span>Заказы</span>
+                     <div class="tmpl-cluster-badge">${orders.length}</div>
                    </div>`,
-            iconSize: [96, 32],
-            iconAnchor: [48, 16],
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
           })
 
           const marker = L.marker([oLat, oLon], { icon: clusterIcon })
@@ -352,6 +372,11 @@ export default defineComponent({
     // preview card can offer a "back to list" affordance.
     const openClusterOrder = (order: any) => {
       selectedOrder.value = order
+    }
+
+    // Recenter the map on the executor's own position.
+    const recenterOnMe = () => {
+      if (map) map.setView([serverLat.value, serverLon.value], 15, { animate: true })
     }
 
     const acceptMapOrder = async () => {
@@ -389,6 +414,7 @@ export default defineComponent({
       selectedOrder,
       selectedCluster,
       openClusterOrder,
+      recenterOnMe,
       accepting,
       acceptMapOrder,
     }
@@ -397,6 +423,8 @@ export default defineComponent({
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap');
+
 .map-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -436,6 +464,18 @@ export default defineComponent({
 .leaflet-container-box {
   width: 100%; height: 100%;
 }
+
+/* Floating "my location" button, bottom-right. */
+.map-fab {
+  position: absolute; bottom: 24px; right: 20px;
+  width: 52px; height: 52px; border-radius: 50%;
+  background: #ffffff; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: #5c60f5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  z-index: 1000; transition: transform 0.15s ease;
+}
+.map-fab:active { transform: scale(0.94); }
 
 /* Selected Order Card Overlay */
 .order-preview-card {
@@ -484,21 +524,26 @@ export default defineComponent({
   display: flex; flex-direction: column; gap: 8px;
   max-height: 40vh; overflow-y: auto;
 }
-.cluster-row {
-  display: flex; align-items: center; gap: 10px;
+.cluster-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   width: 100%; text-align: left; cursor: pointer;
-  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px;
-  padding: 10px 14px; transition: all 0.15s ease;
+  background: #f8fafc; border: none; border-radius: 14px;
+  padding: 10px 12px; transition: background 0.15s ease;
 }
-.cluster-row:hover { background: #eef2ff; border-color: #c7d2fe; }
-.cr-id { font-size: 13px; font-weight: 700; color: #6366f1; font-family: monospace; }
-.cr-price { font-size: 15px; font-weight: 700; color: #0f172a; margin-left: auto; }
-.cr-badge {
-  font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 99px; white-space: nowrap;
+.cluster-item:hover { background: #eef2ff; }
+.ci-left { display: flex; align-items: center; gap: 10px; }
+.ci-icon {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  background: #ffffff; display: flex; align-items: center; justify-content: center;
+  color: #5c60f5; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
-.cr-badge.ok { background: #dcfce7; color: #15803d; }
-.cr-badge.far { background: #fef3c7; color: #b45309; }
-.cr-arrow { color: #94a3b8; font-size: 14px; }
+.ci-icon.hot { color: #f59e0b; }
+.ci-text { display: flex; flex-direction: column; }
+.ci-price { font-weight: 900; font-size: 16px; color: #0f172a; }
+.ci-dist { font-size: 11px; font-weight: 700; }
+.ci-dist.ok { color: #15803d; }
+.ci-dist.far { color: #b45309; }
+.ci-arrow { color: #cbd5e1; font-size: 16px; }
 
 .btn-back-cluster {
   display: inline-flex; align-items: center; gap: 6px;
@@ -513,37 +558,66 @@ export default defineComponent({
   display: none !important;
 }
 
-/* Leaflet Custom Marker Pins.
-   Leaflet injects divIcon HTML outside Vue's scoped DOM, so these selectors
-   must pierce scoping with :deep() — otherwise the marker backgrounds and the
-   cluster's distinct colour never render. */
-:deep(.user-pin-pulse) {
-  width: 32px; height: 32px; border-radius: 50%;
-  background: #6366f1; color: white;
-  display: flex; align-items: center; justify-content: center; font-size: 16px;
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
+/* Leaflet Custom Marker Pins. This block is intentionally global (not scoped):
+   Leaflet injects the divIcon HTML into its own map panes, outside the
+   component's scoped DOM, so plain global selectors are what reach it. */
+
+/* Executor location: brand dot with a white ring and a pulsing halo. */
+.user-pin-pulse {
+  position: relative;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #5c60f5; color: transparent;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(92, 96, 245, 0.5);
+}
+.user-pin-pulse::before {
+  content: ''; position: absolute;
+  top: -6px; left: -6px; right: -6px; bottom: -6px;
+  background: rgba(92, 96, 245, 0.3); border-radius: 50%;
+  animation: tmpl-pulse-dot 2s infinite;
+}
+@keyframes tmpl-pulse-dot {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
 }
 
-:deep(.order-pin-bubble) {
-  padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 700;
-  color: white; white-space: nowrap; text-align: center;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+/* Order pin: a white pill whose tail tip sits on the pickup point. The 0x0
+   icon means this child is positioned relative to the exact coordinate. */
+.tmpl-pin {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -100%);
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #ffffff; color: #0f172a;
+  padding: 8px 14px; border-radius: 20px;
+  font-family: 'Nunito', 'Outfit', sans-serif;
+  font-weight: 800; font-size: 15px; white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+  cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-:deep(.order-pin-bubble.green) { background: #10b981; }
-:deep(.order-pin-bubble.orange) { background: #f59e0b; }
+.tmpl-pin::after {
+  content: ''; position: absolute;
+  bottom: -6px; left: 50%; transform: translateX(-50%);
+  border-width: 6px 6px 0; border-style: solid;
+  border-color: #ffffff transparent transparent transparent;
+}
+.tmpl-pin:hover {
+  transform: translate(-50%, -100%) scale(1.05);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+}
+.tmpl-pin-icon { font-size: 16px; color: #64748b; }
+.tmpl-pin.hot .tmpl-pin-icon { color: #f59e0b; }
+.tmpl-pin.acceptable .tmpl-pin-icon { color: #10b981; }
 
-/* Cluster marker: several stacked orders at one point */
-:deep(.order-cluster-bubble) {
-  padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 700;
-  color: white; white-space: nowrap; text-align: center;
-  background: #7c3aed;
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
-  border: 2px solid #ffffff;
-  display: inline-flex; align-items: center; gap: 5px;
+/* Cluster pin: red outline + count badge. */
+.tmpl-pin.cluster {
+  border: 2px solid #ef4444; padding: 6px 12px;
 }
-:deep(.order-cluster-bubble.has-accept) { background: #4f46e5; }
-:deep(.order-cluster-bubble .cluster-count) {
-  background: rgba(255, 255, 255, 0.25);
-  border-radius: 99px; padding: 0 7px; font-size: 13px; font-weight: 800;
+.tmpl-pin.cluster .tmpl-pin-icon { color: #ef4444; }
+.tmpl-cluster-badge {
+  position: absolute; top: -8px; right: -8px;
+  background: #ef4444; color: #fff;
+  font-size: 12px; font-weight: 900; line-height: 1;
+  min-width: 20px; padding: 3px 6px; border-radius: 10px; text-align: center;
+  border: 2px solid #ffffff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 </style>
