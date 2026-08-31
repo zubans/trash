@@ -1334,15 +1334,10 @@ export default defineComponent({
 
       chatInputText.value = ''
 
-      // The socket is wss:// in every secure context (see buildChatWebSocketUrl),
-      // so the mixed-content ws:// swallow that lost mobile sends no longer
-      // applies. Send over the socket when it is open; the REST branch below is
-      // the fallback for when it is not (e.g. the endpoint has no TLS).
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        ws.value.send(JSON.stringify({ text }))
-        return
-      }
-
+      // Always send over REST — the same path the (working) support chat uses.
+      // ws.send() gives no delivery confirmation and the native WebView can
+      // swallow it, which is what broke the order chat; the REST endpoint saves
+      // the message and broadcasts it to the room, so realtime still works.
       try {
         const res = await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { text })
         if (res.data) {
