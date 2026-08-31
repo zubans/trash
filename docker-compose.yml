@@ -69,6 +69,20 @@ services:
       # connections outright; with one, the queue forms in the process and shows
       # up in the pool metrics instead.
       DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-25}
+      # Tuning knobs for the caches on the request path. Each has a working
+      # default in the code; they are listed here so a value set in .env
+      # actually reaches the process — compose passes through only what is
+      # named, so an unlisted variable would sit in .env doing nothing.
+      #
+      # Each one trades freshness for load, and the trade is bounded: writes
+      # made by this process invalidate its own caches, so the TTL only covers
+      # changes it did not make.
+      AUTH_CACHE_TTL_SEC: ${AUTH_CACHE_TTL_SEC:-5}
+      SETTINGS_CACHE_TTL_SEC: ${SETTINGS_CACHE_TTL_SEC:-10}
+      CATALOG_CACHE_TTL_SEC: ${CATALOG_CACHE_TTL_SEC:-60}
+      # Ceiling on simultaneous calls to the address provider. Past it, address
+      # entry answers 429 instead of piling up goroutines while DaData is slow.
+      DADATA_MAX_CONCURRENCY: ${DADATA_MAX_CONCURRENCY:-8}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://moya-usluga.ru}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TLS_CERT_FILE: /app/certs/localhost-cert.pem

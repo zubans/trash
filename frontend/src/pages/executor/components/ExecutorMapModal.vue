@@ -49,17 +49,15 @@
               :key="o.id"
               type="button"
               class="cluster-item"
+              :class="o.can_accept ? 'ok' : 'far'"
               @click="openClusterOrder(o)"
             >
-              <div class="ci-left">
-                <div class="ci-icon" :class="{ hot: o.is_asap || o.is_urgent }">
-                  <i class="ph-fill" :class="(o.is_asap || o.is_urgent) ? 'ph-lightning' : 'ph-package'"></i>
-                </div>
-                <div class="ci-text">
-                  <div class="ci-price">{{ currencySymbol }}{{ Number(o.hold_amount).toFixed(0) }}</div>
-                  <div class="ci-dist" :class="o.can_accept ? 'ok' : 'far'">
-                    {{ o.can_accept ? 'Можно взять' : '> 2 км' }}
-                  </div>
+              <span class="ci-dot"></span>
+              <div class="ci-text">
+                <div class="ci-title">{{ serviceTitle(o) }}</div>
+                <div class="ci-meta">
+                  <span class="ci-price">{{ Number(o.hold_amount).toFixed(0) }} {{ currencySymbol }}</span>
+                  <span v-if="shortAddress(o)" class="ci-addr">· {{ shortAddress(o) }}</span>
                 </div>
               </div>
               <i class="ph-bold ph-caret-right ci-arrow"></i>
@@ -80,11 +78,17 @@
           <button type="button" class="btn-close-card" @click="selectedOrder = null; selectedCluster = null">
             <i class="ph-bold ph-x"></i>
           </button>
+          <div class="op-title">{{ serviceTitle(selectedOrder) }}</div>
           <div class="op-header">
-            <span class="op-id">#{{ selectedOrder?.id ? selectedOrder.id.slice(0, 8) : '---' }}</span>
-            <span class="op-price">{{ currencySymbol }}{{ Number(selectedOrder.hold_amount).toFixed(2) }}</span>
+            <span class="op-price">{{ Number(selectedOrder.hold_amount).toFixed(0) }} {{ currencySymbol }}</span>
+            <span class="op-accept-tag" :class="selectedOrder.can_accept ? 'ok' : 'far'">
+              {{ selectedOrder.can_accept ? 'Можно взять' : '> 2 км' }}
+            </span>
           </div>
-          <div class="op-address">{{ selectedOrder.address || 'Адрес не указан' }}</div>
+          <div class="op-address">
+            <i class="ph-fill ph-map-pin"></i>
+            {{ shortAddress(selectedOrder) || selectedOrder.address || 'Адрес не указан' }}
+          </div>
           <div class="op-distance">
             📏 Дистанция: <strong>{{ selectedOrder.distance_km.toFixed(1) }} км</strong>
           </div>
@@ -294,15 +298,59 @@ export default defineComponent({
       }
     }
 
+    // Guard divIcon HTML against injection: titles/addresses come from user and
+    // catalog data and go into innerHTML.
+    const escapeHtml = (s: string): string =>
+      String(s).replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string),
+      )
+
+    // "Category · Service" from the fields the map endpoint attaches.
+    const serviceTitle = (o: any): string => {
+      const variant =
+        o?.service_variant?.name?.ru ||
+        o?.service_variant?.name?.en ||
+        o?.service_variant?.code ||
+        ''
+      const category = o?.category_name || ''
+      if (category && variant) return `${category} · ${variant}`
+      return variant || category || 'Услуга'
+    }
+
+    // Address without the city: keep street, house, apartment.
+    const streetLike =
+      /^(ул\.?|улица|пер\.?|переул|пр-?кт|пр\.?|проспект|просп|б-?р|бул|наб\.?|ш\.?|шоссе|пл\.?|площад|проезд|туп\.?|аллея|линия|мкр|микрорайон|кв-?л|квартал)/i
+    const shortAddress = (o: any): string => {
+      const raw = (o?.address || '').trim()
+      if (!raw) return ''
+      const parts = raw.split(',').map((p: string) => p.trim()).filter(Boolean)
+      const idx = parts.findIndex((p: string) => streetLike.test(p))
+      const kept = idx >= 0 ? parts.slice(idx) : parts.slice(1)
+      return (kept.length ? kept : parts).join(', ')
+    }
+
+    // Group orders by building (street + house, apartment stripped) so several
+    // orders in one house — even in different flats — merge into one marker
+    // instead of stacking with only the top one visible. Falls back to
+    // coordinates when there is no address.
+    const buildingKey = (o: any): string => {
+      const addr = (o?.address || '').toLowerCase().trim()
+      const building = addr
+        .replace(/,?\s*(кв\.?|квартира|офис|оф\.?|помещение|пом\.?)\s*[^,]*/gi, '')
+        .trim()
+      if (building) return 'a:' + building
+      const lat = (o.pickup_lat || 0).toFixed(5)
+      const lon = (o.pickup_lon || 0).toFixed(5)
+      return `c:${lat},${lon}`
+    }
+
     const renderMarkers = () => {
       if (!markersLayer || !map) return
       markersLayer.clearLayers()
 
       const groups = new Map<string, any[]>()
       mapOrders.value.forEach((order) => {
-        const oLat = order.pickup_lat || 55.7558
-        const oLon = order.pickup_lon || 37.6173
-        const key = `${oLat.toFixed(5)},${oLon.toFixed(5)}`
+        const key = buildingKey(order)
         const list = groups.get(key)
         if (list) list.push(order)
         else groups.set(key, [order])
@@ -314,14 +362,14 @@ export default defineComponent({
 
         if (orders.length === 1) {
           const order = orders[0]
-          const hot = !!(order.is_asap || order.is_urgent)
           const price = Number(order.hold_amount || 0).toFixed(0)
+          const addr = shortAddress(order)
 
           const orderIcon = L.divIcon({
             className: 'tmpl-marker',
-            html: `<div class="tmpl-pin ${hot ? 'hot' : ''} ${order.can_accept ? 'acceptable' : ''}">
-                     <i class="ph-fill ${hot ? 'ph-lightning' : 'ph-package'} pin-icon"></i>
-                     <span>${price} ${props.currencySymbol}</span>
+            html: `<div class="tmpl-pin ${order.can_accept ? 'green' : 'yellow'}">
+                     <div class="pin-title">${escapeHtml(serviceTitle(order))}</div>
+                     <div class="pin-sub"><b>${price} ${props.currencySymbol}</b>${addr ? ' · ' + escapeHtml(addr) : ''}</div>
                    </div>`,
             iconSize: [0, 0],
             iconAnchor: [0, 0],
@@ -337,10 +385,9 @@ export default defineComponent({
           const anyAccept = orders.some((o) => o.can_accept)
           const clusterIcon = L.divIcon({
             className: 'tmpl-marker',
-            html: `<div class="cluster-pin ${anyAccept ? 'acceptable' : ''}">
+            html: `<div class="tmpl-pin cluster ${anyAccept ? 'green' : 'yellow'}">
                      <i class="ph-fill ph-stack pin-icon"></i>
-                     <span>Заказы</span>
-                     <div class="notification-badge">${orders.length}</div>
+                     <span>${orders.length} заказов</span>
                    </div>`,
             iconSize: [0, 0],
             iconAnchor: [0, 0],

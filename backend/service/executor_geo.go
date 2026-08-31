@@ -252,6 +252,23 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 	// visibility: only how its inputs are loaded is different.
 	customers, variants := s.eligibilityInputs(ctx, pendingOrders)
 
+	// Categories (the variants' parents) so the map can label each order with
+	// "category · service". Batched, so it stays two extra queries, not N.
+	categories := map[uuid.UUID]*repository.ServiceNode{}
+	if s.catalogRepo != nil {
+		parentIDs := make([]uuid.UUID, 0, len(variants))
+		for _, v := range variants {
+			if v != nil && v.ParentID != nil {
+				parentIDs = append(parentIDs, *v.ParentID)
+			}
+		}
+		if len(parentIDs) > 0 {
+			if loaded, err := s.catalogRepo.GetNodesByIDs(ctx, parentIDs); err == nil {
+				categories = loaded
+			}
+		}
+	}
+
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
@@ -275,10 +292,26 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 
 		dist := HaversineDistanceKM(lat, lon, oLat, oLon)
 		if dist <= overviewRadiusKM {
+			// Attach the variant (service name) and resolve the category name so
+			// the client can render "category · service" without extra lookups.
+			oc := *o
+			categoryName := ""
+			if v := variants[o.ServiceVariantID]; v != nil {
+				oc.ServiceVariant = v
+				if v.ParentID != nil {
+					if cat := categories[*v.ParentID]; cat != nil {
+						categoryName = cat.Name["ru"]
+						if categoryName == "" {
+							categoryName = cat.Name["en"]
+						}
+					}
+				}
+			}
 			mapOrders = append(mapOrders, repository.MapOrder{
-				Order:      *o,
-				CanAccept:  dist <= acceptRadiusKM,
-				DistanceKM: dist,
+				Order:        oc,
+				CanAccept:    dist <= acceptRadiusKM,
+				DistanceKM:   dist,
+				CategoryName: categoryName,
 			})
 		}
 	}

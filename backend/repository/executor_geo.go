@@ -25,6 +25,9 @@ type MapOrder struct {
 	Order
 	CanAccept  bool    `json:"can_accept"`
 	DistanceKM float64 `json:"distance_km"`
+	// CategoryName is the service variant's parent category, resolved so the map
+	// can show "category · service" without the client walking the catalog tree.
+	CategoryName string `json:"category_name,omitempty"`
 }
 
 type ExecutorGeoRepository interface {
