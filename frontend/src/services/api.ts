@@ -30,7 +30,11 @@ export const apiUrl = resolveApiUrl()
 
 export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 
-export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 15) * 1000
+// Steady-state polling cadence. Kept coarse (30s) because it runs for every
+// signed-in client continuously and each poll goes through the auth middleware;
+// chat delivery is realtime over the WebSocket, so orders/unread don't need a
+// tight loop. Overridable via VITE_POLL_INTERVAL_SEC.
+export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 30) * 1000
 
 export function formatApiError(err: any, fallbackMessage: string): string {
   const data = err.response?.data

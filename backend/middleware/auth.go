@@ -3,7 +3,11 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -34,6 +38,27 @@ type AuthMiddleware struct {
 	userRepo repository.UserRepository
 	sessions SessionChecker
 	secret   []byte
+
+	// Short-TTL cache of the authenticated user (with roles). Every request used
+	// to hit the DB twice — the user row and the roles — which multiplies under a
+	// client surge (steady polling from every client goes through here). The
+	// cache collapses that to one lookup per user per TTL.
+	//
+	// A ban is still immediate: banning revokes the session, and the revocation
+	// check runs on every request BEFORE this cache is consulted, so the old
+	// token is rejected regardless of a stale entry. A role/verification change
+	// also revokes the session; the only residual is that after the user logs in
+	// again the cached row can be up to TTL stale, so a just-changed role or
+	// verification (and profile fields like balance) takes effect within TTL
+	// rather than instantly. TTL is kept well below the client poll interval to
+	// keep that window tiny; set AUTH_CACHE_TTL_SEC=0 to disable entirely.
+	userCacheTTL time.Duration
+	userCache    sync.Map // userID -> cachedUser
+}
+
+type cachedUser struct {
+	user    *repository.User
+	expires time.Time
 }
 
 // NewAuthMiddleware creates an AuthMiddleware.
@@ -42,10 +67,45 @@ func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionCheck
 		jwtSecret = "dev-secret-change-me"
 	}
 	return &AuthMiddleware{
-		userRepo: userRepo,
-		sessions: sessions,
-		secret:   []byte(jwtSecret),
+		userRepo:     userRepo,
+		sessions:     sessions,
+		secret:       []byte(jwtSecret),
+		userCacheTTL: authCacheTTL(),
 	}
+}
+
+// authCacheTTL reads AUTH_CACHE_TTL_SEC (default 5s). Set it to 0 to disable the
+// cache and read the user fresh on every request.
+func authCacheTTL() time.Duration {
+	if v := os.Getenv("AUTH_CACHE_TTL_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 5 * time.Second
+}
+
+// loadUser returns the user for id, from the short-TTL cache when possible. It
+// hands back a shallow copy so a handler mutating the returned struct cannot
+// corrupt the cached entry (the Roles slice is treated as read-only).
+func (m *AuthMiddleware) loadUser(ctx context.Context, id uuid.UUID) (*repository.User, error) {
+	if m.userCacheTTL > 0 {
+		if v, ok := m.userCache.Load(id); ok {
+			if entry := v.(cachedUser); time.Now().Before(entry.expires) {
+				u := *entry.user
+				return &u, nil
+			}
+		}
+	}
+	user, err := m.userRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if m.userCacheTTL > 0 {
+		stored := *user
+		m.userCache.Store(id, cachedUser{user: &stored, expires: time.Now().Add(m.userCacheTTL)})
+	}
+	return user, nil
 }
 
 func extractBearerToken(r *http.Request) string {
@@ -139,7 +199,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		user, err := m.userRepo.FindByID(r.Context(), userID)
+		user, err := m.loadUser(r.Context(), userID)
 		if err != nil {
 			http.Error(w, "User not found", http.StatusUnauthorized)
 			return
@@ -208,7 +268,7 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		user, err := m.userRepo.FindByID(r.Context(), userID)
+		user, err := m.loadUser(r.Context(), userID)
 		if err != nil || user == nil || user.Status == "BANNED" {
 			next.ServeHTTP(w, r)
 			return
