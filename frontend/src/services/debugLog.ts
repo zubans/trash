@@ -79,6 +79,21 @@ export function updateLog(id: number, patch: Partial<DebugLogEntry>) {
   if (entry) Object.assign(entry, patch)
 }
 
+// logWsEvent records a WebSocket lifecycle/diagnostic line in the same console
+// as HTTP requests. method 'WS' makes the console render OK/ERR instead of an
+// HTTP status. Used to study why native chat sends go missing.
+export function logWsEvent(label: string, opts?: { ok?: boolean; error?: string; detail?: string }) {
+  if (!debugConsoleEnabled.value) return
+  pushLog({
+    ts: Date.now(),
+    method: 'WS',
+    url: label,
+    ok: opts?.ok,
+    error: opts?.error,
+    responseSnippet: opts?.detail,
+  })
+}
+
 // snippet renders a short, safe preview of a response/error body for the console.
 export function snippet(data: unknown, max = 400): string {
   if (data == null) return ''

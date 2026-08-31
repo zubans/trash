@@ -647,6 +647,7 @@ import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs, getRefreshToken } from '../../services/api'
+import { logWsEvent } from '../../services/debugLog'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceVariants, type ServiceNode } from '../../api/services'
@@ -838,7 +839,10 @@ export default defineComponent({
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         try {
           ws.value.send(JSON.stringify({ type: 'read_ack' }))
-        } catch (e) {}
+          logWsEvent('send read_ack (readyState=' + ws.value.readyState + ')', { ok: true })
+        } catch (e: any) {
+          logWsEvent('send read_ack THREW', { ok: false, error: String(e?.message || e) })
+        }
       }
     }
 
@@ -846,7 +850,10 @@ export default defineComponent({
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         try {
           ws.value.send(JSON.stringify({ type: 'delivery_ack' }))
-        } catch (e) {}
+          logWsEvent('send delivery_ack (readyState=' + ws.value.readyState + ')', { ok: true })
+        } catch (e: any) {
+          logWsEvent('send delivery_ack THREW', { ok: false, error: String(e?.message || e) })
+        }
       }
     }
 
@@ -1263,10 +1270,34 @@ export default defineComponent({
       if (!ws.value && selectedChatOrder.value) {
         try {
           const wsUrl = buildChatWebSocketUrl(orderId)
+          logWsEvent('connect ' + wsUrl.replace(/token=[^&]+/, 'token=…'))
           ws.value = new WebSocket(wsUrl)
+          ws.value.onopen = () => {
+            logWsEvent('open (readyState=' + ws.value?.readyState + ')', { ok: true })
+            try {
+              ws.value?.send(JSON.stringify({ type: 'ping' }))
+              logWsEvent('send ping → expecting pong', { ok: true })
+            } catch (e: any) {
+              logWsEvent('send ping THREW', { ok: false, error: String(e?.message || e) })
+            }
+          }
+          ws.value.onerror = () => {
+            logWsEvent('error', { ok: false, error: 'socket error event' })
+          }
+          ws.value.onclose = (e) => {
+            logWsEvent('close code=' + e.code + (e.reason ? ' reason=' + e.reason : ''), {
+              ok: e.code === 1000,
+              error: e.code !== 1000 ? 'code ' + e.code : undefined,
+            })
+          }
           ws.value.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data)
+              if (data.type === 'pong') {
+                logWsEvent('recv pong ✓ round-trip OK', { ok: true })
+                return
+              }
+              logWsEvent('recv ' + (data.type || 'message'), { ok: true, detail: String(event.data).slice(0, 200) })
               if (data.type === 'status_update' && Array.isArray(data.message_ids)) {
                 const updatedSet = new Set(data.message_ids)
                 chatMessages.value = chatMessages.value.map((m: any) => {

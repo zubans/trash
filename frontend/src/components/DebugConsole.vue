@@ -24,8 +24,8 @@
           <div class="dbg-line" :class="[lineClass(log), { open: isOpen(log.id) }]" @click="toggle(log.id)">
             <span class="dbg-caret">{{ isOpen(log.id) ? '▾' : '▸' }}</span>
             <span class="dbg-time">{{ fmtTime(log.ts) }}</span>
-            <span class="dbg-method">{{ log.method }}</span>
-            <span class="dbg-code">{{ log.status ?? (log.error ? 'ERR' : '…') }}</span>
+            <span class="dbg-method" :class="{ ws: log.method === 'WS' }">{{ log.method }}</span>
+            <span class="dbg-code">{{ codeLabel(log) }}</span>
             <span class="dbg-url">{{ shortUrl(log.url) }}</span>
             <span v-if="log.durationMs != null" class="dbg-dur">{{ log.durationMs }}ms</span>
           </div>
@@ -82,8 +82,14 @@ export default defineComponent({
 
     const lineClass = (log: DebugLogEntry) => {
       if (log.error || (log.status != null && log.status >= 400)) return 'err'
-      if (log.status != null && log.status < 400) return 'ok'
+      if (log.ok === true || (log.status != null && log.status < 400)) return 'ok'
       return ''
+    }
+
+    // WS events have no HTTP status; show OK/ERR from the ok/error flags.
+    const codeLabel = (log: DebugLogEntry) => {
+      if (log.method === 'WS') return log.error ? 'ERR' : 'OK'
+      return log.status ?? (log.error ? 'ERR' : '…')
     }
 
     // Strip origin and the /api prefix so the path reads clearly on a phone.
@@ -142,6 +148,7 @@ export default defineComponent({
       errorCount,
       copiedId,
       lineClass,
+      codeLabel,
       shortUrl,
       fmtTime,
       isOpen,
@@ -252,6 +259,9 @@ export default defineComponent({
   color: #93c5fd;
   font-weight: 700;
   min-width: 40px;
+}
+.dbg-method.ws {
+  color: #c084fc; /* WS events stand out from HTTP verbs */
 }
 .dbg-code {
   font-weight: 700;

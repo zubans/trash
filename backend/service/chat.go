@@ -200,6 +200,17 @@ func (s *ChatService) ReadPump(ctx context.Context, client *ChatClient, room *Ch
 					room.Broadcast <- ackBytes
 				}
 				continue
+			} else if eventReq.Type == "ping" {
+				// Diagnostic round-trip: prove that a frame the client sent actually
+				// reached the server. The pong is broadcast through the room's writer
+				// (never written to the socket directly from here, which would race
+				// the write pump). Clients ignore pong for UI and only log it.
+				pongBytes, _ := json.Marshal(map[string]interface{}{
+					"type": "pong",
+					"ts":   time.Now().UnixMilli(),
+				})
+				room.Broadcast <- pongBytes
+				continue
 			}
 		}
 
