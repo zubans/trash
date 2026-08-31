@@ -37,16 +37,7 @@
           :key="msg.id"
           :class="['msg-bubble-wrap', isMyMessage(msg) ? 'outgoing' : 'incoming']"
         >
-          <!-- Admin Avatar for incoming messages -->
-          <div v-if="!isMyMessage(msg)" class="admin-avatar">
-            <i class="ph-fill ph-shield-check"></i>
-          </div>
-
           <div class="msg-bubble-content">
-            <div v-if="!isMyMessage(msg)" class="msg-sender-name">
-              Поддержка
-            </div>
-
             <!-- Image attachment -->
             <div v-if="isImageAttachment(msg)" class="msg-img-box mb-1">
               <img
@@ -91,36 +82,36 @@
         <span>{{ banNoticeText }}</span>
       </div>
 
-      <!-- Input Bar -->
+      <!-- Input Bar — single rounded pill, matching the order chat -->
       <div v-else class="support-input-bar">
-        <button
-          type="button"
-          class="btn-attach"
-          title="Прикрепить фото или файл"
-          :disabled="uploading"
-          @click="triggerFileSelect"
-        >
-          <i v-if="uploading" class="ph ph-spinner spinner"></i>
-          <i v-else class="ph-bold ph-paperclip"></i>
-        </button>
+        <form class="chat-pill" @submit.prevent="sendMessage">
+          <button
+            type="button"
+            class="pill-attach"
+            title="Прикрепить фото или файл"
+            :disabled="uploading"
+            @click="triggerFileSelect"
+          >
+            <i v-if="uploading" class="ph ph-spinner spinner"></i>
+            <i v-else class="ph-bold ph-paperclip"></i>
+          </button>
 
-        <input
-          v-model="inputText"
-          type="text"
-          class="support-input"
-          placeholder="Напишите сообщение..."
-          :disabled="sending"
-          @keyup.enter="sendMessage"
-        />
+          <input
+            v-model="inputText"
+            type="text"
+            class="pill-input"
+            placeholder="Напишите сообщение..."
+            :disabled="sending"
+          />
 
-        <button
-          type="button"
-          class="btn-send"
-          :disabled="!inputText.trim() && !uploading"
-          @click="sendMessage"
-        >
-          <i class="ph-bold ph-paper-plane-right"></i>
-        </button>
+          <button
+            type="submit"
+            class="pill-send"
+            :disabled="!inputText.trim() && !uploading"
+          >
+            <i class="ph-bold ph-paper-plane-tilt"></i>
+          </button>
+        </form>
       </div>
     </div>
 
@@ -660,16 +651,29 @@ export default defineComponent({
   padding: 12px 16px;
   background: #ffffff;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Single rounded pill holding attach + input + send, like the order chat. */
+.chat-pill {
   display: flex;
   align-items: center;
   gap: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 99px;
+  padding: 6px 6px 6px 8px;
+  transition: all 0.2s ease;
+}
+.chat-pill:focus-within {
+  border-color: #5c60f5;
+  box-shadow: 0 0 0 4px rgba(92, 96, 245, 0.1);
 }
 
-.btn-attach {
-  width: 40px;
-  height: 40px;
+.pill-attach {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: #f1f5f9;
+  background: transparent;
   border: none;
   color: #64748b;
   font-size: 18px;
@@ -677,35 +681,26 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  flex-shrink: 0;
   transition: all 0.2s ease;
 }
+.pill-attach:hover:not(:disabled) { color: #0f172a; }
 
-.btn-attach:hover:not(:disabled) {
-  background: #e2e8f0;
-  color: #0f172a;
-}
-
-.support-input {
+.pill-input {
   flex: 1;
-  padding: 10px 16px;
-  border-radius: 99px;
-  border: 1.5px solid rgba(0, 0, 0, 0.08);
-  background: #f8fafc;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
   font-size: 14px;
   color: #0f172a;
-  outline: none;
-  transition: all 0.2s ease;
 }
+.pill-input::placeholder { color: #94a3b8; }
 
-.support-input:focus {
-  border-color: #5c60f5;
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(92, 96, 245, 0.1);
-}
-
-.btn-send {
-  width: 40px;
-  height: 40px;
+.pill-send {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: #5c60f5;
   color: #ffffff;
@@ -715,15 +710,14 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  flex-shrink: 0;
   transition: all 0.2s ease;
 }
-
-.btn-send:hover:not(:disabled) {
+.pill-send:hover:not(:disabled) {
   background: #4f46e5;
   transform: scale(1.05);
 }
-
-.btn-send:disabled {
+.pill-send:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
