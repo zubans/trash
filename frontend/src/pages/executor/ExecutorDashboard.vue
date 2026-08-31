@@ -2652,12 +2652,13 @@ export default defineComponent({
 }
 
 .chat-msgs {
-  padding: 20px 24px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   max-height: 300px;
   overflow-y: auto;
+  background: #f8fafc;
 }
 
 .chat-empty {
@@ -2676,23 +2677,27 @@ export default defineComponent({
 .msg.incoming { align-self: flex-start; }
 .msg.outgoing { align-self: flex-end; }
 
+/* Message bubbles — matched to the support chat (SupportChatModal.vue). The
+   colour rules target .msg-container (the class the markup uses); they used to
+   target a stale .msg class, leaving the bubbles with no background. */
 .bubble {
   padding: 10px 14px;
   font-size: 14px;
-  border-radius: 16px;
+  border-radius: 18px;
   line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
-.msg.incoming .bubble {
+.msg-container.incoming .bubble {
   background: #ffffff;
-  border: 1px solid rgba(0,0,0,0.05);
-  color: var(--text-title);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  color: #0f172a;
   border-bottom-left-radius: 4px;
 }
 
-.msg.outgoing .bubble {
-  background: var(--accent-main);
-  color: white;
+.msg-container.outgoing .bubble {
+  background: #5c60f5;
+  color: #ffffff;
   border-bottom-right-radius: 4px;
 }
 
