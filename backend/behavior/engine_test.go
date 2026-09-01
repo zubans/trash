@@ -126,15 +126,16 @@ func TestVerificationIsFree(t *testing.T) {
 	}
 }
 
-func TestVerificationCompletesAndPaysOnExecution(t *testing.T) {
+func TestVerificationCompletesAndPaysWhenTheDataMatches(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
 	mod := moderator()
 	order := &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID}
 
 	effects, err := e.OnEvent("verification", Facts{
-		Event: "order.executed", Order: order, Customer: cust, Viewer: mod,
-		Config: map[string]interface{}{"reward_executor": 200.0},
+		Event: "order.submission", Order: order, Customer: cust, Viewer: mod,
+		Submission: &SubmissionFacts{Attempt: 1, AllMatch: true},
+		Config:     map[string]interface{}{"reward_executor": 200.0},
 	})
 	if err != nil {
 		t.Fatalf("on_event: %v", err)
@@ -180,7 +181,8 @@ func TestVerificationPaysBothSidesWhenConfigured(t *testing.T) {
 	order := &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "EXECUTED", CustomerID: cust.ID, ExecutorID: mod.ID}
 
 	effects, err := e.OnEvent("verification", Facts{
-		Event: "order.executed", Order: order, Customer: cust, Viewer: mod,
+		Event: "order.submission", Order: order, Customer: cust, Viewer: mod,
+		Submission: &SubmissionFacts{Attempt: 1, AllMatch: true},
 		Config: map[string]interface{}{
 			"reward_executor":  150.0,
 			"reward_customer":  50.0,
@@ -222,10 +224,11 @@ func TestVerificationSkipsZeroRewards(t *testing.T) {
 	cust := customer(false)
 	mod := moderator()
 	effects, err := e.OnEvent("verification", Facts{
-		Event:    "order.executed",
-		Order:    &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
-		Customer: cust,
-		Config:   map[string]interface{}{"reward_executor": 0.0, "reward_customer": 0.0},
+		Event:      "order.submission",
+		Order:      &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
+		Customer:   cust,
+		Submission: &SubmissionFacts{Attempt: 1, AllMatch: true},
+		Config:     map[string]interface{}{"reward_executor": 0.0, "reward_customer": 0.0},
 	})
 	if err != nil {
 		t.Fatalf("on_event: %v", err)
@@ -245,9 +248,10 @@ func TestBehaviorConstantsComeFromTheConfigFile(t *testing.T) {
 	cust := customer(false)
 	mod := moderator()
 	effects, err := e.OnEvent("verification", Facts{
-		Event:    "order.executed",
-		Order:    &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
-		Customer: cust,
+		Event:      "order.submission",
+		Order:      &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
+		Customer:   cust,
+		Submission: &SubmissionFacts{Attempt: 1, AllMatch: true},
 	})
 	if err != nil {
 		t.Fatalf("on_event: %v", err)
@@ -295,6 +299,132 @@ func TestVerificationAdminModeIgnoresExecution(t *testing.T) {
 	}
 	if len(effects) != 0 {
 		t.Errorf("verified_by=admin produced %d effects on execution", len(effects))
+	}
+}
+
+// The identity check: the manifest declares which fields the moderator submits
+// and that they see nothing else about the customer.
+func TestVerificationDeclaresTheIdentityCheck(t *testing.T) {
+	e := loadReal(t)
+	m, _ := e.Manifest("verification")
+	if !m.HideCustomerContacts {
+		t.Error("the behaviour must state that the executor sees no customer contacts")
+	}
+	want := map[string]bool{"last_name": true, "first_name": true, "patronymic": true, "birth_date": true}
+	if len(m.CheckFields) != len(want) {
+		t.Fatalf("check_fields = %v", m.CheckFields)
+	}
+	for _, field := range m.CheckFields {
+		if !want[field] {
+			t.Errorf("unexpected checked field %q", field)
+		}
+	}
+}
+
+// A first mismatch is a typo until proven otherwise: warn, do not escalate, and
+// do not say which field was wrong — the rest could then be found by trying.
+func TestVerificationWarnsOnTheFirstMismatch(t *testing.T) {
+	e := loadReal(t)
+	cust := customer(false)
+	mod := moderator()
+
+	effects, err := e.OnEvent("verification", Facts{
+		Event:    "order.submission",
+		Order:    &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
+		Customer: cust,
+		Viewer:   mod,
+		Submission: &SubmissionFacts{
+			Attempt:  1,
+			AllMatch: false,
+			Matches:  map[string]bool{"last_name": true, "first_name": false, "patronymic": true, "birth_date": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("on_event: %v", err)
+	}
+	if len(effects) != 1 || effects[0].Kind != EffectSystemMessage {
+		t.Fatalf("expected one warning, got %v", effects)
+	}
+	if strings.Contains(effects[0].Text, "first_name") || strings.Contains(effects[0].Text, "Имя") {
+		t.Errorf("the warning names the field that did not match: %q", effects[0].Text)
+	}
+	for _, effect := range effects {
+		if effect.Kind == EffectVerifyUser || effect.Kind == EffectPayBonus {
+			t.Errorf("a mismatch produced %s", effect.Kind)
+		}
+	}
+}
+
+// The last allowed attempt hands the case to an administrator.
+func TestVerificationEscalatesAfterTheLastAttempt(t *testing.T) {
+	e := loadReal(t)
+	cust := customer(false)
+	mod := moderator()
+
+	effects, err := e.OnEvent("verification", Facts{
+		Event:      "order.submission",
+		Order:      &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
+		Customer:   cust,
+		Viewer:     mod,
+		Submission: &SubmissionFacts{Attempt: 2, AllMatch: false, Matches: map[string]bool{"birth_date": false}},
+	})
+	if err != nil {
+		t.Fatalf("on_event: %v", err)
+	}
+
+	var escalated bool
+	for _, effect := range effects {
+		switch effect.Kind {
+		case EffectEscalate:
+			escalated = true
+			if effect.Reason == "" {
+				t.Error("the escalation carries no reason for the administrator")
+			}
+		case EffectVerifyUser, EffectCompleteOrder, EffectPayBonus:
+			t.Errorf("a failed check produced %s", effect.Kind)
+		}
+	}
+	if !escalated {
+		t.Errorf("the case was not handed to an administrator: %v", effects)
+	}
+}
+
+// Once a case is with an administrator the script stops acting on it.
+func TestVerificationLeavesAnEscalatedOrderAlone(t *testing.T) {
+	e := loadReal(t)
+	cust := customer(false)
+	effects, err := e.OnEvent("verification", Facts{
+		Event:      "order.submission",
+		Order:      &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID},
+		Customer:   cust,
+		Submission: &SubmissionFacts{Attempt: 3, AllMatch: true, Escalated: true},
+	})
+	if err != nil {
+		t.Fatalf("on_event: %v", err)
+	}
+	if len(effects) != 0 {
+		t.Errorf("the script acted on a case that is with an administrator: %v", effects)
+	}
+}
+
+// Marking the visit done no longer verifies anybody by itself: the check does.
+func TestVerificationDoesNotCompleteWithoutTheCheck(t *testing.T) {
+	e := loadReal(t)
+	cust := customer(false)
+	mod := moderator()
+	effects, err := e.OnEvent("verification", Facts{
+		Event:    "order.executed",
+		Order:    &OrderFacts{ID: "44444444-4444-4444-4444-444444444444", Status: "ASSIGNED", CustomerID: cust.ID, ExecutorID: mod.ID},
+		Customer: cust,
+		Viewer:   mod,
+	})
+	if err != nil {
+		t.Fatalf("on_event: %v", err)
+	}
+	for _, effect := range effects {
+		if effect.Kind == EffectVerifyUser || effect.Kind == EffectCompleteOrder || effect.Kind == EffectPayBonus {
+			t.Errorf("marking the visit done produced %s without any data being checked", effect.Kind)
+		}
 	}
 }
 

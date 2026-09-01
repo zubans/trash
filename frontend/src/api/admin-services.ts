@@ -13,6 +13,8 @@ export interface CreateServiceNodeRequest {
   sort_order?: number
   behavior_code?: string
   behavior_config?: Record<string, unknown>
+  behavior_constants?: string
+  behavior_source?: string
 }
 
 export interface UpdateServiceNodeRequest {
@@ -25,6 +27,8 @@ export interface UpdateServiceNodeRequest {
   sort_order?: number
   behavior_code?: string
   behavior_config?: Record<string, unknown>
+  behavior_constants?: string
+  behavior_source?: string
 }
 
 // ServiceBehavior is one behaviour script the server has loaded: what a node
@@ -40,6 +44,10 @@ export interface ServiceBehavior {
   events?: string[]
   defaults?: Record<string, unknown>
   hooks?: string[]
+  // The script's own text, which the constructor offers as a starting template
+  // and shows for a node that runs this library behaviour.
+  constants_source?: string
+  source?: string
 }
 
 export async function getServiceBehaviors(): Promise<ServiceBehavior[]> {

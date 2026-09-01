@@ -47,6 +47,11 @@ type Order struct {
 	DeadlineAt       *time.Time   `json:"deadline_at,omitempty"`
 	CompletedAt      *time.Time   `json:"completed_at,omitempty"`
 	CanceledAt       *time.Time   `json:"canceled_at,omitempty"`
+	// SubmitFields names the data the executor has to submit for checking before
+	// this order can be finished — the identity fields on a verification order.
+	// It is filled in when the order is rendered, from the service's behaviour;
+	// no column backs it, and it never carries the values themselves.
+	SubmitFields []string `json:"submit_fields,omitempty"`
 }
 
 // OrderRepository defines storage operations for orders.

@@ -16,12 +16,25 @@ import (
 // that goes with it.
 type BehaviorWorker struct {
 	dispatcher *service.BehaviorDispatcher
+	behaviors  *service.Behaviors
 	guard      func(func() error) error
 }
 
 // NewBehaviorWorker creates a BehaviorWorker.
 func NewBehaviorWorker(dispatcher *service.BehaviorDispatcher) *BehaviorWorker {
 	return &BehaviorWorker{dispatcher: dispatcher}
+}
+
+// WithScriptSync makes the worker recompile the scripts stored on catalog nodes
+// on a timer. An admin's edit applies to the process that served the save at
+// once; this is how it reaches the others, and how a change made directly in
+// the database is picked up at all.
+//
+// It runs on every process, unguarded by the leader lock on purpose: compiling
+// is local work, and each process needs its own copy of the result.
+func (w *BehaviorWorker) WithScriptSync(behaviors *service.Behaviors) *BehaviorWorker {
+	w.behaviors = behaviors
+	return w
 }
 
 // WithLeader makes this worker run at most once across every process. It pays
@@ -52,6 +65,22 @@ func (w *BehaviorWorker) Start(interval time.Duration) {
 		}
 	}()
 	log.Printf("[BehaviorWorker] Background worker started every %v", interval)
+}
+
+// StartScriptSync runs the node-script resync loop.
+func (w *BehaviorWorker) StartScriptSync(interval time.Duration) {
+	if w.behaviors == nil {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			if err := w.behaviors.SyncAll(context.Background()); err != nil {
+				log.Printf("[BehaviorWorker] Error compiling node scripts: %v", err)
+			}
+		}
+	}()
+	log.Printf("[BehaviorWorker] Node script sync started every %v", interval)
 }
 
 func (w *BehaviorWorker) runGuarded(job func() error) error {

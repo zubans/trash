@@ -180,6 +180,12 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 		}
 		if variant := variants[o.ServiceVariantID]; variant != nil {
 			o.ServiceVariant = variant
+			// What the executor has to submit before this order can be finished.
+			// The names of the fields only: their values are what the check is
+			// against, and the executor must not be shown them.
+			if manifest, ok := s.behaviors.Manifest(variant); ok {
+				o.SubmitFields = manifest.CheckFields
+			}
 		}
 		if o.ExecutorID == nil {
 			continue

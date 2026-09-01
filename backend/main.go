@@ -103,6 +103,9 @@ func main() {
 	// claims that make a once-per-user service once per user.
 	eventRepo := repository.NewEventRepository(db)
 	serviceClaimRepo := repository.NewServiceClaimRepository(db)
+	// Data an executor submits for checking, and the cases a behaviour hands to
+	// an administrator when it does not match.
+	submissionRepo := repository.NewSubmissionRepository(db)
 
 	// Services
 	// Every movement of money goes through the ledger, which always touches both
@@ -124,7 +127,15 @@ func main() {
 			log.Printf("[behavior] WARNING: %v", err)
 		}
 	}
-	serviceBehaviors := service.NewBehaviors(behaviorEngine, serviceClaimRepo)
+	serviceBehaviors := service.NewBehaviors(behaviorEngine, serviceClaimRepo).
+		WithCatalog(catalogRepo)
+	// Special services carry their own script, written in the admin panel. They
+	// are compiled before the first request: a node whose script is not loaded
+	// fails its gates closed, and doing that during startup is quieter than
+	// doing it to a customer.
+	if err := serviceBehaviors.SyncAll(context.Background()); err != nil {
+		log.Printf("[behavior] WARNING: %v", err)
+	}
 
 	// DaData is the only source of address data — suggestions and coordinate
 	// resolution alike. There is deliberately no fallback: the alternative had
@@ -209,11 +220,17 @@ func main() {
 	// Domain events reach their behaviours here: an order that closes itself
 	// once its customer is verified, and the reward that goes with it. Short
 	// interval, because somebody is waiting for both.
-	behaviorWorker := worker.NewBehaviorWorker(service.NewBehaviorDispatcher(
+	behaviorDispatcher := service.NewBehaviorDispatcher(
 		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
 		settingsRepo, ledger, serviceBehaviors, orderService,
-	)).WithLeader(leader, "behavior_dispatch")
+	).WithSubmissions(submissionRepo)
+	behaviorWorker := worker.NewBehaviorWorker(behaviorDispatcher).
+		WithLeader(leader, "behavior_dispatch").
+		WithScriptSync(serviceBehaviors)
 	behaviorWorker.Start(5 * time.Second)
+	// Scripts edited on another process, or straight in the database, reach this
+	// one within a minute.
+	behaviorWorker.StartScriptSync(1 * time.Minute)
 
 	// Nightly books check. It reports and never repairs: a balance that drifted
 	// away from its ledger is a bug worth seeing, not a number to overwrite.
@@ -245,6 +262,7 @@ func main() {
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
+	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
 
 	// Rate limiters for the endpoints that are worth brute forcing.
 	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
@@ -360,6 +378,8 @@ func main() {
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
 			r.Post("/executor/set-location", egh.SetLocation)
+			// Resumes automatic positioning after a manual pick.
+			r.Post("/executor/follow-device", egh.FollowDevice)
 			r.Get("/executor/location", egh.GetLocation)
 			r.Get("/executor/map-orders", egh.GetMapOrders)
 			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
@@ -370,6 +390,9 @@ func main() {
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
 			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
+			// Data the executor submits for checking on a scripted service —
+			// the identity check on a verification order.
+			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 		})
 
@@ -405,6 +428,8 @@ func main() {
 			r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
 			r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
 			r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
+			r.Get("/admin/escalations", bhh.ListEscalations)
+			r.Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
 			r.Get("/admin/service-behaviors", sch.AdminListBehaviors)
 			r.Get("/admin/service-nodes", sch.AdminListNodes)
 			r.Get("/admin/service-nodes/{id}", sch.AdminGetNode)

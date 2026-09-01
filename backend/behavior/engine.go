@@ -42,6 +42,18 @@ type script struct {
 	manifest Manifest
 }
 
+// NodeCodePrefix marks a behaviour that belongs to one catalog node — a script
+// written in the admin panel rather than shipped as a file. The prefix keeps the
+// two namespaces apart: a node can never shadow a library behaviour, and a
+// library behaviour can never be edited away by a node.
+const NodeCodePrefix = "node:"
+
+// NodeCode is the behaviour code under which a node's own script is registered.
+func NodeCode(nodeID string) string { return NodeCodePrefix + nodeID }
+
+// IsNodeCode reports whether a code belongs to a node's own script.
+func IsNodeCode(code string) bool { return strings.HasPrefix(code, NodeCodePrefix) }
+
 // Engine holds the compiled behaviour scripts. Compilation happens once at
 // startup; the globals are frozen afterwards, which is what makes concurrent
 // calls from request handlers safe.
@@ -197,10 +209,53 @@ func (e *Engine) CompileFiles(code string, files []SourceFile) error {
 		return err
 	}
 
+	// The sources travel with the compiled behaviour so the admin panel can show
+	// a shipped script as the starting template for a new one.
+	for _, file := range files {
+		if path.Base(file.Name) == ConfigFile {
+			manifest.ConstantsSource = string(file.Src)
+		} else if manifest.Source == "" {
+			manifest.Source = string(file.Src)
+		}
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.scripts[code] = &script{code: code, globals: globals, manifest: manifest}
 	return nil
+}
+
+// Remove unregisters a behaviour. Used when a node's own script is deleted, so
+// the node stops being special the moment the admin saves it.
+func (e *Engine) Remove(code string) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.scripts, code)
+}
+
+// Library lists the behaviours that ship with the build — everything except the
+// per-node scripts. This is what the service constructor offers as templates.
+func (e *Engine) Library() []Manifest {
+	all := e.Manifests()
+	out := make([]Manifest, 0, len(all))
+	for _, m := range all {
+		if !IsNodeCode(m.Code) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// Validate compiles a candidate script without registering it, so the admin
+// panel can refuse a broken script at save time instead of taking the service
+// off sale at run time. The error is the Starlark one, which names the file,
+// the line and the problem.
+func (e *Engine) Validate(files []SourceFile) error {
+	probe := New(e.limits)
+	return probe.CompileFiles("candidate", files)
 }
 
 func readManifest(code string, globals starlark.StringDict) (Manifest, error) {
@@ -232,6 +287,15 @@ func readManifest(code string, globals starlark.StringDict) (Manifest, error) {
 			if b, ok := value.(bool); ok {
 				m.ReleaseClaimOnCancel = b
 			}
+		case "check_fields":
+			items, _ := value.([]interface{})
+			for _, item := range items {
+				if s, ok := item.(string); ok {
+					m.CheckFields = append(m.CheckFields, s)
+				}
+			}
+		case "hide_customer_contacts":
+			m.HideCustomerContacts, _ = value.(bool)
 		case "events":
 			items, _ := value.([]interface{})
 			for _, item := range items {

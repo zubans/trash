@@ -42,6 +42,8 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `030_customer_addresses.sql` | Saved pickup addresses (`customer_addresses`). |
 | `031_structured_addresses.sql` | Addresses stored as their parts: `region`, `city`, `street`, `house`, `flat`, `fias_id`, `geo_lat`, `geo_lon`, `source`, plus a partial index on `fias_id` and a backfill from the old single-line format. See [`address_suggestions.md`](./address_suggestions.md). |
 | `043_service_behaviors.sql` | Scripted services: `service_nodes.behavior_code` / `behavior_config`, the `domain_events` outbox, `user_service_claims`, `behavior_effects`, the `BONUSES` account and the `BONUS` transaction type. Seeds the verification service switched off. See [`service_behaviors.md`](./service_behaviors.md). |
+| `044_service_node_scripts.sql` | A special service carries its own script: `service_nodes.behavior_constants` and `behavior_source`, edited in the admin panel's service constructor. |
+| `045_order_submissions.sql` | Data an executor submits for checking (`order_submissions`) and the cases a behaviour hands to an administrator (`behavior_escalations`), with one open escalation per order. |
 
 ## How to run manually
 

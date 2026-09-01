@@ -33,6 +33,18 @@ type MapOrder struct {
 type ExecutorGeoRepository interface {
 	UpdateExecutorLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64, isManual bool) error
 	GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error)
+	// RecordDevicePosition stores the fix the executor's phone reported.
+	//
+	// It always saves the device position, and moves the working anchor with it
+	// only while the executor has not chosen a district by hand. Once they have,
+	// the anchor stays where they put it until they ask to follow the device
+	// again — a periodic report must not undo a deliberate choice.
+	RecordDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error
+	// GetDevicePosition returns the last position the executor's phone reported.
+	GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*ExecutorPosition, error)
+	// FollowDevicePosition moves the working anchor onto a device fix and drops
+	// the manual override, so automatic reports resume moving the anchor.
+	FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error
 	// GetExecutorLocations resolves the stored positions of several executors
 	// in one query, for the matching worker: it compares every candidate
 	// against every waiting order, and asking per candidate made the cost of a
@@ -81,6 +93,63 @@ func (r *executorGeoRepository) UpdateExecutorLocation(ctx context.Context, exec
 		    current_lon = EXCLUDED.current_lon
 	`
 	_, err := r.db.ExecContext(ctx, query, lat, lon, executorID)
+	return err
+}
+
+func (r *executorGeoRepository) RecordDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
+	// One statement so the device fix and the conditional anchor move cannot
+	// disagree: the anchor follows only while no manual choice is on record.
+	query := `
+		INSERT INTO executor_profiles (user_id, full_name, device_lat, device_lon, device_reported_at, current_lat, current_lon)
+		VALUES ($3, 'Исполнитель', $1, $2, $4, $1, $2)
+		ON CONFLICT (user_id) DO UPDATE
+		SET device_lat = EXCLUDED.device_lat,
+		    device_lon = EXCLUDED.device_lon,
+		    device_reported_at = EXCLUDED.device_reported_at,
+		    current_lat = CASE
+		        WHEN executor_profiles.last_manual_location_change_at IS NULL
+		        THEN EXCLUDED.current_lat ELSE executor_profiles.current_lat END,
+		    current_lon = CASE
+		        WHEN executor_profiles.last_manual_location_change_at IS NULL
+		        THEN EXCLUDED.current_lon ELSE executor_profiles.current_lon END
+	`
+	_, err := r.db.ExecContext(ctx, query, lat, lon, executorID, time.Now())
+	return err
+}
+
+func (r *executorGeoRepository) GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*ExecutorPosition, error) {
+	var lat, lon sql.NullFloat64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT device_lat, device_lon FROM executor_profiles WHERE user_id = $1`, executorID).
+		Scan(&lat, &lon)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !lat.Valid || !lon.Valid {
+		return nil, nil
+	}
+	return &ExecutorPosition{Lat: lat.Float64, Lon: lon.Float64}, nil
+}
+
+func (r *executorGeoRepository) FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
+	// Clearing last_manual_location_change_at is the point: it both releases the
+	// anchor back to the device and ends the district-change cooldown, because
+	// returning to where you actually are is not a district change.
+	query := `
+		INSERT INTO executor_profiles (user_id, full_name, current_lat, current_lon, device_lat, device_lon, device_reported_at)
+		VALUES ($3, 'Исполнитель', $1, $2, $1, $2, $4)
+		ON CONFLICT (user_id) DO UPDATE
+		SET current_lat = EXCLUDED.current_lat,
+		    current_lon = EXCLUDED.current_lon,
+		    device_lat = EXCLUDED.device_lat,
+		    device_lon = EXCLUDED.device_lon,
+		    device_reported_at = EXCLUDED.device_reported_at,
+		    last_manual_location_change_at = NULL
+	`
+	_, err := r.db.ExecContext(ctx, query, lat, lon, executorID, time.Now())
 	return err
 }
 

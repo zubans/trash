@@ -48,6 +48,11 @@ const (
 	// EffectSystemMessage posts a system message into the order's chat. Applied
 	// after the transaction commits, like every other chat notification.
 	EffectSystemMessage EffectKind = "system_message"
+	// EffectEscalate hands the order to an administrator: the executor cannot
+	// finish it any more, and it appears on the escalations screen with what
+	// they submitted. Used when a check has failed as often as the behaviour
+	// allows.
+	EffectEscalate EffectKind = "escalate"
 )
 
 // Effect is one requested change, as returned by a script.
@@ -115,6 +120,26 @@ type VariantFacts struct {
 	BasePrice float64
 }
 
+// SubmissionFacts describes data an executor sent for checking — for the
+// verification service, what the moderator read off the customer's document.
+//
+// It carries the *result* of the comparison and never the values compared
+// against. That is the point of the flow: the moderator is shown the address and
+// nothing else about the customer, so neither they nor the script may learn the
+// name and the birth date by asking. What the script decides is the policy —
+// how many attempts, when to warn, when to escalate.
+type SubmissionFacts struct {
+	// Attempt is 1 for the first submission on this order.
+	Attempt int
+	// AllMatch is true when every checked field matched.
+	AllMatch bool
+	// Matches is the per-field result, keyed by the field names the manifest
+	// declared in check_fields.
+	Matches map[string]bool
+	// Escalated reports that the order is already with an administrator.
+	Escalated bool
+}
+
 // Facts is everything a hook is allowed to know. The core fills it in before
 // calling; the script cannot ask for anything that is not here, which is what
 // keeps a hook a pure function and bounds what one costs to run.
@@ -133,7 +158,9 @@ type Facts struct {
 	Variant  *VariantFacts
 	// Claims is how many times User has already ordered this variant.
 	Claims int
-	Now    time.Time
+	// Submission is set on a submission event and nil otherwise.
+	Submission *SubmissionFacts
+	Now        time.Time
 }
 
 // Manifest is the static half of a behaviour: the properties the core needs to
@@ -154,9 +181,27 @@ type Manifest struct {
 	Events []string `json:"events"`
 	// Defaults are the config values a node inherits when it sets none.
 	Defaults map[string]interface{} `json:"defaults"`
+	// CheckFields names the customer fields an executor has to submit for this
+	// service, and which the core compares on their behalf. Declaring them here
+	// is what turns on the submission step: the app renders a form for exactly
+	// these fields, and the values are never sent to the executor.
+	//
+	// Supported: last_name, first_name, patronymic, birth_date.
+	CheckFields []string `json:"check_fields,omitempty"`
+	// HideCustomerContacts states that an executor working this service must
+	// see the address and nothing else about the customer. The order payload
+	// carries no customer identity in any case; this makes the requirement part
+	// of the behaviour rather than an accident of what the API happens to omit,
+	// and the regression test keys off it.
+	HideCustomerContacts bool `json:"hide_customer_contacts"`
 	// Hooks lists which functions the script actually defines, for the admin
 	// panel and for the dry-run screen.
 	Hooks []string `json:"hooks"`
+	// ConstantsSource and Source are the script's own text. The service
+	// constructor shows them: a shipped behaviour is what an admin reads to
+	// understand it and copies as the starting template for a new one.
+	ConstantsSource string `json:"constants_source,omitempty"`
+	Source          string `json:"source,omitempty"`
 }
 
 // Handles reports whether the behaviour asked for this event.

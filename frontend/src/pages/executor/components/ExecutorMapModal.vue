@@ -30,12 +30,34 @@
         </div>
 
         <!-- Геолокация -->
-        <button type="button" class="location-btn" title="Моё местоположение" @click="recenterOnMe">
-          <i class="ph-fill ph-navigation-arrow"></i>
+        <button
+          type="button"
+          class="location-btn"
+          :class="{ busy: locating }"
+          :disabled="locating"
+          title="Моё местоположение"
+          @click="recenterOnMe"
+        >
+          <i :class="locating ? 'ph-bold ph-spinner spin' : 'ph-fill ph-navigation-arrow'"></i>
         </button>
 
+        <!-- Подтверждение смены рабочего района -->
+        <div v-if="pendingMove" class="order-preview-card move-confirm-card">
+          <div class="mc-title">
+            <i class="ph-fill ph-map-pin-line"></i> Сменить рабочий район?
+          </div>
+          <div class="mc-text">
+            Метка переедет на {{ pendingDistanceKM.toFixed(1) }} км.
+            Следующая смена района будет доступна только через 10 минут.
+          </div>
+          <div class="mc-actions">
+            <button type="button" class="mc-btn cancel" @click="cancelMove">Отмена</button>
+            <button type="button" class="mc-btn confirm" @click="confirmMove">Перенести</button>
+          </div>
+        </div>
+
         <!-- Cluster Overlay: several orders sharing one pickup point -->
-        <div v-if="selectedCluster && !selectedOrder" class="order-preview-card cluster-list-card">
+        <div v-if="selectedCluster && !selectedOrder && !pendingMove" class="order-preview-card cluster-list-card">
           <button type="button" class="btn-close-card" @click="selectedCluster = null">
             <i class="ph-bold ph-x"></i>
           </button>
@@ -66,7 +88,7 @@
         </div>
 
         <!-- Selected Order Overlay Card -->
-        <div v-if="selectedOrder" class="order-preview-card">
+        <div v-if="selectedOrder && !pendingMove" class="order-preview-card">
           <button
             v-if="selectedCluster"
             type="button"
@@ -122,6 +144,7 @@ import { useI18n } from 'vue-i18n'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '../../../services/api'
+import { getCurrentCoordinates, geolocationMessage, GeolocationError } from '../../../services/geolocation'
 
 export default defineComponent({
   name: 'ExecutorMapModal',
@@ -131,7 +154,7 @@ export default defineComponent({
     currentLon: { type: Number, default: 37.6173 },
     currencySymbol: { type: String, default: '₽' },
   },
-  emits: ['update:modelValue', 'order-accepted', 'location-changed'],
+  emits: ['update:modelValue', 'order-accepted', 'location-changed', 'error'],
   setup(props, { emit }) {
     const { t } = useI18n()
     const show = computed({
@@ -235,17 +258,21 @@ export default defineComponent({
           icon: userIcon,
         }).addTo(map)
 
-        userMarker.on('dragend', async (event: any) => {
+        // Both gestures only propose a move. Changing the work area starts a
+        // ten minute cooldown, so an accidental tap or drag used to cost the
+        // executor their ability to reposition for the next ten minutes — the
+        // move is committed once they confirm it.
+        userMarker.on('dragend', (event: any) => {
           const position = event.target.getLatLng()
-          await handleManualLocationChange(position.lat, position.lng)
+          proposeMove(position.lat, position.lng)
         })
 
-        map.on('click', async (event: L.LeafletMouseEvent) => {
+        map.on('click', (event: L.LeafletMouseEvent) => {
           const { lat, lng } = event.latlng
           if (userMarker) {
             userMarker.setLatLng([lat, lng])
           }
-          await handleManualLocationChange(lat, lng)
+          proposeMove(lat, lng)
         })
 
         markersLayer = L.layerGroup().addTo(map)
@@ -271,6 +298,49 @@ export default defineComponent({
       if (userMarker) userMarker.setLatLng([lat, lon])
       if (zone2kmCircle) zone2kmCircle.setLatLng([lat, lon])
       if (zone50kmCircle) zone50kmCircle.setLatLng([lat, lon])
+    }
+
+    // Distance between two points in kilometres. Only used to tell the executor
+    // how far the marker is about to move, so the spherical approximation is
+    // more than accurate enough.
+    const haversineKM = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const toRad = (deg: number) => (deg * Math.PI) / 180
+      const earthRadiusKM = 6371
+      const dLat = toRad(lat2 - lat1)
+      const dLon = toRad(lon2 - lon1)
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+      return earthRadiusKM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+
+    // The move the executor has gestured but not yet agreed to. The marker is
+    // already sitting on it, so cancelling has to put the marker back.
+    const pendingMove = ref<{ lat: number; lon: number } | null>(null)
+
+    // How far the proposed point is from the anchor the server currently holds,
+    // so the confirmation can say what is actually about to change.
+    const pendingDistanceKM = computed(() => {
+      if (!pendingMove.value) return 0
+      return haversineKM(serverLat.value, serverLon.value, pendingMove.value.lat, pendingMove.value.lon)
+    })
+
+    const proposeMove = (lat: number, lon: number) => {
+      if (moving) return
+      pendingMove.value = { lat, lon }
+    }
+
+    const cancelMove = () => {
+      pendingMove.value = null
+      // Snap the marker back to the position the server still considers current.
+      anchorTo(serverLat.value, serverLon.value)
+    }
+
+    const confirmMove = async () => {
+      const target = pendingMove.value
+      if (!target) return
+      pendingMove.value = null
+      await handleManualLocationChange(target.lat, target.lon)
     }
 
     const handleManualLocationChange = async (lat: number, lon: number) => {
@@ -363,13 +433,16 @@ export default defineComponent({
         if (orders.length === 1) {
           const order = orders[0]
           const price = Number(order.hold_amount || 0).toFixed(0)
-          const addr = shortAddress(order)
 
+          // What the pin has to answer at a glance is "what job is this?", so it
+          // carries the category and the service. The address was the one thing
+          // the map already shows — by where the pin is standing — and it pushed
+          // the service name out of a label this small.
           const orderIcon = L.divIcon({
             className: 'tmpl-marker',
             html: `<div class="tmpl-pin ${order.can_accept ? 'green' : 'yellow'}">
                      <div class="pin-title">${escapeHtml(serviceTitle(order))}</div>
-                     <div class="pin-sub"><b>${price} ${props.currencySymbol}</b>${addr ? ' · ' + escapeHtml(addr) : ''}</div>
+                     <div class="pin-sub"><b>${price} ${props.currencySymbol}</b></div>
                    </div>`,
             iconSize: [0, 0],
             iconAnchor: [0, 0],
@@ -415,8 +488,36 @@ export default defineComponent({
       if (map) map.zoomOut()
     }
 
-    const recenterOnMe = () => {
-      if (map) map.setView([serverLat.value, serverLon.value], 15, { animate: true })
+    const locating = ref(false)
+
+    // "My location" is the only thing that hands the work area back to the
+    // device. While the executor has a district pinned by hand, the periodic
+    // reports keep recording where the phone is but leave the anchor alone, so
+    // this button is what re-syncs the two — and it recentres the map on the
+    // result rather than on a position the server no longer holds.
+    const recenterOnMe = async () => {
+      if (locating.value) return
+      locating.value = true
+      try {
+        const device = await getCurrentCoordinates()
+        const res = await api.post('/executor/follow-device', { lat: device.lat, lon: device.lon })
+        const lat = res.data?.lat ?? device.lat
+        const lon = res.data?.lon ?? device.lon
+        anchorTo(lat, lon)
+        emit('location-changed', { lat, lon })
+        if (map) map.setView([lat, lon], 15, { animate: true })
+        fetchMapOrders()
+      } catch (err: any) {
+        // A position we could not read and a request that failed are different
+        // problems, and the executor can only act on the first one.
+        if (err instanceof GeolocationError) {
+          emit('error', geolocationMessage(err))
+        } else {
+          emit('error', err?.response?.data?.message || err?.response?.data || 'Не удалось обновить местоположение')
+        }
+      } finally {
+        locating.value = false
+      }
     }
 
     const acceptMapOrder = async () => {
@@ -467,6 +568,11 @@ export default defineComponent({
       // Vue unmounts the whole modal the moment a pin is tapped.
       serviceTitle,
       shortAddress,
+      locating,
+      pendingMove,
+      pendingDistanceKM,
+      confirmMove,
+      cancelMove,
     }
   },
 })
@@ -768,6 +874,69 @@ export default defineComponent({
   font-size: 13px;
   font-weight: 600;
   text-align: center;
+}
+
+/* Кнопка «моё местоположение» во время определения координат */
+.location-btn.busy {
+  opacity: 0.7;
+  cursor: progress;
+}
+.location-btn .spin {
+  animation: locSpin 0.9s linear infinite;
+}
+@keyframes locSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Подтверждение смены района */
+.move-confirm-card {
+  padding-top: 20px;
+}
+.mc-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.mc-title i {
+  color: var(--brand-primary, #5c60f5);
+  font-size: 20px;
+}
+.mc-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  margin: 8px 0 16px;
+  line-height: 1.4;
+}
+.mc-actions {
+  display: flex;
+  gap: 10px;
+}
+.mc-btn {
+  flex: 1;
+  border: none;
+  border-radius: 14px;
+  padding: 13px 16px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.mc-btn.cancel {
+  background: #f1f5f9;
+  color: #475569;
+}
+.mc-btn.confirm {
+  background: var(--brand-primary, #5c60f5);
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgba(92, 96, 245, 0.3);
+}
+.mc-btn:active {
+  filter: brightness(0.95);
 }
 
 /* Cluster list overlay */

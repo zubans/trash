@@ -44,6 +44,37 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
+// FollowDevice puts the working anchor back under the device's control, at the
+// position the client just read from it. This is the "my location" button: it
+// is the only thing that resumes automatic positioning after the executor has
+// placed their marker by hand.
+func (h *ExecutorGeoHandler) FollowDevice(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Lat float64 `json:"lat"`
+		Lon float64 `json:"lon"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := h.geoService.FollowDevice(r.Context(), user.ID, req.Lat, req.Lon)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {

@@ -199,6 +199,17 @@
                 </div>
               </div>
               <div class="o-actions item-actions" @click.stop>
+                <!-- A service whose script asks for data to be checked: the
+                     order cannot be finished on the executor's word alone. -->
+                <button
+                  v-if="order.submit_fields && order.submit_fields.length"
+                  type="button"
+                  class="btn-action primary"
+                  title="Проверить данные"
+                  @click="openIdentityCheck(order)"
+                >
+                  <i class="ph-bold ph-identification-card"></i>
+                </button>
                 <button
                   type="button"
                   class="btn-action success"
@@ -601,6 +612,7 @@
       :currency-symbol="currencySymbol"
       @order-accepted="onMapOrderAccepted"
       @location-changed="onMapLocationChanged"
+      @error="errorMsg = $event"
     />
 
     <!-- Executor Profile Modal -->
@@ -627,6 +639,13 @@
     <!-- Modal Поддержка -->
     <SupportChatModal v-model:show="showSupportChatModal" />
   </div>
+    <identity-check-modal
+      v-if="identityOrder"
+      :order-id="identityOrder.id"
+      :fields="identityOrder.submit_fields || []"
+      @close="identityOrder = null"
+      @verified="onIdentityChecked"
+    />
 </template>
 
 <script lang="ts">
@@ -637,12 +656,13 @@ import { useI18n } from 'vue-i18n'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { cameraPromptLabels } from '../../utils/cameraLabels'
-import { Geolocation } from '@capacitor/geolocation'
+import { getCurrentCoordinates, geolocationMessage } from '../../services/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import RoleSwitcher from '../../components/RoleSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
+import IdentityCheckModal from './components/IdentityCheckModal.vue'
 import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
@@ -663,6 +683,7 @@ export default defineComponent({
     AppLogo,
     ExecutorMapModal,
     ExecutorProfileModal,
+    IdentityCheckModal,
     OrderDetailsModal,
     ReviewModal,
     SupportChatModal,
@@ -1097,6 +1118,26 @@ export default defineComponent({
       }
     }
 
+    // Identity check. Services whose script declares fields to submit (the
+    // account verification service) are finished by the check, not by the
+    // executor saying so: the platform compares what was typed with the account
+    // and decides. The executor is never shown the values it compares against.
+    const identityOrder = ref<any | null>(null)
+
+    const openIdentityCheck = (order: any) => {
+      identityOrder.value = order
+    }
+
+    const onIdentityChecked = async (result: any) => {
+      identityOrder.value = null
+      if (result?.escalated) {
+        errorMsg.value = 'Данные не совпали. Заказ передан на модерацию администратору.'
+      } else if (result?.matched) {
+        successMsg.value = 'Данные подтверждены. Заказ закрыт автоматически.'
+      }
+      await fetchAssignedOrders()
+    }
+
     const markOrderAsExecuted = async (orderId: string) => {
       try {
         await api.post(`/executor/orders/${orderId}/execute`)
@@ -1156,37 +1197,30 @@ export default defineComponent({
       }
     }
 
-    const updateCurrentPosition = async (force = false) => {
+    // Reads the device position. `announce` decides whether a failure is put in
+    // front of the user: the periodic shift report should stay quiet, but a
+    // position the person actively asked for must say why it could not be read
+    // rather than leaving the map sitting on a stale point.
+    const updateCurrentPosition = async (force = false, announce = false) => {
       try {
-        if (Capacitor.isNativePlatform()) {
-          const pos = await Geolocation.getCurrentPosition({
-            enableHighAccuracy: false,
-            timeout: 5000,
-            maximumAge: 30000,
-          })
-          if (pos && pos.coords) {
-            currentLat.value = pos.coords.latitude
-            currentLon.value = pos.coords.longitude
-            if (force) fetchAvailableOrders()
-          }
-        } else if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              currentLat.value = pos.coords.latitude
-              currentLon.value = pos.coords.longitude
-              if (force) fetchAvailableOrders()
-            },
-            (err) => console.warn('[Geolocation web error]:', err),
-            { timeout: 5000, maximumAge: 30000 }
-          )
-        }
+        const position = await getCurrentCoordinates()
+        currentLat.value = position.lat
+        currentLon.value = position.lon
+        if (force) fetchAvailableOrders()
+        return true
       } catch (err) {
-        console.warn('[Geolocation native error]:', err)
+        console.warn('[Geolocation] failed to read position:', err)
+        if (announce) errorMsg.value = geolocationMessage(err)
+        return false
       }
     }
 
     const openMapPicker = () => {
       showExecutorMapModal.value = true
+      // Opening the map is the moment the position matters most, and it is a
+      // deliberate action — so a failure to read it is reported rather than
+      // leaving the map centred on a stale point with no explanation.
+      updateCurrentPosition(false, true)
     }
 
     const onMapOrderAccepted = () => {
@@ -1704,6 +1738,9 @@ export default defineComponent({
       earlyEndShift,
       acceptOrder,
       markOrderAsExecuted,
+      identityOrder,
+      openIdentityCheck,
+      onIdentityChecked,
       updateCurrentPosition,
       openMapPicker,
       onMapOrderAccepted,

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -57,7 +59,17 @@ func hideVerificationOnly(r *http.Request) bool {
 func (h *ServiceCatalogHandler) visibleTo(r *http.Request, nodes []*repository.ServiceNode) []*repository.ServiceNode {
 	hide := hideVerificationOnly(r)
 	user := userFromContext(r)
-	claims := h.behaviors.ClaimsFor(r.Context(), user)
+
+	// Claims are read only when something on this page can use them. A catalog
+	// of ordinary services must not gain a query per request because scripted
+	// services exist elsewhere.
+	var claims map[uuid.UUID]int
+	for _, n := range nodes {
+		if h.behaviors.Governs(n) {
+			claims = h.behaviors.ClaimsFor(r.Context(), user)
+			break
+		}
+	}
 
 	out := make([]*repository.ServiceNode, 0, len(nodes))
 	for _, n := range nodes {
@@ -157,15 +169,19 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// AdminListBehaviors handles GET /admin/service-behaviors. The admin panel
-// renders the behaviour picker and its configuration form from this: the codes
-// a node may name, what each one does, and the defaults it applies.
+// AdminListBehaviors handles GET /admin/service-behaviors. It returns the
+// library behaviours that ship with the build, each with its full text: the
+// service constructor shows them as the starting template for a special
+// service, and reading one is how an admin learns what a script may do.
+//
+// Per-node scripts are deliberately not listed here — a node's script is part of
+// that node and is edited on it.
 func (h *ServiceCatalogHandler) AdminListBehaviors(w http.ResponseWriter, r *http.Request) {
 	if h.behaviors == nil || h.behaviors.Engine() == nil {
 		writeJSON(w, []interface{}{})
 		return
 	}
-	writeJSON(w, h.behaviors.Engine().Manifests())
+	writeJSON(w, h.behaviors.Engine().Library())
 }
 
 // AdminListNodes handles GET /admin/service-nodes. Retired nodes are left out
@@ -238,6 +254,9 @@ func (h *ServiceCatalogHandler) AdminCreateNode(w http.ResponseWriter, r *http.R
 		writeCatalogError(w, err)
 		return
 	}
+	// The script is compiled into the running engine now, so the service behaves
+	// as edited on the very next request rather than after a restart.
+	h.syncBehavior(&req)
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, req)
@@ -296,6 +315,7 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 		writeCatalogError(w, err)
 		return
 	}
+	h.syncBehavior(&req)
 
 	writeJSON(w, req)
 }
@@ -317,6 +337,11 @@ func (h *ServiceCatalogHandler) AdminDeleteNode(w http.ResponseWriter, r *http.R
 	if err := h.catalogRepo.DeleteNode(r.Context(), id); err != nil {
 		writeCatalogError(w, err)
 		return
+	}
+	// A retired node stops running its script at once; the row keeps it, so a
+	// restore brings the service back exactly as it was.
+	if h.behaviors != nil {
+		h.behaviors.RemoveNode(id)
 	}
 
 	writeJSON(w, map[string]interface{}{
@@ -345,7 +370,21 @@ func (h *ServiceCatalogHandler) AdminRestoreNode(w http.ResponseWriter, r *http.
 		writeJSON(w, map[string]string{"message": "node restored successfully"})
 		return
 	}
+	h.syncBehavior(node)
 	writeJSON(w, node)
+}
+
+// syncBehavior registers (or unregisters) the node's own script in the running
+// engine. The script has already been compiled by validateNode, so a failure
+// here is a surprise worth logging; the periodic resync in the behaviour worker
+// is what covers it, and what carries the edit to the other processes.
+func (h *ServiceCatalogHandler) syncBehavior(node *repository.ServiceNode) {
+	if h.behaviors == nil {
+		return
+	}
+	if err := h.behaviors.SyncNode(node); err != nil {
+		log.Printf("[behavior] node %s saved but not loaded: %v", node.Code, err)
+	}
 }
 
 // writeCatalogError maps repository errors to status codes so the admin panel
@@ -372,6 +411,10 @@ func isNotFound(err error) bool {
 }
 
 var codeRegexp = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// maxScriptBytes bounds one script field. A behaviour is a page of rules, not a
+// program; the limit is here so a paste accident cannot fill a column.
+const maxScriptBytes = 64 * 1024
 
 func (h *ServiceCatalogHandler) validateParent(ctx context.Context, parentID *uuid.UUID) error {
 	if parentID == nil {
@@ -411,9 +454,22 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 		return errors.New("name must contain at least the 'ru' key")
 	}
 
-	// A code with no script behind it would make every gate on the node fail
-	// closed, i.e. quietly take the service off sale. Refuse the edit instead.
-	if node.BehaviorCode != "" {
+	// The node's own script is compiled here, before the row is written: a
+	// script that does not compile would fail every gate on the node, which
+	// reads to a customer as the service having disappeared. Better to refuse
+	// the save while the admin is still looking at the editor.
+	if node.HasOwnScript() {
+		if len(node.BehaviorSource) > maxScriptBytes || len(node.BehaviorConstants) > maxScriptBytes {
+			return fmt.Errorf("скрипт длиннее %d КБ", maxScriptBytes/1024)
+		}
+		if h.behaviors == nil {
+			return errors.New("service behaviors are not available on this server")
+		}
+		if err := h.behaviors.Validate(node); err != nil {
+			return fmt.Errorf("скрипт не компилируется: %w", err)
+		}
+	} else if node.BehaviorCode != "" {
+		// A library code with no script behind it fails closed in the same way.
 		if h.behaviors == nil || !h.behaviors.Engine().Has(node.BehaviorCode) {
 			return errors.New("unknown behavior_code: " + node.BehaviorCode)
 		}

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -34,14 +36,33 @@ type verificationUsers struct {
 	users map[uuid.UUID]*repository.User
 }
 
+// add creates a user with a name of their own: a test where everybody is called
+// the same thing cannot tell "the executor sees the customer's name" from "the
+// executor sees their own".
 func (u *verificationUsers) add(role string, roles []string, verified bool) *repository.User {
-	birth := time.Now().AddDate(-30, 0, 0)
+	birth := time.Date(1990, time.March, 14, 0, 0, 0, 0, time.UTC)
+	nth := len(u.users) + 1
 	user := &repository.User{
 		ID: uuid.New(), Role: role, Roles: roles, Status: "ACTIVE",
 		Verified: verified, BirthDate: &birth,
+		LastName:   fmt.Sprintf("Фамилия%d", nth),
+		FirstName:  fmt.Sprintf("Имя%d", nth),
+		Patronymic: fmt.Sprintf("Отчество%d", nth),
+		Phone:      fmt.Sprintf("+7900000000%d", nth),
 	}
 	u.users[user.ID] = user
 	return user
+}
+
+// passportOf is what a moderator would type off the customer's document when it
+// is genuinely their document.
+func passportOf(user *repository.User) map[string]string {
+	return map[string]string{
+		"last_name":  user.LastName,
+		"first_name": user.FirstName,
+		"patronymic": user.Patronymic,
+		"birth_date": user.BirthDate.Format("2006-01-02"),
+	}
 }
 
 func (u *verificationUsers) FindByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
@@ -206,23 +227,108 @@ func (e *verificationEvents) CountPending(ctx context.Context) (int, error) {
 	return len(e.published) - len(e.processed), nil
 }
 
+// verificationSubmissions is the store behind data checks and escalations.
+type verificationSubmissions struct {
+	submissions []*repository.OrderSubmission
+	escalations []*repository.BehaviorEscalation
+}
+
+func (s *verificationSubmissions) Record(ctx context.Context, q repository.Querier, submission *repository.OrderSubmission) error {
+	submission.ID = uuid.New()
+	attempt := 0
+	for _, existing := range s.submissions {
+		if existing.OrderID == submission.OrderID {
+			attempt++
+		}
+	}
+	submission.Attempt = attempt + 1
+	submission.CreatedAt = time.Now()
+	s.submissions = append(s.submissions, submission)
+	return nil
+}
+
+func (s *verificationSubmissions) CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error) {
+	count := 0
+	for _, submission := range s.submissions {
+		if submission.OrderID == orderID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *verificationSubmissions) ListForOrder(ctx context.Context, orderID uuid.UUID) ([]*repository.OrderSubmission, error) {
+	var out []*repository.OrderSubmission
+	for _, submission := range s.submissions {
+		if submission.OrderID == orderID {
+			out = append(out, submission)
+		}
+	}
+	return out, nil
+}
+
+func (s *verificationSubmissions) Escalate(ctx context.Context, q repository.Querier, escalation *repository.BehaviorEscalation) error {
+	open, _ := s.HasOpenEscalation(ctx, escalation.OrderID)
+	if open {
+		return nil
+	}
+	escalation.ID = uuid.New()
+	escalation.Status = repository.EscalationOpen
+	escalation.CreatedAt = time.Now()
+	s.escalations = append(s.escalations, escalation)
+	return nil
+}
+
+func (s *verificationSubmissions) HasOpenEscalation(ctx context.Context, orderID uuid.UUID) (bool, error) {
+	for _, escalation := range s.escalations {
+		if escalation.OrderID == orderID && escalation.Status == repository.EscalationOpen {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *verificationSubmissions) ListEscalations(ctx context.Context, status string, limit int) ([]*repository.BehaviorEscalation, error) {
+	return s.escalations, nil
+}
+
+func (s *verificationSubmissions) ResolveEscalation(ctx context.Context, id, adminID uuid.UUID) error {
+	for _, escalation := range s.escalations {
+		if escalation.ID == id {
+			escalation.Status = repository.EscalationResolved
+			return nil
+		}
+	}
+	return repository.ErrEscalationNotFound
+}
+
+func (s *verificationSubmissions) ResolveByOrder(ctx context.Context, q repository.Querier, orderID uuid.UUID, adminID *uuid.UUID) error {
+	for _, escalation := range s.escalations {
+		if escalation.OrderID == orderID {
+			escalation.Status = repository.EscalationResolved
+		}
+	}
+	return nil
+}
+
 // --- harness ----------------------------------------------------------------
 
 type verificationWorld struct {
-	orders     *mockOrderRepo
-	users      *verificationUsers
-	catalog    *verificationCatalog
-	claims     *verificationClaims
-	events     *verificationEvents
-	tx         *mockTransactionRepo
-	accounts   *mockAccounts
-	orderSvc   *OrderService
-	dispatcher *BehaviorDispatcher
-	behaviors  *Behaviors
-	settings   *orderMockSettingsRepo
-	customer   *repository.User
-	moderator  *repository.User
-	executor   *repository.User
+	orders      *mockOrderRepo
+	users       *verificationUsers
+	catalog     *verificationCatalog
+	claims      *verificationClaims
+	events      *verificationEvents
+	tx          *mockTransactionRepo
+	accounts    *mockAccounts
+	submissions *verificationSubmissions
+	orderSvc    *OrderService
+	dispatcher  *BehaviorDispatcher
+	behaviors   *Behaviors
+	settings    *orderMockSettingsRepo
+	customer    *repository.User
+	moderator   *repository.User
+	executor    *repository.User
 	// rewardBase is the verifier's balance before the reward, because the
 	// balance fake seeds new users with money of their own.
 	rewardBase money.Amount
@@ -251,13 +357,14 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 	}
 
 	w := &verificationWorld{
-		orders:   &mockOrderRepo{},
-		users:    &verificationUsers{users: map[uuid.UUID]*repository.User{}},
-		catalog:  &verificationCatalog{node: node},
-		claims:   newVerificationClaims(),
-		events:   newVerificationEvents(),
-		tx:       &mockTransactionRepo{},
-		accounts: newMockAccounts(),
+		orders:      &mockOrderRepo{},
+		users:       &verificationUsers{users: map[uuid.UUID]*repository.User{}},
+		catalog:     &verificationCatalog{node: node},
+		claims:      newVerificationClaims(),
+		events:      newVerificationEvents(),
+		tx:          &mockTransactionRepo{},
+		accounts:    newMockAccounts(),
+		submissions: &verificationSubmissions{},
 	}
 	w.behaviors = NewBehaviors(engine, w.claims)
 	ledger := NewLedger(w.tx, w.accounts)
@@ -267,12 +374,30 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 	w.orderSvc = NewOrderService(w.orders, ledger, settings, w.users, &orderMockShiftRepo{}, nil, w.catalog, nil).
 		WithBehaviors(w.behaviors, w.claims, w.events)
 	w.dispatcher = NewBehaviorDispatcher(w.events, w.orders, w.users, w.catalog, w.claims, nil,
-		settings, ledger, w.behaviors, w.orderSvc)
+		settings, ledger, w.behaviors, w.orderSvc).
+		WithSubmissions(w.submissions)
 
 	w.customer = w.users.add(repository.RoleCustomer, nil, false)
 	w.moderator = w.users.add(repository.RoleExecutor, []string{repository.RoleExecutor, repository.RoleModerator}, true)
 	w.executor = w.users.add(repository.RoleExecutor, []string{repository.RoleExecutor}, true)
 	return w
+}
+
+// orderView renders the order the way a list endpoint does, which is how the
+// executor's app sees it.
+func (w *verificationWorld) orderView(t *testing.T, orderID uuid.UUID) *repository.Order {
+	t.Helper()
+	orders, err := w.orderSvc.ListAssigned(context.Background(), w.moderator.ID)
+	if err != nil {
+		t.Fatalf("assigned orders: %v", err)
+	}
+	for _, order := range orders {
+		if order.ID == orderID {
+			return order
+		}
+	}
+	t.Fatalf("order %s is not in the executor's list", orderID)
+	return nil
 }
 
 func (w *verificationWorld) books() money.Amount {
@@ -317,21 +442,23 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 		t.Fatalf("a moderator must be able to take it: %v", err)
 	}
 
-	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); err != nil {
-		t.Fatalf("mark executed: %v", err)
-	}
-
-	if w.customer.Verified {
-		t.Error("the customer must not be verified before the event is dispatched")
+	// The moderator is shown the address and nothing else: what they type comes
+	// off the document in front of them.
+	if got := w.orderView(t, order.ID).SubmitFields; len(got) != 4 {
+		t.Errorf("the executor is not told which fields to submit: %v", got)
 	}
 
 	beforeReward := w.tx.balances[w.moderator.ID]
-	if err := w.dispatcher.Tick(ctx); err != nil {
-		t.Fatalf("dispatch: %v", err)
+	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer))
+	if err != nil {
+		t.Fatalf("submit identity data: %v", err)
+	}
+	if !result.Matched {
+		t.Fatalf("matching data was rejected: %+v", result)
 	}
 
 	if !w.customer.Verified {
-		t.Error("the customer was not verified by the completed visit")
+		t.Error("the customer was not verified by the successful check")
 	}
 	closed, err := w.orders.GetOrderByID(ctx, order.ID)
 	if err != nil {
@@ -372,11 +499,8 @@ func TestRewardCommissionIsOptIn(t *testing.T) {
 			t.Fatalf("accept: %v", err)
 		}
 		w.rewardBase = w.tx.balances[w.moderator.ID]
-		if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); err != nil {
-			t.Fatalf("execute: %v", err)
-		}
-		if err := w.dispatcher.Tick(ctx); err != nil {
-			t.Fatalf("dispatch: %v", err)
+		if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
+			t.Fatalf("submit: %v", err)
 		}
 		return w
 	}
@@ -420,20 +544,17 @@ func TestVerificationRewardIsPaidOnce(t *testing.T) {
 	if err := w.orderSvc.Accept(ctx, order.ID, w.moderator.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if err := w.dispatcher.Tick(ctx); err != nil {
-		t.Fatalf("dispatch: %v", err)
+	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
+		t.Fatalf("submit: %v", err)
 	}
 	paidOnce := w.tx.balances[w.moderator.ID]
 
 	// The same event again: a retry after a crash, a second replica, a
 	// duplicated row — all look like this.
 	if err := w.events.Publish(ctx, nil, &repository.DomainEvent{
-		Type:        repository.EventOrderExecuted,
-		SubjectType: repository.EventSubjectOrder,
-		SubjectID:   order.ID,
+		Type:        repository.EventUserVerified,
+		SubjectType: repository.EventSubjectUser,
+		SubjectID:   w.customer.ID,
 	}); err != nil {
 		t.Fatalf("republish: %v", err)
 	}
@@ -554,7 +675,7 @@ func TestEffectGuardsRefuseWhatAScriptMayNotDo(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := w.dispatcher.apply(ctx, event, tgt, []behavior.Effect{c.effect})
+			_, err := w.dispatcher.apply(ctx, event, tgt, []behavior.Effect{c.effect})
 			if err == nil {
 				t.Fatalf("the core allowed %s", c.name)
 			}
@@ -586,4 +707,177 @@ func TestVerifierCannotBeTheCustomer(t *testing.T) {
 	if errors.Is(err, ErrBehaviorUnavailable) {
 		t.Errorf("the refusal should come from the rule, not from a broken script: %v", err)
 	}
+}
+
+// --- Identity check ---------------------------------------------------------
+
+// The moderator submits what the document says; the platform compares. A first
+// mismatch is a warning to check the passport again — not a verification, not a
+// payment, and not a hint about which field was wrong.
+func TestIdentityMismatchWarnsFirst(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+
+	order := w.acceptedVerificationOrder(t)
+	wrong := passportOf(w.customer)
+	wrong["last_name"] = "Петров"
+
+	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if result.Matched {
+		t.Fatal("wrong data was accepted as a match")
+	}
+	if result.Attempt != 1 {
+		t.Errorf("attempt = %d, want 1", result.Attempt)
+	}
+	if result.Escalated {
+		t.Error("a single typo sent the case to an administrator")
+	}
+	if len(result.Messages) == 0 {
+		t.Error("the moderator was not told to check the document again")
+	}
+	if w.customer.Verified {
+		t.Fatal("a failed check verified the customer")
+	}
+	if got := w.tx.balances[w.moderator.ID]; got != w.rewardBase {
+		t.Errorf("a failed check paid %s", got.Sub(w.rewardBase))
+	}
+
+	// The mismatched field is reported to the caller for its own form, but the
+	// message that reaches the moderator must not narrow the search for them.
+	for _, message := range result.Messages {
+		if strings.Contains(message, "Петров") || strings.Contains(message, w.customer.LastName) {
+			t.Errorf("the warning leaks the compared values: %q", message)
+		}
+	}
+}
+
+// Out of attempts, the case goes to an administrator and the moderator cannot
+// keep guessing.
+func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+
+	order := w.acceptedVerificationOrder(t)
+	wrong := passportOf(w.customer)
+	wrong["birth_date"] = "1980-01-01"
+
+	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	if err != nil {
+		t.Fatalf("second submit: %v", err)
+	}
+	if !result.Escalated {
+		t.Fatalf("the case was not handed to an administrator: %+v", result)
+	}
+
+	open, _ := w.submissions.HasOpenEscalation(ctx, order.ID)
+	if !open {
+		t.Error("no escalation was recorded")
+	}
+	// Both attempts are kept: that is what the administrator reviews.
+	attempts, _ := w.submissions.ListForOrder(ctx, order.ID)
+	if len(attempts) != 2 {
+		t.Errorf("stored %d attempts, want 2", len(attempts))
+	}
+
+	// Even correct data is not accepted afterwards: the decision is no longer
+	// the moderator's.
+	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrSubmissionEscalated) {
+		t.Errorf("submitting after an escalation returned %v, want ErrSubmissionEscalated", err)
+	}
+	if w.customer.Verified {
+		t.Error("the customer was verified while the case was with an administrator")
+	}
+}
+
+// The administrator settles it the ordinary way — by verifying the customer —
+// and that closes both the order and the escalation.
+func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+
+	order := w.acceptedVerificationOrder(t)
+	wrong := passportOf(w.customer)
+	wrong["first_name"] = "Пётр"
+	for i := 0; i < 2; i++ {
+		if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+			t.Fatalf("submit %d: %v", i+1, err)
+		}
+	}
+
+	// Exactly what AdminService.SetUserVerified writes.
+	if err := w.users.UpdateVerified(ctx, w.customer.ID, true); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if err := w.events.Publish(ctx, nil, &repository.DomainEvent{
+		Type:        repository.EventUserVerified,
+		SubjectType: repository.EventSubjectUser,
+		SubjectID:   w.customer.ID,
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := w.dispatcher.Tick(ctx); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	closed, _ := w.orders.GetOrderByID(ctx, order.ID)
+	if closed.Status != repository.OrderStatusCompleted {
+		t.Errorf("order status = %s, want COMPLETED", closed.Status)
+	}
+	if got := w.tx.balances[w.moderator.ID].Sub(w.rewardBase); got != money.FromRubles(200) {
+		t.Errorf("verifier was paid %s, want 200.00: the visit did happen", got)
+	}
+	if open, _ := w.submissions.HasOpenEscalation(ctx, order.ID); open {
+		t.Error("the escalation is still open on a closed order")
+	}
+}
+
+// What the moderator is given to work with: the address, and nothing that would
+// let them copy the answer instead of reading the document.
+func TestExecutorSeesTheAddressAndNoCustomerIdentity(t *testing.T) {
+	w := newVerificationWorld(t)
+
+	order := w.acceptedVerificationOrder(t)
+	view := w.orderView(t, order.ID)
+	if view.Address == nil || *view.Address == "" {
+		t.Error("the moderator has no address to go to")
+	}
+	if len(view.SubmitFields) == 0 {
+		t.Error("the moderator is not told what to submit")
+	}
+
+	rendered, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("render order: %v", err)
+	}
+	body := string(rendered)
+	for _, secret := range []string{
+		w.customer.LastName, w.customer.FirstName, w.customer.Patronymic,
+		w.customer.BirthDate.Format("2006-01-02"), w.customer.Phone,
+	} {
+		if secret != "" && strings.Contains(body, secret) {
+			t.Errorf("the order the executor receives carries the customer's %q", secret)
+		}
+	}
+}
+
+// acceptedVerificationOrder creates a verification order and puts the moderator
+// on it, which is the state every check starts from.
+func (w *verificationWorld) acceptedVerificationOrder(t *testing.T) *repository.Order {
+	t.Helper()
+	ctx := context.Background()
+	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := w.orderSvc.Accept(ctx, order.ID, w.moderator.ID); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	w.rewardBase = w.tx.balances[w.moderator.ID]
+	return order
 }

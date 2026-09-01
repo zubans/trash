@@ -77,8 +77,8 @@ func getAcceptRadiusKM() float64 {
 }
 
 func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UUID, req SetLocationRequest) (*SetLocationResponse, error) {
-	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
-		return nil, fmt.Errorf("invalid coordinates")
+	if err := validateCoordinates(req.Lat, req.Lon); err != nil {
+		return nil, err
 	}
 
 	oldLat, oldLon, lastManual, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
@@ -181,17 +181,55 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 // RecordLiveLocation stores a position the executor's app reports on its own
 // during a shift.
 //
-// It deliberately goes through the same rules as a move made on the map: the
-// passive channel would otherwise be a way around the district-change cooldown,
-// since an executor could post any coordinates they liked. A move that those
-// rules reject is not an error — the ping is telemetry, not a command — so the
-// outcome is reported as a boolean and the caller decides what to say about it.
+// The report is telemetry, not a command. It is always recorded, but it moves
+// the working anchor only while the executor has not chosen a district by hand:
+// otherwise the phone would quietly drag the work area back off the district
+// they picked, a few seconds after they picked it. Pressing "my location" is
+// what puts the anchor back under the device's control — see FollowDevice.
+//
+// This also closes the loophole the old wiring had: because the anchor no
+// longer moves on a passive report, the report can no longer be used to sidestep
+// the district-change cooldown.
 func (s *ExecutorGeoService) RecordLiveLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
-	resp, err := s.SetLocation(ctx, executorID, SetLocationRequest{Lat: lat, Lon: lon})
-	if err != nil {
+	if err := validateCoordinates(lat, lon); err != nil {
 		return false, err
 	}
-	return resp.Success, nil
+	if err := s.geoRepo.RecordDevicePosition(ctx, executorID, lat, lon); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// FollowDevice moves the working anchor onto the position the executor's phone
+// reports and hands control back to the device.
+//
+// This is what the "my location" button does. It is not a district change: the
+// executor is returning to where they actually are, so it carries no cooldown
+// and clears the manual override rather than setting one.
+func (s *ExecutorGeoService) FollowDevice(ctx context.Context, executorID uuid.UUID, lat, lon float64) (*SetLocationResponse, error) {
+	if err := validateCoordinates(lat, lon); err != nil {
+		return nil, err
+	}
+	if err := s.geoRepo.FollowDevicePosition(ctx, executorID, lat, lon); err != nil {
+		return nil, err
+	}
+	// The cooldown is keyed to manual moves, and this ends the manual override,
+	// so the in-memory copy has to go with it.
+	s.cooldownMap.Delete(executorID)
+	return &SetLocationResponse{
+		Success: true,
+		Message: "Метка возвращена к вашему местоположению",
+		Lat:     lat,
+		Lon:     lon,
+	}, nil
+}
+
+// validateCoordinates rejects points that are not on the globe.
+func validateCoordinates(lat, lon float64) error {
+	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return fmt.Errorf("invalid coordinates")
+	}
+	return nil
 }
 
 // LocationResponse reports the executor's authoritative stored position. It is

@@ -55,6 +55,24 @@ func (f *fakeGeoRepo) GetExecutorLocations(ctx context.Context, executorIDs []uu
 	return out, nil
 }
 
+func (f *fakeGeoRepo) RecordDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
+	f.set(executorID, lat, lon)
+	return nil
+}
+
+func (f *fakeGeoRepo) GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*repository.ExecutorPosition, error) {
+	pos, ok := f.positions[executorID]
+	if !ok {
+		return nil, nil
+	}
+	return &repository.ExecutorPosition{Lat: pos[0], Lon: pos[1]}, nil
+}
+
+func (f *fakeGeoRepo) FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
+	f.set(executorID, lat, lon)
+	return nil
+}
+
 func (f *fakeGeoRepo) CreateGeoAlert(ctx context.Context, alert *repository.GeoAlert) error { return nil }
 
 func (f *fakeGeoRepo) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {

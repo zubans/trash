@@ -21,6 +21,9 @@ const (
 	EventOrderExecuted  = "order.executed"
 	EventOrderConfirmed = "order.confirmed"
 	EventOrderCanceled  = "order.canceled"
+	// EventOrderSubmission carries data an executor submitted for checking and
+	// how it compared — never the values it was compared against.
+	EventOrderSubmission = "order.submission"
 )
 
 // Event subject types. The subject decides who the event is delivered to: an

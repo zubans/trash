@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -21,8 +23,9 @@ import (
 // does not care about them, passes nil and gets exactly the behaviour the
 // service had before behaviours existed.
 type Behaviors struct {
-	engine *behavior.Engine
-	claims repository.ServiceClaimRepository
+	engine  *behavior.Engine
+	claims  repository.ServiceClaimRepository
+	catalog repository.ServiceCatalogRepository
 }
 
 // NewBehaviors wires the engine to the claim store. claims may be nil, in which
@@ -33,6 +36,111 @@ func NewBehaviors(engine *behavior.Engine, claims repository.ServiceClaimReposit
 		return nil
 	}
 	return &Behaviors{engine: engine, claims: claims}
+}
+
+// WithCatalog lets the behaviours compile the scripts stored on catalog nodes —
+// the special services written in the admin panel.
+func (b *Behaviors) WithCatalog(catalog repository.ServiceCatalogRepository) *Behaviors {
+	if b != nil {
+		b.catalog = catalog
+	}
+	return b
+}
+
+// codeFor is the behaviour a node actually runs. A node with a script of its own
+// runs that script, registered under its id; otherwise it runs the library
+// behaviour it names. Everything below goes through this, so "which script"
+// is decided in one place.
+func (b *Behaviors) codeFor(node *repository.ServiceNode) string {
+	if node == nil {
+		return ""
+	}
+	if node.HasOwnScript() {
+		return behavior.NodeCode(node.ID.String())
+	}
+	return node.BehaviorCode
+}
+
+// nodeSources renders a node's own script as the two files the engine compiles.
+func nodeSources(node *repository.ServiceNode) []behavior.SourceFile {
+	files := make([]behavior.SourceFile, 0, 2)
+	if strings.TrimSpace(node.BehaviorConstants) != "" {
+		files = append(files, behavior.SourceFile{Name: behavior.ConfigFile, Src: []byte(node.BehaviorConstants)})
+	}
+	return append(files, behavior.SourceFile{Name: "behavior.star", Src: []byte(node.BehaviorSource)})
+}
+
+// Validate compiles a candidate script without registering it. The admin panel
+// calls it before saving: a script that does not compile would take the service
+// off sale silently, so it is refused while somebody is still looking at it.
+func (b *Behaviors) Validate(node *repository.ServiceNode) error {
+	if b == nil || node == nil || !node.HasOwnScript() {
+		return nil
+	}
+	return b.engine.Validate(nodeSources(node))
+}
+
+// SyncNode compiles the node's own script, or unregisters it when the script was
+// removed. Called right after an admin saves, so the edit applies to the next
+// request on this process.
+func (b *Behaviors) SyncNode(node *repository.ServiceNode) error {
+	if b == nil || node == nil {
+		return nil
+	}
+	code := behavior.NodeCode(node.ID.String())
+	if !node.HasOwnScript() || node.IsDeleted() {
+		b.engine.Remove(code)
+		return nil
+	}
+	return b.engine.CompileFiles(code, nodeSources(node))
+}
+
+// RemoveNode unregisters a node's script, for the paths that hold only its id —
+// a retired node stops being special immediately, not at the next resync.
+func (b *Behaviors) RemoveNode(nodeID uuid.UUID) {
+	if b == nil {
+		return
+	}
+	b.engine.Remove(behavior.NodeCode(nodeID.String()))
+}
+
+// SyncAll compiles every node script in the catalog and drops the ones that are
+// gone. It runs at startup and on a timer: another replica's edit, or a change
+// made directly in the database, has to reach this process too.
+func (b *Behaviors) SyncAll(ctx context.Context) error {
+	if b == nil || b.catalog == nil {
+		return nil
+	}
+	nodes, err := b.catalog.ListNodesWithScript(ctx)
+	if err != nil {
+		return err
+	}
+
+	live := make(map[string]struct{}, len(nodes))
+	var failed []string
+	for _, node := range nodes {
+		code := behavior.NodeCode(node.ID.String())
+		live[code] = struct{}{}
+		if err := b.engine.CompileFiles(code, nodeSources(node)); err != nil {
+			// Reported, not fatal, and deliberately not registered: the node
+			// falls back to "unknown behaviour", which fails its gates closed.
+			b.engine.Remove(code)
+			failed = append(failed, node.Code)
+			log.Printf("[behavior] node %s (%s): %v", node.Code, node.ID, err)
+		}
+	}
+	for _, m := range b.engine.Manifests() {
+		if !behavior.IsNodeCode(m.Code) {
+			continue
+		}
+		if _, ok := live[m.Code]; !ok {
+			b.engine.Remove(m.Code)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("node scripts failed to compile: %s", strings.Join(failed, ", "))
+	}
+	return nil
 }
 
 // ErrBehaviorUnavailable is what a caller gets when the script that governs a
@@ -55,12 +163,19 @@ func (b *Behaviors) governs(node *repository.ServiceNode) bool {
 	return b != nil && node != nil && node.HasBehavior()
 }
 
+// Governs reports whether this node's rules come from a script at all. Callers
+// use it to skip work that only a scripted service needs — an ordinary service
+// must not pay for a mechanism it does not use.
+func (b *Behaviors) Governs(node *repository.ServiceNode) bool {
+	return b.governs(node)
+}
+
 // Manifest returns the static declaration behind a node's behaviour.
 func (b *Behaviors) Manifest(node *repository.ServiceNode) (behavior.Manifest, bool) {
 	if !b.governs(node) {
 		return behavior.Manifest{}, false
 	}
-	return b.engine.Manifest(node.BehaviorCode)
+	return b.engine.Manifest(b.codeFor(node))
 }
 
 // Config returns the node's configuration laid over the behaviour's own
@@ -75,7 +190,7 @@ func (b *Behaviors) Config(node *repository.ServiceNode) map[string]interface{} 
 		return nil
 	}
 	merged := map[string]interface{}{}
-	if m, ok := b.engine.Manifest(node.BehaviorCode); ok {
+	if m, ok := b.engine.Manifest(b.codeFor(node)); ok {
 		for k, v := range m.Defaults {
 			merged[k] = v
 		}
@@ -120,7 +235,7 @@ func (b *Behaviors) Visible(ctx context.Context, viewer *repository.User, node *
 		Config:  node.BehaviorConfig,
 		Claims:  claims[node.ID],
 	}
-	visible, err := b.engine.Visible(node.BehaviorCode, facts)
+	visible, err := b.engine.Visible(b.codeFor(node), facts)
 	if err != nil {
 		// Hidden, not shown: a service whose visibility rule cannot be run is
 		// one nobody can order either (CanOrder fails the same way), and
@@ -146,7 +261,7 @@ func (b *Behaviors) CanOrder(ctx context.Context, customer *repository.User, var
 		Config:  variant.BehaviorConfig,
 		Claims:  claims,
 	}
-	return b.translate(variant, behavior.HookCanOrder, b.engine.CanOrder(variant.BehaviorCode, facts))
+	return b.translate(variant, behavior.HookCanOrder, b.engine.CanOrder(b.codeFor(variant), facts))
 }
 
 // CanViewOrTake is the scripted half of canViewOrTakeOrder.
@@ -161,7 +276,7 @@ func (b *Behaviors) CanViewOrTake(ctx context.Context, viewer, customer *reposit
 		Variant:  variantFacts(variant),
 		Config:   variant.BehaviorConfig,
 	}
-	return b.translate(variant, behavior.HookCanViewOrTake, b.engine.CanViewOrTake(variant.BehaviorCode, facts))
+	return b.translate(variant, behavior.HookCanViewOrTake, b.engine.CanViewOrTake(b.codeFor(variant), facts))
 }
 
 // Price returns the price a behaviour dictates, if it dictates one. A script
@@ -175,7 +290,7 @@ func (b *Behaviors) Price(ctx context.Context, variant *repository.ServiceNode) 
 		Variant: variantFacts(variant),
 		Config:  variant.BehaviorConfig,
 	}
-	rubles, ok, err := b.engine.Price(variant.BehaviorCode, facts)
+	rubles, ok, err := b.engine.Price(b.codeFor(variant), facts)
 	if err != nil {
 		b.report(variant, behavior.HookPrice, err)
 		return money.Zero, false, ErrBehaviorUnavailable
@@ -233,8 +348,18 @@ func (b *Behaviors) translate(node *repository.ServiceNode, hook string, err err
 }
 
 func (b *Behaviors) report(node *repository.ServiceNode, hook string, err error) {
-	log.Printf("[behavior] %s.%s on node %s: %v", node.BehaviorCode, hook, node.Code, err)
-	metrics.BehaviorHookError(node.BehaviorCode, hook)
+	code := b.codeFor(node)
+	log.Printf("[behavior] %s.%s on node %s: %v", code, hook, node.Code, err)
+	metrics.BehaviorHookError(code, hook)
+}
+
+// Code is the behaviour a node runs, for the callers outside this file that
+// need to name it — the dispatcher, when it records what asked for an effect.
+func (b *Behaviors) Code(node *repository.ServiceNode) string {
+	if b == nil {
+		return ""
+	}
+	return b.codeFor(node)
 }
 
 // actorFacts renders a user for a script. Nil stays nil: "no user" is a case

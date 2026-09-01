@@ -182,43 +182,81 @@
         </label>
       </div>
 
-      <!-- Row 7: Special behaviour. The flags above cover the rules that are the
-           same for every service; a behaviour carries the ones that are not. -->
+      <!-- Row 7: Special service. The flags above cover the rules that are the
+           same for every service; a script carries the ones that are not. -->
       <div class="form-divider mt-4 mb-4"></div>
 
-      <div class="form-group mb-4">
-        <label class="form-label">ОСОБОЕ ПОВЕДЕНИЕ (СКРИПТ)</label>
-        <div class="select-wrapper">
-          <select v-model="form.behavior_code" class="form-select" @change="applyBehaviorDefaults">
-            <option value="">Обычная услуга</option>
-            <option v-for="b in behaviors" :key="b.code" :value="b.code">
-              {{ b.name }} ({{ b.code }})
-            </option>
-          </select>
-          <i class="ph-bold ph-caret-down select-arrow"></i>
-        </div>
-        <p v-if="selectedBehavior" class="behavior-hint">
-          {{ selectedBehavior.description }}
-          <span v-if="selectedBehavior.once_per_user"> · заказывается один раз на пользователя</span>
-        </p>
-      </div>
+      <label class="toggle-item special-toggle">
+        <input v-model="form.is_special" type="checkbox" class="toggle-checkbox" @change="onSpecialToggled" />
+        <span class="toggle-switch"></span>
+        <span class="toggle-label">
+          Спец-услуга (правила задаются скриптом)
+        </span>
+      </label>
 
-      <div v-if="form.behavior_code" class="form-group">
-        <label class="form-label">НАСТРОЙКИ ПОВЕДЕНИЯ (JSON)</label>
-        <textarea
-          v-model="form.behavior_config"
-          class="form-input code-font behavior-config"
-          rows="5"
-          spellcheck="false"
-        ></textarea>
-        <p v-if="configError" class="behavior-error">{{ configError }}</p>
-        <p v-else class="behavior-hint">
-          Значения по умолчанию берутся из скрипта; здесь задаётся только то, что отличается.
+      <div v-if="form.is_special" class="special-section">
+        <div class="special-head">
+          <div class="select-wrapper template-select">
+            <select v-model="template" class="form-select" @change="applyTemplate">
+              <option value="">Шаблон: пустой</option>
+              <option v-for="b in behaviors" :key="b.code" :value="b.code">
+                Шаблон: {{ b.name }}
+              </option>
+            </select>
+            <i class="ph-bold ph-caret-down select-arrow"></i>
+          </div>
+          <router-link
+            class="help-link"
+            :to="{ name: 'admin-service-scripts-help' }"
+            target="_blank"
+          >
+            <i class="ph-bold ph-question"></i> Как писать скрипты
+          </router-link>
+        </div>
+
+        <p v-if="fromLibrary" class="behavior-hint">
+          Скрипт «{{ selectedBehavior?.name }}» поставляется с приложением.
+          Сохранение услуги создаст её собственную копию, и дальше она живёт
+          отдельно от поставляемой.
         </p>
+
+        <div class="form-group mb-4">
+          <label class="form-label">КОНСТАНТЫ И ПЕРЕМЕННЫЕ</label>
+          <textarea
+            v-model="form.behavior_constants"
+            class="form-input code-font script-input"
+            rows="10"
+            spellcheck="false"
+            placeholder="REWARD = 100"
+          ></textarea>
+          <p class="behavior-hint">
+            Суммы, роли, тексты сообщений — всё, что меняют, не читая логику.
+            Выполняется перед скриптом, поэтому в нём доступно по имени.
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">СКРИПТ УСЛУГИ</label>
+          <textarea
+            v-model="form.behavior_source"
+            class="form-input code-font script-input"
+            rows="18"
+            spellcheck="false"
+            placeholder="MANIFEST = { ... }"
+          ></textarea>
+          <p v-if="scriptError" class="behavior-error">{{ scriptError }}</p>
+          <p v-else class="behavior-hint">
+            <code>MANIFEST</code> и хуки <code>visible</code>,
+            <code>can_order</code>, <code>can_view_or_take</code>,
+            <code>price</code>, <code>on_event</code>. Скрипт компилируется при
+            сохранении: с ошибкой услуга не сохранится.
+          </p>
+        </div>
       </div>
     </div>
 
     <!-- Footer -->
+    <p v-if="saveError" class="save-error">{{ saveError }}</p>
     <div class="form-footer">
       <button type="button" class="btn-cancel" @click="$emit('cancel')">
         Отмена
@@ -250,6 +288,12 @@ export default defineComponent({
       type: String as PropType<string | null>,
       default: null,
     },
+    // What the server said when it refused the last save — a script that does
+    // not compile, most often. Shown in the footer, where the admin is looking.
+    saveError: {
+      type: String as PropType<string>,
+      default: '',
+    },
   },
   emits: ['save', 'cancel'],
   setup(props, { emit }) {
@@ -259,10 +303,49 @@ export default defineComponent({
     // themselves: a behaviour deployed today is selectable here today, with no
     // change to this form.
     const behaviors = ref<ServiceBehavior[]>([])
-    const configError = ref('')
+    const scriptError = ref('')
+    const template = ref('')
 
-    const formatConfig = (config?: Record<string, unknown> | null) =>
-      config && Object.keys(config).length ? JSON.stringify(config, null, 2) : '{}'
+    // The two fields of an empty special service. A blank editor is a worse
+    // starting point than a script that already compiles and does nothing
+    // surprising.
+    const EMPTY_CONSTANTS = `# Константы и переменные услуги.
+# Суммы, роли, тексты сообщений — всё, что меняют, не читая логику.
+
+REWARD = 0
+MSG_UNAVAILABLE = "услуга сейчас недоступна"
+`
+    const EMPTY_SCRIPT = `# Правила услуги. Определяйте только нужные хуки:
+# отсутствующий хук означает «нет мнения» — работает обычное правило платформы.
+
+MANIFEST = {
+    "name": "Новая спец-услуга",
+    "description": "",
+    "once_per_user": False,
+    "events": [],
+}
+
+def visible(f):
+    # Кому услуга видна в каталоге.
+    return f.user != None
+
+def can_order(f):
+    # None — можно заказать; строка — отказ с этим текстом.
+    if f.user == None:
+        return MSG_UNAVAILABLE
+    return None
+
+# def price(f):
+#     return 0
+
+# def can_view_or_take(f):
+#     if not has_role(f.viewer, "MODERATOR"):
+#         return "заказ выполняют только модераторы"
+#     return None
+
+# def on_event(f):
+#     return []
+`
 
     const buildForm = () => {
       if (props.node) {
@@ -282,7 +365,13 @@ export default defineComponent({
           moderator_only: props.node.moderator_only || false,
           min_age: props.node.min_age || 0,
           behavior_code: props.node.behavior_code || '',
-          behavior_config: formatConfig(props.node.behavior_config),
+          behavior_config: props.node.behavior_config || {},
+          // A node is special when it runs a script: its own, or a library one
+          // it names. Both are shown in the editor; saving a library one makes
+          // the copy its own.
+          is_special: Boolean(props.node.behavior_source || props.node.behavior_code),
+          behavior_constants: props.node.behavior_constants || '',
+          behavior_source: props.node.behavior_source || '',
         }
       }
       return {
@@ -301,7 +390,10 @@ export default defineComponent({
         moderator_only: false,
         min_age: 0,
         behavior_code: '',
-        behavior_config: '{}',
+        behavior_config: {} as Record<string, unknown>,
+        is_special: false,
+        behavior_constants: '',
+        behavior_source: '',
       }
     }
 
@@ -311,23 +403,58 @@ export default defineComponent({
       behaviors.value.find((b) => b.code === form.value.behavior_code) || null
     )
 
-    // Switching behaviour reloads the new script's defaults, so the admin edits
-    // real values instead of guessing which keys the behaviour reads.
-    const applyBehaviorDefaults = () => {
-      configError.value = ''
-      if (!form.value.behavior_code) {
-        form.value.behavior_config = '{}'
+    // True while the node still runs the library script rather than a copy of
+    // its own — the state the editor warns about, because saving forks it.
+    const fromLibrary = computed(
+      () => Boolean(form.value.behavior_code) && !props.node?.behavior_source
+    )
+
+    // Ticking the flag on an empty node fills both fields, so the admin starts
+    // from something that compiles instead of a blank page.
+    const onSpecialToggled = () => {
+      scriptError.value = ''
+      if (!form.value.is_special) {
         return
       }
-      form.value.behavior_config = formatConfig(selectedBehavior.value?.defaults as Record<string, unknown>)
+      if (!form.value.behavior_source) {
+        applyTemplate()
+      }
+    }
+
+    // Loading a template replaces both fields. Only ever done on request: it
+    // would otherwise overwrite an edit in progress.
+    const applyTemplate = () => {
+      scriptError.value = ''
+      const chosen = behaviors.value.find((b) => b.code === template.value)
+      if (!chosen) {
+        form.value.behavior_constants = EMPTY_CONSTANTS
+        form.value.behavior_source = EMPTY_SCRIPT
+        return
+      }
+      form.value.behavior_constants = chosen.constants_source || ''
+      form.value.behavior_source = chosen.source || ''
+    }
+
+    // A node running a library script shows that script, so the editor always
+    // displays the rules the service actually runs.
+    const showLibrarySource = () => {
+      if (!form.value.behavior_code || form.value.behavior_source) {
+        return
+      }
+      const library = behaviors.value.find((b) => b.code === form.value.behavior_code)
+      if (library) {
+        form.value.behavior_constants = library.constants_source || ''
+        form.value.behavior_source = library.source || ''
+      }
     }
 
     onMounted(async () => {
       try {
         behaviors.value = await getServiceBehaviors()
+        showLibrarySource()
       } catch {
-        // An admin panel that cannot list behaviours must still be able to edit
-        // the rest of a service; the field simply offers nothing but "ordinary".
+        // An admin panel that cannot list the library must still be able to edit
+        // the rest of a service; only the templates are missing.
         behaviors.value = []
       }
     })
@@ -341,15 +468,10 @@ export default defineComponent({
     )
 
     const submit = () => {
-      let behaviorConfig: Record<string, unknown> = {}
-      if (form.value.behavior_code) {
-        try {
-          behaviorConfig = JSON.parse(form.value.behavior_config || '{}')
-        } catch (e) {
-          configError.value = 'Настройки должны быть корректным JSON'
-          return
-        }
-        configError.value = ''
+      scriptError.value = ''
+      if (form.value.is_special && !form.value.behavior_source.trim()) {
+        scriptError.value = 'Спец-услуге нужен скрипт: выберите шаблон или напишите свой'
+        return
       }
 
       const payload: any = {
@@ -369,8 +491,12 @@ export default defineComponent({
         requires_verification: form.value.requires_verification,
         moderator_only: form.value.moderator_only,
         min_age: form.value.min_age || 0,
-        behavior_code: form.value.behavior_code || '',
-        behavior_config: behaviorConfig,
+        // The code records which library script this started from; the text
+        // below is what the service actually runs.
+        behavior_code: form.value.is_special ? form.value.behavior_code || '' : '',
+        behavior_config: form.value.is_special ? form.value.behavior_config : {},
+        behavior_constants: form.value.is_special ? form.value.behavior_constants : '',
+        behavior_source: form.value.is_special ? form.value.behavior_source : '',
       }
 
       if (!isEditing.value) {
@@ -390,8 +516,11 @@ export default defineComponent({
       isEditing,
       behaviors,
       selectedBehavior,
-      applyBehaviorDefaults,
-      configError,
+      fromLibrary,
+      template,
+      applyTemplate,
+      onSpecialToggled,
+      scriptError,
       submit,
     }
   },
@@ -625,11 +754,65 @@ export default defineComponent({
   color: #dc2626;
 }
 
-.behavior-config {
+.save-error {
+  margin: 0;
+  padding: 12px 28px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  border-top: 1px solid #fecaca;
+}
+
+.special-toggle {
+  margin-bottom: 16px;
+}
+
+.special-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px 20px;
+  background: #fbfcfe;
+}
+
+.special-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.template-select {
+  max-width: 320px;
+}
+
+.help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6366f1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.help-link:hover {
+  text-decoration: underline;
+}
+
+.script-input {
   height: auto;
   padding: 12px 16px;
-  line-height: 1.5;
+  line-height: 1.55;
+  font-size: 13px;
   resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
 }
 
 /* Toggles Card */

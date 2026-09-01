@@ -96,6 +96,11 @@
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.serviceCatalog') }}</span>
           </router-link>
 
+          <router-link to="/admin/escalations" class="nav-item" :class="{ active: currentRouteName === 'admin-escalations' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-shield-warning"></i>
+            <span v-if="!sidebarMinimized || isMobile">Модерация проверок</span>
+          </router-link>
+
           <router-link to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
             <i class="ph ph-gear"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
@@ -217,6 +222,8 @@ export default defineComponent({
         case 'admin-active-orders': return 'Активные заказы'
         case 'admin-completed-orders': return 'Выполненные заказы'
         case 'admin-service-catalog': return 'Каталог услуг'
+        case 'admin-escalations': return 'Модерация проверок'
+        case 'admin-service-scripts-help': return 'Как писать скрипты услуг'
         case 'admin-settings': return 'Системные настройки'
         default: return 'Панель администратора'
       }

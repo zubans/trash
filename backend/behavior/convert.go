@@ -13,17 +13,41 @@ import (
 // field name fails loudly instead of silently yielding None.
 func factsValue(f Facts) starlark.Value {
 	d := starlark.StringDict{
-		"event":    starlark.String(f.Event),
-		"config":   configValue(f.Config),
-		"user":     actorValue(f.User),
-		"viewer":   actorValue(f.Viewer),
-		"customer": actorValue(f.Customer),
-		"order":    orderValue(f.Order),
-		"variant":  variantValue(f.Variant),
-		"claims":   starlark.MakeInt(f.Claims),
-		"now":      starlark.MakeInt64(f.Now.Unix()),
+		"event":      starlark.String(f.Event),
+		"config":     configValue(f.Config),
+		"user":       actorValue(f.User),
+		"viewer":     actorValue(f.Viewer),
+		"customer":   actorValue(f.Customer),
+		"order":      orderValue(f.Order),
+		"variant":    variantValue(f.Variant),
+		"claims":     starlark.MakeInt(f.Claims),
+		"submission": submissionValue(f.Submission),
+		"now":        starlark.MakeInt64(f.Now.Unix()),
 	}
 	return starlarkstruct.FromStringDict(starlark.String("facts"), d)
+}
+
+// submissionValue renders the outcome of a data check. Only the outcome: the
+// values the submission was compared against never enter the script.
+func submissionValue(s *SubmissionFacts) starlark.Value {
+	if s == nil {
+		return starlark.None
+	}
+	matches := starlark.NewDict(len(s.Matches))
+	keys := make([]string, 0, len(s.Matches))
+	for field := range s.Matches {
+		keys = append(keys, field)
+	}
+	sort.Strings(keys)
+	for _, field := range keys {
+		_ = matches.SetKey(starlark.String(field), starlark.Bool(s.Matches[field]))
+	}
+	return starlarkstruct.FromStringDict(starlark.String("submission"), starlark.StringDict{
+		"attempt":   starlark.MakeInt(s.Attempt),
+		"all_match": starlark.Bool(s.AllMatch),
+		"matches":   matches,
+		"escalated": starlark.Bool(s.Escalated),
+	})
 }
 
 func actorValue(a *Actor) starlark.Value {
@@ -216,6 +240,13 @@ func predeclared() starlark.StringDict {
 				return nil, err
 			}
 			return &effectValue{Effect{Kind: EffectSystemMessage, OrderID: orderID, Text: text}}, nil
+		}),
+		"escalate": starlark.NewBuiltin("escalate", func(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			var orderID, reason string
+			if err := starlark.UnpackArgs(b.Name(), args, kwargs, "order_id", &orderID, "reason?", &reason); err != nil {
+				return nil, err
+			}
+			return &effectValue{Effect{Kind: EffectEscalate, OrderID: orderID, Reason: reason}}, nil
 		}),
 		"has_role": starlark.NewBuiltin("has_role", func(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			var actor starlark.Value

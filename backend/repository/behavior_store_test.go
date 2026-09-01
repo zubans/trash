@@ -173,3 +173,104 @@ func containsEvent(events []*repository.DomainEvent, id uuid.UUID) bool {
 	}
 	return false
 }
+
+func TestSubmissionsNumberTheirAttempts(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	customerID, _, orderID := seedBehaviorOrder(t, db)
+	executorID := createTestUser(t, db, "EXECUTOR")
+	submissions := repository.NewSubmissionRepository(db)
+
+	for want := 1; want <= 3; want++ {
+		submission := &repository.OrderSubmission{
+			OrderID:    orderID,
+			ExecutorID: executorID,
+			Matched:    false,
+			Fields:     map[string]string{"last_name": "Петров"},
+			Mismatches: []string{"last_name"},
+		}
+		if err := submissions.Record(ctx, nil, submission); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+		// The number comes from the same statement that writes the row, so two
+		// submissions racing cannot both call themselves the same attempt.
+		if submission.Attempt != want {
+			t.Errorf("attempt = %d, want %d", submission.Attempt, want)
+		}
+	}
+
+	stored, err := submissions.ListForOrder(ctx, orderID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(stored) != 3 {
+		t.Fatalf("stored %d submissions, want 3", len(stored))
+	}
+	if stored[0].Fields["last_name"] != "Петров" || len(stored[0].Mismatches) != 1 {
+		t.Errorf("submission did not round-trip: %+v", stored[0])
+	}
+	_ = customerID
+}
+
+func TestEscalationIsOpenedOncePerOrder(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	_, _, orderID := seedBehaviorOrder(t, db)
+	adminID := createTestUser(t, db, "ADMIN")
+	submissions := repository.NewSubmissionRepository(db)
+
+	escalation := &repository.BehaviorEscalation{
+		OrderID:      orderID,
+		BehaviorCode: "verification",
+		Reason:       "данные не совпали",
+	}
+	if err := submissions.Escalate(ctx, nil, escalation); err != nil {
+		t.Fatalf("escalate: %v", err)
+	}
+	// A behaviour asking twice is describing the same case, not a second one.
+	if err := submissions.Escalate(ctx, nil, &repository.BehaviorEscalation{
+		OrderID: orderID, BehaviorCode: "verification", Reason: "снова",
+	}); err != nil {
+		t.Fatalf("second escalate: %v", err)
+	}
+
+	open, err := submissions.ListEscalations(ctx, repository.EscalationOpen, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	forOrder := 0
+	for _, e := range open {
+		if e.OrderID == orderID {
+			forOrder++
+		}
+	}
+	if forOrder != 1 {
+		t.Fatalf("%d open escalations for one order, want 1", forOrder)
+	}
+
+	if err := submissions.ResolveEscalation(ctx, escalation.ID, adminID); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if has, _ := submissions.HasOpenEscalation(ctx, orderID); has {
+		t.Error("the escalation is still open after being resolved")
+	}
+	// Resolving twice is not a second resolution.
+	if err := submissions.ResolveEscalation(ctx, escalation.ID, adminID); !errors.Is(err, repository.ErrEscalationNotFound) {
+		t.Errorf("second resolve returned %v, want ErrEscalationNotFound", err)
+	}
+
+	// The order can be escalated again afterwards: the index only forbids two
+	// open ones at a time.
+	if err := submissions.Escalate(ctx, nil, &repository.BehaviorEscalation{
+		OrderID: orderID, BehaviorCode: "verification", Reason: "новый случай",
+	}); err != nil {
+		t.Fatalf("escalate after resolving: %v", err)
+	}
+	if has, _ := submissions.HasOpenEscalation(ctx, orderID); !has {
+		t.Error("a new escalation was not opened")
+	}
+}

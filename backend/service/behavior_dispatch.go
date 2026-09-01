@@ -39,16 +39,17 @@ const ConfigVerifierRole = "verifier_role"
 // wrong about a decision, but it cannot pay a stranger, verify an arbitrary
 // user, or write an unbalanced pair of ledger entries.
 type BehaviorDispatcher struct {
-	events    repository.EventRepository
-	orders    repository.OrderRepository
-	users     repository.UserRepository
-	catalog   repository.ServiceCatalogRepository
-	claims    repository.ServiceClaimRepository
-	chat      repository.ChatRepository
-	settings  repository.SettingsRepository
-	ledger    *Ledger
-	behaviors *Behaviors
-	orderSvc  *OrderService
+	events      repository.EventRepository
+	orders      repository.OrderRepository
+	users       repository.UserRepository
+	catalog     repository.ServiceCatalogRepository
+	claims      repository.ServiceClaimRepository
+	chat        repository.ChatRepository
+	settings    repository.SettingsRepository
+	submissions repository.SubmissionRepository
+	ledger      *Ledger
+	behaviors   *Behaviors
+	orderSvc    *OrderService
 
 	// batchSize bounds one tick; maxAttempts bounds one event's lifetime, so a
 	// permanently failing event stops consuming the batch instead of blocking
@@ -89,6 +90,13 @@ func NewBehaviorDispatcher(
 	}
 }
 
+// WithSubmissions wires the store behind data checks and escalations. Without
+// it a behaviour that declares check_fields simply takes no submissions.
+func (d *BehaviorDispatcher) WithSubmissions(submissions repository.SubmissionRepository) *BehaviorDispatcher {
+	d.submissions = submissions
+	return d
+}
+
 // Tick processes one batch of pending events. It is called on a timer by the
 // behaviour worker, under the leader guard.
 func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
@@ -100,7 +108,7 @@ func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
 		return err
 	}
 	for _, event := range events {
-		if err := d.dispatch(ctx, event); err != nil {
+		if _, err := d.dispatch(ctx, event); err != nil {
 			metrics.BehaviorEvent(event.Type, "failed")
 			log.Printf("[behavior] event %s (%s) failed: %v", event.ID, event.Type, err)
 			// Left unprocessed on purpose: the next tick retries it, up to
@@ -147,12 +155,15 @@ type target struct {
 	variant *repository.ServiceNode
 }
 
-// dispatch resolves who the event concerns and runs their behaviours.
-func (d *BehaviorDispatcher) dispatch(ctx context.Context, event *repository.DomainEvent) error {
+// dispatch resolves who the event concerns and runs their behaviours. It
+// returns the messages the behaviours posted, for the caller that is waiting on
+// the outcome — an executor who has just submitted data for checking.
+func (d *BehaviorDispatcher) dispatch(ctx context.Context, event *repository.DomainEvent) ([]string, error) {
 	targets, err := d.targets(ctx, event)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var messages []string
 	for _, t := range targets {
 		manifest, ok := d.behaviors.Manifest(t.variant)
 		if !ok || !manifest.Handles(event.Type) {
@@ -160,21 +171,23 @@ func (d *BehaviorDispatcher) dispatch(ctx context.Context, event *repository.Dom
 		}
 		facts, err := d.facts(ctx, event, t)
 		if err != nil {
-			return err
+			return messages, err
 		}
-		effects, err := d.behaviors.Engine().OnEvent(t.variant.BehaviorCode, facts)
+		effects, err := d.behaviors.Engine().OnEvent(d.behaviors.Code(t.variant), facts)
 		if err != nil {
-			metrics.BehaviorHookError(t.variant.BehaviorCode, behavior.HookOnEvent)
-			return err
+			metrics.BehaviorHookError(d.behaviors.Code(t.variant), behavior.HookOnEvent)
+			return messages, err
 		}
 		if len(effects) == 0 {
 			continue
 		}
-		if err := d.apply(ctx, event, t, effects); err != nil {
-			return err
+		posted, err := d.apply(ctx, event, t, effects)
+		messages = append(messages, posted...)
+		if err != nil {
+			return messages, err
 		}
 	}
-	return nil
+	return messages, nil
 }
 
 // targets answers "which running orders can this event change".
@@ -242,13 +255,22 @@ func (d *BehaviorDispatcher) facts(ctx context.Context, event *repository.Domain
 			facts.Claims = count
 		}
 	}
+	if event.Type == repository.EventOrderSubmission {
+		escalated := false
+		if d.submissions != nil {
+			if open, err := d.submissions.HasOpenEscalation(ctx, t.order.ID); err == nil {
+				escalated = open
+			}
+		}
+		facts.Submission = submissionFacts(event, escalated)
+	}
 	return facts, nil
 }
 
 // apply performs the effects of one behaviour in a single transaction: either
 // the customer is verified, the order is closed and the reward is paid, or none
 // of it happened and the event is retried.
-func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.DomainEvent, t target, effects []behavior.Effect) error {
+func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.DomainEvent, t target, effects []behavior.Effect) ([]string, error) {
 	maxBonus := money.FromRubles(settingFloat(ctx, d.settings, SettingBehaviorMaxBonus, defaultBehaviorMaxBonus))
 
 	var messages []behavior.Effect
@@ -267,7 +289,7 @@ func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.Domain
 			}
 			// Claiming the key first is what makes redelivery safe: the second
 			// attempt to pay the same reward finds the row taken and stops.
-			err := d.events.RecordEffect(ctx, tx, key, event.ID, t.variant.BehaviorCode, string(effect.Kind), map[string]interface{}{
+			err := d.events.RecordEffect(ctx, tx, key, event.ID, d.behaviors.Code(t.variant), string(effect.Kind), map[string]interface{}{
 				"order_id": effect.OrderID,
 				"user_id":  effect.UserID,
 				"amount":   effect.Amount,
@@ -289,13 +311,15 @@ func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.Domain
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	posted := make([]string, 0, len(messages))
 	for _, message := range messages {
 		d.postMessage(ctx, t, message)
+		posted = append(posted, message.Text)
 	}
-	return nil
+	return posted, nil
 }
 
 // applyOne performs one effect, after checking that the behaviour was entitled
@@ -307,7 +331,14 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err := d.requireOwnOrder(t, effect.OrderID); err != nil {
 			return err
 		}
-		return d.orderSvc.confirmTx(ctx, tx, t.order.ID)
+		if err := d.orderSvc.confirmTx(ctx, tx, t.order.ID); err != nil {
+			return err
+		}
+		// A closed order has nothing left for an administrator to decide.
+		if d.submissions != nil {
+			return d.submissions.ResolveByOrder(ctx, tx, t.order.ID, nil)
+		}
+		return nil
 
 	case behavior.EffectCancelOrder:
 		if err := d.requireOwnOrder(t, effect.OrderID); err != nil {
@@ -353,7 +384,7 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err := d.users.UpdateVerifiedTx(ctx, tx, subject, true); err != nil {
 			return err
 		}
-		log.Printf("[AUDIT] behavior %s verified user %s through order %s", t.variant.BehaviorCode, subject, t.order.ID)
+		log.Printf("[AUDIT] behavior %s verified user %s through order %s", d.behaviors.Code(t.variant), subject, t.order.ID)
 		// Published like any other verification, so anything else that reacts to
 		// a user becoming verified sees this one too.
 		return d.events.Publish(ctx, tx, &repository.DomainEvent{
@@ -361,6 +392,24 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 			SubjectType: repository.EventSubjectUser,
 			SubjectID:   subject,
 			ActorID:     t.order.ExecutorID,
+		})
+
+	case behavior.EffectEscalate:
+		if err := d.requireOwnOrder(t, effect.OrderID); err != nil {
+			return err
+		}
+		if d.submissions == nil {
+			return errors.New("escalations are not available on this server")
+		}
+		reason := strings.TrimSpace(effect.Reason)
+		if reason == "" {
+			reason = "передано администратору поведением услуги"
+		}
+		log.Printf("[AUDIT] behavior %s escalated order %s: %s", d.behaviors.Code(t.variant), t.order.ID, reason)
+		return d.submissions.Escalate(ctx, tx, &repository.BehaviorEscalation{
+			OrderID:      t.order.ID,
+			BehaviorCode: d.behaviors.Code(t.variant),
+			Reason:       reason,
 		})
 
 	default:

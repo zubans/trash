@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -121,17 +122,31 @@ type ServiceNode struct {
 	// pays, the role it requires. The script declares the defaults; this holds
 	// only what this node changes.
 	BehaviorConfig BehaviorConfig `json:"behavior_config,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// BehaviorConstants and BehaviorSource are the node's own script, written
+	// in the admin panel (migration 044): the constants file and the logic.
+	// When they are set they replace the file behaviour entirely — BehaviorCode
+	// then only records which library script the admin started from.
+	BehaviorConstants string    `json:"behavior_constants,omitempty"`
+	BehaviorSource    string    `json:"behavior_source,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 	// DeletedAt is set when the node was retired. The row stays in place so
 	// that orders which reference it keep resolving; nothing in the catalog
 	// offers it any more.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
-// HasBehavior reports whether this node's rules come from a script.
+// HasBehavior reports whether this node's rules come from a script — its own,
+// or one of the library behaviours that ship with the build.
 func (n *ServiceNode) HasBehavior() bool {
-	return n != nil && n.BehaviorCode != ""
+	return n != nil && (n.BehaviorCode != "" || n.HasOwnScript())
+}
+
+// HasOwnScript reports whether the node carries a script of its own. Such a node
+// is what the admin panel calls a special service: its rules were written in the
+// service constructor rather than shipped as a file.
+func (n *ServiceNode) HasOwnScript() bool {
+	return n != nil && strings.TrimSpace(n.BehaviorSource) != ""
 }
 
 // nullableCode stores an empty behaviour code as NULL, so "no behaviour" is one
@@ -141,6 +156,14 @@ func nullableCode(code string) interface{} {
 		return nil
 	}
 	return code
+}
+
+// nullableText does the same for a script that was left empty.
+func nullableText(text string) interface{} {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return text
 }
 
 // IsCategory returns true if the node is a category.
@@ -223,6 +246,10 @@ type ServiceCatalogRepository interface {
 
 	// Catalog helpers
 	GetActiveVariants(ctx context.Context) ([]*ServiceNode, error)
+	// ListNodesWithScript returns every live node carrying a script of its own,
+	// so the behaviour engine can compile them at startup and pick up edits made
+	// by another process.
+	ListNodesWithScript(ctx context.Context) ([]*ServiceNode, error)
 	GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*ServiceNode, []*ServiceNode, error)
 
 	// Transactional helpers used by the service layer.
@@ -243,7 +270,8 @@ func NewServiceCatalogRepository(db *sql.DB) ServiceCatalogRepository {
 const serviceNodeColumns = `
     id, parent_id, code, name, description, node_type, base_price,
     is_auction, is_active, sort_order, COALESCE(requires_verification, false), COALESCE(min_age, 0), COALESCE(moderator_only, false),
-    COALESCE(behavior_code, ''), COALESCE(behavior_config, '{}'::jsonb), created_at, updated_at, deleted_at
+    COALESCE(behavior_code, ''), COALESCE(behavior_config, '{}'::jsonb),
+    COALESCE(behavior_constants, ''), COALESCE(behavior_source, ''), created_at, updated_at, deleted_at
 `
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows.
@@ -256,7 +284,8 @@ func scanServiceNodeInto(s rowScanner) (*ServiceNode, error) {
 	err := s.Scan(
 		&n.ID, &n.ParentID, &n.Code, &n.Name, &n.Description, &n.NodeType,
 		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.RequiresVerification,
-		&n.MinAge, &n.ModeratorOnly, &n.BehaviorCode, &n.BehaviorConfig, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
+		&n.MinAge, &n.ModeratorOnly, &n.BehaviorCode, &n.BehaviorConfig,
+		&n.BehaviorConstants, &n.BehaviorSource, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -316,14 +345,16 @@ func (r *serviceCatalogRepo) CreateNode(ctx context.Context, node *ServiceNode) 
 	defer tx.Rollback()
 
 	query := `
-        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, moderator_only, behavior_code, behavior_config, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, moderator_only, behavior_code, behavior_config, behavior_constants, behavior_source, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
     `
 	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Code, node.Name, node.Description,
 		node.NodeType, node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
 		node.RequiresVerification, node.MinAge, node.ModeratorOnly,
-		nullableCode(node.BehaviorCode), node.BehaviorConfig, node.CreatedAt, node.UpdatedAt,
+		nullableCode(node.BehaviorCode), node.BehaviorConfig,
+		nullableText(node.BehaviorConstants), nullableText(node.BehaviorSource),
+		node.CreatedAt, node.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -398,14 +429,17 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
         UPDATE service_nodes
         SET parent_id = $2, name = $3, description = $4, base_price = $5,
             is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, moderator_only = $11,
-            behavior_code = $12, behavior_config = $13, updated_at = $14
+            behavior_code = $12, behavior_config = $13,
+            behavior_constants = $14, behavior_source = $15, updated_at = $16
         WHERE id = $1 AND deleted_at IS NULL
     `
 	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Name, node.Description,
 		node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
 		node.RequiresVerification, node.MinAge, node.ModeratorOnly,
-		nullableCode(node.BehaviorCode), node.BehaviorConfig, node.UpdatedAt,
+		nullableCode(node.BehaviorCode), node.BehaviorConfig,
+		nullableText(node.BehaviorConstants), nullableText(node.BehaviorSource),
+		node.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -603,6 +637,12 @@ func (r *serviceCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.
 func (r *serviceCatalogRepo) GetActiveVariants(ctx context.Context) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE node_type = 'VARIANT'" +
 		FilterActive.where("") + " ORDER BY sort_order, name->>'ru'"
+	return r.queryNodes(ctx, query)
+}
+
+func (r *serviceCatalogRepo) ListNodesWithScript(ctx context.Context) ([]*ServiceNode, error) {
+	query := "SELECT " + serviceNodeColumns + " FROM service_nodes" +
+		" WHERE behavior_source IS NOT NULL AND behavior_source <> '' AND deleted_at IS NULL"
 	return r.queryNodes(ctx, query)
 }
 

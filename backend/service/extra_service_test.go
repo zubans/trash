@@ -266,6 +266,18 @@ func (m *mockExecutorGeoRepo) GetExecutorLocations(ctx context.Context, executor
 	}
 	return out, nil
 }
+func (m *mockExecutorGeoRepo) RecordDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
+	return nil
+}
+
+func (m *mockExecutorGeoRepo) GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*repository.ExecutorPosition, error) {
+	return nil, nil
+}
+
+func (m *mockExecutorGeoRepo) FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
+	return nil
+}
+
 func (m *mockExecutorGeoRepo) CreateGeoAlert(ctx context.Context, alert *repository.GeoAlert) error {
 	return nil
 }

@@ -156,6 +156,17 @@ func (m *mockCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUI
 	return nil, nil
 }
 
+// ListNodesWithScript returns the nodes carrying a script of their own.
+func (m *mockCatalogRepo) ListNodesWithScript(ctx context.Context) ([]*repository.ServiceNode, error) {
+	out := []*repository.ServiceNode{}
+	for _, n := range m.nodes {
+		if n.HasOwnScript() && !n.IsDeleted() {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
 func (m *mockCatalogRepo) GetActiveVariants(ctx context.Context) ([]*repository.ServiceNode, error) {
 	out := []*repository.ServiceNode{}
 	for _, n := range m.nodes {

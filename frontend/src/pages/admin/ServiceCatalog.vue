@@ -69,6 +69,7 @@
         :node="editingNode"
         :initial-parent-id="defaultParentId"
         :parent-options="parentOptions"
+        :save-error="saveError"
         @save="saveNode"
         @cancel="showFormModal = false"
       />
@@ -105,6 +106,10 @@ export default defineComponent({
     const defaultParentId = ref<string | null>(null)
     const successMsg = ref('')
     const errorMsg = ref('')
+    // A save refused by the server has to be readable inside the modal: the
+    // usual place for the message is the page behind it, and a compile error
+    // shown there is a compile error nobody sees.
+    const saveError = ref('')
     const showDeleted = ref(false)
 
     const flatten = (items: TreeItem[]): ServiceNode[] => {
@@ -138,12 +143,14 @@ export default defineComponent({
     }
 
     const openCreateModal = (parentId: string | null) => {
+      saveError.value = ''
       editingNode.value = null
       defaultParentId.value = parentId
       showFormModal.value = true
     }
 
     const openEditModal = (node: ServiceNode) => {
+      saveError.value = ''
       editingNode.value = node
       showFormModal.value = true
     }
@@ -151,6 +158,7 @@ export default defineComponent({
     const saveNode = async (payload: any) => {
       successMsg.value = ''
       errorMsg.value = ''
+      saveError.value = ''
       try {
         if (editingNode.value) {
           await updateServiceNode(editingNode.value.id, payload)
@@ -162,7 +170,9 @@ export default defineComponent({
         showFormModal.value = false
         await fetchTree()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка при сохранении'
+        const message = err.response?.data || 'Ошибка при сохранении'
+        errorMsg.value = message
+        saveError.value = typeof message === 'string' ? message : 'Ошибка при сохранении'
       }
     }
 
@@ -215,6 +225,7 @@ export default defineComponent({
       parentOptions,
       successMsg,
       errorMsg,
+      saveError,
       showDeleted,
       fetchTree,
       openCreateModal,

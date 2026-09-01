@@ -1,24 +1,33 @@
-# Account verification.
+# Верификация аккаунта.
 #
-# The service a customer orders to have their identity confirmed. Everything
-# that makes it unusual lives here, not in the Go code:
+# Услуга, которую заказывает пользователь, чтобы подтвердить свою личность. Всё,
+# что делает её особенной, живёт здесь, а не в коде Go:
 #
-#   * only an unverified user sees it, and only until they order it once;
-#   * it is free;
-#   * on the executor side only VERIFIER_ROLE may see or take it;
-#   * when the customer becomes verified the order closes by itself and the
-#     rewards in config.star are paid.
+#   * её видит только неподтверждённый пользователь и только пока не заказал её
+#     один раз;
+#   * она бесплатна;
+#   * на стороне исполнителя её видит и может взять только VERIFIER_ROLE;
+#   * модератору видно только адрес: ни телефона, ни ФИО, ни даты рождения. Он
+#     вводит данные с документа, ядро сверяет их с учётной записью и сообщает
+#     скрипту лишь результат сравнения;
+#   * первое несовпадение — предупреждение сверить данные с паспортом, повторное
+#     — заказ уходит на модерацию администратора;
+#   * когда пользователь становится подтверждённым, заказ закрывается сам, а
+#     вознаграждения из config.star выплачиваются.
 #
-# The numbers, roles, event names and messages are all in config.star; this file
-# is the logic that uses them. A node may override the amounts and the mode
-# through service_nodes.behavior_config (the CFG_* keys).
+# Суммы, роли, имена событий и тексты — в config.star; здесь только логика,
+# которая их использует. Узел каталога может переопределить суммы и режим через
+# service_nodes.behavior_config (ключи CFG_*).
 
 MANIFEST = {
     "name": "Верификация аккаунта",
     "description": "Бесплатная услуга: модератор подтверждает личность пользователя и получает вознаграждение.",
     "once_per_user": True,
     "release_claim_on_cancel": True,
-    "events": [EVENT_ORDER_EXECUTED, EVENT_USER_VERIFIED],
+    "events": [EVENT_ORDER_EXECUTED, EVENT_USER_VERIFIED, EVENT_ORDER_SUBMISSION],
+    # Какие поля модератор вводит с документа, и что он не видит о заказчике.
+    "check_fields": CHECK_FIELDS,
+    "hide_customer_contacts": HIDE_CUSTOMER_CONTACTS,
     "defaults": {
         CFG_REWARD_EXECUTOR: REWARD_EXECUTOR,
         CFG_REWARD_CUSTOMER: REWARD_CUSTOMER,
@@ -28,11 +37,11 @@ MANIFEST = {
     },
 }
 
-# --- Catalog -----------------------------------------------------------------
+# --- Каталог ------------------------------------------------------------------
 
 def visible(f):
-    # A verified user has nothing to order here, and neither has one who already
-    # has a verification order running: claims counts the orders placed.
+    # Подтверждённому пользователю здесь нечего заказывать, как и тому, у кого
+    # заказ на верификацию уже есть: claims — это число сделанных заказов.
     if f.user == None:
         return False
     if f.user.is_verified:
@@ -49,10 +58,10 @@ def can_order(f):
     return None
 
 def price(f):
-    # Free for the customer. The verifier is paid by the platform, not by them.
+    # Для заказчика бесплатно. Верификатору платит платформа, а не он.
     return 0
 
-# --- Executor side -----------------------------------------------------------
+# --- Сторона исполнителя ------------------------------------------------------
 
 def can_view_or_take(f):
     role = f.config.get(CFG_VERIFIER_ROLE, VERIFIER_ROLE)
@@ -64,11 +73,12 @@ def can_view_or_take(f):
         return MSG_SELF_VERIFICATION
     return None
 
-# --- Reactions ---------------------------------------------------------------
+# --- Реакции на события -------------------------------------------------------
 
 def _reward(f, o, recipient, amount, role):
-    # One reward, keyed by the order and by who it is for, so the same reward is
-    # never paid twice however many events describe the same verification.
+    # Одна выплата с ключом, привязанным к заказу и к получателю: одно и то же
+    # вознаграждение не будет выплачено дважды, сколько бы событий ни описывало
+    # одну верификацию, а выплаты заказчику и исполнителю не перекроют друг друга.
     return pay_bonus(
         to = recipient,
         amount = amount,
@@ -91,24 +101,53 @@ def _reward_effects(f, o):
         effects.append(_reward(f, o, o.customer_id, to_customer, "customer"))
     return effects
 
+def _submission_effects(f, o):
+    s = f.submission
+    if s == None:
+        return []
+    # Заказ уже у администратора — решение за ним, скрипт больше не вмешивается.
+    if s.escalated:
+        return []
+
+    if s.all_match:
+        # Данные сошлись: это и есть подтверждение личности.
+        return [verify_user(user_id = o.customer_id, order_id = o.id)] + _reward_effects(f, o)
+
+    if s.attempt < MAX_ATTEMPTS:
+        # Первое несовпадение — скорее всего опечатка или неверно прочитанное
+        # поле. Что именно не сошлось, модератору не сообщается: иначе остальные
+        # поля можно было бы подобрать перебором.
+        return [system_message(order_id = o.id, text = MSG_CHECK_PASSPORT)]
+
+    # Попытки исчерпаны. Дальше решает администратор: он видит, что вводил
+    # модератор, и сверяет это с учётной записью сам.
+    return [
+        escalate(order_id = o.id, reason = REASON_ESCALATED),
+        system_message(order_id = o.id, text = MSG_ESCALATED),
+    ]
+
 def on_event(f):
     o = f.order
     if o == None:
         return []
-    # Only an order that is still running can be closed by a verification.
+    # Закрыть верификацией можно только незавершённый заказ.
     if o.status != STATUS_ASSIGNED and o.status != STATUS_EXECUTED:
         return []
 
+    if f.event == EVENT_ORDER_SUBMISSION:
+        return _submission_effects(f, o)
+
     if f.event == EVENT_ORDER_EXECUTED:
         if f.config.get(CFG_VERIFIED_BY, VERIFIED_BY) != VERIFIED_BY_MODERATOR:
-            # The flag is an admin's decision in this configuration; wait for
-            # the user.verified event instead of acting on the visit report.
+            # В этой конфигурации отметку ставит администратор: ждём события
+            # user.verified, а не отчёт о выполнении.
             return []
         if f.customer == None or f.customer.is_verified:
             return []
-        # verify_user is a request, not an act: the core applies it only when
-        # the order was performed by somebody holding VERIFIER_ROLE.
-        return [verify_user(user_id = o.customer_id, order_id = o.id)] + _reward_effects(f, o)
+        # Отметка «выполнено» сама по себе больше ничего не подтверждает:
+        # личность подтверждает совпадение введённых данных (EVENT_ORDER_SUBMISSION).
+        # Если модератор отметил выполнение, не пройдя проверку, — напоминаем.
+        return [system_message(order_id = o.id, text = MSG_CHECK_PASSPORT)]
 
     if f.event == EVENT_USER_VERIFIED:
         return _reward_effects(f, o)

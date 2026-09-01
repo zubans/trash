@@ -20,6 +20,11 @@ export interface ServiceNode {
   // That script's per-node configuration. Its keys belong to the behaviour, not
   // to the catalog, which is why this stays an open object.
   behavior_config?: Record<string, unknown>
+  // The node's own script, written in the service constructor: the constants
+  // file and the logic. When they are set the node runs them instead of any
+  // library behaviour.
+  behavior_constants?: string
+  behavior_source?: string
   // Set when the node was retired. The catalog never returns deleted nodes to
   // the app; the admin panel asks for them explicitly.
   deleted_at?: string | null

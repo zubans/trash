@@ -1,55 +1,74 @@
-# Everything the verification behaviour exchanges with the world outside the
-# script: what it pays, who may perform it, which events and statuses it reacts
-# to, and what its configuration keys are called.
+# Константы услуги «Верификация аккаунта» и всё, чем скрипт связан с внешним
+# кодом: суммы вознаграждений, роли, имена событий и статусов, ключи настроек и
+# тексты сообщений.
 #
-# It lives in its own file so that changing a rule and changing a number are two
-# different edits. behavior.star holds the logic and reads these names; nothing
-# in it is a literal that an operator would want to change.
+# Этот файл отделён от логики намеренно: поменять сумму и поменять правило —
+# разные по риску правки, и первая не должна требовать чтения второй. В
+# behavior.star не должно оставаться литералов, которые кто-то захочет править.
 #
-# Every amount below is also overridable per catalog node through
-# service_nodes.behavior_config, under the CFG_* key of the same meaning — the
-# constant here is the default the admin panel offers.
+# Любую константу ниже можно переопределить у конкретного узла каталога через
+# service_nodes.behavior_config — ключом CFG_* того же смысла. Значение здесь —
+# то, что админка подставит по умолчанию.
 
-# --- Money ------------------------------------------------------------------
+# --- Деньги ------------------------------------------------------------------
 
-# Paid to the executor (the moderator) who performed the verification, in
-# rubles, from the platform's BONUSES account.
+# Вознаграждение исполнителю (модератору), выполнившему верификацию, в рублях.
+# Платится со счёта BONUSES, то есть из средств платформы.
 REWARD_EXECUTOR = 200
 
-# Paid to the customer who got verified. Zero by default: verification is
-# already free, and a welcome bonus is a marketing decision, not a rule of the
-# service. Set it here or per node to turn it on.
+# Вознаграждение заказчику, прошедшему верификацию. По умолчанию 0: услуга и так
+# бесплатна, а приветственный бонус — маркетинговое решение, а не правило услуги.
+# Чтобы включить, задайте сумму здесь или в настройках узла.
 REWARD_CUSTOMER = 0
 
-# Whether the platform's commission (order_commission_percent) is withheld from
-# the rewards above.
+# Удерживать ли комиссию платформы (order_commission_percent) с этих
+# вознаграждений.
 #
-# False, and deliberately so: the commission is the platform's share of what a
-# customer paid, and nobody paid for a free service. Taking a cut of money the
-# platform is itself paying out would only move it from one of its own accounts
-# to another. A behaviour that does want its rewards treated as ordinary
-# earnings sets this to True (or apply_commission on the node).
+# False, и намеренно: комиссия — это доля платформы от того, что заплатил
+# заказчик, а за бесплатную услугу не платил никто. Удержание с собственной
+# выплаты просто перекладывало бы деньги платформы с одного её счёта на другой.
+# Поведение, которое считает свои вознаграждения обычным заработком, ставит True
+# (или apply_commission у узла).
 APPLY_COMMISSION = False
 
-# --- Roles ------------------------------------------------------------------
+# --- Проверка личности --------------------------------------------------------
 
-# Who may see and take a verification order on the executor side. Read by the
-# script and, independently, by the core when it decides whether to honour a
-# verify_user effect — the script asks, the core checks.
+# Какие поля модератор вводит с документа и какие ядро сверяет с учётной записью.
+# Само объявление и включает шаг проверки: приложение исполнителя рисует форму
+# ровно под эти поля, а значения для сравнения ему не отдаются.
+#
+# Поддерживаются: last_name, first_name, patronymic, birth_date.
+CHECK_FIELDS = ["last_name", "first_name", "patronymic", "birth_date"]
+
+# Исполнителю на этой услуге видно только адрес: ни телефона, ни ФИО, ни даты
+# рождения заказчика. Иначе проверять было бы нечего — модератор просто переписал
+# бы то, что ему показали.
+HIDE_CUSTOMER_CONTACTS = True
+
+# Сколько попыток ввода даётся модератору. Первое несовпадение — предупреждение
+# сверить данные с паспортом, последнее — заказ уходит на модерацию
+# администратора: дальше это уже не опечатка.
+MAX_ATTEMPTS = 2
+
+# --- Роли --------------------------------------------------------------------
+
+# Кто видит и может взять заказ на верификацию на стороне исполнителя. Значение
+# читает и скрипт, и — независимо — ядро, когда решает, исполнять ли эффект
+# verify_user: скрипт просит, ядро проверяет.
 VERIFIER_ROLE = "MODERATOR"
 
-# --- Verification mode ------------------------------------------------------
+# --- Кто ставит отметку о верификации ----------------------------------------
 
-# Who turns the customer's verified flag on:
-#   "moderator" — the verifier marking the order done verifies them;
-#   "admin"     — it stays an administrator's checkbox and the script only
-#                 reacts to it.
+#   "moderator" — верификатор, отметивший заказ выполненным, подтверждает
+#                 заказчика;
+#   "admin"     — отметка остаётся галочкой администратора, скрипт только
+#                 реагирует на неё.
 VERIFIED_BY = "moderator"
 
 VERIFIED_BY_MODERATOR = "moderator"
 VERIFIED_BY_ADMIN = "admin"
 
-# --- Node configuration keys -------------------------------------------------
+# --- Ключи настроек узла ------------------------------------------------------
 
 CFG_REWARD_EXECUTOR = "reward_executor"
 CFG_REWARD_CUSTOMER = "reward_customer"
@@ -57,23 +76,24 @@ CFG_APPLY_COMMISSION = "apply_commission"
 CFG_VERIFIER_ROLE = "verifier_role"
 CFG_VERIFIED_BY = "verified_by"
 
-# --- The core's vocabulary ---------------------------------------------------
-# Event names, order statuses and roles as the Go side spells them. Kept here so
-# a rename on that side is one edit in one file per behaviour.
+# --- Словарь ядра -------------------------------------------------------------
+# Имена событий, статусы заказа и роли — так, как их пишет Go. Собраны здесь,
+# чтобы переименование на той стороне было одной правкой в одном файле.
 
 EVENT_ORDER_EXECUTED = "order.executed"
 EVENT_USER_VERIFIED = "user.verified"
+EVENT_ORDER_SUBMISSION = "order.submission"
 
 STATUS_ASSIGNED = "ASSIGNED"
 STATUS_EXECUTED = "EXECUTED"
 
 ROLE_CUSTOMER = "CUSTOMER"
 
-# Prefix of the idempotency key that ties a reward to its order, so the same
-# reward is never paid twice however many events describe the verification.
+# Префикс ключа идемпотентности, который привязывает выплату к заказу: сколько бы
+# событий ни описывало одну верификацию, вознаграждение выплачивается один раз.
 REWARD_KEY_PREFIX = "verification"
 
-# --- Messages ----------------------------------------------------------------
+# --- Сообщения пользователю ---------------------------------------------------
 
 MSG_ALREADY_VERIFIED = "ваш аккаунт уже подтверждён"
 MSG_ALREADY_ORDERED = "услуга верификации уже была заказана"
@@ -82,3 +102,7 @@ MSG_MODERATORS_ONLY = "верификацию выполняют только м
 MSG_BANNED = "аккаунт заблокирован"
 MSG_SELF_VERIFICATION = "нельзя верифицировать самого себя"
 MSG_ORDER_CLOSED = "✅ Аккаунт подтверждён. Заказ закрыт автоматически."
+MSG_CHECK_PASSPORT = "⚠️ Введённые данные не совпадают с данными аккаунта. Сверьте их с паспортом и попробуйте ещё раз."
+MSG_ESCALATED = "🛡️ Данные не совпали повторно. Заказ передан на модерацию администратору."
+MSG_ALREADY_ESCALATED = "заказ уже на модерации администратора"
+REASON_ESCALATED = "данные, введённые модератором, не совпали с данными аккаунта"

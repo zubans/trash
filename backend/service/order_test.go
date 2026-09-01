@@ -448,6 +448,18 @@ func (m *mockCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUI
 func (m *mockCatalogRepo) GetActiveVariants(ctx context.Context) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
+
+// ListNodesWithScript: none of these fixtures carries a script of its own.
+func (m *mockCatalogRepo) ListNodesWithScript(ctx context.Context) ([]*repository.ServiceNode, error) {
+	var withScript []*repository.ServiceNode
+	for _, node := range m.nodes {
+		if node.HasOwnScript() {
+			withScript = append(withScript, node)
+		}
+	}
+	return withScript, nil
+}
+
 func (m *mockCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*repository.ServiceNode, []*repository.ServiceNode, error) {
 	return nil, nil, nil
 }

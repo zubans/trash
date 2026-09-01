@@ -93,6 +93,19 @@ const routes: Array<RouteRecordRaw> = [
         name: 'admin-broadcasts',
         component: () => import('../pages/admin/EmailBroadcasts.vue'),
       },
+      {
+        path: 'escalations',
+        name: 'admin-escalations',
+        component: () => import('../pages/admin/Escalations.vue'),
+      },
+      {
+        // Reference for the script editor in the service constructor. Not in the
+        // menu: it is reached from the "как писать скрипты" link next to the
+        // editor, where the question actually comes up.
+        path: 'service-scripts',
+        name: 'admin-service-scripts-help',
+        component: () => import('../pages/admin/ServiceScriptHelp.vue'),
+      },
     ],
   },
   {
