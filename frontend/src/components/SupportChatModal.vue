@@ -133,6 +133,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { useScrollLock } from '../composables/useScrollLock'
 import api, { resolveFileUrl } from '../services/api'
 import { useAuthStore } from '../stores/auth-store'
 import { Capacitor } from '@capacitor/core'
@@ -446,16 +447,7 @@ export default defineComponent({
 
 
     // Disable body scrolling while modal is open
-    watch(
-      () => props.show,
-      (val) => {
-        if (val) {
-          document.body.style.overflow = 'hidden'
-        } else {
-          document.body.style.overflow = ''
-        }
-      }
-    )
+    useScrollLock(() => props.show)
 
     onUnmounted(() => {
       stopPolling()

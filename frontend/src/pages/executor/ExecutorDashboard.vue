@@ -631,6 +631,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useScrollLock } from '../../composables/useScrollLock'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Capacitor } from '@capacitor/core'
@@ -921,14 +922,13 @@ export default defineComponent({
       } catch (err) {}
     }
 
-    watch([showOrderDetailsModal, showReviewModal, showWithdrawalModal, showExecutorMapModal, showImagePreviewModal], (modalStates) => {
-      const isAnyModalOpen = modalStates.some(state => state === true)
-      if (isAnyModalOpen) {
-        document.body.style.overflow = 'hidden'
-      } else {
-        document.body.style.overflow = ''
-      }
-    })
+    useScrollLock(() => (
+      showOrderDetailsModal.value ||
+      showReviewModal.value ||
+      showWithdrawalModal.value ||
+      showExecutorMapModal.value ||
+      showImagePreviewModal.value
+    ))
 
     const currentUserId = computed(() => authStore.userID)
 

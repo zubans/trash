@@ -451,6 +451,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useScrollLock } from '../../composables/useScrollLock'
 import type { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
@@ -555,14 +556,11 @@ export default defineComponent({
     const showSupportChatModal = ref(false)
     const menuOpen = ref(false)
 
-    watch([showCreateOrderModal, showOrderDetailsModal, showTopUpModal], (modalStates) => {
-      const isAnyModalOpen = modalStates.some(state => state === true)
-      if (isAnyModalOpen) {
-        document.body.style.overflow = 'hidden'
-      } else {
-        document.body.style.overflow = ''
-      }
-    })
+    useScrollLock(() => (
+      showCreateOrderModal.value ||
+      showOrderDetailsModal.value ||
+      showTopUpModal.value
+    ))
     const selectedOrderDetails = ref<any>(null)
     const topUpAmount = ref<number>(100)
     const submitting = ref(false)

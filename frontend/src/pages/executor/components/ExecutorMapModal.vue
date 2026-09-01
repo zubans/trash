@@ -255,7 +255,7 @@ export default defineComponent({
           if (!map) return
           map.invalidateSize()
           const viewRadius = 2500
-          const viewBounds = L.circle([serverLat.value, serverLon.value], { radius: viewRadius }).getBounds()
+          const viewBounds = L.latLng(serverLat.value, serverLon.value).toBounds(viewRadius * 2)
           map.fitBounds(viewBounds, { animate: false })
         }
 
@@ -463,6 +463,10 @@ export default defineComponent({
       recenterOnMe,
       zoomIn,
       zoomOut,
+      // The order cards render these; without them the template throws and
+      // Vue unmounts the whole modal the moment a pin is tapped.
+      serviceTitle,
+      shortAddress,
     }
   },
 })

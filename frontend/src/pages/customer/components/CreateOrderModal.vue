@@ -158,7 +158,8 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, computed, onMounted, watch } from 'vue'
+import { defineComponent, computed, onMounted } from 'vue'
+import { useScrollLock } from '../../../composables/useScrollLock'
 import type { PropType } from 'vue'
 
 export default defineComponent({
@@ -224,13 +225,7 @@ export default defineComponent({
       return 'ph-fill ph-wrench'
     }
 
-    watch(show, (val) => {
-      if (val) {
-        document.body.style.overflow = 'hidden'
-      } else {
-        document.body.style.overflow = ''
-      }
-    }, { immediate: true })
+    useScrollLock(show)
 
     onMounted(() => {
     })
