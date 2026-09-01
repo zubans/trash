@@ -97,6 +97,22 @@ ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 -L 9093:127.0.0.1:9093 user@mo
 
 Результат ночной сверки: `reconcile_ok`, `reconcile_findings{kind}`, `reconcile_drift_rubles{kind}`, `reconcile_last_run_timestamp_seconds`. Если проход **упал**, датчики сохраняют прежние значения и растёт `reconcile_failures_total` — обнулять их означало бы утверждать, что книги в порядке, тогда как их просто никто не проверил.
 
+### Особые услуги (скрипты)
+
+`behavior_hook_errors_total{behavior,hook}` — хук поведения не выполнился. Это не
+диагностическая деталь: гейт при ошибке закрывается, то есть услуга перестала
+показываться и продаваться. Ненулевое значение здесь означает сломанный скрипт.
+
+`behavior_events_total{event,result}` и `behavior_effects_total{kind,result}` —
+обработка доменных событий (`processed`/`failed`) и применённые эффекты
+(`applied`/`duplicate`/`refused`). `duplicate` — норма: так выглядит защита от
+повторной выплаты при перепоставке события. `refused` — скрипт попросил то, на
+что не имеет права; это повод посмотреть, что он попросил.
+
+`behavior_events_pending` — размер очереди `domain_events`. Растёт — значит
+авто-закрытия заказов и вознаграждения не происходят. Механизм целиком:
+[`service_behaviors.md`](./service_behaviors.md).
+
 ### Зависимости и фон
 
 `upstream_requests_total{upstream,operation,result}` для DaData и Nominatim (отдельные значения `cache_hit`, `busy`, `rate_limited`, `unauthorized` — они лечатся по-разному), `mail_sends_total{kind,result}`, `worker_runs_total`, `worker_last_success_timestamp_seconds`, `chat_websocket_connections`.

@@ -111,6 +111,9 @@ type UserRepository interface {
 	// users.role (the primary role) pointing at one of them.
 	SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error
 	UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error
+	// UpdateVerifiedTx is the same write inside the caller's transaction, for
+	// the callers that must commit it together with a domain event.
+	UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error
 	UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error
 	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error
 	GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error)
@@ -569,10 +572,23 @@ func (r *repo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error 
 	return r.SetUserRoles(ctx, id, []string{role})
 }
 
-// UpdateVerified sets the manual verification flag. This is the only writer of
-// users.is_verified; it is reached exclusively through the admin endpoint.
+// UpdateVerified sets the manual verification flag on its own connection.
 func (r *repo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
+	return r.UpdateVerifiedTx(ctx, nil, id, verified)
+}
+
+// UpdateVerifiedTx sets the flag inside the caller's transaction. Both writers
+// of users.is_verified need one: the admin endpoint publishes the
+// user.verified event with the change, and the behaviour applier sets the flag
+// alongside closing the order and paying the verifier. A flag set without its
+// event, or an event without the flag, is exactly the split the outbox exists
+// to prevent.
+func (r *repo) UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error {
+	exec := Querier(r.db)
+	if q != nil {
+		exec = q
+	}
+	_, err := exec.ExecContext(ctx, `UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
 	return err
 }
 

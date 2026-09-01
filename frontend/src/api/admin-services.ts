@@ -11,6 +11,8 @@ export interface CreateServiceNodeRequest {
   is_auction?: boolean
   is_active?: boolean
   sort_order?: number
+  behavior_code?: string
+  behavior_config?: Record<string, unknown>
 }
 
 export interface UpdateServiceNodeRequest {
@@ -21,6 +23,28 @@ export interface UpdateServiceNodeRequest {
   is_auction?: boolean
   is_active?: boolean
   sort_order?: number
+  behavior_code?: string
+  behavior_config?: Record<string, unknown>
+}
+
+// ServiceBehavior is one behaviour script the server has loaded: what a node
+// may name in behavior_code, and what configuring it means. The list comes from
+// the scripts themselves, so a new behaviour appears in the admin panel as soon
+// as its file is deployed.
+export interface ServiceBehavior {
+  code: string
+  name: string
+  description?: string
+  once_per_user?: boolean
+  release_claim_on_cancel?: boolean
+  events?: string[]
+  defaults?: Record<string, unknown>
+  hooks?: string[]
+}
+
+export async function getServiceBehaviors(): Promise<ServiceBehavior[]> {
+  const response = await api.get('/admin/service-behaviors')
+  return Array.isArray(response.data) ? response.data : []
 }
 
 export interface DeleteServiceNodeResult {

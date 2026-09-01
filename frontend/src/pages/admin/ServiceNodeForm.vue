@@ -181,6 +181,41 @@
           <span class="toggle-label">Только для модераторов</span>
         </label>
       </div>
+
+      <!-- Row 7: Special behaviour. The flags above cover the rules that are the
+           same for every service; a behaviour carries the ones that are not. -->
+      <div class="form-divider mt-4 mb-4"></div>
+
+      <div class="form-group mb-4">
+        <label class="form-label">ОСОБОЕ ПОВЕДЕНИЕ (СКРИПТ)</label>
+        <div class="select-wrapper">
+          <select v-model="form.behavior_code" class="form-select" @change="applyBehaviorDefaults">
+            <option value="">Обычная услуга</option>
+            <option v-for="b in behaviors" :key="b.code" :value="b.code">
+              {{ b.name }} ({{ b.code }})
+            </option>
+          </select>
+          <i class="ph-bold ph-caret-down select-arrow"></i>
+        </div>
+        <p v-if="selectedBehavior" class="behavior-hint">
+          {{ selectedBehavior.description }}
+          <span v-if="selectedBehavior.once_per_user"> · заказывается один раз на пользователя</span>
+        </p>
+      </div>
+
+      <div v-if="form.behavior_code" class="form-group">
+        <label class="form-label">НАСТРОЙКИ ПОВЕДЕНИЯ (JSON)</label>
+        <textarea
+          v-model="form.behavior_config"
+          class="form-input code-font behavior-config"
+          rows="5"
+          spellcheck="false"
+        ></textarea>
+        <p v-if="configError" class="behavior-error">{{ configError }}</p>
+        <p v-else class="behavior-hint">
+          Значения по умолчанию берутся из скрипта; здесь задаётся только то, что отличается.
+        </p>
+      </div>
     </div>
 
     <!-- Footer -->
@@ -196,8 +231,9 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed, watch, type PropType } from 'vue'
+import { defineComponent, ref, computed, watch, onMounted, type PropType } from 'vue'
 import type { ServiceNode } from '../../api/services'
+import { getServiceBehaviors, type ServiceBehavior } from '../../api/admin-services'
 
 export default defineComponent({
   name: 'ServiceNodeForm',
@@ -219,6 +255,15 @@ export default defineComponent({
   setup(props, { emit }) {
     const isEditing = computed(() => props.node !== null)
 
+    // The behaviour list comes from the server, which reads it from the scripts
+    // themselves: a behaviour deployed today is selectable here today, with no
+    // change to this form.
+    const behaviors = ref<ServiceBehavior[]>([])
+    const configError = ref('')
+
+    const formatConfig = (config?: Record<string, unknown> | null) =>
+      config && Object.keys(config).length ? JSON.stringify(config, null, 2) : '{}'
+
     const buildForm = () => {
       if (props.node) {
         return {
@@ -236,6 +281,8 @@ export default defineComponent({
           requires_verification: props.node.requires_verification || false,
           moderator_only: props.node.moderator_only || false,
           min_age: props.node.min_age || 0,
+          behavior_code: props.node.behavior_code || '',
+          behavior_config: formatConfig(props.node.behavior_config),
         }
       }
       return {
@@ -253,10 +300,37 @@ export default defineComponent({
         requires_verification: false,
         moderator_only: false,
         min_age: 0,
+        behavior_code: '',
+        behavior_config: '{}',
       }
     }
 
     const form = ref(buildForm())
+
+    const selectedBehavior = computed(() =>
+      behaviors.value.find((b) => b.code === form.value.behavior_code) || null
+    )
+
+    // Switching behaviour reloads the new script's defaults, so the admin edits
+    // real values instead of guessing which keys the behaviour reads.
+    const applyBehaviorDefaults = () => {
+      configError.value = ''
+      if (!form.value.behavior_code) {
+        form.value.behavior_config = '{}'
+        return
+      }
+      form.value.behavior_config = formatConfig(selectedBehavior.value?.defaults as Record<string, unknown>)
+    }
+
+    onMounted(async () => {
+      try {
+        behaviors.value = await getServiceBehaviors()
+      } catch {
+        // An admin panel that cannot list behaviours must still be able to edit
+        // the rest of a service; the field simply offers nothing but "ordinary".
+        behaviors.value = []
+      }
+    })
 
     watch(
       () => props.node,
@@ -267,6 +341,17 @@ export default defineComponent({
     )
 
     const submit = () => {
+      let behaviorConfig: Record<string, unknown> = {}
+      if (form.value.behavior_code) {
+        try {
+          behaviorConfig = JSON.parse(form.value.behavior_config || '{}')
+        } catch (e) {
+          configError.value = 'Настройки должны быть корректным JSON'
+          return
+        }
+        configError.value = ''
+      }
+
       const payload: any = {
         parent_id: form.value.parent_id || undefined,
         name: {
@@ -284,6 +369,8 @@ export default defineComponent({
         requires_verification: form.value.requires_verification,
         moderator_only: form.value.moderator_only,
         min_age: form.value.min_age || 0,
+        behavior_code: form.value.behavior_code || '',
+        behavior_config: behaviorConfig,
       }
 
       if (!isEditing.value) {
@@ -301,6 +388,10 @@ export default defineComponent({
     return {
       form,
       isEditing,
+      behaviors,
+      selectedBehavior,
+      applyBehaviorDefaults,
+      configError,
       submit,
     }
   },
@@ -519,6 +610,26 @@ export default defineComponent({
 .form-divider {
   height: 1px;
   border-top: 1px dashed #e2e8f0;
+}
+
+.behavior-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.behavior-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #dc2626;
+}
+
+.behavior-config {
+  height: auto;
+  padding: 12px 16px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 /* Toggles Card */

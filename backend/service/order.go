@@ -33,6 +33,48 @@ type OrderService struct {
 	// point the map and the accept-radius check use — so the list can never
 	// diverge from what the executor can actually take.
 	executorGeoRepo repository.ExecutorGeoRepository
+	// behaviors, claimRepo and events are the scripted-service wiring. All
+	// three are optional and travel together: without them a service node that
+	// names a behaviour is refused rather than silently treated as ordinary
+	// (see the gates in eligibility.go), and no domain events are published.
+	behaviors *Behaviors
+	claimRepo repository.ServiceClaimRepository
+	events    repository.EventRepository
+}
+
+// WithBehaviors wires scripted services into the order lifecycle: the pricing
+// and eligibility hooks, the once-per-user claim, and the domain events the
+// behaviour dispatcher reacts to.
+func (s *OrderService) WithBehaviors(behaviors *Behaviors, claimRepo repository.ServiceClaimRepository, events repository.EventRepository) *OrderService {
+	s.behaviors = behaviors
+	s.claimRepo = claimRepo
+	s.events = events
+	return s
+}
+
+// publishOrderEvent appends a domain event about an order inside the caller's
+// transaction. A failure to write is returned, because an event that was not
+// recorded is a reaction that will never happen.
+//
+// Orders for services with no behaviour publish nothing. An event is delivered
+// to the behaviour of its own order and to nothing else, so an event for an
+// ordinary service could never do anything — writing one per lifecycle step for
+// every order would fill the table with rows whose only future is being marked
+// processed. When the variant cannot be resolved the event is written anyway:
+// an unnecessary event is a no-op, a missing one is a reward nobody gets.
+func (s *OrderService) publishOrderEvent(ctx context.Context, tx *sql.Tx, eventType string, order *repository.Order, actorID *uuid.UUID) error {
+	if s.events == nil || order == nil {
+		return nil
+	}
+	if variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID); err == nil && !s.behaviors.governs(variant) {
+		return nil
+	}
+	return s.events.Publish(ctx, tx, &repository.DomainEvent{
+		Type:        eventType,
+		SubjectType: repository.EventSubjectOrder,
+		SubjectID:   order.ID,
+		ActorID:     actorID,
+	})
 }
 
 // NewOrderService creates an OrderService.
@@ -199,6 +241,15 @@ func (s *OrderService) CalculatePrice(ctx context.Context, serviceVariantID uuid
 	if variant == nil || !variant.IsVariant() {
 		return money.Zero, errors.New("invalid service variant")
 	}
+	// A behaviour that prices its service overrides the catalog outright,
+	// tariff coefficients included: "free" has to stay free on an ASAP order
+	// too, and a downgrade cannot make it cheaper than nothing.
+	if scripted, ok, err := s.behaviors.Price(ctx, variant); err != nil {
+		return money.Zero, err
+	} else if ok {
+		return scripted, nil
+	}
+
 	if variant.BasePrice == nil {
 		return money.Zero, errors.New("variant has no base price")
 	}
@@ -265,7 +316,7 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		if err != nil {
 			return nil, err
 		}
-		if err := canCustomerOrderVariant(customer, variant); err != nil {
+		if err := canCustomerOrderVariant(ctx, s.behaviors, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -331,13 +382,30 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		if err := s.orderRepo.Create(ctx, tx, order); err != nil {
 			return err
 		}
+		// A service that may be ordered once per user claims its row here, in
+		// the same transaction as the order. Two simultaneous requests both pass
+		// the can_order hook; only one of them gets the row.
+		if s.behaviors.OncePerUser(variant) {
+			if s.claimRepo == nil {
+				return errors.New("service variant is not available")
+			}
+			if err := s.claimRepo.Claim(ctx, tx, customerID, variant.ID, order.ID); err != nil {
+				return err
+			}
+		}
 		// Reserve is a single conditional debit paired with a credit to escrow:
 		// the money is not destroyed, it moves to the account that holds it for
 		// the duration of the order.
-		return s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID)
+		if err := s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID); err != nil {
+			return err
+		}
+		return s.publishOrderEvent(ctx, tx, repository.EventOrderCreated, order, &customerID)
 	}); err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {
 			return nil, errors.New("insufficient balance")
+		}
+		if errors.Is(err, repository.ErrServiceAlreadyClaimed) {
+			return nil, errors.New("услуга уже была заказана")
 		}
 		return nil, err
 	}
@@ -418,7 +486,15 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 		return fmt.Errorf("превышен лимит непотвержденных заказчиком исполненных заказов (не более %d)", maxExecuted)
 	}
 
-	if err := s.orderRepo.Assign(ctx, nil, orderID, executorID); err != nil {
+	// The assignment and the event it produces share one transaction: a
+	// behaviour that reacts to an accepted order must not see an order that was
+	// never assigned, nor miss one that was.
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if err := s.orderRepo.Assign(ctx, tx, orderID, executorID); err != nil {
+			return err
+		}
+		return s.publishOrderEvent(ctx, tx, repository.EventOrderAccepted, order, &executorID)
+	}); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return errors.New("заказ уже взят другим исполнителем")
 		}
@@ -444,7 +520,7 @@ func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID 
 		return err
 	}
 	customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-	return canViewOrTakeOrder(viewer, customer, variant)
+	return canViewOrTakeOrder(ctx, s.behaviors, viewer, customer, variant)
 }
 
 // settingsFloat reads a numeric system setting with a fallback default.
@@ -498,7 +574,14 @@ func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uui
 		return errors.New("order is not assigned to this executor")
 	}
 
-	if err := s.orderRepo.Execute(ctx, nil, orderID); err != nil {
+	// Marking the job done is what verifies a customer on the verification
+	// service, so the event has to be as durable as the status change itself.
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if err := s.orderRepo.Execute(ctx, tx, orderID); err != nil {
+			return err
+		}
+		return s.publishOrderEvent(ctx, tx, repository.EventOrderExecuted, order, &executorID)
+	}); err != nil {
 		return err
 	}
 	metrics.OrderEvent("executed")
@@ -522,69 +605,81 @@ func (s *OrderService) ConfirmOrder(ctx context.Context, orderID uuid.UUID) erro
 	// Counted after the transaction returns, never inside it: a confirmation
 	// that rolled back paid nobody and must not show up as revenue.
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
-		if err != nil {
-			return errors.New("order not found")
-		}
-		// The customer may approve either after the executor marked the order as
-		// EXECUTED, or earlier while it is still ASSIGNED — approving early simply
-		// closes the order and pays the executor the held amount, same as the
-		// EXECUTED path below.
-		if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned {
-			return errors.New("order must be assigned or marked as executed before confirmation")
-		}
-		if order.ExecutorID == nil {
-			return errors.New("order has no executor")
-		}
-
-		finalAmount := order.HoldAmount
-		isDowngraded := order.IsDowngraded
-		if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
-			downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
-			if err != nil {
-				return err
-			}
-			if downgraded < finalAmount {
-				isDowngraded = true
-				finalAmount = downgraded
-			}
-		}
-
-		// Escrow holds exactly order.HoldAmount for this order, and it drains
-		// completely here: the unspent part back to the customer, the rest to
-		// the executor.
-		refund := order.HoldAmount.Sub(finalAmount)
-		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
-			return err
-		}
-
-		// The customer's money left the balance at hold time; this entry records
-		// the hold being spent rather than a second debit.
-		if err := s.ledger.Note(ctx, tx, order.CustomerID, repository.AccountEscrow, finalAmount, repository.TransactionTypePayment, &order.ID); err != nil {
-			return err
-		}
-
-		// The platform keeps its share of what the customer paid and the executor
-		// is rewarded the rest. Escrow still drains to exactly zero for this
-		// order: refund + commission + reward = the hold.
-		commission := commissionOn(finalAmount, s.loadSettings(ctx))
-		if err := s.ledger.Commission(ctx, tx, *order.ExecutorID, commission, &order.ID); err != nil {
-			return err
-		}
-
-		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, *order.ExecutorID, finalAmount.Sub(commission), repository.TransactionTypeReward, &order.ID, nil); err != nil {
-			return err
-		}
-
-		if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
-			return err
-		}
-		return s.orderRepo.Confirm(ctx, tx, orderID, finalAmount, isDowngraded)
+		return s.confirmTx(ctx, tx, orderID)
 	})
 	if err == nil {
 		metrics.OrderEvent("confirmed")
 	}
 	return err
+}
+
+// confirmTx is the confirmation itself, inside a caller's transaction. It has
+// two callers: a customer confirming, and the behaviour applier closing an
+// order a script declared complete (a verification that has happened, say).
+// Both have to pay out through exactly the same steps, so there is one copy of
+// them.
+func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID) error {
+	order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+	if err != nil {
+		return errors.New("order not found")
+	}
+	// The customer may approve either after the executor marked the order as
+	// EXECUTED, or earlier while it is still ASSIGNED — approving early simply
+	// closes the order and pays the executor the held amount, same as the
+	// EXECUTED path below.
+	if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned {
+		return errors.New("order must be assigned or marked as executed before confirmation")
+	}
+	if order.ExecutorID == nil {
+		return errors.New("order has no executor")
+	}
+
+	finalAmount := order.HoldAmount
+	isDowngraded := order.IsDowngraded
+	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
+		downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
+		if err != nil {
+			return err
+		}
+		if downgraded < finalAmount {
+			isDowngraded = true
+			finalAmount = downgraded
+		}
+	}
+
+	// Escrow holds exactly order.HoldAmount for this order, and it drains
+	// completely here: the unspent part back to the customer, the rest to
+	// the executor.
+	refund := order.HoldAmount.Sub(finalAmount)
+	if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
+		return err
+	}
+
+	// The customer's money left the balance at hold time; this entry records
+	// the hold being spent rather than a second debit.
+	if err := s.ledger.Note(ctx, tx, order.CustomerID, repository.AccountEscrow, finalAmount, repository.TransactionTypePayment, &order.ID); err != nil {
+		return err
+	}
+
+	// The platform keeps its share of what the customer paid and the executor
+	// is rewarded the rest. Escrow still drains to exactly zero for this
+	// order: refund + commission + reward = the hold.
+	commission := commissionOn(finalAmount, s.loadSettings(ctx))
+	if err := s.ledger.Commission(ctx, tx, *order.ExecutorID, commission, &order.ID); err != nil {
+		return err
+	}
+
+	if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, *order.ExecutorID, finalAmount.Sub(commission), repository.TransactionTypeReward, &order.ID, nil); err != nil {
+		return err
+	}
+
+	if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
+		return err
+	}
+	if err := s.orderRepo.Confirm(ctx, tx, orderID, finalAmount, isDowngraded); err != nil {
+		return err
+	}
+	return s.publishOrderEvent(ctx, tx, repository.EventOrderConfirmed, order, nil)
 }
 
 // maxTipAmount is a fat-finger ceiling on a single tip. The balance check is
@@ -674,35 +769,56 @@ func (s *OrderService) CancelUnclaimedAuction(ctx context.Context, orderID uuid.
 
 func (s *OrderService) cancel(ctx context.Context, orderID uuid.UUID, allowed ...repository.OrderStatus) error {
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
-		if err != nil {
-			return errors.New("order not found")
-		}
-		permitted := false
-		for _, status := range allowed {
-			if order.Status == status {
-				permitted = true
-				break
-			}
-		}
-		if !permitted {
-			return errors.New("order cannot be canceled")
-		}
-
-		if order.HoldAmount.IsPositive() {
-			if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
-				return err
-			}
-			if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
-				return err
-			}
-		}
-		return s.orderRepo.Cancel(ctx, tx, orderID)
+		return s.cancelTx(ctx, tx, orderID, allowed...)
 	})
 	if err == nil {
 		metrics.OrderEvent("cancelled")
 	}
 	return err
+}
+
+// cancelTx is the cancellation itself, inside a caller's transaction: the same
+// refund, claim release and event whether a customer cancelled, a worker swept
+// an unclaimed auction, or a behaviour script asked for it.
+func (s *OrderService) cancelTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID, allowed ...repository.OrderStatus) error {
+	order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+	if err != nil {
+		return errors.New("order not found")
+	}
+	permitted := false
+	for _, status := range allowed {
+		if order.Status == status {
+			permitted = true
+			break
+		}
+	}
+	if !permitted {
+		return errors.New("order cannot be canceled")
+	}
+
+	if order.HoldAmount.IsPositive() {
+		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
+			return err
+		}
+		if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
+			return err
+		}
+	}
+	if err := s.orderRepo.Cancel(ctx, tx, orderID); err != nil {
+		return err
+	}
+	// A cancelled order gives the user their one attempt back. Without this
+	// a customer who cancelled a verification order could never order
+	// another one, and so could never get verified.
+	if s.claimRepo != nil {
+		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
+		if err == nil && s.behaviors.ReleasesClaimOnCancel(variant) {
+			if err := s.claimRepo.ReleaseByOrder(ctx, tx, orderID); err != nil {
+				return err
+			}
+		}
+	}
+	return s.publishOrderEvent(ctx, tx, repository.EventOrderCanceled, order, nil)
 }
 
 // Cancel cancels an order for a specific customer (alias compatible with handler).
@@ -750,7 +866,7 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 		if err != nil {
 			return nil, err
 		}
-		if err := canCustomerOrderVariant(customer, variant); err != nil {
+		if err := canCustomerOrderVariant(ctx, s.behaviors, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -908,7 +1024,7 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		// accept path enforces: moderator-only orders go to moderators; normal
 		// orders follow the customer-verification segmentation and the standard
 		// executor gates (requires_verification, min_age, ban).
-		if canViewOrTakeOrder(viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
+		if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
 			continue
 		}
 

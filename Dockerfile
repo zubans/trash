@@ -30,6 +30,10 @@ COPY --from=build /app/migrate .
 COPY --from=build /app/reconcile .
 # Migrations ship with the image: the server applies pending ones on start.
 COPY --from=build /app/migrations ./migrations
+# The behaviour scripts are compiled into the binary as well; this copy is what
+# BEHAVIORS_DIR points at when a rule has to be corrected on a running
+# deployment without rebuilding the image.
+COPY --from=build /app/behaviors ./behaviors
 RUN mkdir -p /app/certs
 EXPOSE 8080
 CMD ["./healthlogin"]

@@ -14,6 +14,12 @@ export interface ServiceNode {
   requires_verification?: boolean
   moderator_only?: boolean
   min_age?: number
+  // Behaviour script that carries this service's own rules (who sees it, what
+  // it costs, what happens when it is done). Empty for an ordinary service.
+  behavior_code?: string
+  // That script's per-node configuration. Its keys belong to the behaviour, not
+  // to the catalog, which is why this stays an open object.
+  behavior_config?: Record<string, unknown>
   // Set when the node was retired. The catalog never returns deleted nodes to
   // the app; the admin panel asks for them explicitly.
   deleted_at?: string | null

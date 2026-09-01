@@ -238,6 +238,32 @@ var (
 		Name:      "chat_messages_total",
 		Help:      "Chat messages accepted by the server, by conversation kind.",
 	}, []string{"kind"})
+
+	// ---- Service behaviours ------------------------------------------------
+
+	behaviorHookErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "behavior_hook_errors_total",
+		Help:      "Behaviour script hooks that failed to run, by behaviour and hook. Every one of these is a service gate that failed closed.",
+	}, []string{"behavior", "hook"})
+
+	behaviorEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "behavior_events_total",
+		Help:      "Domain events handed to the behaviour dispatcher, by outcome.",
+	}, []string{"event", "result"})
+
+	behaviorEffects = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "behavior_effects_total",
+		Help:      "Effects a behaviour asked for, by kind and outcome (applied, duplicate, refused).",
+	}, []string{"kind", "result"})
+
+	behaviorBacklog = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "behavior_events_pending",
+		Help:      "Unprocessed domain events. A backlog that grows means rewards and auto-completions are not happening.",
+	})
 )
 
 func init() {
@@ -263,8 +289,27 @@ func init() {
 		upstreamRequests, upstreamDuration,
 		mailSends, mailDuration,
 		chatConnections, chatMessages,
+		behaviorHookErrors, behaviorEvents, behaviorEffects, behaviorBacklog,
 	)
 }
+
+// BehaviorHookError counts a hook that could not be evaluated. The gate it
+// guards has failed closed, so this is a service outage for that node, not a
+// diagnostic detail.
+func BehaviorHookError(behavior, hook string) {
+	behaviorHookErrors.WithLabelValues(behavior, hook).Inc()
+}
+
+// BehaviorEvent counts one dispatched domain event: "processed", "failed" or
+// "skipped" (no behaviour cared about it).
+func BehaviorEvent(event, result string) { behaviorEvents.WithLabelValues(event, result).Inc() }
+
+// BehaviorEffect counts one effect: "applied", "duplicate" (an idempotency key
+// that was already used) or "refused" (a guard in the core said no).
+func BehaviorEffect(kind, result string) { behaviorEffects.WithLabelValues(kind, result).Inc() }
+
+// SetBehaviorBacklog publishes the number of unprocessed domain events.
+func SetBehaviorBacklog(pending int) { behaviorBacklog.Set(float64(pending)) }
 
 // SetBuildInfo publishes the running version as a constant 1-valued gauge, the
 // usual way to make "which build is this?" answerable from a dashboard.

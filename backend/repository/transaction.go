@@ -38,6 +38,10 @@ const (
 	// of the system. Neither touches a user balance.
 	TransactionTypeCommission       TransactionType = "COMMISSION"
 	TransactionTypeCommissionPayout TransactionType = "COMMISSION_PAYOUT"
+	// TransactionTypeBonus credits a user from the platform's own pocket: the
+	// reward a behaviour script pays for performing a service that the customer
+	// did not pay for. It faces the BONUSES account (see migration 043).
+	TransactionTypeBonus TransactionType = "BONUS"
 )
 
 // ledgerSigns declares how each transaction type moves a user's balance. This is
@@ -69,6 +73,9 @@ var ledgerSigns = map[TransactionType]int{
 	// out — is there to make the entry findable, not to move their balance.
 	TransactionTypeCommission:       0,
 	TransactionTypeCommissionPayout: 0,
+	// A bonus credits the user; the platform's BONUSES account goes negative by
+	// the same amount, so the books still close.
+	TransactionTypeBonus: +1,
 }
 
 // LedgerSign reports how a transaction type moves the balance, and whether the

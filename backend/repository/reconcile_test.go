@@ -31,6 +31,7 @@ var allTransactionTypes = []TransactionType{
 	TransactionTypeTipReward,
 	TransactionTypeCommission,
 	TransactionTypeCommissionPayout,
+	TransactionTypeBonus,
 }
 
 func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
@@ -54,6 +55,7 @@ func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 		TransactionTypeReward:    +1,
 		TransactionTypeRefund:    +1,
 		TransactionTypeTipReward: +1,
+		TransactionTypeBonus:     +1,
 		// Money leaving.
 		TransactionTypeHold:           -1,
 		TransactionTypeFine:           -1,

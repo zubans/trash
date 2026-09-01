@@ -41,6 +41,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `029_system_accounts.sql` | System accounts, so that money has a counterparty. |
 | `030_customer_addresses.sql` | Saved pickup addresses (`customer_addresses`). |
 | `031_structured_addresses.sql` | Addresses stored as their parts: `region`, `city`, `street`, `house`, `flat`, `fias_id`, `geo_lat`, `geo_lon`, `source`, plus a partial index on `fias_id` and a backfill from the old single-line format. See [`address_suggestions.md`](./address_suggestions.md). |
+| `043_service_behaviors.sql` | Scripted services: `service_nodes.behavior_code` / `behavior_config`, the `domain_events` outbox, `user_service_claims`, `behavior_effects`, the `BONUSES` account and the `BONUS` transaction type. Seeds the verification service switched off. See [`service_behaviors.md`](./service_behaviors.md). |
 
 ## How to run manually
 
@@ -61,4 +62,5 @@ done
 * `system_settings.value` is `VARCHAR` and supports both numeric and string settings.
 * `users.password` stores a bcrypt hash; plain text must never be persisted.
 * Two files share the `026_` prefix (`026_normalize_phone_numbers.sql` and `026_normalize_user_phones.sql`); both are idempotent, so the apply order between them does not matter.
+* The table above skips `032`–`042`; those migrations are described in the module documents that introduced them.
 * `customer_addresses.address` is kept as the display line alongside the structured columns added in `031`, so code that reads it did not have to change at once.

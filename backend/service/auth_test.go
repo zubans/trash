@@ -87,6 +87,12 @@ func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string
 	return sql.ErrNoRows
 }
 
+// UpdateVerifiedTx runs the same write; the fake has no transactions, so the
+// querier is ignored.
+func (m *mockRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
+	return m.UpdateVerified(ctx, id, verified)
+}
+
 func (m *mockRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
 	for _, u := range m.users {
 		if u.ID == id {

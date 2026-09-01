@@ -32,7 +32,11 @@ var ErrCustomerNotEligible = errors.New("customer is not eligible for this servi
 // cannot be bypassed by posting a known variant id directly. Age (min_age) is
 // deliberately an executor-side gate only: it restricts who may perform the job,
 // not who may request it.
-func canCustomerOrderVariant(customer *repository.User, variant *repository.ServiceNode) error {
+//
+// A variant governed by a behaviour script gets the script's can_order hook on
+// top of these rules, never instead of them: a script may restrict who orders a
+// service, it cannot hand out an exemption from a ban.
+func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, customer *repository.User, variant *repository.ServiceNode) error {
 	if customer == nil {
 		return ErrCustomerNotEligible
 	}
@@ -45,7 +49,7 @@ func canCustomerOrderVariant(customer *repository.User, variant *repository.Serv
 	if variant.RequiresVerification && !customer.IsVerified() {
 		return errors.New("для этой услуги требуется подтверждённый аккаунт")
 	}
-	return nil
+	return behaviors.CanOrder(ctx, customer, variant)
 }
 
 // formatGeo renders a coordinate pair in the "lat,lon" form used by
@@ -112,13 +116,15 @@ func canExecutorTakeOrder(executor *repository.User, variant *repository.Service
 // Rules:
 //   - Moderator-only service: only a MODERATOR may see or take the order; the
 //     normal executor gates do not apply (moderators are trusted staff).
+//   - Scripted service: whatever its behaviour's can_view_or_take hook says, on
+//     top of the rules below.
 //   - Normal service: the executor gates (ban, requires_verification, min_age)
 //     apply, and on top of them a customer-verification segmentation —
-//       * an unverified customer's order is visible to everyone (this is what
-//         lets an unverified executor work the unverified pool);
-//       * a verified customer's order is visible only to a verified executor or
-//         to a moderator.
-func canViewOrTakeOrder(viewer *repository.User, customer *repository.User, variant *repository.ServiceNode) error {
+//   - an unverified customer's order is visible to everyone (this is what
+//     lets an unverified executor work the unverified pool);
+//   - a verified customer's order is visible only to a verified executor or
+//     to a moderator.
+func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, viewer *repository.User, customer *repository.User, variant *repository.ServiceNode) error {
 	if viewer == nil {
 		return ErrExecutorNotEligible
 	}
@@ -129,7 +135,7 @@ func canViewOrTakeOrder(viewer *repository.User, customer *repository.User, vari
 		if viewer.Status == "BANNED" {
 			return errors.New("аккаунт заблокирован")
 		}
-		return nil
+		return behaviors.CanViewOrTake(ctx, viewer, customer, variant)
 	}
 	if err := canExecutorTakeOrder(viewer, variant); err != nil {
 		return err
@@ -139,5 +145,7 @@ func canViewOrTakeOrder(viewer *repository.User, customer *repository.User, vari
 			return ErrExecutorNotEligible
 		}
 	}
-	return nil
+	// The script runs last and can only narrow what the built-in rules allowed.
+	// The verification service uses it to admit moderators alone.
+	return behaviors.CanViewOrTake(ctx, viewer, customer, variant)
 }

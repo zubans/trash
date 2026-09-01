@@ -25,6 +25,10 @@ type MatchingService struct {
 	catalogRepo  repository.ServiceCatalogRepository
 	geoRepo      repository.ExecutorGeoRepository
 	settingsRepo repository.SettingsRepository
+	// behaviors applies the scripted rules of a service, so automatic matching
+	// cannot assign an order to somebody who could not have accepted it by
+	// hand. Optional.
+	behaviors *Behaviors
 	// leaderGuard, when set, runs a cycle only on the process holding the
 	// matching job's lock. See WithLeaderGuard.
 	leaderGuard func(func() error) error
@@ -38,6 +42,12 @@ func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo reposito
 		userRepo:    userRepo,
 		catalogRepo: catalogRepo,
 	}
+}
+
+// WithBehaviors wires the behaviour scripts into the matcher's candidate test.
+func (s *MatchingService) WithBehaviors(behaviors *Behaviors) *MatchingService {
+	s.behaviors = behaviors
+	return s
 }
 
 // WithGeo attaches the stores automatic matching needs to bound assignment by
@@ -210,7 +220,7 @@ func (s *MatchingService) loadRound(ctx context.Context, orders []*repository.Or
 //
 // The inputs come from the pre-loaded round; the predicate is the same one the
 // map, the order list and the accept path use.
-func (s *MatchingService) executorEligible(round *matchingRound, executorID uuid.UUID, order *repository.Order) bool {
+func (s *MatchingService) executorEligible(ctx context.Context, round *matchingRound, executorID uuid.UUID, order *repository.Order) bool {
 	if s.userRepo == nil || s.catalogRepo == nil {
 		return true
 	}
@@ -222,7 +232,7 @@ func (s *MatchingService) executorEligible(round *matchingRound, executorID uuid
 	if !ok {
 		return false
 	}
-	return canViewOrTakeOrder(executor, round.users[order.CustomerID], variant) == nil
+	return canViewOrTakeOrder(ctx, s.behaviors, executor, round.users[order.CustomerID], variant) == nil
 }
 
 // MatchOrders executes the matching cycle.
@@ -279,7 +289,7 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 			if round.activeOrders[execID] > 0 {
 				continue
 			}
-			if !s.executorEligible(round, execID, order) {
+			if !s.executorEligible(ctx, round, execID, order) {
 				continue
 			}
 			position, known := round.positions[execID]

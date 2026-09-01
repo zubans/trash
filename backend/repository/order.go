@@ -88,6 +88,11 @@ type OrderRepository interface {
 
 	GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error)
 	GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
+	// FindOpenByCustomer returns the customer's orders that have not finished:
+	// the ones a domain event about that customer can still change. Bounded by
+	// status rather than by a page size, because "still running" is a small set
+	// however long the customer's history is.
+	FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
 	GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error)
 }
 
@@ -446,6 +451,30 @@ func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID)
 		result[i] = &orders[i]
 	}
 	return result, nil
+}
+
+func (r *orderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+orderColumns+` FROM orders o
+		 WHERE o.customer_id = $1 AND o.status IN ($2, $3, $4)
+		 ORDER BY o.created_at`,
+		customerID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := []*Order{}
+	for rows.Next() {
+		o, err := scanOrderRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		order := o
+		orders = append(orders, &order)
+	}
+	return orders, rows.Err()
 }
 
 // GetAvailableAuctionOrders returns open auction orders.

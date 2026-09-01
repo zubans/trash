@@ -13,16 +13,27 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/repository"
+	"healthlogin/backend/service"
 )
 
 // ServiceCatalogHandler handles public and admin service catalog HTTP endpoints.
 type ServiceCatalogHandler struct {
 	catalogRepo repository.ServiceCatalogRepository
+	// behaviors decides visibility for nodes whose rules come from a script.
+	// Optional: without it only the built-in flags apply, which is what the
+	// catalog did before behaviours existed.
+	behaviors *service.Behaviors
 }
 
 // NewServiceCatalogHandler creates a ServiceCatalogHandler.
 func NewServiceCatalogHandler(catalogRepo repository.ServiceCatalogRepository) *ServiceCatalogHandler {
 	return &ServiceCatalogHandler{catalogRepo: catalogRepo}
+}
+
+// WithBehaviors wires the behaviour scripts into the catalog listings.
+func (h *ServiceCatalogHandler) WithBehaviors(behaviors *service.Behaviors) *ServiceCatalogHandler {
+	h.behaviors = behaviors
+	return h
 }
 
 // hideVerificationOnly reports whether the requester is a customer who has not
@@ -35,14 +46,25 @@ func hideVerificationOnly(r *http.Request) bool {
 	return user != nil && user.Role == "CUSTOMER" && !user.IsVerified()
 }
 
-// filterVerificationOnly drops nodes flagged requires_verification when hide is set.
-func filterVerificationOnly(nodes []*repository.ServiceNode, hide bool) []*repository.ServiceNode {
-	if !hide {
-		return nodes
-	}
+// visibleTo drops the nodes this requester must not see: the ones flagged
+// requires_verification when they are an unverified customer, and the ones a
+// behaviour script hides from them.
+//
+// Both rules are applied here, in one pass, because a node the caller cannot
+// order must not be listed either — a listing that shows what checkout will
+// refuse is worse than not listing it at all. The claim counts are read once
+// per request, not once per node.
+func (h *ServiceCatalogHandler) visibleTo(r *http.Request, nodes []*repository.ServiceNode) []*repository.ServiceNode {
+	hide := hideVerificationOnly(r)
+	user := userFromContext(r)
+	claims := h.behaviors.ClaimsFor(r.Context(), user)
+
 	out := make([]*repository.ServiceNode, 0, len(nodes))
 	for _, n := range nodes {
-		if n.RequiresVerification {
+		if hide && n.RequiresVerification {
+			continue
+		}
+		if !h.behaviors.Visible(r.Context(), user, n, claims) {
 			continue
 		}
 		out = append(out, n)
@@ -57,7 +79,7 @@ func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *htt
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, filterVerificationOnly(nodes, hideVerificationOnly(r)))
+	writeJSON(w, h.visibleTo(r, nodes))
 }
 
 // ListChildren handles GET /service-categories/:id/children.
@@ -72,7 +94,7 @@ func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, filterVerificationOnly(nodes, hideVerificationOnly(r)))
+	writeJSON(w, h.visibleTo(r, nodes))
 }
 
 // ListCategoryVariants handles GET /service-categories/:id/variants.
@@ -94,7 +116,7 @@ func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *h
 			variants = append(variants, n)
 		}
 	}
-	writeJSON(w, filterVerificationOnly(variants, hideVerificationOnly(r)))
+	writeJSON(w, h.visibleTo(r, variants))
 }
 
 // ListVariants handles GET /service-variants.
@@ -104,7 +126,7 @@ func (h *ServiceCatalogHandler) ListVariants(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, filterVerificationOnly(nodes, hideVerificationOnly(r)))
+	writeJSON(w, h.visibleTo(r, nodes))
 }
 
 // GetVariant handles GET /service-variants/:id.
@@ -123,9 +145,9 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// An unverified customer cannot order a verification-only variant, so it must
-	// not be readable by id either — otherwise the gate is only cosmetic.
-	if variant != nil && variant.RequiresVerification && hideVerificationOnly(r) {
+	// A variant the caller cannot see in a listing must not be readable by id
+	// either — otherwise the gate is only cosmetic.
+	if variant != nil && len(h.visibleTo(r, []*repository.ServiceNode{variant})) == 0 {
 		http.Error(w, "variant not found", http.StatusNotFound)
 		return
 	}
@@ -133,6 +155,17 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 		"variant": variant,
 		"path":    path,
 	})
+}
+
+// AdminListBehaviors handles GET /admin/service-behaviors. The admin panel
+// renders the behaviour picker and its configuration form from this: the codes
+// a node may name, what each one does, and the defaults it applies.
+func (h *ServiceCatalogHandler) AdminListBehaviors(w http.ResponseWriter, r *http.Request) {
+	if h.behaviors == nil || h.behaviors.Engine() == nil {
+		writeJSON(w, []interface{}{})
+		return
+	}
+	writeJSON(w, h.behaviors.Engine().Manifests())
 }
 
 // AdminListNodes handles GET /admin/service-nodes. Retired nodes are left out
@@ -376,6 +409,14 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 
 	if node.Name == nil || node.Name["ru"] == "" {
 		return errors.New("name must contain at least the 'ru' key")
+	}
+
+	// A code with no script behind it would make every gate on the node fail
+	// closed, i.e. quietly take the service off sale. Refuse the edit instead.
+	if node.BehaviorCode != "" {
+		if h.behaviors == nil || !h.behaviors.Engine().Has(node.BehaviorCode) {
+			return errors.New("unknown behavior_code: " + node.BehaviorCode)
+		}
 	}
 
 	if node.NodeType == repository.ServiceNodeTypeVariant {

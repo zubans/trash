@@ -171,6 +171,22 @@ func (m *mockOrderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.U
 	return cust, nil
 }
 
+// FindOpenByCustomer returns the customer's unfinished orders, the ones a
+// domain event about them can still change.
+func (m *mockOrderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*repository.Order, error) {
+	var open []*repository.Order
+	for _, o := range m.orders {
+		if o.CustomerID != customerID {
+			continue
+		}
+		switch o.Status {
+		case repository.OrderStatusSearching, repository.OrderStatusAssigned, repository.OrderStatusExecuted:
+			open = append(open, o)
+		}
+	}
+	return open, nil
+}
+
 func (m *mockOrderRepo) GetOrderByID(ctx context.Context, orderID uuid.UUID) (*repository.Order, error) {
 	for _, o := range m.orders {
 		if o.ID == orderID {
@@ -552,6 +568,13 @@ func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 	return nil
 }
 func (m *mockUserRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error { return nil }
+
+// UpdateVerifiedTx runs the same write; the fake has no transactions, so the
+// querier is ignored.
+func (m *mockUserRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
+	return m.UpdateVerified(ctx, id, verified)
+}
+
 func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
 	return nil
 }
@@ -881,6 +904,7 @@ func newMockAccounts() *mockAccounts {
 		repository.AccountDeposits:   0,
 		repository.AccountPayouts:    0,
 		repository.AccountCommission: 0,
+		repository.AccountBonuses:    0,
 	}}
 }
 

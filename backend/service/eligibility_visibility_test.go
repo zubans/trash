@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"healthlogin/backend/repository"
@@ -54,7 +55,7 @@ func TestCanViewOrTakeOrder(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := canViewOrTakeOrder(c.viewer, c.customer, c.variant)
+			err := canViewOrTakeOrder(context.Background(), nil, c.viewer, c.customer, c.variant)
 			if c.wantOK && err != nil {
 				t.Errorf("expected visible, got error: %v", err)
 			}

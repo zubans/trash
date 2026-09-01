@@ -22,6 +22,20 @@ type BidService struct {
 	userRepo    repository.UserRepository
 	catalogRepo repository.ServiceCatalogRepository
 	chatRepo    repository.ChatRepository
+	// behaviors applies the scripted rules of a service, when the variant has
+	// any; events records what a behaviour reacts to. Both optional: nil means
+	// no service has scripted rules.
+	behaviors *Behaviors
+	events    repository.EventRepository
+}
+
+// WithBehaviors wires the behaviour scripts into the auction gates, so a
+// scripted service restricts bidding exactly as it restricts accepting, and
+// publishes the assignment event a behaviour may react to.
+func (s *BidService) WithBehaviors(behaviors *Behaviors, events repository.EventRepository) *BidService {
+	s.behaviors = behaviors
+	s.events = events
+	return s
 }
 
 // NewBidService creates a new BidService.
@@ -87,7 +101,7 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 			return nil, err
 		}
 		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-		if err := canViewOrTakeOrder(executor, customer, variant); err != nil {
+		if err := canViewOrTakeOrder(ctx, s.behaviors, executor, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -167,7 +181,7 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 			return errors.New("executor not found")
 		}
 		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-		if err := canViewOrTakeOrder(executor, customer, variant); err != nil {
+		if err := canViewOrTakeOrder(ctx, s.behaviors, executor, customer, variant); err != nil {
 			return err
 		}
 		shift, err := s.shiftRepo.GetActiveShift(ctx, bid.ExecutorID)
@@ -190,6 +204,18 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 			return err
 		}
 		acceptedOrderID = order.ID
+		// Winning an auction assigns the order exactly as accepting one does, so
+		// it publishes the same event, in the same transaction.
+		if s.events != nil {
+			if err := s.events.Publish(ctx, tx, &repository.DomainEvent{
+				Type:        repository.EventOrderAccepted,
+				SubjectType: repository.EventSubjectOrder,
+				SubjectID:   order.ID,
+				ActorID:     &bid.ExecutorID,
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {

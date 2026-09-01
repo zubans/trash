@@ -27,6 +27,10 @@ const (
 	// It is the one account whose balance is the platform's own money rather
 	// than money it is holding for somebody, and only an admin may pay it out.
 	AccountCommission = "COMMISSION"
+	// AccountBonuses is what the platform has paid out in rewards that no
+	// customer funded — a verifier's fee, for instance. Like DEPOSITS it goes
+	// negative, and that negative balance is the running cost of those rewards.
+	AccountBonuses = "BONUSES"
 )
 
 // ErrUnknownSystemAccount is returned for a code with no account.

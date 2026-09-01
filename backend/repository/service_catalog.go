@@ -61,6 +61,40 @@ func (lt *LocalizedText) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, lt)
 }
 
+// BehaviorConfig is a service node's behaviour configuration as stored in
+// JSONB. It is deliberately untyped: every behaviour has its own keys, and
+// declaring them in Go would put the definition of a behaviour back into the
+// code the behaviour exists to stay out of. The script's manifest declares the
+// defaults, and the admin panel renders the form from it.
+type BehaviorConfig map[string]interface{}
+
+// Value implements driver.Valuer for JSONB storage. A nil or empty config is
+// stored as an empty object, so the column never holds NULL.
+func (c BehaviorConfig) Value() (driver.Value, error) {
+	if len(c) == 0 {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(map[string]interface{}(c))
+}
+
+// Scan implements sql.Scanner for JSONB retrieval.
+func (c *BehaviorConfig) Scan(value interface{}) error {
+	if value == nil {
+		*c = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("cannot scan type %T into BehaviorConfig", value)
+	}
+	return json.Unmarshal(bytes, c)
+}
+
 // ServiceNode represents a node in the service catalog tree.
 type ServiceNode struct {
 	ID                   uuid.UUID       `json:"id"`
@@ -77,13 +111,36 @@ type ServiceNode struct {
 	MinAge               int             `json:"min_age"`
 	// ModeratorOnly marks a service whose orders are visible to and acceptable
 	// by moderators only (see migration 040).
-	ModeratorOnly bool      `json:"moderator_only"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt            time.Time       `json:"updated_at"`
+	ModeratorOnly bool `json:"moderator_only"`
+	// BehaviorCode names the script that carries this service's own rules (see
+	// package behavior and migration 043). Empty for an ordinary service, which
+	// is every service that existed before behaviours: the flags above are the
+	// whole of its behaviour.
+	BehaviorCode string `json:"behavior_code,omitempty"`
+	// BehaviorConfig is that script's per-node configuration — the reward it
+	// pays, the role it requires. The script declares the defaults; this holds
+	// only what this node changes.
+	BehaviorConfig BehaviorConfig `json:"behavior_config,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 	// DeletedAt is set when the node was retired. The row stays in place so
 	// that orders which reference it keep resolving; nothing in the catalog
 	// offers it any more.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+// HasBehavior reports whether this node's rules come from a script.
+func (n *ServiceNode) HasBehavior() bool {
+	return n != nil && n.BehaviorCode != ""
+}
+
+// nullableCode stores an empty behaviour code as NULL, so "no behaviour" is one
+// value in the database rather than two.
+func nullableCode(code string) interface{} {
+	if code == "" {
+		return nil
+	}
+	return code
 }
 
 // IsCategory returns true if the node is a category.
@@ -185,7 +242,8 @@ func NewServiceCatalogRepository(db *sql.DB) ServiceCatalogRepository {
 
 const serviceNodeColumns = `
     id, parent_id, code, name, description, node_type, base_price,
-    is_auction, is_active, sort_order, COALESCE(requires_verification, false), COALESCE(min_age, 0), COALESCE(moderator_only, false), created_at, updated_at, deleted_at
+    is_auction, is_active, sort_order, COALESCE(requires_verification, false), COALESCE(min_age, 0), COALESCE(moderator_only, false),
+    COALESCE(behavior_code, ''), COALESCE(behavior_config, '{}'::jsonb), created_at, updated_at, deleted_at
 `
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows.
@@ -198,7 +256,7 @@ func scanServiceNodeInto(s rowScanner) (*ServiceNode, error) {
 	err := s.Scan(
 		&n.ID, &n.ParentID, &n.Code, &n.Name, &n.Description, &n.NodeType,
 		&n.BasePrice, &n.IsAuction, &n.IsActive, &n.SortOrder, &n.RequiresVerification,
-		&n.MinAge, &n.ModeratorOnly, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
+		&n.MinAge, &n.ModeratorOnly, &n.BehaviorCode, &n.BehaviorConfig, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -258,13 +316,14 @@ func (r *serviceCatalogRepo) CreateNode(ctx context.Context, node *ServiceNode) 
 	defer tx.Rollback()
 
 	query := `
-        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, moderator_only, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        INSERT INTO service_nodes (id, parent_id, code, name, description, node_type, base_price, is_auction, is_active, sort_order, requires_verification, min_age, moderator_only, behavior_code, behavior_config, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
     `
 	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Code, node.Name, node.Description,
 		node.NodeType, node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
-		node.RequiresVerification, node.MinAge, node.ModeratorOnly, node.CreatedAt, node.UpdatedAt,
+		node.RequiresVerification, node.MinAge, node.ModeratorOnly,
+		nullableCode(node.BehaviorCode), node.BehaviorConfig, node.CreatedAt, node.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -338,13 +397,15 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 	query := `
         UPDATE service_nodes
         SET parent_id = $2, name = $3, description = $4, base_price = $5,
-            is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, moderator_only = $11, updated_at = $12
+            is_auction = $6, is_active = $7, sort_order = $8, requires_verification = $9, min_age = $10, moderator_only = $11,
+            behavior_code = $12, behavior_config = $13, updated_at = $14
         WHERE id = $1 AND deleted_at IS NULL
     `
 	_, err = tx.ExecContext(ctx, query,
 		node.ID, node.ParentID, node.Name, node.Description,
 		node.BasePrice, node.IsAuction, node.IsActive, node.SortOrder,
-		node.RequiresVerification, node.MinAge, node.ModeratorOnly, node.UpdatedAt,
+		node.RequiresVerification, node.MinAge, node.ModeratorOnly,
+		nullableCode(node.BehaviorCode), node.BehaviorConfig, node.UpdatedAt,
 	)
 	if err != nil {
 		return err

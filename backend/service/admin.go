@@ -38,6 +38,17 @@ type AdminService struct {
 	sessions      SessionRevoker
 	mailer        MailSender
 	jwtSecret     []byte
+	// events, when wired, records the domain events an admin action produces —
+	// today only user.verified, which is what closes a verification order and
+	// pays the moderator who performed it.
+	events repository.EventRepository
+}
+
+// WithEvents wires the domain event outbox into the admin actions that
+// behaviours react to.
+func (s *AdminService) WithEvents(events repository.EventRepository) *AdminService {
+	s.events = events
+	return s
 }
 
 // NewAdminService creates a new AdminService.
@@ -226,7 +237,29 @@ func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid
 	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	if err := s.userRepo.UpdateVerified(ctx, userID, verified); err != nil {
+	if s.events == nil {
+		if err := s.userRepo.UpdateVerified(ctx, userID, verified); err != nil {
+			return err
+		}
+	} else if err := s.events.RunInTx(ctx, func(tx *sql.Tx) error {
+		// The flag and the event commit together. A behaviour that closes a
+		// verification order on this event must never see the flag set without
+		// the event, nor the event without the flag.
+		if err := s.userRepo.UpdateVerifiedTx(ctx, tx, userID, verified); err != nil {
+			return err
+		}
+		if !verified {
+			// Un-verifying is an admin taking something back, not an event
+			// anything reacts to.
+			return nil
+		}
+		return s.events.Publish(ctx, tx, &repository.DomainEvent{
+			Type:        repository.EventUserVerified,
+			SubjectType: repository.EventSubjectUser,
+			SubjectID:   userID,
+			ActorID:     &adminID,
+		})
+	}); err != nil {
 		return err
 	}
 	log.Printf("[AUDIT] admin %s set verified of user %s to %t", adminID, userID, verified)

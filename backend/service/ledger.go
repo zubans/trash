@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
 
@@ -207,6 +208,55 @@ func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uui
 		return err
 	}
 	return l.record(ctx, tx, entry{UserID: userID, AdminID: adminID, Type: kind, Account: from, Amount: amount})
+}
+
+// Bonus pays a user out of the platform's own pocket: a reward a behaviour
+// script awarded for work no customer paid for, such as verifying somebody's
+// identity. The money comes from BONUSES, which goes negative by the amount
+// paid — that balance is the running cost of those rewards, and the books still
+// close because the user's credit and the account's debit are one movement.
+//
+// commission is normally zero. The platform's share exists to be taken out of
+// what a customer paid, and nobody paid for a free service; withholding it from
+// a reward would only move the platform's money from BONUSES to COMMISSION. A
+// behaviour that wants its rewards treated as ordinary earnings asks for it
+// explicitly, and then the gross still splits exactly:
+//
+//	BONUSES -gross = user +(gross - commission) + COMMISSION +commission
+//
+// The debit is unguarded on purpose. BONUSES is an expense account, not a
+// wallet: refusing a reward because "the account is empty" would mean the first
+// reward could never be paid. The ceiling on what a script may award lives in
+// the applier (behavior_max_bonus), where it can be read and changed by an
+// admin.
+func (l *Ledger) Bonus(ctx context.Context, tx *sql.Tx, userID uuid.UUID, gross, commission money.Amount, orderID *uuid.UUID) error {
+	if !gross.IsPositive() {
+		return nil
+	}
+	if commission.IsNegative() {
+		return errors.New("bonus commission must not be negative")
+	}
+	if commission > gross {
+		commission = gross
+	}
+	if commission.IsPositive() {
+		if err := l.accounts.Debit(ctx, tx, repository.AccountBonuses, commission); err != nil {
+			return err
+		}
+		if err := l.accounts.Credit(ctx, tx, repository.AccountCommission, commission); err != nil {
+			return err
+		}
+		if err := l.record(ctx, tx, entry{
+			UserID:  userID,
+			OrderID: orderID,
+			Type:    repository.TransactionTypeCommission,
+			Account: repository.AccountBonuses,
+			Amount:  commission,
+		}); err != nil {
+			return err
+		}
+	}
+	return l.Release(ctx, tx, repository.AccountBonuses, userID, gross.Sub(commission), repository.TransactionTypeBonus, orderID, nil)
 }
 
 // Note records an entry that moves no money, for a step that is worth seeing in

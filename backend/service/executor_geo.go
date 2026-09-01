@@ -21,6 +21,9 @@ type ExecutorGeoService struct {
 	userRepo     repository.UserRepository
 	settingsRepo repository.SettingsRepository
 	catalogRepo  repository.ServiceCatalogRepository
+	// behaviors applies the scripted rules of a service to the map, so the map
+	// shows exactly the orders the list does. Optional.
+	behaviors *Behaviors
 	// In-memory cache & mutex lock for fast cooldown checks
 	cooldownMap sync.Map
 }
@@ -38,6 +41,12 @@ func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository,
 	s.userRepo = userRepo
 	s.settingsRepo = settingsRepo
 	s.catalogRepo = catalogRepo
+	return s
+}
+
+// WithBehaviors wires the behaviour scripts into the map's visibility check.
+func (s *ExecutorGeoService) WithBehaviors(behaviors *Behaviors) *ExecutorGeoService {
+	s.behaviors = behaviors
 	return s
 }
 
@@ -283,7 +292,7 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		// moderator-only orders → moderators; normal orders → customer-verification
 		// segmentation plus the standard executor gates.
 		if s.userRepo != nil {
-			if canViewOrTakeOrder(viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
+			if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
 				continue
 			}
 		}

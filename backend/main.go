@@ -17,6 +17,8 @@ import (
 
 	_ "net/http/pprof"
 
+	"healthlogin/backend/behavior"
+	"healthlogin/backend/behaviors"
 	"healthlogin/backend/handler"
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
@@ -97,11 +99,32 @@ func main() {
 	addressRepo := repository.NewAddressRepository(db)
 	reconcileRepo := repository.NewReconciliationRepository(db)
 	systemAccountRepo := repository.NewSystemAccountRepository(db)
+	// Scripted services: the outbox the behaviour dispatcher reads, and the
+	// claims that make a once-per-user service once per user.
+	eventRepo := repository.NewEventRepository(db)
+	serviceClaimRepo := repository.NewServiceClaimRepository(db)
 
 	// Services
 	// Every movement of money goes through the ledger, which always touches both
 	// a user balance and a system account.
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
+
+	// Behaviour scripts carry the rules of the services whose conditions do not
+	// fit the catalog's flags (see doc/service_behaviors.md). The copies
+	// embedded in the binary load first; a directory on top of them lets a rule
+	// be corrected on a running deployment without a rebuild. A script that
+	// fails to compile is logged and skipped — the nodes that name it then fail
+	// closed, which is the safe direction and a loud one.
+	behaviorEngine := behavior.New(behavior.DefaultLimits)
+	if err := behaviorEngine.Load(behaviors.FS, "embedded"); err != nil {
+		log.Printf("[behavior] WARNING: %v", err)
+	}
+	if dir := getEnv("BEHAVIORS_DIR", ""); dir != "" {
+		if err := behaviorEngine.Load(os.DirFS(dir), dir); err != nil {
+			log.Printf("[behavior] WARNING: %v", err)
+		}
+	}
+	serviceBehaviors := service.NewBehaviors(behaviorEngine, serviceClaimRepo)
 
 	// DaData is the only source of address data — suggestions and coordinate
 	// resolution alike. There is deliberately no fallback: the alternative had
@@ -128,11 +151,14 @@ func main() {
 		WithSessions(authService).
 		WithLedger(ledger).
 		WithAddresses(addressRepo).
-		WithReconciliation(reconcileRepo)
+		WithReconciliation(reconcileRepo).
+		WithEvents(eventRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
-		WithExecutorGeo(executorGeoRepo)
+		WithExecutorGeo(executorGeoRepo).
+		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo, catalogRepo)
+		WithEligibility(userRepo, settingsRepo, catalogRepo).
+		WithBehaviors(serviceBehaviors)
 	// Shift location reports are written through the geo service, so the stored
 	// executor position has a single writer and one set of rules.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
@@ -140,8 +166,10 @@ func main() {
 	// Automatic matching is bounded by distance, which needs the executor's
 	// stored position and the configured radius.
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
-		WithGeo(executorGeoRepo, settingsRepo)
-	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo)
+		WithGeo(executorGeoRepo, settingsRepo).
+		WithBehaviors(serviceBehaviors)
+	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo).
+		WithBehaviors(serviceBehaviors, eventRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 
@@ -178,6 +206,15 @@ func main() {
 		WithLeader(leader, "shift_autoclose")
 	shiftWorker.Start(1 * time.Minute)
 
+	// Domain events reach their behaviours here: an order that closes itself
+	// once its customer is verified, and the reward that goes with it. Short
+	// interval, because somebody is waiting for both.
+	behaviorWorker := worker.NewBehaviorWorker(service.NewBehaviorDispatcher(
+		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
+		settingsRepo, ledger, serviceBehaviors, orderService,
+	)).WithLeader(leader, "behavior_dispatch")
+	behaviorWorker.Start(5 * time.Second)
+
 	// Nightly books check. It reports and never repairs: a balance that drifted
 	// away from its ledger is a bug worth seeing, not a number to overwrite.
 	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
@@ -204,7 +241,7 @@ func main() {
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
 	gh := handler.NewGeoHandler(addressSuggester)
-	sch := handler.NewServiceCatalogHandler(catalogRepo)
+	sch := handler.NewServiceCatalogHandler(catalogRepo).WithBehaviors(serviceBehaviors)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
@@ -368,6 +405,7 @@ func main() {
 			r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
 			r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
 			r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
+			r.Get("/admin/service-behaviors", sch.AdminListBehaviors)
 			r.Get("/admin/service-nodes", sch.AdminListNodes)
 			r.Get("/admin/service-nodes/{id}", sch.AdminGetNode)
 			r.Post("/admin/service-nodes", sch.AdminCreateNode)
