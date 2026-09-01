@@ -9,6 +9,8 @@
     "password": "Password",
     "signInBtn": "Sign In",
     "signUpBtn": "Sign Up",
+    "birthDate": "Date of birth",
+    "birthDateHint": "Required for age-restricted services",
     "pickupAddress": "Your address",
     "pickupAddressPlaceholder": "Russia, Moscow, Tverskaya Street, bld. 1",
     "flatNumber": "Flat",

@@ -230,7 +230,7 @@ func TestRegister_Success(t *testing.T) {
 	phone := "+79001234567"
 	password := "strong-password"
 
-	user, err := svc.Register(context.Background(), phone, "test@example.com", password, "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	user, err := svc.Register(context.Background(), phone, "test@example.com", password, "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -254,12 +254,68 @@ func TestRegister_Success(t *testing.T) {
 	}
 }
 
+// TestRegisterRequiresBirthDate: an account with no birth date reads as age 0,
+// so every min_age gate would refuse it without saying why. Registration has to
+// refuse first.
+func TestRegisterRequiresBirthDate(t *testing.T) {
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
+
+	_, err := svc.Register(context.Background(), "+79001239001", "nobirth@example.com", "strong-password",
+		"Иванов", "Иван", "Иванович", "", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	if err == nil {
+		t.Fatal("registration without a birth date must be refused")
+	}
+}
+
+// TestRegisterRejectsImpossibleBirthDates covers the values that produce an age
+// no gate can read sensibly: a future date (negative age) and a malformed one.
+func TestRegisterRejectsImpossibleBirthDates(t *testing.T) {
+	cases := map[string]string{
+		"future":     time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
+		"malformed":  "17.05.1990",
+		"tooLongAgo": time.Now().AddDate(-(maxHumanAge + 1), 0, 0).Format("2006-01-02"),
+	}
+
+	for name, birthDate := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
+			_, err := svc.Register(context.Background(), "+79001239002", "bad@example.com", "strong-password",
+				"Иванов", "Иван", "Иванович", birthDate, "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+			if err == nil {
+				t.Fatalf("birth date %q must be refused", birthDate)
+			}
+		})
+	}
+}
+
+// TestRegisterStoresBirthDate: the date has to survive to the stored user, or
+// the age gates read 0 for every account created through the form.
+func TestRegisterStoresBirthDate(t *testing.T) {
+	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
+	born := time.Now().AddDate(-30, 0, -1)
+
+	user, err := svc.Register(context.Background(), "+79001239003", "born@example.com", "strong-password",
+		"Иванов", "Иван", "Иванович", born.Format("2006-01-02"), "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if user.BirthDate == nil {
+		t.Fatal("birth date was not stored on the created user")
+	}
+	if got := user.BirthDateString(); got != born.Format("2006-01-02") {
+		t.Errorf("birth date mismatch: got %q want %q", got, born.Format("2006-01-02"))
+	}
+	if age := user.GetAge(); age != 30 {
+		t.Errorf("age mismatch: got %d want 30", age)
+	}
+}
+
 func TestRegister_NormalizesAddress(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	phone := "+79001234568"
 	password := "strong-password"
 
-	user, err := svc.Register(context.Background(), phone, "kursk@example.com", password, "Иванов", "Иван", "Иванович", "Россия, Курск, улица Генерала Григорова, д. 40 кв. 12", "CUSTOMER")
+	user, err := svc.Register(context.Background(), phone, "kursk@example.com", password, "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Курск, улица Генерала Григорова, д. 40 кв. 12", "CUSTOMER")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,7 +329,7 @@ func TestRegister_ExecutorSuccess(t *testing.T) {
 	phone := "+79001234569"
 	password := "strong-password"
 
-	user, err := svc.Register(context.Background(), phone, "executor@example.com", password, "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "EXECUTOR")
+	user, err := svc.Register(context.Background(), phone, "executor@example.com", password, "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "EXECUTOR")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +340,7 @@ func TestRegister_ExecutorSuccess(t *testing.T) {
 
 func TestRegister_InvalidRoleAdmin(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Register(context.Background(), "+79001234567", "admin@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "ADMIN")
+	_, err := svc.Register(context.Background(), "+79001234567", "admin@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "ADMIN")
 	if err == nil {
 		t.Fatal("expected error for ADMIN role")
 	}
@@ -295,7 +351,7 @@ func TestRegister_InvalidRoleAdmin(t *testing.T) {
 
 func TestRegister_InvalidRoleEmpty(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Register(context.Background(), "+79001234567", "empty@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "")
+	_, err := svc.Register(context.Background(), "+79001234567", "empty@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "")
 	if err == nil {
 		t.Fatal("expected error for empty role")
 	}
@@ -303,7 +359,7 @@ func TestRegister_InvalidRoleEmpty(t *testing.T) {
 
 func TestRegister_EmptyPhone(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Register(context.Background(), "", "emptyphone@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	_, err := svc.Register(context.Background(), "", "emptyphone@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error for empty phone")
 	}
@@ -314,7 +370,7 @@ func TestRegister_EmptyPhone(t *testing.T) {
 
 func TestRegister_EmptyPassword(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
-	_, err := svc.Register(context.Background(), "+79001234567", "emptypass@example.com", "", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	_, err := svc.Register(context.Background(), "+79001234567", "emptypass@example.com", "", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error for empty password")
 	}
@@ -325,11 +381,11 @@ func TestRegister_UserAlreadyExists(t *testing.T) {
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 	phone := "+79001234567"
 
-	if _, err := svc.Register(context.Background(), phone, "exists@example.com", "password-one", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
+	if _, err := svc.Register(context.Background(), phone, "exists@example.com", "password-one", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
 		t.Fatalf("first registration failed: %v", err)
 	}
 
-	_, err := svc.Register(context.Background(), phone, "exists2@example.com", "password-two", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	_, err := svc.Register(context.Background(), phone, "exists2@example.com", "password-two", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error when registering existing user")
 	}
@@ -343,7 +399,7 @@ func TestRegister_FindByPhoneError(t *testing.T) {
 	repo.findErr = errors.New("db is down")
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 
-	_, err := svc.Register(context.Background(), "+79001234567", "dberr@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	_, err := svc.Register(context.Background(), "+79001234567", "dberr@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error from repository")
 	}
@@ -357,7 +413,7 @@ func TestRegister_CreateError(t *testing.T) {
 	repo.createErr = errors.New("insert failed")
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 
-	_, err := svc.Register(context.Background(), "+79001234567", "createerr@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	_, err := svc.Register(context.Background(), "+79001234567", "createerr@example.com", "Str0ngPassw0rd", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
 	if err == nil {
 		t.Fatal("expected error from Create")
 	}
@@ -372,7 +428,7 @@ func TestAuthenticate_Success(t *testing.T) {
 	phone := "+79001234567"
 	password := "correct-password"
 
-	if _, err := svc.Register(context.Background(), phone, "auth@example.com", password, "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
+	if _, err := svc.Register(context.Background(), phone, "auth@example.com", password, "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
 		t.Fatalf("registration failed: %v", err)
 	}
 
@@ -417,7 +473,7 @@ func TestAuthenticate_WrongPassword(t *testing.T) {
 	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
 	phone := "+79001234567"
 
-	if _, err := svc.Register(context.Background(), phone, "wrongpass@example.com", "correct-password", "Иванов", "Иван", "Иванович", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
+	if _, err := svc.Register(context.Background(), phone, "wrongpass@example.com", "correct-password", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER"); err != nil {
 		t.Fatalf("registration failed: %v", err)
 	}
 
@@ -578,7 +634,7 @@ func TestRegisterAcceptsRealBuildingNumbers(t *testing.T) {
 		email := fmt.Sprintf("building-%d@example.com", i)
 
 		if _, err := svc.Register(context.Background(), phone, email, "strong-password",
-			"Иванов", "Иван", "Иванович", address, "CUSTOMER"); err != nil {
+			"Иванов", "Иван", "Иванович", "1990-05-17", address, "CUSTOMER"); err != nil {
 			t.Errorf("%q must be accepted: %v", address, err)
 		}
 	}
@@ -600,7 +656,7 @@ func TestRegisterStillRequiresABuilding(t *testing.T) {
 		email := fmt.Sprintf("nohouse-%d@example.com", i)
 
 		if _, err := svc.Register(context.Background(), phone, email, "strong-password",
-			"Иванов", "Иван", "Иванович", address, "CUSTOMER"); err == nil {
+			"Иванов", "Иван", "Иванович", "1990-05-17", address, "CUSTOMER"); err == nil {
 			t.Errorf("%q has no building and must be refused", address)
 		}
 	}

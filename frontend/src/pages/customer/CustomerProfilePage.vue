@@ -28,6 +28,41 @@
           </div>
         </div>
 
+        <!-- Date of Birth -->
+        <div class="section-header">
+          <div class="section-title">
+            <i class="ph-fill ph-cake" style="color: #ec4899;"></i>
+            Дата рождения и возраст
+          </div>
+          <div class="section-subtitle">Определяет доступ к услугам с возрастным цензом</div>
+        </div>
+
+        <div class="email-box mb-4">
+          <div class="input-wrapper">
+            <input
+              v-model="birthDateInput"
+              type="date"
+              class="form-input"
+              :max="maxBirthDate"
+            />
+            <button
+              type="button"
+              class="btn-save-email"
+              :disabled="savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate"
+              @click="saveBirthDate"
+            >
+              <span v-if="savingBirthDate" class="spinner-sm"></span>
+              <template v-else>Сохранить</template>
+            </button>
+          </div>
+          <div v-if="userAge > 0" class="mt-2 text-sm text-secondary">
+            Ваш возраст: <strong>{{ userAge }} {{ getAgeWord(userAge) }}</strong>
+          </div>
+          <div v-if="birthDateMsg" class="email-msg-text" :class="{ error: birthDateMsgIsError }">
+            {{ birthDateMsg }}
+          </div>
+        </div>
+
         <!-- Email Management -->
         <div class="section-header">
           <div class="section-title">
@@ -175,6 +210,23 @@ export default defineComponent({
     const emailMsgIsError = ref(false)
     const userFullName = ref('')
 
+    const birthDateInput = ref('')
+    const currentBirthDate = ref('')
+    const userAge = ref(0)
+    const savingBirthDate = ref(false)
+    const birthDateMsg = ref('')
+    const birthDateMsgIsError = ref(false)
+    const maxBirthDate = new Date().toISOString().slice(0, 10)
+
+    const getAgeWord = (age: number) => {
+      const last = age % 10
+      const lastTwo = age % 100
+      if (lastTwo >= 11 && lastTwo <= 19) return 'лет'
+      if (last === 1) return 'год'
+      if (last >= 2 && last <= 4) return 'года'
+      return 'лет'
+    }
+
     const currentEmail = computed(() => userEmail.value)
 
     const fetchUserProfile = async () => {
@@ -183,6 +235,13 @@ export default defineComponent({
         if (meRes?.data) {
           const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
           userFullName.value = parts.join(' ')
+          if (meRes.data.birth_date) {
+            birthDateInput.value = meRes.data.birth_date
+            currentBirthDate.value = meRes.data.birth_date
+          }
+          if (meRes.data.age !== undefined) {
+            userAge.value = meRes.data.age
+          }
         }
         const res = await api.get('/user/profile')
         userPhone.value = res.data.phone || authStore.phone || ''
@@ -208,6 +267,26 @@ export default defineComponent({
         emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
       } finally {
         savingEmail.value = false
+      }
+    }
+
+    const saveBirthDate = async () => {
+      if (!birthDateInput.value || birthDateInput.value === currentBirthDate.value || savingBirthDate.value) return
+      savingBirthDate.value = true
+      birthDateMsg.value = ''
+      birthDateMsgIsError.value = false
+      try {
+        const res = await api.post('/user/birth-date', { birth_date: birthDateInput.value })
+        currentBirthDate.value = birthDateInput.value
+        if (res.data?.age !== undefined) {
+          userAge.value = res.data.age
+        }
+        birthDateMsg.value = 'Дата рождения сохранена'
+      } catch (err: any) {
+        birthDateMsgIsError.value = true
+        birthDateMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка сохранения даты рождения'
+      } finally {
+        savingBirthDate.value = false
       }
     }
 
@@ -336,6 +415,15 @@ export default defineComponent({
       emailMsgIsError,
       currentEmail,
       saveEmail,
+      birthDateInput,
+      currentBirthDate,
+      maxBirthDate,
+      userAge,
+      savingBirthDate,
+      birthDateMsg,
+      birthDateMsgIsError,
+      getAgeWord,
+      saveBirthDate,
       setActiveAddress,
       addNewAddress,
       removeAddress,

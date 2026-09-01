@@ -96,7 +96,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	customer, err := authService.RegisterWithCoordinates(
 		ctx, custPhone, custEmail, "Password123!",
 		"Иванов", "Иван", "Иванович",
-		custAddress, "CUSTOMER", &custLat, &custLon,
+		"1990-05-17", custAddress, "CUSTOMER", &custLat, &custLon,
 	)
 	if err != nil {
 		t.Fatalf("Customer registration failed: %v", err)
@@ -139,7 +139,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	executor, err := authService.RegisterWithCoordinates(
 		ctx, execPhone, execEmail, "Password123!",
 		"Петров", "Петр", "Петрович",
-		execAddress, "EXECUTOR", &execLat, &execLon,
+		"1990-05-17", execAddress, "EXECUTOR", &execLat, &execLon,
 	)
 	if err != nil {
 		t.Fatalf("Executor registration failed: %v", err)
@@ -240,6 +240,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	distant, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "far_"+uuid.New().String()[:8]+"@test.com",
 		"Password123!", "Сидоров", "Сидор", "Сидорович",
+		"1990-05-17",
 		"Россия, г. Санкт-Петербург, Невский пр., д. 1", "EXECUTOR", &distantLat, &distantLon,
 	)
 	if err != nil {
@@ -341,6 +342,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	customer, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "cust_"+uuid.New().String()[:8]+"@test.com",
 		"Password123!", "Иванов", "Иван", "Иванович",
+		"1990-05-17",
 		"Россия, г. Москва, ул. Арбат, д. 10", "CUSTOMER", &custLat, &custLon,
 	)
 	if err != nil {
@@ -371,6 +373,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	distant, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "far_"+uuid.New().String()[:8]+"@test.com",
 		"Password123!", "Сидоров", "Сидор", "Сидорович",
+		"1990-05-17",
 		"Россия, г. Санкт-Петербург, Невский пр., д. 1", "EXECUTOR", &distantLat, &distantLon,
 	)
 	if err != nil {
@@ -394,6 +397,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	unlocated, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "nowhere_"+uuid.New().String()[:8]+"@test.com",
 		"Password123!", "Незнамов", "Никита", "Никитич",
+		"1990-05-17",
 		"Россия, г. Москва, ул. Арбат, д. 10", "EXECUTOR", nil, nil,
 	)
 	if err != nil {

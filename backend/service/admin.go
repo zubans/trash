@@ -398,6 +398,20 @@ func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, las
 	return s.userRepo.UpdateUserName(ctx, userID, lastName, firstName, patronymic)
 }
 
+// UpdateUserBirthDate corrects a user's birth date (admin-only). It shares
+// parseBirthDate with registration, so an admin cannot store a date the
+// registration form would have rejected.
+func (s *AdminService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate string) error {
+	parsed, err := parseBirthDate(birthDate)
+	if err != nil {
+		return err
+	}
+	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
+		return errors.New("user not found")
+	}
+	return s.userRepo.UpdateUserBirthDate(ctx, userID, parsed)
+}
+
 // TopUpUserBalance adds funds directly to a user's balance.
 // Only non-admin users may be topped up, and an admin cannot credit themselves.
 func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {
@@ -674,6 +688,8 @@ func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[st
 		"first_name": user.FirstName,
 		"last_name":  user.LastName,
 		"patronymic": user.Patronymic,
+		"birth_date": user.BirthDateString(),
+		"age":        user.GetAge(),
 		"address":    "",
 	}
 

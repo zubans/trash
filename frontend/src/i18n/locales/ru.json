@@ -9,6 +9,8 @@
     "password": "Пароль",
     "signInBtn": "Войти",
     "signUpBtn": "Зарегистрироваться",
+    "birthDate": "Дата рождения",
+    "birthDateHint": "Нужна для услуг с возрастным ограничением",
     "pickupAddress": "Ваш адрес",
     "pickupAddressPlaceholder": "Россия, Москва, Тверская улица, д. 1",
     "flatNumber": "Квартира",

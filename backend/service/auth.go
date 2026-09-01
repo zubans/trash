@@ -103,6 +103,34 @@ func validatePassword(password string) error {
 	return nil
 }
 
+// maxHumanAge bounds how far back a birth date may sit. It is a sanity check on
+// a hand-typed date, not a policy: the age limits that actually gate anything
+// live per service in min_age.
+const maxHumanAge = 120
+
+// parseBirthDate turns the wire format into a date and rejects what cannot
+// describe a living person. A date in the future is the one that does real
+// damage: GetAge would report a negative age, so every min_age gate would read
+// as "too young" and no screen would say why.
+func parseBirthDate(birthDate string) (time.Time, error) {
+	birthDate = strings.TrimSpace(birthDate)
+	if birthDate == "" {
+		return time.Time{}, errors.New("укажите дату рождения")
+	}
+	t, err := time.Parse("2006-01-02", birthDate)
+	if err != nil {
+		return time.Time{}, errors.New("неверный формат даты рождения, ожидается ГГГГ-ММ-ДД")
+	}
+	now := time.Now()
+	if t.After(now) {
+		return time.Time{}, errors.New("дата рождения не может быть в будущем")
+	}
+	if t.Before(now.AddDate(-maxHumanAge, 0, 0)) {
+		return time.Time{}, fmt.Errorf("дата рождения не может быть раньше, чем %d лет назад", maxHumanAge)
+	}
+	return t, nil
+}
+
 var phoneCleanup = regexp.MustCompile(`[^0-9+]`)
 
 // normalizePhone reduces a Russian phone number to a single canonical form, so
@@ -128,13 +156,13 @@ func validRegistrationRole(role string) bool {
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
-// Register creates a new user with the given phone, email, password, pickup address and role.
-func (s *AuthService) Register(ctx context.Context, phone, email, password, lastName, firstName, patronymic, address, role string) (*repository.User, error) {
-	return s.RegisterWithCoordinates(ctx, phone, email, password, lastName, firstName, patronymic, address, role, nil, nil)
+// Register creates a new user with the given phone, email, password, birth date, pickup address and role.
+func (s *AuthService) Register(ctx context.Context, phone, email, password, lastName, firstName, patronymic, birthDate, address, role string) (*repository.User, error) {
+	return s.RegisterWithCoordinates(ctx, phone, email, password, lastName, firstName, patronymic, birthDate, address, role, nil, nil)
 }
 
-// RegisterWithCoordinates creates a new user with email, phone, password and address.
-func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email, password, lastName, firstName, patronymic, address, role string, lat, lon *float64) (*repository.User, error) {
+// RegisterWithCoordinates creates a new user with email, phone, password, birth date and address.
+func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email, password, lastName, firstName, patronymic, birthDate, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
 	}
@@ -147,6 +175,13 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 	patronymic = strings.TrimSpace(patronymic)
 	if lastName == "" || firstName == "" || patronymic == "" {
 		return nil, errors.New("last_name, first_name, and patronymic are required")
+	}
+	// Required from here on: the per-service min_age gates read GetAge(), and an
+	// account with no birth date reads as age 0 — silently ineligible for every
+	// age-restricted service.
+	parsedBirthDate, err := parseBirthDate(birthDate)
+	if err != nil {
+		return nil, err
 	}
 	email = strings.TrimSpace(email)
 	if email == "" || !emailRegex.MatchString(email) {
@@ -200,6 +235,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		LastName:               lastName,
 		FirstName:              firstName,
 		Patronymic:             patronymic,
+		BirthDate:              &parsedBirthDate,
 		EmailVerified:          false,
 		EmailVerificationToken: verificationToken,
 		EmailTokenExpiresAt:    &tokenExpiresAt,
@@ -506,9 +542,9 @@ func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, new
 
 // UpdateUserBirthDate updates user's date of birth.
 func (s *AuthService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDateStr string) (*repository.User, error) {
-	t, err := time.Parse("2006-01-02", birthDateStr)
+	t, err := parseBirthDate(birthDateStr)
 	if err != nil {
-		return nil, errors.New("invalid birth date format, expected YYYY-MM-DD")
+		return nil, err
 	}
 	if err := s.repo.UpdateUserBirthDate(ctx, userID, t); err != nil {
 		return nil, err

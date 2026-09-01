@@ -28,8 +28,9 @@ type AuthRequest struct {
 	Password string `json:"password"`
 }
 
-// RegisterRequest extends AuthRequest with the required pickup address,
-// role and optional coordinates. Role must be CUSTOMER or EXECUTOR.
+// RegisterRequest extends AuthRequest with the required pickup address, birth
+// date, role and optional coordinates. Role must be CUSTOMER or EXECUTOR, and
+// birth_date is YYYY-MM-DD.
 type RegisterRequest struct {
 	Phone      string   `json:"phone"`
 	Email      string   `json:"email"`
@@ -37,6 +38,7 @@ type RegisterRequest struct {
 	LastName   string   `json:"last_name"`
 	FirstName  string   `json:"first_name"`
 	Patronymic string   `json:"patronymic"`
+	BirthDate  string   `json:"birth_date"`
 	Address    string   `json:"address"`
 	Role       string   `json:"role"`
 	Lat        *float64 `json:"lat,omitempty"`
@@ -83,7 +85,7 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := h.authService.RegisterWithCoordinates(r.Context(), req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.Address, req.Role, req.Lat, req.Lon)
+	user, err := h.authService.RegisterWithCoordinates(r.Context(), req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.BirthDate, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
 		metrics.AuthEvent("register", "denied")
 		if err.Error() == "user with this phone already exists" || err.Error() == "user with this email already exists" {
@@ -219,10 +221,6 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	var birthDateStr string
-	if user.BirthDate != nil {
-		birthDateStr = user.BirthDate.Format("2006-01-02")
-	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":            user.ID,
 		"phone":         user.Phone,
@@ -234,7 +232,7 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 		"first_name":    user.FirstName,
 		"last_name":     user.LastName,
 		"patronymic":    user.Patronymic,
-		"birth_date":    birthDateStr,
+		"birth_date":    user.BirthDateString(),
 		"age":           user.GetAge(),
 		"is_verified":   user.IsVerified(),
 		"pending_email": user.PendingEmail,
@@ -414,15 +412,10 @@ func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var birthDateStr string
-	if updatedUser.BirthDate != nil {
-		birthDateStr = updatedUser.BirthDate.Format("2006-01-02")
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":     "ok",
-		"birth_date": birthDateStr,
+		"birth_date": updatedUser.BirthDateString(),
 		"age":        updatedUser.GetAge(),
 	})
 }

@@ -142,7 +142,7 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	listQuery := fmt.Sprintf(
 		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at,
 		        COALESCE((SELECT a.address FROM addresses a WHERE a.user_id = u.id AND a.is_default LIMIT 1), '') AS address,
-		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, '')
+		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, ''), u.birth_date
 		 FROM users u
 		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argCount, argCount+1,
@@ -158,12 +158,17 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	var users []*User
 	for rows.Next() {
 		var u User
+		var birthDate sql.NullTime
 		// The password hash is deliberately not selected: it has no use in an
 		// admin listing and must not travel through the application at all.
 		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address,
-			&u.LastName, &u.FirstName, &u.Patronymic)
+			&u.LastName, &u.FirstName, &u.Patronymic, &birthDate)
 		if err != nil {
 			return nil, 0, err
+		}
+		if birthDate.Valid {
+			bd := birthDate.Time
+			u.BirthDate = &bd
 		}
 		users = append(users, &u)
 	}

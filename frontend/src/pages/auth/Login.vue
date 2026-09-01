@@ -223,6 +223,18 @@
               />
             </div>
 
+            <div class="input-group col-span-2">
+              <label class="input-label">{{ $t('login.birthDate') }}</label>
+              <input
+                v-model="birthDate"
+                type="date"
+                class="form-input no-icon"
+                :max="maxBirthDate"
+                required
+              />
+              <span class="field-hint">{{ $t('login.birthDateHint') }}</span>
+            </div>
+
             <div class="divider col-span-2 mobile-only"></div>
 
             <div class="input-group col-span-2">
@@ -485,7 +497,12 @@ export default defineComponent({
     const lastName = ref('')
     const firstName = ref('')
     const patronymic = ref('')
+    const birthDate = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
+
+    // The date picker refuses tomorrow before the request is made; the backend
+    // refuses it again, since a native build can post whatever it likes.
+    const maxBirthDate = new Date().toISOString().slice(0, 10)
     const pickedAddress = ref<StructuredAddress | null>(null)
     const error = ref('')
     const message = ref('')
@@ -600,6 +617,7 @@ export default defineComponent({
       lastName.value = ''
       firstName.value = ''
       patronymic.value = ''
+      birthDate.value = ''
       pickedAddress.value = null
       nextTick(() => {
         window.scrollTo({ top: 0, behavior: 'instant' })
@@ -641,6 +659,7 @@ export default defineComponent({
             last_name: lastName.value,
             first_name: firstName.value,
             patronymic: patronymic.value,
+            birth_date: birthDate.value,
             role: role.value,
           }
 
@@ -670,6 +689,7 @@ export default defineComponent({
           lastName.value = ''
           firstName.value = ''
           patronymic.value = ''
+          birthDate.value = ''
           role.value = 'CUSTOMER'
           pickedAddress.value = null
         }
@@ -692,6 +712,8 @@ export default defineComponent({
       lastName,
       firstName,
       patronymic,
+      birthDate,
+      maxBirthDate,
       role,
       pickedAddress,
       error,
@@ -953,6 +975,11 @@ export default defineComponent({
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
 }
 
 .input-wrapper {

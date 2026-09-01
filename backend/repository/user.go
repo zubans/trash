@@ -47,6 +47,15 @@ type User struct {
 	Address                string       `json:"address,omitempty"`
 }
 
+// BirthDateString renders the birth date the way every client expects it —
+// YYYY-MM-DD, empty when unset. Three call sites used to format it by hand.
+func (u *User) BirthDateString() string {
+	if u.BirthDate == nil {
+		return ""
+	}
+	return u.BirthDate.Format("2006-01-02")
+}
+
 func (u *User) GetAge() int {
 	if u.BirthDate == nil {
 		return 0
@@ -416,9 +425,9 @@ func (r *repo) Create(ctx context.Context, user *User) error {
 		user.ID = id
 	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
+		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, birth_date, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.BirthDate, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
 	)
 	if err != nil {
 		return err

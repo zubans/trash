@@ -235,6 +235,33 @@ func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"message": "name updated successfully"})
 }
 
+// UpdateUserBirthDateHandler corrects a user's birth date. It is separate from
+// the name handler so a rejected date cannot roll back an accepted name.
+func (h *AdminHandler) UpdateUserBirthDateHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		BirthDate string `json:"birth_date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.adminService.UpdateUserBirthDate(r.Context(), userID, req.BirthDate); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "birth date updated successfully"})
+}
+
 // TopUpUserBalanceHandler adds funds directly to a user's balance.
 func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")

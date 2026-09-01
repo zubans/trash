@@ -59,7 +59,10 @@
           <span>{{ u.phone }}</span>
         </div>
 
-        <div class="cell-name" :title="formatFullName(u)">{{ formatFullName(u) }}</div>
+        <div class="cell-name" :title="formatFullName(u)">
+          <span>{{ formatFullName(u) }}</span>
+          <span class="cell-birth-date">{{ formatBirthDate(u.birth_date) }}</span>
+        </div>
 
         <div class="cell-role">
           <span v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])" :key="r" class="role-chip">{{ r }}</span>
@@ -101,7 +104,7 @@
             </button>
             <div class="dropdown-menu">
               <button class="dropdown-item" @click="openNameModal(u)">
-                <i class="ph-bold ph-user"></i> Редактировать ФИО
+                <i class="ph-bold ph-user"></i> Личные данные
               </button>
               <button class="dropdown-item" @click="openTopUpModal(u)">
                 <i class="ph-bold ph-wallet"></i> Пополнить баланс
@@ -285,10 +288,10 @@
       />
     </va-modal>
 
-    <!-- Change Name Modal -->
+    <!-- Personal Details Modal -->
     <va-modal
       v-model="showNameModal"
-      title="Редактировать ФИО"
+      title="Редактировать личные данные"
       :ok-text="$t('users.save')"
       :cancel-text="$t('users.cancel')"
       @ok="saveName"
@@ -313,6 +316,15 @@
         <va-input
           v-model="newPatronymic"
           label="Отчество"
+          required
+        />
+      </div>
+      <div class="mb-3">
+        <va-input
+          v-model="newBirthDate"
+          type="date"
+          label="Дата рождения"
+          :max="maxBirthDate"
           required
         />
       </div>
@@ -522,6 +534,8 @@ export default defineComponent({
     const newLastName = ref('')
     const newFirstName = ref('')
     const newPatronymic = ref('')
+    const newBirthDate = ref('')
+    const maxBirthDate = new Date().toISOString().slice(0, 10)
 
     const formatFullName = (user: any) => {
       if (!user) return '-'
@@ -529,11 +543,23 @@ export default defineComponent({
       return parts.length > 0 ? parts.join(' ') : '-'
     }
 
+    // The listing serialises birth_date as a timestamp; both the date input and
+    // the cell want the plain day.
+    const toDateInput = (value?: string) => (value ? String(value).slice(0, 10) : '')
+
+    const formatBirthDate = (value?: string) => {
+      const day = toDateInput(value)
+      if (!day) return 'дата рождения не указана'
+      const [year, month, date] = day.split('-')
+      return `${date}.${month}.${year}`
+    }
+
     const openNameModal = (user: any) => {
       selectedUser.value = user
       newLastName.value = user.last_name || ''
       newFirstName.value = user.first_name || ''
       newPatronymic.value = user.patronymic || ''
+      newBirthDate.value = toDateInput(user.birth_date)
       showNameModal.value = true
     }
 
@@ -543,6 +569,7 @@ export default defineComponent({
       newLastName.value = ''
       newFirstName.value = ''
       newPatronymic.value = ''
+      newBirthDate.value = ''
     }
 
     const saveName = async () => {
@@ -551,7 +578,20 @@ export default defineComponent({
         alert('Заполните все поля (Фамилия, Имя, Отчество)')
         return
       }
+      if (!newBirthDate.value) {
+        alert('Укажите дату рождения')
+        return
+      }
       try {
+        // The birth date goes first: it is the field the server can reject, and
+        // saving it before the name keeps a refusal from leaving half the form
+        // applied.
+        if (newBirthDate.value !== toDateInput(selectedUser.value.birth_date)) {
+          await api.post(`/admin/users/${selectedUser.value.id}/birth-date`, {
+            birth_date: newBirthDate.value,
+          })
+          selectedUser.value.birth_date = newBirthDate.value
+        }
         await api.post(`/admin/users/${selectedUser.value.id}/name`, {
           last_name: newLastName.value.trim(),
           first_name: newFirstName.value.trim(),
@@ -562,7 +602,7 @@ export default defineComponent({
         selectedUser.value.patronymic = newPatronymic.value.trim()
         closeNameModal()
       } catch (err: any) {
-        alert(err.response?.data || 'Ошибка обновления ФИО')
+        alert(err.response?.data || 'Ошибка обновления личных данных')
         console.error(err)
       }
     }
@@ -707,6 +747,9 @@ export default defineComponent({
       openNameModal,
       closeNameModal,
       saveName,
+      newBirthDate,
+      maxBirthDate,
+      formatBirthDate,
     }
   },
 })
@@ -853,9 +896,25 @@ export default defineComponent({
   font-size: 14px;
   font-weight: 500;
   color: #0f172a;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+/* The name still truncates on its own line; the birth date sits under it. */
+.cell-name > span:first-child {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cell-birth-date {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
+  white-space: nowrap;
 }
 
 .avatar {
