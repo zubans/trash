@@ -1,140 +1,149 @@
 <template>
   <div class="user-list">
-    <!-- Table Toolbar -->
-    <div class="table-toolbar mb-4">
-      <div class="search-box">
-        <i class="ph ph-magnifying-glass"></i>
-        <input
-          v-model="searchQuery"
-          type="text"
-          :placeholder="$t('users.searchPlaceholder')"
-          @input="debouncedFetch"
-        />
-      </div>
-
-      <div class="filters">
-        <div class="filter-select-wrapper">
-          <select v-model="selectedRole" class="btn-filter-select" @change="fetchUsers">
-            <option value="">Все роли</option>
-            <option value="CUSTOMER">CUSTOMER</option>
-            <option value="EXECUTOR">EXECUTOR</option>
-            <option value="ADMIN">ADMIN</option>
-          </select>
+    <div class="admin-table-card mb-4">
+      <!-- Table Toolbar -->
+      <div class="table-toolbar">
+        <div class="search-box">
+          <i class="ph ph-magnifying-glass"></i>
+          <input
+            v-model="searchQuery"
+            type="text"
+            :placeholder="$t('users.searchPlaceholder')"
+            @input="debouncedFetch"
+          />
         </div>
 
-        <div class="filter-select-wrapper">
-          <select v-model="selectedStatus" class="btn-filter-select" @change="fetchUsers">
-            <option value="">Все статусы</option>
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="BLOCKED">BLOCKED</option>
-          </select>
-        </div>
-
-        <button class="btn-filter" title="Сбросить" @click="clearFilters">
-          <i class="ph-bold ph-arrows-clockwise"></i>
-        </button>
-      </div>
-    </div>
-
-    <!-- Modern Grid Table -->
-    <div class="grid-table mb-4">
-      <!-- Headers -->
-      <div class="grid-row grid-header">
-        <div>Телефон</div>
-        <div>ФИО</div>
-        <div>Роль</div>
-        <div>Баланс</div>
-        <div>Адрес</div>
-        <div>Статус</div>
-        <div>Дата регистрации</div>
-        <div style="text-align: right; padding-right: 12px;">Действия</div>
-      </div>
-
-      <!-- Rows -->
-      <div v-for="u in users" :key="u.id" class="grid-row grid-item">
-        <div class="cell-phone">
-          <div class="avatar" :class="getAvatarClass(u.role)">
-            {{ getAvatarChar(u.role) }}
+        <div class="filters">
+          <div class="filter-select-wrapper">
+            <select v-model="selectedRole" class="btn-filter-select" @change="fetchUsers">
+              <option value="">Все роли</option>
+              <option value="CUSTOMER">CUSTOMER</option>
+              <option value="EXECUTOR">EXECUTOR</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
           </div>
-          <span>{{ u.phone }}</span>
-        </div>
 
-        <div class="cell-name" :title="formatFullName(u)">
-          <span>{{ formatFullName(u) }}</span>
-          <span class="cell-birth-date">{{ formatBirthDate(u.birth_date) }}</span>
-        </div>
+          <div class="filter-select-wrapper">
+            <select v-model="selectedStatus" class="btn-filter-select" @change="fetchUsers">
+              <option value="">Все статусы</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="BLOCKED">BLOCKED</option>
+            </select>
+          </div>
 
-        <div class="cell-role">
-          <span v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])" :key="r" class="role-chip">{{ r }}</span>
-        </div>
-
-        <div class="cell-amount">{{ currencySymbol }}{{ Number(u.balance || 0).toFixed(2) }}</div>
-
-        <div class="cell-address" :title="u.address || '-'">{{ u.address || '-' }}</div>
-
-        <div class="cell-status">
-          <span class="status-pill" :class="u.status === 'ACTIVE' ? 'success' : 'danger'">
-            {{ u.status }}
-          </span>
-          <span class="verify-chip" :class="u.is_verified ? 'verified' : 'unverified'">
-            <i :class="u.is_verified ? 'ph-fill ph-seal-check' : 'ph ph-seal'"></i>
-            {{ u.is_verified ? 'Верифицирован' : 'Не верифицирован' }}
-          </span>
-        </div>
-
-        <div class="cell-date">
-          <span>{{ formatDate(u.created_at).split(',')[0] }}</span>
-          <span class="date-time">{{ formatDate(u.created_at).split(',')[1] || '' }}</span>
-        </div>
-
-        <div class="cell-actions">
-          <!-- Fast Top Up Icon Button -->
-          <button
-            class="btn-ghost topup"
-            data-tooltip="Пополнить"
-            @click="openTopUpModal(u)"
-          >
-            <i class="ph-bold ph-plus-circle"></i>
+          <button class="btn-filter" title="Сбросить" @click="clearFilters">
+            <i class="ph-bold ph-arrows-clockwise"></i>
           </button>
+        </div>
+      </div>
 
-          <!-- Kebab Dropdown Menu -->
-          <div class="dropdown-wrapper">
-            <button class="btn-ghost" data-tooltip="Меню">
-              <i class="ph-bold ph-dots-three-vertical"></i>
+      <!-- Modern Grid Table -->
+      <div class="grid-table">
+        <!-- Headers -->
+        <div class="grid-row grid-header">
+          <div>Пользователь</div>
+          <div>Роль</div>
+          <div>Баланс</div>
+          <div>Адрес</div>
+          <div>Статус</div>
+          <div>Регистрация</div>
+          <div class="cell-actions">Действия</div>
+        </div>
+
+        <!-- Rows -->
+        <div v-for="u in users" :key="u.id" class="grid-row grid-item">
+          <div class="cell-user">
+            <div class="avatar" :class="getAvatarClass(u.role)">
+              {{ getAvatarChar(u.role) }}
+            </div>
+            <div class="user-info">
+              <span class="user-phone">{{ u.phone }}</span>
+              <span class="user-name" :title="formatFullName(u)">{{ formatFullName(u) }}</span>
+              <span class="user-birth-date">{{ formatBirthDate(u.birth_date) }}</span>
+            </div>
+          </div>
+
+          <div class="cell-role">
+            <span
+              v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])"
+              :key="r"
+              class="role-chip"
+              :class="getRoleClass(r)"
+            >{{ r }}</span>
+          </div>
+
+          <div class="cell-amount">
+            <span class="balance">{{ currencySymbol }}{{ Number(u.balance || 0).toFixed(2) }}</span>
+          </div>
+
+          <div class="cell-address">
+            <span class="address" :class="{ empty: !u.address }" :title="u.address || '—'">{{ u.address || '—' }}</span>
+          </div>
+
+          <div class="cell-status">
+            <div class="status-main" :class="{ banned: u.status !== 'ACTIVE' }">
+              <span class="dot"></span>{{ u.status }}
+            </div>
+            <div class="status-verify" :class="{ verified: u.is_verified }">
+              <i :class="u.is_verified ? 'ph-fill ph-check-circle' : 'ph ph-warning-circle'"></i>
+              {{ u.is_verified ? 'Верифицирован' : 'Не верифицирован' }}
+            </div>
+          </div>
+
+          <div class="cell-date">
+            <span class="date-main">{{ formatDay(u.created_at) }}</span>
+            <span class="date-time">{{ formatTime(u.created_at) }}</span>
+          </div>
+
+          <div class="cell-actions">
+            <!-- Fast Top Up Icon Button -->
+            <button
+              class="btn-ghost topup"
+              data-tooltip="Пополнить"
+              @click="openTopUpModal(u)"
+            >
+              <i class="ph-bold ph-plus-circle"></i>
             </button>
-            <div class="dropdown-menu">
-              <button class="dropdown-item" @click="openNameModal(u)">
-                <i class="ph-bold ph-user"></i> Личные данные
+
+            <!-- Kebab Dropdown Menu -->
+            <div class="dropdown-wrapper">
+              <button class="btn-ghost" data-tooltip="Меню">
+                <i class="ph-bold ph-dots-three-vertical"></i>
               </button>
-              <button class="dropdown-item" @click="openTopUpModal(u)">
-                <i class="ph-bold ph-wallet"></i> Пополнить баланс
-              </button>
-              <button class="dropdown-item" @click="openRolesModal(u)">
-                <i class="ph-bold ph-user-gear"></i> Роли
-              </button>
-              <button class="dropdown-item" @click="openAddressModal(u)">
-                <i class="ph-bold ph-map-pin"></i> Редактировать адрес
-              </button>
-              <div class="menu-divider"></div>
-              <button class="dropdown-item" @click="toggleUserVerified(u)">
-                <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
-                {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
-              </button>
-              <div class="menu-divider"></div>
-              <button
-                v-if="u.status === 'ACTIVE'"
-                class="dropdown-item danger"
-                @click="toggleUserStatus(u)"
-              >
-                <i class="ph-bold ph-prohibit"></i> Заблокировать
-              </button>
-              <button
-                v-else
-                class="dropdown-item"
-                @click="toggleUserStatus(u)"
-              >
-                <i class="ph-bold ph-check"></i> Активировать
-              </button>
+              <div class="dropdown-menu">
+                <button class="dropdown-item" @click="openNameModal(u)">
+                  <i class="ph-bold ph-user"></i> Личные данные
+                </button>
+                <button class="dropdown-item" @click="openTopUpModal(u)">
+                  <i class="ph-bold ph-wallet"></i> Пополнить баланс
+                </button>
+                <button class="dropdown-item" @click="openRolesModal(u)">
+                  <i class="ph-bold ph-user-gear"></i> Роли
+                </button>
+                <button class="dropdown-item" @click="openAddressModal(u)">
+                  <i class="ph-bold ph-map-pin"></i> Редактировать адрес
+                </button>
+                <div class="menu-divider"></div>
+                <button class="dropdown-item" @click="toggleUserVerified(u)">
+                  <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
+                  {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
+                </button>
+                <div class="menu-divider"></div>
+                <button
+                  v-if="u.status === 'ACTIVE'"
+                  class="dropdown-item danger"
+                  @click="toggleUserStatus(u)"
+                >
+                  <i class="ph-bold ph-prohibit"></i> Заблокировать
+                </button>
+                <button
+                  v-else
+                  class="dropdown-item"
+                  @click="toggleUserStatus(u)"
+                >
+                  <i class="ph-bold ph-check"></i> Активировать
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -156,7 +165,12 @@
         </div>
 
         <div class="uc-chips">
-          <span v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])" :key="r" class="role-chip">{{ r }}</span>
+          <span
+            v-for="r in (u.roles && u.roles.length ? u.roles : [u.role])"
+            :key="r"
+            class="role-chip"
+            :class="getRoleClass(r)"
+          >{{ r }}</span>
           <span class="status-pill" :class="u.status === 'ACTIVE' ? 'success' : 'danger'">{{ u.status }}</span>
           <span class="verify-chip" :class="u.is_verified ? 'verified' : 'unverified'">
             <i :class="u.is_verified ? 'ph-fill ph-seal-check' : 'ph ph-seal'"></i>
@@ -172,7 +186,7 @@
             <span>Адрес</span><b class="uc-addr">{{ u.address || '—' }}</b>
           </div>
           <div class="uc-meta-row">
-            <span>Регистрация</span><b>{{ formatDate(u.created_at).split(',')[0] }}</b>
+            <span>Регистрация</span><b>{{ formatDay(u.created_at) }}</b>
           </div>
         </div>
 
@@ -669,10 +683,17 @@ export default defineComponent({
       }
     }
 
-    const formatDate = (dateStr: string) => {
-      if (!dateStr) return '-'
-      const d = new Date(dateStr)
-      return d.toLocaleString()
+    // Split into day and time explicitly. The cell used to render
+    // toLocaleString().split(','), which puts the whole timestamp in one line
+    // wherever the browser locale does not separate them with a comma.
+    const formatDay = (dateStr: string) => {
+      if (!dateStr) return '—'
+      return new Date(dateStr).toLocaleDateString('ru-RU')
+    }
+
+    const formatTime = (dateStr: string) => {
+      if (!dateStr) return ''
+      return new Date(dateStr).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
     }
 
     onMounted(() => {
@@ -683,10 +704,15 @@ export default defineComponent({
       switch (role) {
         case 'CUSTOMER': return 'customer'
         case 'EXECUTOR': return 'executor'
+        case 'MODERATOR': return 'moderator'
         case 'ADMIN': return 'admin'
         default: return 'customer'
       }
     }
+
+    // Role chips are coloured by role, so a moderator reads differently from a
+    // plain executor at a glance. Shared with the mobile cards.
+    const getRoleClass = (role: string) => getAvatarClass(role)
 
     const getAvatarChar = (role: string) => {
       return (role || 'U').charAt(0).toUpperCase()
@@ -715,7 +741,9 @@ export default defineComponent({
       clearFilters,
       toggleUserStatus,
       toggleUserVerified,
-      formatDate,
+      formatDay,
+      formatTime,
+      getRoleClass,
       showRoleModal,
       showTopUpModal,
       showAddressModal,
@@ -761,11 +789,22 @@ export default defineComponent({
   flex-direction: column;
 }
 
+/* Toolbar and table share one surface, so the filters read as part of the
+   table rather than as a floating strip above it. */
+.admin-table-card {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+}
+
 .table-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .search-box {
@@ -848,84 +887,96 @@ export default defineComponent({
   width: 100%;
   display: flex;
   flex-direction: column;
+  overflow-x: auto;
+}
+
+/* Sum of the fixed columns: narrower than this the table scrolls rather than
+   crushing the address and status cells. */
+.grid-row {
+  min-width: 1100px;
 }
 
 .grid-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.8fr) minmax(0, 0.9fr) minmax(0, 1.3fr) 120px;
+  /* Пользователь | Роль | Баланс | Адрес | Статус | Регистрация | Действия.
+     The last two are wider than the mockup's 120/80: at that size the uppercase
+     headers "РЕГИСТРАЦИЯ" and "ДЕЙСТВИЯ" run into each other, and two 32px
+     buttons do not fit an 80px column once the cell padding is counted. */
+  grid-template-columns: minmax(250px, 1.5fr) 120px 110px minmax(200px, 1fr) 160px 140px 120px;
   align-items: center;
-  gap: 16px;
 }
 
 .grid-row > div {
   min-width: 0;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.grid-header .cell-actions {
+  justify-content: flex-end;
 }
 
 .grid-header {
-  padding: 0 16px 12px 16px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .grid-item {
-  padding: 16px;
-  border-bottom: 1px dashed rgba(0,0,0,0.04);
-  transition: all 0.2s ease-in-out;
+  border-bottom: 1px solid #e2e8f0;
+  transition: background 0.2s ease-in-out;
 }
 
 .grid-item:hover {
   background: #f8fafc;
-  border-radius: 8px;
-  border-bottom-color: transparent;
 }
 
-.cell-phone {
-  font-size: 15px;
-  font-weight: 600;
-  color: #0f172a;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+/* Phone, name and birth date share one column: three lines about the same
+   person read better together than split across two columns. */
+.cell-user {
+  gap: 16px;
 }
 
-.cell-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #0f172a;
-  min-width: 0;
+.user-info {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  min-width: 0;
 }
 
-/* The name still truncates on its own line; the birth date sits under it. */
-.cell-name > span:first-child {
+.user-phone {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.user-name,
+.user-birth-date {
+  font-size: 13px;
+  color: #64748b;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.cell-birth-date {
+.user-birth-date {
   font-size: 12px;
-  font-weight: 400;
-  color: #64748b;
-  white-space: nowrap;
 }
 
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 800;
   flex-shrink: 0;
 }
 
@@ -939,29 +990,49 @@ export default defineComponent({
   color: #f59e0b;
 }
 
+.avatar.moderator {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
 .avatar.admin {
   background: #f3e8ff;
   color: #d946ef;
 }
 
+/* Roles stack: a user with several of them stays inside a fixed column. */
 .cell-role {
-  font-size: 13px;
-  font-weight: 600;
-  color: #64748b;
-  letter-spacing: 0.5px;
-  display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
 }
 
 .role-chip {
-  background: #eef2ff;
-  color: #4f46e5;
+  display: inline-flex;
+  background: #f1f5f9;
+  color: #0f172a;
   border-radius: 6px;
-  padding: 2px 6px;
+  padding: 4px 8px;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  width: fit-content;
+}
+
+.role-chip.customer {
+  background: #eef2ff;
+  color: #5c60f5;
+}
+
+.role-chip.moderator {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.role-chip.admin {
+  background: #f3e8ff;
+  color: #a21caf;
 }
 
 .roles-check-list {
@@ -987,32 +1058,40 @@ export default defineComponent({
   margin-top: 8px;
 }
 
-.cell-amount {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 14px;
-  font-weight: 700;
+.balance {
+  font-size: 15px;
+  font-weight: 800;
   color: #0f172a;
+  white-space: nowrap;
 }
 
-.cell-address {
+.address {
   font-size: 13px;
-  color: #0f172a;
+  color: #64748b;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.address.empty {
+  color: #cbd5e1;
+}
+
 .cell-date {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  color: #64748b;
-  display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.date-main {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
 }
 
 .date-time {
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 12px;
+  color: #64748b;
 }
 
 .status-pill {
@@ -1037,10 +1116,53 @@ export default defineComponent({
 }
 
 .cell-status {
-  display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   align-items: flex-start;
+  justify-content: center;
+}
+
+.status-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.status-main.banned {
+  color: #ef4444;
+}
+
+.status-main .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+}
+
+.status-main.banned .dot {
+  background: #ef4444;
+}
+
+.status-verify {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.status-verify i {
+  font-size: 14px;
+}
+
+.status-verify.verified {
+  color: #10b981;
 }
 
 .verify-chip {
@@ -1072,24 +1194,21 @@ export default defineComponent({
 .cell-actions {
   display: flex;
   gap: 4px;
+  padding-left: 8px;
   justify-content: flex-end;
   align-items: center;
-  opacity: 0.5;
-  transition: all 0.2s ease-in-out;
-}
-
-.grid-item:hover .cell-actions {
-  opacity: 1;
+  /* overflow:hidden from the shared cell rule would clip the kebab menu */
+  overflow: visible;
 }
 
 .btn-ghost {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: none;
   background: transparent;
   color: #64748b;
-  font-size: 18px;
+  font-size: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1099,7 +1218,7 @@ export default defineComponent({
 }
 
 .btn-ghost:hover {
-  background: rgba(0,0,0,0.05);
+  background: #e2e8f0;
   color: #0f172a;
 }
 
@@ -1393,7 +1512,18 @@ export default defineComponent({
     flex: 1;
     min-width: 120px;
   }
-  /* Swap the wide table for cards. */
+  /* Swap the wide table for cards; the toolbar keeps the surface to itself,
+     so it must not keep the table's chrome. */
+  .admin-table-card {
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+  .table-toolbar {
+    padding: 0;
+    border-bottom: none;
+  }
   .grid-table {
     display: none;
   }

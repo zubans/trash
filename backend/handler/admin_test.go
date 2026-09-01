@@ -215,8 +215,12 @@ func (m *mockAdminRepository) GetActiveOrders(ctx context.Context, limit, offset
 	return nil, nil
 }
 
-func (m *mockAdminRepository) GetCompletedOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
-	return nil, nil
+func (m *mockAdminRepository) GetCompletedOrders(ctx context.Context, f repository.CompletedOrdersFilter) ([]*repository.AdminOrder, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockAdminRepository) CompletedOrderFacets(ctx context.Context) (repository.CompletedOrderFacets, error) {
+	return repository.CompletedOrderFacets{}, nil
 }
 
 // mockSettingsRepository implements repository.SettingsRepository.

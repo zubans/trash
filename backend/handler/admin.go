@@ -784,13 +784,38 @@ func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Req
 // GetCompletedOrdersHandler lists completed customer orders.
 func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
-	orders, err := h.adminService.GetCompletedOrders(r.Context(), limit, offset)
+	q := r.URL.Query()
+	orders, total, err := h.adminService.GetCompletedOrders(r.Context(), repository.CompletedOrdersFilter{
+		Search:  q.Get("search"),
+		Service: q.Get("service"),
+		Period:  q.Get("period"),
+		Sort:    q.Get("sort"),
+		Desc:    q.Get("order") != "asc",
+		Limit:   limit,
+		Offset:  offset,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if orders == nil {
+		orders = []*repository.AdminOrder{}
+	}
+	// Facets travel with the page so the filter dropdowns list every service and
+	// month that exists, not only the ones on screen.
+	facets, err := h.adminService.CompletedOrderFacets(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"orders":   orders,
+		"total":    total,
+		"services": facets.Services,
+		"periods":  facets.Periods,
+	})
 }
 
 // SendBroadcastEmailHandler sends an email broadcast to selected recipients.

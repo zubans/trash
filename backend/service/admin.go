@@ -662,10 +662,17 @@ func (s *AdminService) GetActiveOrders(ctx context.Context, limit, offset int) (
 	return s.adminRepo.GetActiveOrders(ctx, limit, offset)
 }
 
-// GetCompletedOrders returns completed customer orders.
-func (s *AdminService) GetCompletedOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
-	limit, offset = page(limit, offset)
-	return s.adminRepo.GetCompletedOrders(ctx, limit, offset)
+// GetCompletedOrders returns one page of completed customer orders together
+// with the total number matching the filter, so the client can paginate and
+// export without guessing how much is behind the page it holds.
+func (s *AdminService) GetCompletedOrders(ctx context.Context, f repository.CompletedOrdersFilter) ([]*repository.AdminOrder, int, error) {
+	f.Limit, f.Offset = page(f.Limit, f.Offset)
+	return s.adminRepo.GetCompletedOrders(ctx, f)
+}
+
+// CompletedOrderFacets returns the values the completed-orders filters offer.
+func (s *AdminService) CompletedOrderFacets(ctx context.Context) (repository.CompletedOrderFacets, error) {
+	return s.adminRepo.CompletedOrderFacets(ctx)
 }
 
 // GetProfile returns the authenticated user's profile including customer address.

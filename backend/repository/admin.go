@@ -85,7 +85,41 @@ type AdminRepository interface {
 	GetTransactions(ctx context.Context, limit, offset int) ([]*Transaction, error)
 	GetActiveShifts(ctx context.Context) ([]*AdminShift, error)
 	GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
-	GetCompletedOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
+	GetCompletedOrders(ctx context.Context, f CompletedOrdersFilter) ([]*AdminOrder, int, error)
+	CompletedOrderFacets(ctx context.Context) (CompletedOrderFacets, error)
+}
+
+// CompletedOrderFacets are the values the completed-orders filters can be set
+// to. They are computed over every completed order rather than over the current
+// page, so choosing one filter never empties the other.
+type CompletedOrderFacets struct {
+	Services []string `json:"services"`
+	Periods  []string `json:"periods"`
+}
+
+// CompletedOrdersFilter describes one page of the completed-orders listing.
+// Search, service and period narrow the set; Sort picks the column. All of it
+// runs in SQL, so what the admin sees and exports covers every completed order,
+// not just the rows that happened to be loaded.
+type CompletedOrdersFilter struct {
+	Search  string // phone, order id or service name, matched loosely
+	Service string // exact service name
+	Period  string // YYYY-MM over completed_at
+	Sort    string // one of completedOrderSorts; anything else falls back
+	Desc    bool
+	Limit   int
+	Offset  int
+}
+
+// completedOrderSorts whitelists what may reach ORDER BY. The key arrives from
+// the client, so it must never be interpolated: only these fixed expressions
+// can be selected.
+var completedOrderSorts = map[string]string{
+	"completed_at": "o.completed_at",
+	"final_amount": "o.final_amount",
+	"service":      "COALESCE(sn.name->>'ru', sn.code)",
+	"customer":     "cu.phone",
+	"executor":     "eu.phone",
 }
 
 type adminRepo struct {
@@ -489,23 +523,79 @@ func (r *adminRepo) GetActiveOrders(ctx context.Context, limit, offset int) ([]*
 	return orders, rows.Err()
 }
 
-func (r *adminRepo) GetCompletedOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error) {
-	query := `
-		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
-		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, eu.phone, COALESCE(sn.name->>'ru', sn.code)
+func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFilter) ([]*AdminOrder, int, error) {
+	where := "WHERE o.status = $1"
+	args := []interface{}{OrderStatusCompleted}
+
+	if search := strings.TrimSpace(f.Search); search != "" {
+		// A phone is stored as +79997454656 but typed as "+7 (999) 745-46-56"
+		// or just "9997": both sides are reduced to digits before comparing, so
+		// the admin does not have to reproduce the stored spelling. Digits are
+		// only used when the term actually has some — otherwise every row would
+		// match the empty string.
+		digits := digitsOnly(search)
+		args = append(args, "%"+search+"%")
+		like := fmt.Sprintf("$%d", len(args))
+		conds := []string{
+			fmt.Sprintf("o.id::text ILIKE %s", like),
+			fmt.Sprintf("COALESCE(sn.name->>'ru', sn.code) ILIKE %s", like),
+			fmt.Sprintf("COALESCE(o.address, '') ILIKE %s", like),
+		}
+		if digits != "" {
+			args = append(args, "%"+digits+"%")
+			digitsLike := fmt.Sprintf("$%d", len(args))
+			conds = append(conds,
+				fmt.Sprintf("regexp_replace(cu.phone, '[^0-9]', '', 'g') LIKE %s", digitsLike),
+				fmt.Sprintf("regexp_replace(COALESCE(eu.phone, ''), '[^0-9]', '', 'g') LIKE %s", digitsLike),
+			)
+		}
+		where += " AND (" + strings.Join(conds, " OR ") + ")"
+	}
+
+	if service := strings.TrimSpace(f.Service); service != "" {
+		args = append(args, service)
+		where += fmt.Sprintf(" AND COALESCE(sn.name->>'ru', sn.code) = $%d", len(args))
+	}
+
+	if period := strings.TrimSpace(f.Period); period != "" {
+		args = append(args, period)
+		where += fmt.Sprintf(" AND to_char(o.completed_at, 'YYYY-MM') = $%d", len(args))
+	}
+
+	from := `
 		FROM orders o
 		JOIN users cu ON o.customer_id = cu.id
 		LEFT JOIN users eu ON o.executor_id = eu.id
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.status = $1
-		ORDER BY o.completed_at DESC, o.created_at DESC
-		LIMIT $2 OFFSET $3`
+		` + where
 
-	rows, err := r.db.QueryContext(ctx, query, OrderStatusCompleted, limit, offset)
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) "+from, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	sortExpr, ok := completedOrderSorts[f.Sort]
+	if !ok {
+		sortExpr = completedOrderSorts["completed_at"]
+	}
+	direction := "ASC"
+	if f.Desc {
+		direction = "DESC"
+	}
+
+	args = append(args, f.Limit, f.Offset)
+	query := fmt.Sprintf(`
+		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
+		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
+		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
+		       cu.phone, eu.phone, COALESCE(sn.name->>'ru', sn.code)
+		%s
+		ORDER BY %s %s NULLS LAST, o.created_at DESC
+		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -519,9 +609,64 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, limit, offset int) (
 			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
 		)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		orders = append(orders, &o)
 	}
-	return orders, rows.Err()
+	return orders, total, rows.Err()
+}
+
+func (r *adminRepo) CompletedOrderFacets(ctx context.Context) (CompletedOrderFacets, error) {
+	facets := CompletedOrderFacets{Services: []string{}, Periods: []string{}}
+
+	serviceRows, err := r.db.QueryContext(ctx, `
+		SELECT DISTINCT COALESCE(sn.name->>'ru', sn.code) AS name
+		FROM orders o
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
+		WHERE o.status = $1
+		ORDER BY name`, OrderStatusCompleted)
+	if err != nil {
+		return facets, err
+	}
+	defer serviceRows.Close()
+	for serviceRows.Next() {
+		var name string
+		if err := serviceRows.Scan(&name); err != nil {
+			return facets, err
+		}
+		facets.Services = append(facets.Services, name)
+	}
+	if err := serviceRows.Err(); err != nil {
+		return facets, err
+	}
+
+	periodRows, err := r.db.QueryContext(ctx, `
+		SELECT DISTINCT to_char(completed_at, 'YYYY-MM') AS period
+		FROM orders
+		WHERE status = $1 AND completed_at IS NOT NULL
+		ORDER BY period DESC`, OrderStatusCompleted)
+	if err != nil {
+		return facets, err
+	}
+	defer periodRows.Close()
+	for periodRows.Next() {
+		var period string
+		if err := periodRows.Scan(&period); err != nil {
+			return facets, err
+		}
+		facets.Periods = append(facets.Periods, period)
+	}
+	return facets, periodRows.Err()
+}
+
+// digitsOnly keeps the digits of a search term so a typed phone matches a
+// stored one whatever punctuation either side uses.
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
