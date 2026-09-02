@@ -416,6 +416,36 @@ async function performRefresh(): Promise<string> {
   return token
 }
 
+export type SessionState = 'ok' | 'stale' | 'ended'
+
+// Доводит access-токен до пригодного состояния перед тем, как его предъявят там,
+// где обменять его по ходу дела уже не выйдет, — прежде всего в query
+// WebSocket: сокет показывает токен один раз, при рукопожатии, и просроченный
+// сервер отвергает ещё до апгрейда. Обычный путь по 401 сокету недоступен.
+//
+// 'stale' означает временный сбой обмена (нет сети, 429, 5xx): токены целы,
+// попытку стоит повторить позже. 'ended' — сессии больше нет, повторять нечего.
+export async function ensureFreshSession(): Promise<SessionState> {
+  const token = getAuthToken()
+  if (!token && !getRefreshToken()) return 'ended'
+
+  const expiresMs = token ? accessTokenExpiryMs(token) : null
+  // Срок неизвестен — ведём себя как обычный запрос: идём с тем, что есть, и
+  // полагаемся на 401. Живой токен обменивать незачем.
+  if (token && (expiresMs === null || expiresMs - Date.now() > REFRESH_SKEW_MS)) return 'ok'
+
+  try {
+    await refreshSession()
+    return 'ok'
+  } catch (err) {
+    if (isSessionExpired(err)) {
+      endSession()
+      return 'ended'
+    }
+    return 'stale'
+  }
+}
+
 // Эндпоинты, чей 401 говорит о самих учётных данных, а не об истёкшем токене.
 // Обновление на них бессмысленно: на экране входа обновлять нечего.
 function isAuthEndpoint(url: string | undefined): boolean {
