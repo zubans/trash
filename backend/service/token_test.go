@@ -67,6 +67,15 @@ func (f *fakeRefreshRepo) Revoke(ctx context.Context, tokenHash string) error {
 
 func (f *fakeRefreshRepo) DeleteExpired(ctx context.Context) (int64, error) { return 0, nil }
 
+// ageUse отодвигает отметку об использовании в прошлое: так тест отличает
+// повтор спустя время от гонки двух запросов одного клиента.
+func (f *fakeRefreshRepo) ageUse(tokenHash string, by time.Duration) {
+	if t, ok := f.tokens[tokenHash]; ok && t.UsedAt != nil {
+		aged := t.UsedAt.Add(-by)
+		t.UsedAt = &aged
+	}
+}
+
 func (f *fakeRefreshRepo) usableCount(userID uuid.UUID) int {
 	n := 0
 	for _, t := range f.tokens {
@@ -132,12 +141,52 @@ func TestRefreshReplayRevokesEverySession(t *testing.T) {
 		t.Fatalf("first exchange should succeed: %v", err)
 	}
 
+	// Обмен состоялся давно: окно гонки клиента прошло, и повтор объясняется
+	// только тем, что значение оказалось у кого-то ещё.
+	refresh.ageUse(hashRefreshToken(stolen.RefreshToken), refreshReplayGrace+time.Second)
+
 	// Атакующий повторяет значение, уже использованное законным клиентом.
 	if _, err := svc.Refresh(context.Background(), stolen.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("expected the replay to be rejected, got %v", err)
 	}
 	if n := refresh.usableCount(user.ID); n != 0 {
 		t.Errorf("a replay must end every session of the user, %d still usable", n)
+	}
+}
+
+// TestConcurrentRefreshKeepsOtherSessions — два контекста одного клиента
+// (экран и таймер обновления, две вкладки, приложение, вернувшееся из фона)
+// успевают послать один и тот же токен почти одновременно. Проигравшему
+// отказывают, но пара победителя и остальные сессии должны выжить: иначе
+// собственный параллелизм приложения выбрасывает человека из аккаунта.
+func TestConcurrentRefreshKeepsOtherSessions(t *testing.T) {
+	svc, _, refresh, user := newSessionTestService(t)
+
+	pair, err := svc.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Вторая, не связанная сессия того же пользователя (другое устройство).
+	if _, err := svc.IssueTokenPair(context.Background(), user); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rotated, err := svc.Refresh(context.Background(), pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("first exchange should succeed: %v", err)
+	}
+
+	// Тот же токен приходит вторым запросом, пока окно гонки не истекло.
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Errorf("expected the duplicate to be rejected, got %v", err)
+	}
+
+	// Пара, которую получил победивший запрос, обязана остаться рабочей.
+	if _, err := svc.Refresh(context.Background(), rotated.RefreshToken); err != nil {
+		t.Errorf("the winner's token must survive a concurrent duplicate: %v", err)
+	}
+	if n := refresh.usableCount(user.ID); n == 0 {
+		t.Error("a concurrent duplicate must not end the user's sessions")
 	}
 }
 

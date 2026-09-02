@@ -27,6 +27,18 @@ const (
 	refreshTokenTTL = 30 * 24 * time.Hour
 
 	refreshTokenBytes = 32
+
+	// refreshReplayGrace — окно, внутри которого повторное предъявление уже
+	// обменянного токена считается гонкой клиента, а не утечкой.
+	//
+	// Ротация разрешает обменять значение один раз, и два контекста одного
+	// пользователя (две вкладки, экран и таймер обновления, мобильное
+	// приложение, вернувшееся из фона сразу несколькими запросами) успевают
+	// послать один и тот же токен почти одновременно. Наказывать за это
+	// завершением всех сессий — значит выбрасывать человека из приложения за
+	// собственный параллелизм. Настоящая утечка проявляется позже: у
+	// атакующего нет причин попадать в те же секунды, что и законный клиент.
+	refreshReplayGrace = 30 * time.Second
 )
 
 // ErrInvalidRefreshToken возвращается для всего, что делает refresh-токен
@@ -91,7 +103,8 @@ func (s *AuthService) IssueTokenPair(ctx context.Context, user *repository.User)
 // Именно ротация делает утёкший токен обнаружимым: каждый токен можно обменять
 // один раз. Предъявление уже использованного токена означает, что значение
 // находится в двух местах сразу, поэтому все сессии этого пользователя
-// завершаются и ему приходится войти заново.
+// завершаются и ему приходится войти заново — но только если повтор пришёл
+// позже refreshReplayGrace: внутри окна это параллелизм самого клиента.
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	if s.refreshRepo == nil {
 		return nil, errors.New("refresh token storage is not configured")
@@ -109,8 +122,15 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, err
 	}
 
-	// Повтор: токен уже обменивали. Считаем это компрометацией.
+	// Повтор: токен уже обменивали.
 	if stored.UsedAt != nil {
+		// Внутри окна это гонка самого клиента: отказываем в обмене, но пару,
+		// которую уже получил победивший запрос, оставляем рабочей — иначе
+		// параллелизм одного приложения заканчивался бы выходом из всех сессий.
+		if time.Since(*stored.UsedAt) <= refreshReplayGrace {
+			log.Printf("[AuthService] concurrent refresh for user %s; rejecting the duplicate without ending sessions", stored.UserID)
+			return nil, ErrInvalidRefreshToken
+		}
 		log.Printf("[SECURITY] refresh token replay for user %s; revoking all sessions", stored.UserID)
 		if err := s.refreshRepo.RevokeAllForUser(ctx, stored.UserID); err != nil {
 			log.Printf("[SECURITY] failed to revoke sessions for user %s: %v", stored.UserID, err)

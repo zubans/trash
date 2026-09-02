@@ -211,15 +211,41 @@ api.interceptors.response.use(
 // Access-токен короткоживущий, поэтому 401 — нормальный конец его жизни, а не
 // повод выбрасывать пользователя. На первый 401 клиент обменивает свой
 // refresh-токен на новую пару и повторяет исходный запрос. Сессия по-настоящему
-// закончена, только когда падает само обновление.
+// закончена, только когда сам обмен отвергнут сервером: временный сбой (нет
+// сети, 429, 5xx) сессию не заканчивает, иначе мобильный клиент терял бы вход
+// каждый раз, когда связь моргнула.
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
+
+// Насколько заранее обновляемся. Запрос, отправленный за секунды до истечения,
+// успевает приехать на сервер уже просроченным.
+const REFRESH_SKEW_MS = 2 * 60 * 1000
 
 export function getRefreshToken(): string {
   try {
     return localStorage.getItem(REFRESH_TOKEN_KEY) || ''
   } catch {
     return ''
+  }
+}
+
+// Разбирает exp из access-токена. Возвращает null, если токена нет или он не
+// разбирается: тогда о сроке ничего не известно и решает обычный путь по 401.
+function accessTokenExpiryMs(token: string): number | null {
+  try {
+    const base64Url = token.split('.')[1]
+    if (!base64Url) return null
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+    const jsonPayload = decodeURIComponent(
+      window.atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+    const claims = JSON.parse(jsonPayload)
+    return typeof claims.exp === 'number' ? claims.exp * 1000 : null
+  } catch {
+    return null
   }
 }
 
@@ -230,35 +256,19 @@ function scheduleProactiveRefresh(token: string) {
     clearTimeout(proactiveTimer)
     proactiveTimer = null
   }
-  try {
-    const base64Url = token.split('.')[1]
-    if (!base64Url) return
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-    const jsonPayload = decodeURIComponent(
-      window.atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    )
-    const claims = JSON.parse(jsonPayload)
-    if (typeof claims.exp === 'number') {
-      const expiresMs = claims.exp * 1000
-      const nowMs = Date.now()
-      // Обновляем за 2 минуты до истечения (или на половине срока, если он очень короткий)
-      const refreshInMs = Math.max(10000, expiresMs - nowMs - 2 * 60 * 1000)
-      proactiveTimer = setTimeout(async () => {
-        try {
-          if (getRefreshToken()) {
-            await refreshSession()
-          }
-        } catch (e) {
-          console.warn('[auth] proactive refresh failed, will retry on demand:', e)
-        }
-      }, refreshInMs)
-    }
-  } catch {
-    // игнорируем ошибки разбора
-  }
+  const expiresMs = accessTokenExpiryMs(token)
+  if (expiresMs === null) return
+
+  const refreshInMs = Math.max(10000, expiresMs - Date.now() - REFRESH_SKEW_MS)
+  proactiveTimer = setTimeout(() => {
+    if (!getRefreshToken()) return
+    // Ошибку глотаем намеренно: обмен по расписанию — оптимизация, а не
+    // последний шанс. Если он не удался, обновление всё равно случится на
+    // первом же 401, а сессию завершает только отказ сервера внутри refreshSession.
+    refreshSession().catch((e) => {
+      console.warn('[auth] proactive refresh failed, will retry on demand:', e)
+    })
+  }, refreshInMs)
 }
 
 export function storeSession(token: string, refreshToken?: string) {
@@ -299,6 +309,19 @@ export function clearSession() {
   }
 }
 
+// Что делать, когда сессия закончилась. Хранилище авторизации живёт в памяти
+// Pinia, и очистка localStorage его не трогает: без этого уведомления стор
+// продолжал считать пользователя вошедшим, навигационный гард возвращал его с
+// /login обратно в кабинет, и получался открытый кабинет, где каждое действие
+// отвечает ошибкой авторизации. Обработчик регистрирует main.ts.
+type SessionExpiredHandler = () => void
+
+let sessionExpiredHandler: SessionExpiredHandler | null = null
+
+export function setSessionExpiredHandler(handler: SessionExpiredHandler | null) {
+  sessionExpiredHandler = handler
+}
+
 function redirectToLogin() {
   if (Capacitor.isNativePlatform()) {
     if (window.location.hash !== '#/login') {
@@ -309,16 +332,49 @@ function redirectToLogin() {
   }
 }
 
-// Одно выполняющееся обновление, общее для всех запросов, получивших 401
-// одновременно. Без него экран, стреляющий пятью параллельными запросами, послал
-// бы пять обновлений, и ротация выдала бы четыре из них за повтор — а на это
-// бэкенд отвечает завершением всех сессий.
+// Единственный путь завершения сессии: чистит хранилище и отдаёт управление
+// приложению, чтобы оно сбросило своё состояние и увело пользователя на вход.
+function endSession() {
+  clearSession()
+  if (sessionExpiredHandler) {
+    sessionExpiredHandler()
+    return
+  }
+  redirectToLogin()
+}
+
+// Ошибка обмена, означающая, что refresh-токен больше не действует. Отделена
+// от сетевых и серверных сбоев: только она завершает сессию.
+function sessionExpiredError(message: string): Error & { sessionExpired: true } {
+  const err = new Error(message) as Error & { sessionExpired: true }
+  err.sessionExpired = true
+  return err
+}
+
+function isSessionExpired(err: any): boolean {
+  return !!err?.sessionExpired
+}
+
+// Одно выполняющееся обновление, общее для всех, кому оно понадобилось:
+// параллельных запросов с 401, таймера и возврата приложения из фона. Ротация
+// разрешает обменять токен ровно один раз, а второй обмен тем же значением
+// бэкенд считает утечкой и завершает все сессии пользователя — поэтому все
+// вызывающие обязаны идти через одну эту точку.
 let refreshInFlight: Promise<string> | null = null
 
-export async function refreshSession(): Promise<string> {
+export function refreshSession(): Promise<string> {
+  if (!refreshInFlight) {
+    refreshInFlight = performRefresh().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+async function performRefresh(): Promise<string> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) {
-    throw new Error('no refresh token')
+    throw sessionExpiredError('no refresh token')
   }
 
   const baseUrl = (api.defaults.baseURL || '').replace(/\/$/, '')
@@ -326,18 +382,45 @@ export async function refreshSession(): Promise<string> {
 
   // Голый вызов axios: он не должен идти через перехватчик ниже, иначе падающее
   // обновление пыталось бы обновить само себя.
-  const res = await axios.post(
-    refreshUrl,
-    { refresh_token: refreshToken },
-    { headers: { 'Content-Type': 'application/json' } }
-  )
+  let res
+  try {
+    res = await axios.post(
+      refreshUrl,
+      { refresh_token: refreshToken },
+      { headers: { 'Content-Type': 'application/json' } }
+    )
+  } catch (err: any) {
+    const status = err?.response?.status
+    if (status === 401 || status === 403) {
+      // Пока запрос был в пути, другой контекст того же аккаунта (вторая
+      // вкладка, второй WebView) мог обменять этот же токен и записать новую
+      // пару. Тогда отказ относится к уже устаревшему значению, а сессия жива.
+      const rotatedElsewhere = getRefreshToken()
+      const access = getAuthToken()
+      if (rotatedElsewhere && rotatedElsewhere !== refreshToken && access) {
+        return access
+      }
+      // Сервер отверг сами учётные данные обновления — сессия действительно кончилась.
+      throw sessionExpiredError('refresh token rejected')
+    }
+    // Нет ответа, 429 (общий адрес мобильного оператора) или 5xx: сбой временный,
+    // refresh-токен ещё цел, попробуем на следующем запросе.
+    throw err
+  }
 
   const token: string = res.data?.token
   if (!token) {
-    throw new Error('refresh response carried no token')
+    throw sessionExpiredError('refresh response carried no token')
   }
   storeSession(token, res.data?.refresh_token)
   return token
+}
+
+// Эндпоинты, чей 401 говорит о самих учётных данных, а не об истёкшем токене.
+// Обновление на них бессмысленно: на экране входа обновлять нечего.
+function isAuthEndpoint(url: string | undefined): boolean {
+  if (!url) return false
+  return /\/(login|register|auth\/refresh)$/.test(url.split('?')[0])
 }
 
 api.interceptors.response.use(
@@ -346,32 +429,67 @@ api.interceptors.response.use(
     const original = error.config
     const status = error.response?.status
 
-    if (status !== 401 || !original || original._retriedAfterRefresh) {
-      if (status === 401) {
-        clearSession()
-        redirectToLogin()
-      }
+    // Повторный 401 уже с новым токеном сессию не заканчивает: это отказ
+    // конкретного эндпоинта, а не истёкший вход.
+    if (status !== 401 || !original || original._retriedAfterRefresh || isAuthEndpoint(original.url)) {
       return Promise.reject(error)
     }
 
     original._retriedAfterRefresh = true
 
     try {
-      if (!refreshInFlight) {
-        refreshInFlight = refreshSession().finally(() => {
-          refreshInFlight = null
-        })
-      }
-      const token = await refreshInFlight
+      const token = await refreshSession()
       original.headers = original.headers || {}
       original.headers.Authorization = `Bearer ${token}`
       return api(original)
-    } catch {
-      clearSession()
-      redirectToLogin()
+    } catch (refreshError) {
+      if (isSessionExpired(refreshError)) {
+        endSession()
+      }
       return Promise.reject(error)
     }
   }
 )
+
+// Подхватывает сессию, восстановленную из localStorage при запуске приложения, и
+// следит за возвратом из фона.
+//
+// Таймер обновления в мобильном WebView не переживает фон: система замораживает
+// таймеры свёрнутого приложения, поэтому вернувшийся через час пользователь
+// приходит с access-токеном, истёкшим сорок пять минут назад. Проверка при
+// возврате видимости обновляет пару до того, как экран выстрелит первым
+// запросом, — иначе каждое действие сначала получает ошибку авторизации.
+export function startSessionWatch() {
+  const refreshIfNeeded = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    if (!getRefreshToken()) return
+
+    const current = getAuthToken()
+    const expiresMs = current ? accessTokenExpiryMs(current) : null
+    // Токена нет, срок неизвестен или он вот-вот кончится — обмениваем сразу.
+    if (expiresMs !== null && expiresMs - Date.now() > REFRESH_SKEW_MS) {
+      scheduleProactiveRefresh(current)
+      return
+    }
+    refreshSession().catch((err) => {
+      if (isSessionExpired(err)) {
+        endSession()
+      }
+    })
+  }
+
+  // Тот же разбор на старте: приложение могло пролежать закрытым дольше, чем
+  // живёт access-токен, и восстановленная из localStorage сессия начинается с
+  // просроченного токена. Обновляем до первого запроса экрана.
+  refreshIfNeeded()
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', refreshIfNeeded)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', refreshIfNeeded)
+    window.addEventListener('online', refreshIfNeeded)
+  }
+}
 
 export default api

@@ -14,6 +14,8 @@ import '@phosphor-icons/web/fill/style.css'
 import App from './App.vue'
 import router from './router'
 import { i18n } from './i18n'
+import { setSessionExpiredHandler, startSessionWatch } from './services/api'
+import { useAuthStore } from './stores/auth-store'
 
 const app = createApp(App)
 
@@ -34,5 +36,22 @@ app.use(createPinia())
 app.use(router)
 app.use(i18n)
 app.use(createVuestic())
+
+// Конец сессии обязан дойти и до хранилища авторизации: оно живёт в памяти и
+// продолжало бы считать пользователя вошедшим после того, как обновление
+// провалилось. Тогда навигационный гард возвращает его с /login обратно в
+// кабинет, и получается открытый кабинет, где каждое действие отвечает ошибкой
+// авторизации, — ровно то, что видно в мобильном приложении.
+setSessionExpiredHandler(() => {
+  useAuthStore().logout()
+  router.replace('/login').catch(() => {
+    // Навигация может быть прервана параллельным переходом — вход всё равно
+    // остаётся единственным доступным экраном, потому что стор уже пуст.
+  })
+})
+
+// Планирует обновление для сессии, восстановленной из localStorage, и обновляет
+// её при возврате приложения из фона, где таймеры WebView не идут.
+startSessionWatch()
 
 app.mount('#app')

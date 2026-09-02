@@ -269,6 +269,12 @@ func main() {
 	passwordResetLimiter := middleware.NewRateLimiter(5, 15*time.Minute)
 	registerLimiter := middleware.NewRateLimiter(5, time.Hour)
 	geoLimiter := middleware.NewRateLimiter(30, time.Minute)
+	// Обновление сессии ограничивается отдельно и щедрее входа: это не подбор
+	// учётных данных, а обмен уже выданного токена, и ключ здесь — адрес
+	// клиента. За NAT мобильного оператора под одним адресом сидят сотни
+	// приложений, и общий с /login лимит в 10 запросов в минуту отказывал бы им
+	// в обновлении, то есть выбрасывал бы их из аккаунта.
+	refreshLimiter := middleware.NewRateLimiter(120, time.Minute)
 
 	r := chi.NewRouter()
 	// StripQueryToken выполняется до логгера, чтобы учётные данные, переданные
@@ -294,7 +300,7 @@ func main() {
 		// Обновление намеренно без аутентификации: к моменту, когда клиенту это нужно,
 		// access-токен уже истёк. Учётными данными служит refresh-токен, поэтому
 		// эндпоинт ограничен по частоте, как и прочие эндпоинты с учётными данными.
-		r.With(loginLimiter.Middleware).Post("/auth/refresh", ph.RefreshHandler)
+		r.With(refreshLimiter.Middleware).Post("/auth/refresh", ph.RefreshHandler)
 		r.Get("/auth/verify-email", ph.VerifyEmailHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/forgot-password", ph.ForgotPasswordHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/reset-password", ph.ResetPasswordHandler)
