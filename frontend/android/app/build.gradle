@@ -7,8 +7,8 @@ android {
         applicationId "com.healthlogin.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 216
-        versionName "1.0.9"
+        versionCode 251
+        versionName "1.0.25"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         aaptOptions {
