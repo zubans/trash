@@ -9,16 +9,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * Instrumented test, which will execute on an Android device.
+ * Инструментальный тест, выполняющийся на Android-устройстве.
  *
- * @see <a href="http://d.android.com/tools/testing">Testing documentation</a>
+ * @see <a href="http://d.android.com/tools/testing">Документация по тестированию</a>
  */
 @RunWith(AndroidJUnit4.class)
 public class ExampleInstrumentedTest {
 
     @Test
     public void useAppContext() throws Exception {
-        // Context of the app under test.
+        // Контекст тестируемого приложения.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
         assertEquals("com.getcapacitor.app", appContext.getPackageName());

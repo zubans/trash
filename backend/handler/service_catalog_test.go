@@ -17,8 +17,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// mockCatalogRepo is an in-memory service catalog with the same delete
-// semantics as the database: nothing is ever removed, nodes are marked.
+// mockCatalogRepo — каталог услуг в памяти с той же семантикой удаления, что и
+// у базы: ничего никогда не удаляется, узлы помечаются.
 type mockCatalogRepo struct {
 	nodes     map[uuid.UUID]*repository.ServiceNode
 	withOrder map[uuid.UUID]bool
@@ -65,13 +65,27 @@ func (m *mockCatalogRepo) DeleteNode(ctx context.Context, id uuid.UUID) error {
 	if node.IsDeleted() {
 		return repository.ErrServiceNodeDeleted
 	}
-	if children, _ := m.HasChildren(context.Background(), id); children {
-		return repository.ErrServiceNodeHasChildren
-	}
+	// Каскад: гасим узел и всех его живых потомков, как это делает реальный репозиторий.
 	now := time.Now()
-	node.DeletedAt = &now
-	node.IsActive = false
+	for _, n := range m.subtreeLive(id) {
+		n.DeletedAt = &now
+		n.IsActive = false
+	}
 	return nil
+}
+
+// subtreeLive возвращает живые узлы поддерева, включая корень.
+func (m *mockCatalogRepo) subtreeLive(root uuid.UUID) []*repository.ServiceNode {
+	out := []*repository.ServiceNode{}
+	if n, ok := m.nodes[root]; ok && !n.IsDeleted() {
+		out = append(out, n)
+	}
+	for _, n := range m.nodes {
+		if n.ParentID != nil && *n.ParentID == root && !n.IsDeleted() {
+			out = append(out, m.subtreeLive(n.ID)...)
+		}
+	}
+	return out
 }
 
 func (m *mockCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) error {
@@ -145,7 +159,15 @@ func (m *mockCatalogRepo) GetChildren(ctx context.Context, parentID uuid.UUID, f
 }
 
 func (m *mockCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {
-	return m.GetChildren(context.Background(), ancestorID, repository.FilterLive)
+	// Живые потомки на всех уровнях (без самого корня), как в реальном репозитории.
+	all := m.subtreeLive(ancestorID)
+	out := make([]*repository.ServiceNode, 0, len(all))
+	for _, n := range all {
+		if n.ID != ancestorID {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 func (m *mockCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*repository.ServiceNode, error) {
@@ -156,7 +178,7 @@ func (m *mockCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUI
 	return nil, nil
 }
 
-// ListNodesWithScript returns the nodes carrying a script of their own.
+// ListNodesWithScript возвращает узлы, несущие собственный скрипт.
 func (m *mockCatalogRepo) ListNodesWithScript(ctx context.Context) ([]*repository.ServiceNode, error) {
 	out := []*repository.ServiceNode{}
 	for _, n := range m.nodes {
@@ -195,8 +217,8 @@ func (m *mockCatalogRepo) IsDescendantOf(ctx context.Context, a, b uuid.UUID) (b
 	return false, nil
 }
 
-// catalogTestEnv wires the handler into a router so that URL params resolve the
-// same way they do in main.
+// catalogTestEnv подключает обработчик к роутеру, чтобы URL-параметры
+// разрешались так же, как в main.
 type catalogTestEnv struct {
 	repo    *mockCatalogRepo
 	router  chi.Router
@@ -254,10 +276,10 @@ func (e *catalogTestEnv) do(t *testing.T, method, url string, body interface{}) 
 	return rec
 }
 
-// TestAdminUpdateNode_VariantKeepsItsTypeWhenBodyOmitsIt pins the fix for the
-// admin panel bug: node_type is immutable and therefore not sent on update, and
-// validating the request against its own empty type rejected every variant edit
-// — including a plain "switch it off" — with "CATEGORY cannot have base_price".
+// TestAdminUpdateNode_VariantKeepsItsTypeWhenBodyOmitsIt фиксирует исправление
+// бага админ-панели: node_type неизменяем и потому не шлётся при обновлении, а
+// проверка запроса по его же пустому типу отклоняла любую правку варианта —
+// включая простое «выключить» — с «CATEGORY cannot have base_price».
 func TestAdminUpdateNode_VariantKeepsItsTypeWhenBodyOmitsIt(t *testing.T) {
 	env := newCatalogTestEnv()
 
@@ -283,8 +305,8 @@ func TestAdminUpdateNode_VariantKeepsItsTypeWhenBodyOmitsIt(t *testing.T) {
 	}
 }
 
-// TestAdminUpdateNode_CategoryZeroPriceIsNoPrice covers the other half of the
-// same form: a shared form sends base_price 0 for a category.
+// TestAdminUpdateNode_CategoryZeroPriceIsNoPrice закрывает вторую половину той
+// же формы: общая форма шлёт для категории base_price 0.
 func TestAdminUpdateNode_CategoryZeroPriceIsNoPrice(t *testing.T) {
 	env := newCatalogTestEnv()
 
@@ -316,9 +338,9 @@ func TestAdminUpdateNode_CategoryWithRealPriceIsRejected(t *testing.T) {
 	}
 }
 
-// TestAdminDeleteNode_KeepsOrderedVariant is the fix for "cannot delete variant
-// with existing orders": the delete goes through and the row survives for the
-// orders that reference it.
+// TestAdminDeleteNode_KeepsOrderedVariant — исправление «нельзя удалить вариант
+// с существующими заказами»: удаление проходит, а строка выживает ради заказов,
+// которые на неё ссылаются.
 func TestAdminDeleteNode_KeepsOrderedVariant(t *testing.T) {
 	env := newCatalogTestEnv()
 	env.repo.withOrder[env.variant.ID] = true
@@ -351,20 +373,34 @@ func TestAdminDeleteNode_KeepsOrderedVariant(t *testing.T) {
 	}
 }
 
-func TestAdminDeleteNode_CategoryWithLiveChildrenIsRejected(t *testing.T) {
+func TestAdminDeleteNode_CategoryCascadesToChildren(t *testing.T) {
 	env := newCatalogTestEnv()
 
+	// Удаление категории с живым потомком проходит и гасит поддерево целиком.
 	rec := env.do(t, http.MethodDelete, "/admin/service-nodes/"+env.rootCat.ID.String(), nil)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Retiring the child first frees the category.
-	if rec := env.do(t, http.MethodDelete, "/admin/service-nodes/"+env.variant.ID.String(), nil); rec.Code != http.StatusOK {
-		t.Fatalf("expected the variant delete to succeed, got %d: %s", rec.Code, rec.Body.String())
+	var resp struct {
+		Soft         bool `json:"soft"`
+		DeletedCount int  `json:"deleted_count"`
 	}
-	if rec := env.do(t, http.MethodDelete, "/admin/service-nodes/"+env.rootCat.ID.String(), nil); rec.Code != http.StatusOK {
-		t.Fatalf("expected the category delete to succeed, got %d: %s", rec.Code, rec.Body.String())
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Soft || resp.DeletedCount != 2 {
+		t.Errorf("expected a soft cascade over 2 nodes, got %+v", resp)
+	}
+
+	// И категория, и вложенный вариант должны стать удалёнными.
+	cat, _ := env.repo.GetNodeByID(context.Background(), env.rootCat.ID)
+	if !cat.IsDeleted() || cat.IsActive {
+		t.Errorf("category not retired: deleted=%v active=%v", cat.IsDeleted(), cat.IsActive)
+	}
+	child, _ := env.repo.GetNodeByID(context.Background(), env.variant.ID)
+	if !child.IsDeleted() || child.IsActive {
+		t.Errorf("child variant not retired by cascade: deleted=%v active=%v", child.IsDeleted(), child.IsActive)
 	}
 }
 
@@ -402,7 +438,7 @@ func TestAdminRestoreNode_ComesBackSwitchedOff(t *testing.T) {
 		t.Error("a restored node must stay switched off until an admin publishes it")
 	}
 
-	// Restoring twice is a conflict, not a silent success.
+	// Повторное восстановление — конфликт, а не тихий успех.
 	if rec := env.do(t, http.MethodPost, "/admin/service-nodes/"+env.variant.ID.String()+"/restore", nil); rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 on the second restore, got %d", rec.Code)
 	}

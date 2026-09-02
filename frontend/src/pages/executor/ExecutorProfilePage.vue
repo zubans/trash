@@ -1,7 +1,7 @@
 <template>
   <div class="profile-page-wrapper">
     <div class="profile-container">
-      <!-- Top Navigation Header -->
+      <!-- Верхняя навигационная шапка -->
       <div class="top-nav">
         <button type="button" class="btn-back" @click="goBack">
           <i class="ph-bold ph-arrow-left"></i>
@@ -14,7 +14,7 @@
       </div>
 
       <div class="profile-card">
-        <!-- Phone & Status Banner -->
+        <!-- Баннер с телефоном и статусом -->
         <div class="user-phone-banner mb-4">
           <div class="banner-avatar">
             <i class="ph ph-user"></i>
@@ -28,7 +28,7 @@
           </div>
         </div>
 
-        <!-- Date of Birth Section -->
+        <!-- Раздел даты рождения -->
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-cake" style="color: #ec4899;"></i>
@@ -57,7 +57,7 @@
           </div>
         </div>
 
-        <!-- Email Management -->
+        <!-- Управление почтой -->
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
@@ -84,7 +84,7 @@
           </div>
         </div>
 
-        <!-- Password Change Section -->
+        <!-- Раздел смены пароля -->
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-lock-key" style="color: #f59e0b;"></i>
@@ -115,7 +115,7 @@
           </div>
         </div>
 
-        <!-- Action Footer -->
+        <!-- Подвал с действиями -->
         <div class="profile-actions">
           <button type="button" class="btn-back-home" @click="goBack">
             <i class="ph-bold ph-house"></i>
@@ -248,9 +248,9 @@ export default defineComponent({
           old_password: oldPassword.value,
           new_password: newPassword.value
         })
-        // Changing the password ends every session; the response carries a fresh
-        // pair so this device stays signed in. Without storing it the next
-        // request would 401 and drop the user on the login screen.
+        // Смена пароля завершает все сессии; ответ несёт свежую пару, чтобы это
+        // устройство осталось в системе. Без её сохранения следующий запрос отдал бы
+        // 401 и выбросил пользователя на экран входа.
         if (res.data?.token) {
           storeSession(res.data.token, res.data.refresh_token)
         }
@@ -373,7 +373,7 @@ export default defineComponent({
   padding: 32px;
 }
 
-/* User phone banner */
+/* Баннер с телефоном пользователя */
 .user-phone-banner {
   display: flex;
   align-items: center;
@@ -424,7 +424,7 @@ export default defineComponent({
   border-radius: 6px;
 }
 
-/* Section Header */
+/* Заголовок раздела */
 .section-header {
   margin-bottom: 14px;
 }
@@ -444,7 +444,7 @@ export default defineComponent({
   margin-top: 2px;
 }
 
-/* Email & Password Box */
+/* Блок почты и пароля */
 .email-box, .password-box {
   background: #f8fafc;
   border: 1px solid #e2e8f0;

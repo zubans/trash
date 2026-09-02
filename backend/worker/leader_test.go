@@ -29,8 +29,8 @@ func leaderTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// Without a database the guard is a pass-through, so single-process
-// deployments and unit tests are unaffected.
+// Без базы защита — сквозной проход, поэтому однопроцессные деплои и
+// юнит-тесты не затронуты.
 func TestLeaderWithoutDatabaseRunsTheJob(t *testing.T) {
 	ran := false
 	guard := NewLeader(nil).Guard("test")
@@ -55,15 +55,15 @@ func TestLeaderRunsTheJobAndPropagatesItsError(t *testing.T) {
 		t.Fatal("job did not run while the lock was free")
 	}
 
-	// A job's own failure must reach the caller, which is what logs it.
+	// Собственный сбой задачи обязан дойти до вызывающего, который его и логирует.
 	wantErr := sql.ErrNoRows
 	if err := guard(func() error { return wantErr }); err != wantErr {
 		t.Errorf("guard returned %v, want the job's error", err)
 	}
 }
 
-// The point of the lock: while one process is inside the job, another must
-// skip it rather than run the same work twice.
+// Смысл блокировки: пока один процесс внутри задачи, другой обязан её
+// пропустить, а не выполнить ту же работу дважды.
 func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	db := leaderTestDB(t)
 	defer db.Close()
@@ -102,8 +102,8 @@ func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	close(release)
 	wg.Wait()
 
-	// And once the holder is done, the lock is free again — a lock that is
-	// taken but never released would stop the job forever.
+	// А когда держатель закончил, блокировка снова свободна — блокировка, которую
+	// взяли и не отпустили, остановила бы задачу навсегда.
 	afterRan := false
 	if err := leader.Guard(job)(func() error { afterRan = true; return nil }); err != nil {
 		t.Fatalf("third guard returned %v", err)
@@ -113,7 +113,7 @@ func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	}
 }
 
-// Different jobs must not block each other.
+// Разные задачи не должны блокировать друг друга.
 func TestLeaderJobsAreIndependent(t *testing.T) {
 	db := leaderTestDB(t)
 	defer db.Close()

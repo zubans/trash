@@ -7,8 +7,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// An executor who has never touched the marker should keep following their
-// phone: that is what makes the map useful out of the box.
+// Исполнитель, ни разу не трогавший метку, должен и дальше следовать за своим
+// телефоном: именно это делает карту полезной «из коробки».
 func TestExecutorGeo_DeviceReportMovesAnchorUntilManualChoice(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
@@ -33,8 +33,8 @@ func TestExecutorGeo_DeviceReportMovesAnchorUntilManualChoice(t *testing.T) {
 	}
 }
 
-// The bug this guards: a periodic GPS report used to overwrite the district the
-// executor had chosen by hand, dragging their work area back on its own.
+// Баг, от которого это страхует: периодический GPS-отчёт раньше переписывал
+// выбранный вручную район, самовольно утаскивая рабочую зону обратно.
 func TestExecutorGeo_DeviceReportLeavesManualAnchorAlone(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
@@ -43,13 +43,13 @@ func TestExecutorGeo_DeviceReportLeavesManualAnchorAlone(t *testing.T) {
 	ctx := context.Background()
 	executorID := createTestUser(t, db, "EXECUTOR")
 
-	// The executor picks a district by hand ...
+	// Исполнитель выбирает район вручную...
 	const manualLat, manualLon = 55.8000, 37.7000
 	if err := repo.UpdateExecutorLocation(ctx, executorID, manualLat, manualLon, true); err != nil {
 		t.Fatalf("unexpected error setting manual location: %v", err)
 	}
 
-	// ... and the phone goes on reporting from somewhere else.
+	// ...а телефон продолжает сообщать откуда-то ещё.
 	if err := repo.RecordDevicePosition(ctx, executorID, 55.7512, 37.6000); err != nil {
 		t.Fatalf("unexpected error recording device position: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestExecutorGeo_DeviceReportLeavesManualAnchorAlone(t *testing.T) {
 			*lat, *lon, manualLat, manualLon)
 	}
 
-	// The report is still recorded — it is simply not in charge of the anchor.
+	// Отчёт всё равно записывается — он просто не распоряжается якорем.
 	device, err := repo.GetDevicePosition(ctx, executorID)
 	if err != nil {
 		t.Fatalf("unexpected error reading device position: %v", err)
@@ -79,8 +79,8 @@ func TestExecutorGeo_DeviceReportLeavesManualAnchorAlone(t *testing.T) {
 	}
 }
 
-// Pressing "my location" is the way back: it moves the anchor onto the device
-// and lets later reports move it again.
+// Нажатие «моё местоположение» — путь назад: оно переносит якорь на устройство
+// и снова позволяет последующим отчётам его двигать.
 func TestExecutorGeo_FollowDeviceResumesAutomaticPositioning(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
@@ -108,7 +108,7 @@ func TestExecutorGeo_FollowDeviceResumesAutomaticPositioning(t *testing.T) {
 		t.Error("following the device must clear the manual override, and with it the cooldown")
 	}
 
-	// And a later report moves the anchor again, because the override is gone.
+	// А следующий отчёт снова двигает якорь, потому что переопределения больше нет.
 	if err := repo.RecordDevicePosition(ctx, executorID, 55.7600, 37.6100); err != nil {
 		t.Fatalf("unexpected error recording device position: %v", err)
 	}

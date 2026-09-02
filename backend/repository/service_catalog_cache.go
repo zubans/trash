@@ -8,27 +8,27 @@ import (
 	"github.com/google/uuid"
 )
 
-// cachedServiceCatalogRepo caches single-node lookups by id.
+// cachedServiceCatalogRepo кэширует чтение отдельных узлов по id.
 //
-// Why only those: GetNodeByID and GetNodesByIDs are what the request path calls
-// repeatedly — every order rendered in a list resolves its service variant, and
-// the eligibility predicate reads the variant's flags for every order it judges.
-// The tree-navigation methods are called once per screen and are left to the
-// database, so the cache stays a small map of rows rather than a second copy of
-// the catalog with its own invalidation rules.
+// Почему только их: GetNodeByID и GetNodesByIDs — то, что путь запроса вызывает
+// снова и снова: каждый заказ в списке разрешает свой вариант услуги, а предикат
+// допуска читает флаги варианта для каждого оцениваемого заказа. Методы
+// навигации по дереву вызываются раз на экран и оставлены базе, поэтому кэш
+// остаётся маленькой картой строк, а не второй копией каталога со своими
+// правилами инвалидации.
 //
-// Freshness: every catalog mutation that goes through this repository flushes
-// the cache, so an admin's edit is visible to the next request. The TTL is the
-// backstop for the writes this process cannot see — a second replica, or psql —
-// and bounds how long such a change can go unnoticed.
+// Свежесть: любая мутация каталога, идущая через этот репозиторий, сбрасывает
+// кэш, поэтому правка админа видна следующему запросу. TTL — страховка для
+// записей, которых этот процесс не видит (вторая реплика или psql), и он
+// ограничивает, как долго такое изменение может остаться незамеченным.
 //
-// Entries are shared pointers handed to callers, and the nested LocalizedText
-// maps are shared with them. Nothing in the codebase writes to a node it read;
-// treat what comes out of here as read-only, as the code already does.
+// Записи — общие указатели, отдаваемые вызывающим, и вложенные карты
+// LocalizedText разделяются с ними. Ничто в кодовой базе не пишет в прочитанный
+// узел; считайте выходящее отсюда доступным только для чтения, как код и делает.
 type cachedServiceCatalogRepo struct {
-	// Embedded so every method this cache does not care about passes straight
-	// through to the real repository — including new ones added later, which
-	// then simply go uncached rather than silently returning stale rows.
+	// Встроен так, что любой метод, до которого этому кэшу нет дела, проходит
+	// прямо в настоящий репозиторий — включая новые, добавленные позже, которые
+	// тогда просто не кэшируются, а не возвращают молча устаревшие строки.
 	ServiceCatalogRepository
 
 	ttl time.Duration
@@ -42,9 +42,9 @@ type cachedNode struct {
 	expires time.Time
 }
 
-// NewCachedServiceCatalogRepository wraps a catalog repository with an in-memory
-// cache of node-by-id lookups. A ttl of zero disables caching entirely and
-// returns the inner repository unchanged.
+// NewCachedServiceCatalogRepository оборачивает репозиторий каталога кэшем
+// чтений узла по id в памяти. Нулевой ttl полностью выключает кэширование и
+// возвращает внутренний репозиторий без изменений.
 func NewCachedServiceCatalogRepository(inner ServiceCatalogRepository, ttl time.Duration) ServiceCatalogRepository {
 	if ttl <= 0 {
 		return inner
@@ -72,9 +72,9 @@ func (r *cachedServiceCatalogRepo) store(id uuid.UUID, node *ServiceNode) {
 	r.entries[id] = cachedNode{node: node, expires: time.Now().Add(r.ttl)}
 }
 
-// flush drops everything. Catalog mutations are rare admin actions, so a whole
-// flush is cheaper to reason about than working out which nodes an edit could
-// have affected — moving a node changes what its descendants resolve to.
+// flush сбрасывает всё. Мутации каталога — редкие действия админа, поэтому
+// полный сброс проще для понимания, чем вычисление того, какие узлы могла
+// затронуть правка: перенос узла меняет то, во что разрешаются его потомки.
 func (r *cachedServiceCatalogRepo) flush() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -87,8 +87,8 @@ func (r *cachedServiceCatalogRepo) GetNodeByID(ctx context.Context, id uuid.UUID
 	}
 	node, err := r.ServiceCatalogRepository.GetNodeByID(ctx, id)
 	if err != nil {
-		// Misses are not cached: sql.ErrNoRows for an id that is about to exist
-		// (a node created by another process) would otherwise stick for the TTL.
+		// Промахи не кэшируются: sql.ErrNoRows для id, который вот-вот появится
+		// (узел, созданный другим процессом), иначе залип бы на весь TTL.
 		return nil, err
 	}
 	r.store(id, node)

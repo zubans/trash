@@ -1,7 +1,7 @@
 <template>
   <div v-if="show" class="modal-overlay" @click.self="show = false">
     <div class="modal-card">
-      <!-- Header -->
+      <!-- Шапка -->
       <div class="modal-header">
         <div class="modal-title">
           <i class="ph-fill ph-user-gear"></i>
@@ -12,7 +12,7 @@
         </button>
       </div>
 
-      <!-- Verification / Profile Box -->
+      <!-- Блок верификации / профиля -->
       <div class="verification-box mb-4">
         <i class="ph-fill ph-user-circle v-icon"></i>
         <div class="v-content">
@@ -23,7 +23,7 @@
         </div>
       </div>
 
-      <!-- Email Management -->
+      <!-- Управление почтой -->
       <div class="section-header">
         <div class="section-title">
           <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
@@ -50,7 +50,7 @@
         </div>
       </div>
 
-      <!-- Base Address Management -->
+      <!-- Управление базовым адресом -->
       <div class="section-header">
         <div class="section-title">
           <i class="ph-fill ph-map-pin" style="color: #ef4444;"></i>
@@ -83,7 +83,7 @@
         </div>
       </div>
 
-      <!-- Footer -->
+      <!-- Подвал -->
       <div class="modal-footer">
         <button type="button" class="btn-cancel" @click="show = false">
           Закрыть

@@ -13,7 +13,7 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// --- Mocks ---
+// --- Моки ---
 
 type mockOrderRepo struct {
 	orders []*repository.Order
@@ -171,8 +171,8 @@ func (m *mockOrderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.U
 	return cust, nil
 }
 
-// FindOpenByCustomer returns the customer's unfinished orders, the ones a
-// domain event about them can still change.
+// FindOpenByCustomer возвращает незавершённые заказы заказчика — те, которые
+// доменное событие о нём ещё может изменить.
 func (m *mockOrderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*repository.Order, error) {
 	var open []*repository.Order
 	for _, o := range m.orders {
@@ -222,7 +222,7 @@ func (m *mockOrderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*repos
 	return list, nil
 }
 
-// Methods required by the OrderRepository interface.
+// Методы, требуемые интерфейсом OrderRepository.
 func (m *mockOrderRepo) Create(ctx context.Context, q repository.Querier, order *repository.Order) error {
 	m.orders = append(m.orders, order)
 	return nil
@@ -260,7 +260,7 @@ func (m *mockOrderRepo) Assign(ctx context.Context, q repository.Querier, orderI
 	return m.AssignOrder(context.Background(), orderID, executorID)
 }
 
-// AssignWithHold mirrors the guarded assignment used when a bid is accepted.
+// AssignWithHold повторяет охраняемое назначение, используемое при принятии ставки.
 func (m *mockOrderRepo) AssignWithHold(ctx context.Context, q repository.Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
@@ -278,7 +278,7 @@ func (m *mockOrderRepo) AssignWithHold(ctx context.Context, q repository.Querier
 	return repository.ErrConflict
 }
 
-// LockForUpdate mirrors the real repository's row lock read.
+// LockForUpdate повторяет чтение с блокировкой строки из настоящего репозитория.
 func (m *mockOrderRepo) LockForUpdate(ctx context.Context, q repository.Querier, orderID uuid.UUID) (*repository.Order, error) {
 	return m.GetOrderByID(context.Background(), orderID)
 }
@@ -311,8 +311,8 @@ func (m *mockOrderRepo) Confirm(ctx context.Context, q repository.Querier, order
 func (m *mockOrderRepo) Cancel(ctx context.Context, q repository.Querier, orderID uuid.UUID) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {
-			// Mirrors the guarded UPDATE: only a live order can be canceled,
-			// and a second cancel reports a conflict instead of succeeding.
+			// Повторяет охраняемый UPDATE: отменить можно только живой заказ,
+			// а вторая отмена сообщает о конфликте вместо успеха.
 			if o.Status != repository.OrderStatusSearching && o.Status != repository.OrderStatusAssigned {
 				return repository.ErrConflict
 			}
@@ -323,11 +323,11 @@ func (m *mockOrderRepo) Cancel(ctx context.Context, q repository.Querier, orderI
 	return repository.ErrConflict
 }
 
-// FindNearbyOrders mirrors the real repository: searching orders that carry
-// coordinates and fall within the radius. It used to be a stub returning
-// nothing, which was harmless while the map filtered in Go and read every
-// pending order — now that the map asks the repository to bound the search,
-// a stub here would silently make the map look empty.
+// FindNearbyOrders повторяет настоящий репозиторий: заказы в поиске, несущие
+// координаты и попадающие в радиус. Раньше это была заглушка, ничего не
+// возвращавшая, — безвредная, пока карта фильтровала в Go и читала каждый
+// ожидающий заказ; теперь, когда карта просит репозиторий ограничить поиск,
+// заглушка здесь молча делала бы карту пустой.
 func (m *mockOrderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
 	var nearby []*repository.Order
 	for _, o := range m.orders {
@@ -449,7 +449,7 @@ func (m *mockCatalogRepo) GetActiveVariants(ctx context.Context) ([]*repository.
 	return nil, nil
 }
 
-// ListNodesWithScript: none of these fixtures carries a script of its own.
+// ListNodesWithScript: ни одна из этих фикстур не несёт собственного скрипта.
 func (m *mockCatalogRepo) ListNodesWithScript(ctx context.Context) ([]*repository.ServiceNode, error) {
 	var withScript []*repository.ServiceNode
 	for _, node := range m.nodes {
@@ -559,13 +559,13 @@ func (m *mockUserRepo) FindByPhone(ctx context.Context, phone string) (*reposito
 }
 func (m *mockUserRepo) Create(ctx context.Context, user *repository.User) error { return nil }
 func (m *mockUserRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
-	// A verified adult user: eligibility rules are exercised separately.
+	// Верифицированный совершеннолетний пользователь: правила допуска проверяются отдельно.
 	birth := time.Now().AddDate(-30, 0, 0)
 	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", Verified: true, BirthDate: &birth}, nil
 }
 func (m *mockUserRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.User, error) {
-	// Mirrors FindByID above, so a caller batching lookups sees the same users
-	// as one asking for them one at a time.
+	// Повторяет FindByID выше, чтобы вызывающий, пакетирующий чтения, видел тех же
+	// пользователей, что и запрашивающий их по одному.
 	found := make(map[uuid.UUID]*repository.User, len(ids))
 	for _, id := range ids {
 		u, err := m.FindByID(ctx, id)
@@ -581,8 +581,8 @@ func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 }
 func (m *mockUserRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error { return nil }
 
-// UpdateVerifiedTx runs the same write; the fake has no transactions, so the
-// querier is ignored.
+// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
+// querier игнорируется.
 func (m *mockUserRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	return m.UpdateVerified(ctx, id, verified)
 }
@@ -654,7 +654,7 @@ func (m *mockTransactionRepo) UpdateBalance(ctx context.Context, tx *sql.Tx, use
 	return nil
 }
 
-// Debit refuses to go below zero, like the guarded UPDATE in the real repository.
+// Debit отказывается уходить ниже нуля, как охраняемый UPDATE в настоящем репозитории.
 func (m *mockTransactionRepo) Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
 	if m.balance(userID) < amount {
 		return repository.ErrInsufficientFunds
@@ -685,7 +685,7 @@ func (m *mockTransactionRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) erro
 	return fn(nil)
 }
 
-// --- Tests ---
+// --- Тесты ---
 
 func TestOrderService_CalculatePrice(t *testing.T) {
 	setRepo := &orderMockSettingsRepo{
@@ -794,8 +794,8 @@ func TestOrderService_CreateConstructionOrder(t *testing.T) {
 		t.Error("expected error creating construction order without photo URL")
 	}
 
-	// Only paths produced by our own upload endpoint are accepted; an arbitrary
-	// URL would end up rendered in the admin panel.
+	// Принимаются только пути, порождённые нашим собственным эндпоинтом загрузки;
+	// произвольный URL в итоге отрисовался бы в админ-панели.
 	if _, err := srv.CreateConstructionOrder(context.Background(), customerID, "http://somephoto.jpg", "55.75,37.61", "", nil, nil); err == nil {
 		t.Error("expected an external photo URL to be refused")
 	}
@@ -825,7 +825,7 @@ func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(context.Background(), order.ID, executorID)
 
-	// Simulate deadline in the past to trigger downgrade.
+	// Имитируем дедлайн в прошлом, чтобы включить понижение.
 	past := time.Now().Add(-time.Hour)
 	for _, o := range orderRepo.orders {
 		if o.ID == order.ID {
@@ -859,7 +859,7 @@ func TestOrderService_AcceptLimits(t *testing.T) {
 
 	executorID := uuid.New()
 
-	// Test 3 active orders limit
+	// Проверяем лимит в 3 активных заказа
 	for i := 0; i < 3; i++ {
 		oID := uuid.New()
 		orderRepo.orders = append(orderRepo.orders, &repository.Order{
@@ -880,7 +880,7 @@ func TestOrderService_AcceptLimits(t *testing.T) {
 		t.Errorf("expected active orders limit error, got: %v", err)
 	}
 
-	// Reset assigned orders and test 6 executed unconfirmed limit
+	// Сбрасываем назначенные заказы и проверяем лимит в 6 выполненных неподтверждённых
 	orderRepo.orders = nil
 	for i := 0; i < 6; i++ {
 		oID := uuid.New()
@@ -903,8 +903,8 @@ func TestOrderService_AcceptLimits(t *testing.T) {
 	}
 }
 
-// mockAccounts is an in-memory SystemAccountRepository. It mirrors the real one
-// closely enough that a test can assert where money went, not just that it left.
+// mockAccounts — SystemAccountRepository в памяти. Он повторяет настоящий
+// достаточно близко, чтобы тест проверял, куда ушли деньги, а не только что ушли.
 type mockAccounts struct {
 	balances map[string]money.Amount
 }
@@ -936,8 +936,8 @@ func (m *mockAccounts) Debit(ctx context.Context, q repository.Querier, code str
 	return nil
 }
 
-// DebitAvailable mirrors the guarded debit in the real repository: an account
-// may not be taken below zero by a payout.
+// DebitAvailable повторяет охраняемое списание из настоящего репозитория: счёт
+// нельзя увести ниже нуля выплатой.
 func (m *mockAccounts) DebitAvailable(ctx context.Context, q repository.Querier, code string, amount money.Amount) error {
 	balance, ok := m.balances[code]
 	if !ok {
@@ -966,13 +966,13 @@ func (m *mockAccounts) List(ctx context.Context) ([]repository.SystemAccount, er
 	return list, nil
 }
 
-// newTestLedger wires a ledger over in-memory balances and accounts.
+// newTestLedger собирает реестр поверх балансов и счетов в памяти.
 func newTestLedger(txRepo *mockTransactionRepo) (*Ledger, *mockAccounts) {
 	accounts := newMockAccounts()
 	return NewLedger(txRepo, accounts), accounts
 }
 
-// testLedger is the common case: a fresh ledger whose sides are not inspected.
+// testLedger — обычный случай: свежий реестр, чьи стороны никто не разглядывает.
 func testLedger() *Ledger {
 	l, _ := newTestLedger(&mockTransactionRepo{})
 	return l
@@ -982,8 +982,8 @@ func (m *mockUserRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, new
 	return nil
 }
 
-// TestOrderService_TipOrder covers the tip flow: money moves from the customer
-// to the executor, exactly once, and only for a completed order.
+// TestOrderService_TipOrder покрывает поток чаевых: деньги идут от заказчика к
+// исполнителю, ровно один раз и только по завершённому заказу.
 func TestOrderService_TipOrder(t *testing.T) {
 	customerID := uuid.New()
 	executorID := uuid.New()
@@ -1015,7 +1015,7 @@ func TestOrderService_TipOrder(t *testing.T) {
 		t.Errorf("executor balance: expected 150, got %s", got)
 	}
 
-	// A second tip on the same order is refused, and nothing moves.
+	// Вторые чаевые по тому же заказу отклоняются, и ничего не двигается.
 	if err := srv.TipOrder(context.Background(), customerID, orderID, tip); err == nil {
 		t.Fatal("expected a second tip to be rejected")
 	}

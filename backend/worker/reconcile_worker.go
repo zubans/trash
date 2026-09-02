@@ -10,22 +10,22 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// ReconcileWorker periodically checks that stored balances still agree with the
-// transaction log. It only reports: repairing a balance automatically would
-// paper over the bug that caused the drift, and the difference is somebody's
-// money either way.
+// ReconcileWorker периодически проверяет, что сохранённые балансы всё ещё
+// согласуются с журналом транзакций. Он только сообщает: автоматический ремонт
+// баланса замазал бы баг, вызвавший расхождение, а разница — в любом случае
+// чьи-то деньги.
 type ReconcileWorker struct {
 	repo      repository.ReconciliationRepository
 	tolerance money.Amount
 	guard func(func() error) error
 }
 
-// NewReconcileWorker creates a ReconcileWorker.
+// NewReconcileWorker создаёт ReconcileWorker.
 func NewReconcileWorker(repo repository.ReconciliationRepository, tolerance money.Amount) *ReconcileWorker {
 	return &ReconcileWorker{repo: repo, tolerance: tolerance}
 }
 
-// Start runs a pass immediately and then on every interval.
+// Start выполняет проход сразу, а затем на каждом интервале.
 func (w *ReconcileWorker) Start(interval time.Duration) {
 	go func() {
 		w.runGuarded()
@@ -37,7 +37,7 @@ func (w *ReconcileWorker) Start(interval time.Duration) {
 	log.Printf("[ReconcileWorker] Balance reconciliation scheduled every %v", interval)
 }
 
-// Run performs one pass and logs the outcome.
+// Run выполняет один проход и логирует исход.
 func (w *ReconcileWorker) Run() {
 	started := time.Now()
 	report, err := w.repo.Reconcile(context.Background(), w.tolerance)
@@ -62,7 +62,7 @@ func (w *ReconcileWorker) Run() {
 		return
 	}
 
-	// Loud, and with enough detail to act on without opening a database client.
+	// Громко и с достаточной детализацией, чтобы действовать, не открывая клиент базы.
 	log.Printf("[ALERT] %s", report.Summary())
 	if report.BooksOpen {
 		log.Printf("[ALERT] users hold %s, platform accounts hold %s: the two sides differ by %s",
@@ -84,9 +84,9 @@ func (w *ReconcileWorker) Run() {
 	}
 }
 
-// runGuarded runs one pass under the job's advisory lock when a Leader is
-// wired. The pass only reads and reports, so a duplicate run is harmless — but
-// it would raise the same alert twice, which is noise nobody needs.
+// runGuarded выполняет один проход под advisory-блокировкой задачи, когда
+// подключён Leader. Проход только читает и сообщает, поэтому дубль безвреден —
+// но он поднял бы тот же алерт дважды, а этот шум никому не нужен.
 func (w *ReconcileWorker) runGuarded() {
 	if w.guard == nil {
 		w.Run()
@@ -98,7 +98,7 @@ func (w *ReconcileWorker) runGuarded() {
 	})
 }
 
-// WithLeader makes this worker run at most once across every process.
+// WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.
 func (w *ReconcileWorker) WithLeader(leader *Leader, name string) *ReconcileWorker {
 	w.guard = leader.Guard(name)
 	return w

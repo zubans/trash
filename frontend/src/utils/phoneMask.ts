@@ -1,21 +1,21 @@
 /**
- * Formats a raw digit string or arbitrary input into a Russian phone mask:
- * +7 (XXX) XXX-XX-XX
+ * Форматирует строку из цифр или произвольный ввод в российскую телефонную
+ * маску: +7 (XXX) XXX-XX-XX
  */
 export function formatPhoneMask(input: string): string {
   let digits = input.replace(/\D/g, '')
 
-  // If user typed 8 at the start (e.g. 8999...), convert leading 8 to 7
+  // Если пользователь набрал 8 в начале (например, 8999...), меняем ведущую 8 на 7
   if (digits.startsWith('8')) {
     digits = '7' + digits.slice(1)
   }
 
-  // If user didn't start with 7, prepend 7 if there are digits
+  // Если пользователь начал не с 7, дописываем 7 в начало, когда цифры есть
   if (digits.length > 0 && !digits.startsWith('7')) {
     digits = '7' + digits
   }
 
-  // Cap max length to 11 digits (7 + 10 digits)
+  // Ограничиваем длину 11 цифрами (7 + 10 цифр)
   digits = digits.slice(0, 11)
 
   if (digits.length === 0) {
@@ -40,7 +40,7 @@ export function formatPhoneMask(input: string): string {
 }
 
 /**
- * Extracts raw digits for database storage & API requests (e.g., 79999999999).
+ * Извлекает голые цифры для хранения в базе и запросов к API (например, 79999999999).
  */
 export function cleanPhoneDigits(input: string): string {
   let digits = input.replace(/\D/g, '')

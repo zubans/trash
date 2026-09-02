@@ -17,17 +17,17 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// maxAdminPageSize caps admin listings so a single request cannot ask for the
-// whole table.
+// maxAdminPageSize ограничивает админские списки, чтобы один запрос не мог
+// попросить всю таблицу.
 const maxAdminPageSize = 200
 
-// SessionRevoker ends every session of a user. Satisfied by *AuthService;
-// AdminService only needs this much of it.
+// SessionRevoker завершает все сессии пользователя. Удовлетворяется
+// *AuthService; AdminService нужно от него ровно столько.
 type SessionRevoker interface {
 	RevokeAllSessions(ctx context.Context, userID uuid.UUID) error
 }
 
-// AdminService manages administrative business logic.
+// AdminService управляет административной бизнес-логикой.
 type AdminService struct {
 	userRepo      repository.UserRepository
 	adminRepo     repository.AdminRepository
@@ -38,20 +38,20 @@ type AdminService struct {
 	sessions      SessionRevoker
 	mailer        MailSender
 	jwtSecret     []byte
-	// events, when wired, records the domain events an admin action produces —
-	// today only user.verified, which is what closes a verification order and
-	// pays the moderator who performed it.
+	// events, когда подключён, записывает доменные события, порождаемые действием
+	// админа, — сегодня только user.verified, которое закрывает заказ верификации
+	// и оплачивает выполнившему его модератору.
 	events repository.EventRepository
 }
 
-// WithEvents wires the domain event outbox into the admin actions that
-// behaviours react to.
+// WithEvents подключает outbox доменных событий к тем действиям админа, на
+// которые реагируют поведения.
 func (s *AdminService) WithEvents(events repository.EventRepository) *AdminService {
 	s.events = events
 	return s
 }
 
-// NewAdminService creates a new AdminService.
+// NewAdminService создаёт новый AdminService.
 func NewAdminService(
 	userRepo repository.UserRepository,
 	adminRepo repository.AdminRepository,
@@ -75,13 +75,13 @@ func NewAdminService(
 	}
 }
 
-// WithAddresses attaches the saved-address store used by user profiles.
+// WithAddresses присоединяет хранилище сохранённых адресов, используемое профилями.
 func (s *AdminService) WithAddresses(addressRepo repository.AddressRepository) *AdminService {
 	s.addressRepo = addressRepo
 	return s
 }
 
-// ListAddresses returns a user's saved pickup addresses.
+// ListAddresses возвращает сохранённые адреса подачи пользователя.
 func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
@@ -89,7 +89,7 @@ func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]r
 	return s.addressRepo.List(ctx, userID)
 }
 
-// AddAddress saves a new pickup address.
+// AddAddress сохраняет новый адрес подачи.
 func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address Address) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
@@ -100,7 +100,7 @@ func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address
 	return s.addressRepo.Add(ctx, userID, address.ToRecord())
 }
 
-// DeleteAddress removes one of the user's addresses.
+// DeleteAddress удаляет один из адресов пользователя.
 func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
@@ -108,7 +108,7 @@ func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid
 	return s.addressRepo.Delete(ctx, userID, addressID)
 }
 
-// SetDefaultAddress marks which address new orders should start from.
+// SetDefaultAddress отмечает, с какого адреса должны начинаться новые заказы.
 func (s *AdminService) SetDefaultAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
@@ -116,7 +116,7 @@ func (s *AdminService) SetDefaultAddress(ctx context.Context, userID, addressID 
 	return s.addressRepo.SetDefault(ctx, userID, addressID)
 }
 
-// SetDefaultAddressByValue is the same, for clients that identify an address by its text.
+// SetDefaultAddressByValue — то же для клиентов, опознающих адрес по его тексту.
 func (s *AdminService) SetDefaultAddressByValue(ctx context.Context, userID uuid.UUID, address string) ([]repository.Address, error) {
 	if s.addressRepo == nil {
 		return nil, errors.New("address storage is not configured")
@@ -124,21 +124,21 @@ func (s *AdminService) SetDefaultAddressByValue(ctx context.Context, userID uuid
 	return s.addressRepo.SetDefaultByValue(ctx, userID, strings.TrimSpace(address))
 }
 
-// WithLedger attaches the ledger. Top-ups and withdrawals move money, and the
-// ledger is the only thing that can move it.
+// WithLedger присоединяет реестр. Пополнения и выводы двигают деньги, а реестр —
+// единственное, что умеет их двигать.
 func (s *AdminService) WithLedger(ledger *Ledger) *AdminService {
 	s.ledger = ledger
 	return s
 }
 
-// WithReconciliation enables the balance/ledger consistency report.
+// WithReconciliation включает отчёт о согласованности баланса и реестра.
 func (s *AdminService) WithReconciliation(repo repository.ReconciliationRepository) *AdminService {
 	s.reconcileRepo = repo
 	return s
 }
 
-// Reconcile compares every stored balance with the sum of that user's ledger
-// entries. Read-only: a mismatch is reported, never silently corrected.
+// Reconcile сравнивает каждый сохранённый баланс с суммой проводок этого
+// пользователя. Только чтение: расхождение сообщается, но не правится молча.
 func (s *AdminService) Reconcile(ctx context.Context, tolerance money.Amount) (*repository.ReconciliationReport, error) {
 	if s.reconcileRepo == nil {
 		return nil, errors.New("reconciliation is not configured")
@@ -155,11 +155,11 @@ func (s *AdminService) Reconcile(ctx context.Context, tolerance money.Amount) (*
 		return nil, err
 	}
 
-	// A pass run on demand publishes its result exactly like the nightly one.
-	// Without this, forcing a reconciliation from the admin panel or from the
-	// ops bot would show a green report on screen while the alert kept firing
-	// on yesterday's gauge — the two would disagree about the same money, and
-	// the screen would be the one people believed.
+	// Проход, запущенный по требованию, публикует результат ровно как ночной.
+	// Без этого принудительная сверка из админ-панели или из ops-бота показывала бы
+	// зелёный отчёт на экране, пока алерт продолжает срабатывать по вчерашнему
+	// датчику: двое расходились бы в оценке одних и тех же денег, и верили бы
+	// именно экрану.
 	metrics.ReconcileReport(
 		report.OK(),
 		len(report.Discrepancies),
@@ -171,16 +171,16 @@ func (s *AdminService) Reconcile(ctx context.Context, tolerance money.Amount) (*
 	return report, nil
 }
 
-// WithSessions lets the service end a user's sessions when their access is
-// changed. Without it, a ban or a demotion would only take effect once the
-// refresh token expires.
+// WithSessions позволяет сервису завершать сессии пользователя при изменении
+// его доступа. Без этого бан или понижение вступали бы в силу лишь по истечении
+// refresh-токена.
 func (s *AdminService) WithSessions(sessions SessionRevoker) *AdminService {
 	s.sessions = sessions
 	return s
 }
 
-// revokeSessions ends every session of a user, logging but not failing on error:
-// the access change itself has already been persisted.
+// revokeSessions завершает все сессии пользователя, логируя ошибку, но не падая
+// на ней: само изменение доступа уже сохранено.
 func (s *AdminService) revokeSessions(ctx context.Context, userID uuid.UUID, reason string) {
 	if s.sessions == nil {
 		return
@@ -190,11 +190,11 @@ func (s *AdminService) revokeSessions(ctx context.Context, userID uuid.UUID, rea
 	}
 }
 
-// GetUsers retrieves a list of users with filters and search.
+// GetUsers отдаёт список пользователей с фильтрами и поиском.
 //
-// role and status are validated here rather than handed straight to the enum
-// columns: an unexpected value used to surface as a database error and a 500,
-// which is both a bad answer and a way to probe the schema.
+// role и status проверяются здесь, а не передаются прямо в enum-колонки:
+// неожиданное значение раньше всплывало ошибкой базы и кодом 500, а это и
+// плохой ответ, и способ прощупать схему.
 func (s *AdminService) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*repository.User, int, error) {
 	if role != "" && role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
 		return nil, 0, errors.New("invalid role filter")
@@ -208,7 +208,7 @@ func (s *AdminService) GetUsers(ctx context.Context, page, limit int, role, stat
 	return s.adminRepo.GetUsers(ctx, page, limit, role, status, search)
 }
 
-// UpdateUserStatus updates user status (e.g., ACTIVE or BANNED).
+// UpdateUserStatus обновляет статус пользователя (например, ACTIVE или BANNED).
 func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uuid.UUID, status string) error {
 	if status != "ACTIVE" && status != "BANNED" {
 		return errors.New("invalid status")
@@ -220,19 +220,19 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uui
 		return err
 	}
 	if status == "BANNED" {
-		// A ban has to end the sessions too: RequireAuth rejects the banned user
-		// on the next request, but their refresh token would otherwise keep
-		// minting access tokens.
+		// Бан обязан завершить и сессии: RequireAuth отвергнет забаненного на
+		// следующем запросе, но его refresh-токен иначе продолжал бы штамповать
+		// access-токены.
 		s.revokeSessions(ctx, userID, "ban")
 	}
 	log.Printf("[AUDIT] admin %s set status of user %s to %s", adminID, userID, status)
 	return nil
 }
 
-// SetUserVerified toggles the manual verification flag on a user. This is the
-// admin "verified" checkbox: it is the only thing that makes IsVerified() true,
-// which in turn gates customer order visibility and services that require a
-// verified account.
+// SetUserVerified переключает флаг ручной верификации у пользователя. Это тот
+// самый админский чекбокс «верифицирован»: только он делает IsVerified()
+// истинным, что, в свою очередь, управляет видимостью заказов для заказчика и
+// услугами, требующими верифицированной учётной записи.
 func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid.UUID, verified bool) error {
 	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
@@ -242,15 +242,15 @@ func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid
 			return err
 		}
 	} else if err := s.events.RunInTx(ctx, func(tx *sql.Tx) error {
-		// The flag and the event commit together. A behaviour that closes a
-		// verification order on this event must never see the flag set without
-		// the event, nor the event without the flag.
+		// Флаг и событие коммитятся вместе. Поведение, закрывающее заказ верификации
+		// по этому событию, не должно ни разу увидеть флаг без события или событие
+		// без флага.
 		if err := s.userRepo.UpdateVerifiedTx(ctx, tx, userID, verified); err != nil {
 			return err
 		}
 		if !verified {
-			// Un-verifying is an admin taking something back, not an event
-			// anything reacts to.
+			// Снятие верификации — это админ, забирающий что-то назад, а не событие,
+			// на которое что-то реагирует.
 			return nil
 		}
 		return s.events.Publish(ctx, tx, &repository.DomainEvent{
@@ -266,8 +266,8 @@ func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid
 	return nil
 }
 
-// UpdateUserRole updates a user's role. Role changes take effect on the next
-// request because authorization reads the role from the database.
+// UpdateUserRole меняет роль пользователя. Смена роли вступает в силу на
+// следующем запросе, потому что авторизация читает роль из базы.
 func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.UUID, role string) error {
 	if role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
 		return errors.New("invalid role")
@@ -293,15 +293,15 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	if err := s.userRepo.UpdateRole(ctx, userID, role); err != nil {
 		return err
 	}
-	// Authorization reads the role from the database on every request, so the
-	// change is already effective; ending the sessions makes the client pick up
-	// its new role instead of rendering a UI it can no longer use.
+	// Авторизация читает роль из базы на каждом запросе, поэтому изменение уже
+	// действует; завершение сессий заставляет клиента подхватить новую роль вместо
+	// отрисовки интерфейса, которым он больше не может пользоваться.
 	s.revokeSessions(ctx, userID, "role change")
 	log.Printf("[AUDIT] admin %s changed role of user %s: %s -> %s", adminID, userID, current.Role, role)
 	return nil
 }
 
-// validRoles is the closed set of roles an admin may assign.
+// validRoles — закрытый набор ролей, которые админ может назначать.
 var validRoles = map[string]struct{}{
 	repository.RoleCustomer:  {},
 	repository.RoleExecutor:  {},
@@ -309,12 +309,12 @@ var validRoles = map[string]struct{}{
 	repository.RoleAdmin:     {},
 }
 
-// UpdateUserRoles replaces the full set of roles a user holds. It mirrors the
-// single-role guards (a user cannot lose their own admin rights, and the last
-// admin cannot be demoted) and ends the user's sessions so the client re-reads
-// its roles.
+// UpdateUserRoles заменяет полный набор ролей пользователя. Он повторяет
+// охранные правила однорольного варианта (пользователь не может лишить себя
+// админских прав, а последнего админа нельзя понизить) и завершает сессии
+// пользователя, чтобы клиент перечитал свои роли.
 func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid.UUID, roles []string) error {
-	// Normalise: dedupe and validate.
+	// Нормализуем: убираем дубли и проверяем.
 	seen := map[string]struct{}{}
 	clean := make([]string, 0, len(roles))
 	for _, role := range roles {
@@ -336,7 +336,7 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 		return errors.New("user not found")
 	}
 
-	// Guard the admin role the same way single-role updates do.
+	// Охраняем роль админа так же, как это делают однорольные обновления.
 	_, keepsAdmin := seen[repository.RoleAdmin]
 	if current.HasRole(repository.RoleAdmin) && !keepsAdmin {
 		if userID == adminID {
@@ -359,11 +359,11 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 	return nil
 }
 
-// UpdateUserAddress sets the address a user's orders start from (admin-only).
+// UpdateUserAddress задаёт адрес, с которого начинаются заказы пользователя (только для админов).
 //
-// "Update" here means "make this the default address": the row is upserted and
-// promoted, so an admin correcting an address changes the one the customer
-// actually orders from rather than quietly adding a second, unused entry.
+// «Обновить» здесь значит «сделать этот адрес адресом по умолчанию»: строка
+// вставляется-или-обновляется и повышается, поэтому админ, исправляющий адрес,
+// меняет тот, с которого заказчик и правда заказывает, а не добавляет второй.
 func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	if strings.TrimSpace(address) == "" {
 		return errors.New("address is required")
@@ -384,7 +384,7 @@ func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, 
 	return err
 }
 
-// UpdateUserName updates a user's full name (admin-only).
+// UpdateUserName обновляет ФИО пользователя (только для админов).
 func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	lastName = strings.TrimSpace(lastName)
 	firstName = strings.TrimSpace(firstName)
@@ -398,9 +398,9 @@ func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, las
 	return s.userRepo.UpdateUserName(ctx, userID, lastName, firstName, patronymic)
 }
 
-// UpdateUserBirthDate corrects a user's birth date (admin-only). It shares
-// parseBirthDate with registration, so an admin cannot store a date the
-// registration form would have rejected.
+// UpdateUserBirthDate исправляет дату рождения пользователя (только для
+// админов). Он делит parseBirthDate с регистрацией, поэтому админ не может
+// сохранить дату, которую отвергла бы форма регистрации.
 func (s *AdminService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate string) error {
 	parsed, err := parseBirthDate(birthDate)
 	if err != nil {
@@ -412,8 +412,8 @@ func (s *AdminService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID
 	return s.userRepo.UpdateUserBirthDate(ctx, userID, parsed)
 }
 
-// TopUpUserBalance adds funds directly to a user's balance.
-// Only non-admin users may be topped up, and an admin cannot credit themselves.
+// TopUpUserBalance зачисляет средства прямо на баланс пользователя.
+// Пополнять можно только не-админов, и админ не может зачислить самому себе.
 func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {
 	if !amount.IsPositive() {
 		return errors.New("amount must be greater than zero")
@@ -423,7 +423,7 @@ func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uui
 		return errors.New("admin cannot top up their own balance")
 	}
 
-	// Verify user exists and is not an admin
+	// Проверяем, что пользователь существует и не является админом
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return errors.New("user not found")
@@ -432,11 +432,11 @@ func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uui
 		return errors.New("cannot top up an admin balance")
 	}
 
-	// Through the ledger, like every other movement of money. The previous
-	// implementation credited the balance and wrote a transaction row with raw
-	// SQL, touching no system account: the user's own history still added up,
-	// which is why the per-user reconciliation kept passing, while the platform
-	// books drifted a little further open with every top-up.
+	// Через реестр, как и любое другое движение денег. Прежняя реализация
+	// зачисляла на баланс и писала строку транзакции сырым SQL, не трогая ни
+	// одного системного счёта: собственная история пользователя всё ещё сходилась,
+	// поэтому пользовательская сверка продолжала проходить, а книги платформы
+	// расходились чуть сильнее с каждым пополнением.
 	if s.ledger == nil {
 		return errors.New("ledger is not configured")
 	}
@@ -450,8 +450,8 @@ func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uui
 	return nil
 }
 
-// page normalises a requested page size. Admin listings used to return whole
-// tables, which is both a slow response and an easy way to strain the database.
+// page нормализует запрошенный размер страницы. Админские списки раньше
+// возвращали целые таблицы — это и медленный ответ, и лёгкий способ нагрузить базу.
 func page(limit, offset int) (int, int) {
 	if limit <= 0 {
 		limit = 50
@@ -465,19 +465,19 @@ func page(limit, offset int) (int, int) {
 	return limit, offset
 }
 
-// GetTopUpRequests lists balance top-up requests, newest first.
+// GetTopUpRequests перечисляет заявки на пополнение баланса, сначала новые.
 func (s *AdminService) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*repository.TopUpRequest, error) {
 	limit, offset = page(limit, offset)
 	return s.adminRepo.GetTopUpRequests(ctx, limit, offset)
 }
 
-// CreateTopUpRequest creates a pending balance top-up request.
+// CreateTopUpRequest создаёт ожидающую заявку на пополнение баланса.
 func (s *AdminService) CreateTopUpRequest(ctx context.Context, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
 	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
 	}
 
-	// Verify user exists
+	// Проверяем, что пользователь существует
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -489,15 +489,15 @@ func (s *AdminService) CreateTopUpRequest(ctx context.Context, userID uuid.UUID,
 	return s.adminRepo.CreateTopUpRequest(ctx, nil, userID, amount)
 }
 
-// ApproveTopUpRequest credits the requested amount to the user.
+// ApproveTopUpRequest зачисляет запрошенную сумму пользователю.
 //
-// The money comes in from the DEPOSITS account, which represents the outside
-// world: a top-up used to make a balance grow with nothing on the other side.
+// Деньги приходят со счёта DEPOSITS, представляющего внешний мир: раньше
+// пополнение растило баланс, не имея ничего по другую сторону.
 func (s *AdminService) ApproveTopUpRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
 	return s.decideTopUp(ctx, requestID, adminID, "APPROVED")
 }
 
-// RejectTopUpRequest closes a request without moving money.
+// RejectTopUpRequest закрывает заявку, не двигая денег.
 func (s *AdminService) RejectTopUpRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
 	return s.decideTopUp(ctx, requestID, adminID, "REJECTED")
 }
@@ -533,20 +533,20 @@ func (s *AdminService) decideTopUp(ctx context.Context, requestID, adminID uuid.
 	return nil
 }
 
-// GetWithdrawalRequests lists all balance withdrawal requests.
+// GetWithdrawalRequests перечисляет все заявки на вывод средств.
 func (s *AdminService) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*repository.WithdrawalRequest, error) {
 	limit, offset = page(limit, offset)
 	return s.adminRepo.GetWithdrawalRequests(ctx, limit, offset)
 }
 
-// CreateWithdrawalRequest reserves the requested amount and records a pending
-// request for it.
+// CreateWithdrawalRequest резервирует запрошенную сумму и записывает ожидающую
+// заявку на неё.
 //
-// The money is taken out of the balance immediately, exactly like an order hold.
-// Previously a request only checked the balance and left the funds spendable, so
-// a user could queue several requests against the same money and spend it while
-// they waited — the payout queue then contained amounts that could not all be
-// honoured.
+// Деньги уходят с баланса немедленно, ровно как удержание по заказу. Раньше
+// заявка лишь проверяла баланс и оставляла средства тратимыми, поэтому
+// пользователь мог поставить в очередь несколько заявок на одни и те же деньги
+// и потратить их за время ожидания, а очередь выплат тогда содержала суммы,
+// которые нельзя было выполнить все.
 func (s *AdminService) CreateWithdrawalRequest(ctx context.Context, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
 	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
@@ -573,10 +573,10 @@ func (s *AdminService) CreateWithdrawalRequest(ctx context.Context, userID uuid.
 
 	var created *repository.WithdrawalRequest
 	err = s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		// Guarded debit: the balance has to cover the request at this moment,
-		// not at some earlier read.
-		// The money moves out of the balance and onto the payouts account, where
-		// it waits for an admin decision.
+		// Охраняемое списание: баланс обязан покрыть заявку в этот момент,
+		// а не при каком-то более раннем чтении.
+		// Деньги уходят с баланса на счёт выплат, где они ждут
+		// решения администратора.
 		if err := s.ledger.Reserve(ctx, tx, userID, repository.AccountPayouts, amount, repository.TransactionTypeWithdrawalHold, nil); err != nil {
 			return err
 		}
@@ -596,14 +596,14 @@ func (s *AdminService) CreateWithdrawalRequest(ctx context.Context, userID uuid.
 	return created, nil
 }
 
-// ApproveWithdrawalRequest marks a reserved withdrawal as paid out. No balance
-// movement happens here: the money left the balance when the request was
-// created, and this records that reservation being spent.
+// ApproveWithdrawalRequest помечает зарезервированный вывод выплаченным.
+// Никакого движения баланса тут не происходит: деньги ушли с баланса при
+// создании заявки, а это фиксирует расход того резерва.
 func (s *AdminService) ApproveWithdrawalRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
 	return s.decideWithdrawal(ctx, requestID, adminID, "APPROVED")
 }
 
-// RejectWithdrawalRequest returns the reserved money to the user.
+// RejectWithdrawalRequest возвращает зарезервированные деньги пользователю.
 func (s *AdminService) RejectWithdrawalRequest(ctx context.Context, requestID uuid.UUID, adminID uuid.UUID) error {
 	return s.decideWithdrawal(ctx, requestID, adminID, "REJECTED")
 }
@@ -627,12 +627,12 @@ func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID 
 		}
 
 		if status == "REJECTED" {
-			// Give the reserved money back.
+			// Возвращаем зарезервированные деньги.
 			return s.ledger.Release(ctx, tx, repository.AccountPayouts, req.UserID, req.Amount, repository.TransactionTypeRefund, nil, &adminID)
 		}
 
-		// Paid out: the reservation leaves the system through the account that
-		// represents the outside world.
+		// Выплачено: резерв покидает систему через счёт, представляющий
+		// внешний мир.
 		return s.ledger.Settle(ctx, tx, repository.AccountPayouts, repository.AccountDeposits, req.UserID, req.Amount, repository.TransactionTypeWithdrawalPaid, &adminID)
 	})
 	if err != nil {
@@ -645,37 +645,37 @@ func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID 
 	return nil
 }
 
-// GetTransactions retrieves transaction history.
+// GetTransactions отдаёт историю транзакций.
 func (s *AdminService) GetTransactions(ctx context.Context, limit, offset int) ([]*repository.Transaction, error) {
 	limit, offset = page(limit, offset)
 	return s.adminRepo.GetTransactions(ctx, limit, offset)
 }
 
-// GetActiveShifts returns all currently active executor shifts.
+// GetActiveShifts возвращает все активные сейчас смены исполнителей.
 func (s *AdminService) GetActiveShifts(ctx context.Context) ([]*repository.AdminShift, error) {
 	return s.adminRepo.GetActiveShifts(ctx)
 }
 
-// GetActiveOrders returns customer orders that are still active (searching or assigned).
+// GetActiveOrders возвращает заказы клиентов, которые ещё активны (в поиске или назначены).
 func (s *AdminService) GetActiveOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
 	limit, offset = page(limit, offset)
 	return s.adminRepo.GetActiveOrders(ctx, limit, offset)
 }
 
-// GetCompletedOrders returns one page of completed customer orders together
-// with the total number matching the filter, so the client can paginate and
-// export without guessing how much is behind the page it holds.
+// GetCompletedOrders возвращает одну страницу завершённых заказов клиентов
+// вместе с общим числом подходящих под фильтр, чтобы клиент мог листать и
+// выгружать, не гадая, сколько стоит за имеющейся у него страницей.
 func (s *AdminService) GetCompletedOrders(ctx context.Context, f repository.CompletedOrdersFilter) ([]*repository.AdminOrder, int, error) {
 	f.Limit, f.Offset = page(f.Limit, f.Offset)
 	return s.adminRepo.GetCompletedOrders(ctx, f)
 }
 
-// CompletedOrderFacets returns the values the completed-orders filters offer.
+// CompletedOrderFacets возвращает значения, которые предлагают фильтры завершённых заказов.
 func (s *AdminService) CompletedOrderFacets(ctx context.Context) (repository.CompletedOrderFacets, error) {
 	return s.adminRepo.CompletedOrderFacets(ctx)
 }
 
-// GetProfile returns the authenticated user's profile including customer address.
+// GetProfile возвращает профиль аутентифицированного пользователя, включая адрес заказчика.
 func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[string]interface{}, error) {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -723,39 +723,39 @@ func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[st
 	return profile, nil
 }
 
-// GetSettings retrieves global settings.
+// GetSettings отдаёт глобальные настройки.
 func (s *AdminService) GetSettings(ctx context.Context) (map[string]string, error) {
 	return s.settingsRepo.GetSettings(ctx)
 }
 
-// UpdateSettings updates global settings.
+// UpdateSettings обновляет глобальные настройки.
 func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]string) error {
-	// Numeric settings must be non-negative when applicable.
+	// Числовые настройки, где это применимо, обязаны быть неотрицательными.
 	numericKeys := map[string]bool{
 		"standard_tariff_coeff":  true,
 		"increased_tariff_coeff": true,
 		"urgent_tariff_coeff":    true,
 		"asap_tariff_coeff":      true,
 		"min_balance_limit":      true,
-		// How far automatic matching may reach when assigning an order.
+		// Как далеко может дотянуться автоматический подбор при назначении заказа.
 		"auto_match_radius_km": true,
 	}
 	numericKeys["shift_early_exit_penalty"] = true
-	// Enabling this makes executor apps report their position, which keeps the
-	// stored position fresh for the map and for automatic matching. Only "1" or
-	// "0" are accepted so it cannot be switched on by a typo.
+	// Включение этого заставляет приложения исполнителей сообщать своё положение,
+	// что держит сохранённую позицию свежей для карты и автоподбора. Принимаются
+	// только «1» и «0», чтобы его нельзя было включить опечаткой.
 	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
 	}
-	// Whether the background worker auto-assigns orders. Off by default; only
-	// "1" or "0" so it cannot be switched on by a typo.
+	// Назначает ли фоновый воркер заказы автоматически. По умолчанию выключено;
+	// только «1» или «0», чтобы его нельзя было включить опечаткой.
 	if v, ok := settings["auto_matching_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting auto_matching_enabled must be 0 or 1")
 	}
 	numericKeys["reject_penalty_share"] = true
-	// The platform's share of a completed order. Bounded below with the other
-	// numeric settings and above right here, because a share over 100% would pay
-	// the executor a negative reward.
+	// Доля платформы с завершённого заказа. Снизу ограничена вместе с прочими
+	// числовыми настройками, а сверху — прямо здесь, потому что доля выше 100%
+	// платила бы исполнителю отрицательное вознаграждение.
 	numericKeys[SettingOrderCommissionPercent] = true
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,
@@ -791,15 +791,15 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	return s.settingsRepo.UpdateSettings(ctx, settings)
 }
 
-// Commission is what the admin screen shows about the platform's cut: how much
-// has been collected and is still sitting on the commission account, and the
-// rate currently being charged.
+// Commission — то, что админский экран показывает про долю платформы: сколько
+// собрано и всё ещё лежит на счёте комиссии и по какой ставке она берётся
+// сейчас.
 type Commission struct {
 	Balance money.Amount `json:"balance"`
 	Percent float64      `json:"percent"`
 }
 
-// GetCommission reports the commission account balance and the current rate.
+// GetCommission сообщает баланс счёта комиссии и текущую ставку.
 func (s *AdminService) GetCommission(ctx context.Context) (*Commission, error) {
 	if s.ledger == nil {
 		return nil, errors.New("ledger is not configured")
@@ -811,9 +811,9 @@ func (s *AdminService) GetCommission(ctx context.Context) (*Commission, error) {
 	return &Commission{Balance: account.Balance, Percent: s.commissionPercent(ctx)}, nil
 }
 
-// commissionPercent reads the configured rate, falling back to zero when the
-// setting is missing or unreadable — charging nothing is the safe direction to
-// fail in.
+// commissionPercent читает настроенную ставку, откатываясь к нулю, когда
+// настройка отсутствует или нечитаема: не брать ничего — безопасное направление
+// отказа.
 func (s *AdminService) commissionPercent(ctx context.Context) float64 {
 	if s.settingsRepo == nil {
 		return 0
@@ -829,12 +829,12 @@ func (s *AdminService) commissionPercent(ctx context.Context) float64 {
 	return percent
 }
 
-// PayoutCommission withdraws collected commission out of the system. Only an
-// admin reaches this — the route requires the role — and the admin is recorded
-// on the entry, so a payout always has a name against it.
+// PayoutCommission выводит собранную комиссию из системы. Сюда дотягивается
+// только админ — маршрут требует роли, — и админ записывается в проводку,
+// поэтому у выплаты всегда есть имя.
 //
-// The debit is guarded by the account balance, so two admins paying out at once
-// cannot together withdraw more than has been collected.
+// Списание охраняется балансом счёта, поэтому два админа, выплачивающих
+// одновременно, не могут вместе вывести больше, чем собрано.
 func (s *AdminService) PayoutCommission(ctx context.Context, adminID uuid.UUID, amount money.Amount) (*Commission, error) {
 	if !amount.IsPositive() {
 		return nil, errors.New("amount must be greater than zero")
@@ -858,7 +858,7 @@ func (s *AdminService) PayoutCommission(ctx context.Context, adminID uuid.UUID, 
 	return s.GetCommission(ctx)
 }
 
-// BroadcastEmailRequest defines payload for email broadcast.
+// BroadcastEmailRequest описывает полезную нагрузку рассылки писем.
 type BroadcastEmailRequest struct {
 	TargetGroup  string   `json:"target_group"` // CUSTOMERS, EXECUTORS, CUSTOM_EMAILS
 	CustomEmails []string `json:"custom_emails,omitempty"`
@@ -866,7 +866,7 @@ type BroadcastEmailRequest struct {
 	BodyHTML     string   `json:"body_html"`
 }
 
-// BroadcastEmailResult contains summary of sent emails.
+// BroadcastEmailResult содержит сводку об отправленных письмах.
 type BroadcastEmailResult struct {
 	Total      int      `json:"total"`
 	Successful int      `json:"successful"`
@@ -874,7 +874,7 @@ type BroadcastEmailResult struct {
 	Failures   []string `json:"failures,omitempty"`
 }
 
-// SendBroadcastEmail dispatches email broadcasts to selected user groups or custom recipient list.
+// SendBroadcastEmail рассылает письма выбранным группам пользователей или произвольному списку получателей.
 func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmailRequest) (*BroadcastEmailResult, error) {
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.BodyHTML = strings.TrimSpace(req.BodyHTML)
@@ -910,8 +910,8 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 			if trimmed == "" {
 				continue
 			}
-			// Reject anything that is not a plain address: the message headers
-			// are built by concatenation, so a CR/LF here is header injection.
+			// Отвергаем всё, что не является обычным адресом: заголовки письма
+			// собираются конкатенацией, поэтому CR/LF здесь — инъекция заголовков.
 			if !validRecipient.MatchString(trimmed) {
 				return nil, fmt.Errorf("invalid recipient address: %s", trimmed)
 			}
@@ -931,7 +931,7 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 
 	smtpSender, ok := s.mailer.(*SmtpMailSender)
 	if !ok {
-		// Without a real transport nothing is sent; reporting success would be a lie.
+		// Без настоящего транспорта ничего не отправляется; отчёт об успехе был бы ложью.
 		return nil, errors.New("email transport is not available")
 	}
 	for _, email := range recipientEmails {

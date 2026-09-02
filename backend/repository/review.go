@@ -122,7 +122,7 @@ func (r *reviewRepository) GetReviewsForUser(ctx context.Context, targetID uuid.
 }
 
 func (r *reviewRepository) UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error {
-	// Calculate Bayesian Average Rating
+	// Считаем байесовский средний рейтинг
 	// m = 4.8, C = 5
 	// R = (C*m + SUM(r_i)) / (C + n)
 	var sumRating float64

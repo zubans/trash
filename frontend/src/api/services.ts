@@ -14,19 +14,19 @@ export interface ServiceNode {
   requires_verification?: boolean
   moderator_only?: boolean
   min_age?: number
-  // Behaviour script that carries this service's own rules (who sees it, what
-  // it costs, what happens when it is done). Empty for an ordinary service.
+  // Скрипт поведения, несущий собственные правила этой услуги (кто её видит,
+  // сколько она стоит, что происходит по завершении). Пусто для обычной услуги.
   behavior_code?: string
-  // That script's per-node configuration. Its keys belong to the behaviour, not
-  // to the catalog, which is why this stays an open object.
+  // Конфигурация этого скрипта на уровне узла. Её ключи принадлежат поведению, а
+  // не каталогу, поэтому это остаётся открытым объектом.
   behavior_config?: Record<string, unknown>
-  // The node's own script, written in the service constructor: the constants
-  // file and the logic. When they are set the node runs them instead of any
-  // library behaviour.
+  // Собственный скрипт узла, написанный в конструкторе услуг: файл констант и
+  // логика. Когда они заданы, узел выполняет их вместо любого библиотечного
+  // поведения.
   behavior_constants?: string
   behavior_source?: string
-  // Set when the node was retired. The catalog never returns deleted nodes to
-  // the app; the admin panel asks for them explicitly.
+  // Выставляется при списании узла. Каталог никогда не возвращает удалённые узлы
+  // приложению; админ-панель запрашивает их явно.
   deleted_at?: string | null
 }
 

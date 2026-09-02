@@ -15,9 +15,9 @@ import (
 	"healthlogin/backend/service"
 )
 
-// The service constructor is now a script editor. These tests cover the part of
-// it the browser cannot be trusted with: a script is compiled before the node is
-// written, and a broken one never reaches the database.
+// Конструктор услуг теперь редактор скриптов. Эти тесты покрывают ту его часть,
+// которую нельзя доверить браузеру: скрипт компилируется до записи узла, и
+// сломанный до базы не доходит.
 
 func newScriptTestEnv(t *testing.T) (*catalogTestEnv, *service.Behaviors) {
 	t.Helper()
@@ -70,8 +70,8 @@ func TestAdminCreateNode_CompilesTheScriptBeforeSaving(t *testing.T) {
 		t.Fatal("the node was saved without its script")
 	}
 
-	// Registered in the running engine, so the rule applies to the next request
-	// rather than after a restart.
+	// Зарегистрирован в работающем движке, поэтому правило действует со следующего
+	// запроса, а не после перезапуска.
 	customer := &repository.User{ID: uuid.New(), Role: repository.RoleCustomer, Status: "ACTIVE"}
 	if !behaviors.Visible(context.Background(), customer, stored, nil) {
 		t.Error("the saved script is not running: the node is hidden from everyone")
@@ -94,7 +94,7 @@ func TestAdminCreateNode_RefusesABrokenScript(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for a script that does not compile, got %d: %s", rec.Code, rec.Body.String())
 	}
-	// The admin reads this in the editor, so it has to say what is wrong.
+	// Админ читает это в редакторе, поэтому текст обязан сказать, что не так.
 	if !strings.Contains(rec.Body.String(), "не компилируется") {
 		t.Errorf("unhelpful error: %s", rec.Body.String())
 	}
@@ -103,7 +103,7 @@ func TestAdminCreateNode_RefusesABrokenScript(t *testing.T) {
 	}
 }
 
-// Clearing the script in the editor makes the node an ordinary service again.
+// Очистка скрипта в редакторе снова делает узел обычной услугой.
 func TestAdminUpdateNode_ClearingTheScript(t *testing.T) {
 	env, behaviors := newScriptTestEnv(t)
 
@@ -141,8 +141,8 @@ func TestAdminUpdateNode_ClearingTheScript(t *testing.T) {
 	}
 }
 
-// The library is what the editor offers as a template, so it has to carry the
-// text and not only the names.
+// Библиотека — это то, что редактор предлагает как шаблон, поэтому она обязана
+// нести текст, а не одни имена.
 func TestAdminListBehaviors_ReturnsTheScriptText(t *testing.T) {
 	env, behaviors := newScriptTestEnv(t)
 	if err := behaviors.Engine().CompileFiles("sample", []behavior.SourceFile{
@@ -171,8 +171,8 @@ func TestAdminListBehaviors_ReturnsTheScriptText(t *testing.T) {
 	}
 }
 
-// An ordinary catalog must not pay for the scripted-service machinery: no claim
-// lookup, no script call, nothing but the rules it always had.
+// Обычный каталог не должен платить за машинерию скриптовых услуг: ни запроса
+// claim'ов, ни вызова скрипта — ничего, кроме правил, которые у него были всегда.
 func TestOrdinaryCatalogDoesNotTouchTheBehaviorStores(t *testing.T) {
 	env, behaviors := newScriptTestEnv(t)
 	claims := &countingClaims{}
@@ -191,7 +191,7 @@ func TestOrdinaryCatalogDoesNotTouchTheBehaviorStores(t *testing.T) {
 	}
 }
 
-// countingClaims records whether the claim store was consulted at all.
+// countingClaims фиксирует, обращались ли к хранилищу claim'ов вообще.
 type countingClaims struct {
 	repository.ServiceClaimRepository
 	calls int

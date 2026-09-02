@@ -2,9 +2,9 @@ package repository
 
 import "testing"
 
-// TestCompletedOrderSortsAreWhitelisted: the sort key arrives from the query
-// string and is concatenated into ORDER BY, so anything outside the map has to
-// fall back rather than reach SQL.
+// TestCompletedOrderSortsAreWhitelisted: ключ сортировки приходит из строки
+// запроса и конкатенируется в ORDER BY, поэтому всё, чего нет в карте, обязано
+// откатиться к умолчанию, а не дойти до SQL.
 func TestCompletedOrderSortsAreWhitelisted(t *testing.T) {
 	rejected := []string{
 		"o.completed_at; DROP TABLE orders",
@@ -25,9 +25,9 @@ func TestCompletedOrderSortsAreWhitelisted(t *testing.T) {
 	}
 }
 
-// TestDigitsOnly: a phone typed with the display mask has to match the stored
-// +79997454656, and a term with no digits must not turn into an empty pattern
-// that matches every row.
+// TestDigitsOnly: телефон, набранный с маской отображения, обязан совпасть с
+// сохранённым +79997454656, а запрос без цифр не должен превращаться в пустой
+// шаблон, которому соответствует каждая строка.
 func TestDigitsOnly(t *testing.T) {
 	cases := map[string]string{
 		"+7 (999) 745-46-56": "79997454656",

@@ -32,7 +32,7 @@ export default defineComponent({
       }
     }
 
-    // Swipe gesture: left-to-right swipe near left edge to navigate back
+    // Жест смахивания: свайп слева направо у левого края возвращает назад
     let touchStartX = 0
     let touchStartY = 0
 
@@ -50,10 +50,10 @@ export default defineComponent({
         const deltaX = touchEndX - touchStartX
         const deltaY = Math.abs(touchEndY - touchStartY)
 
-        // Trigger back navigation if:
-        // 1. Swipe starts near left edge (first 100px of screen)
-        // 2. Horizontal swipe distance > 70px
-        // 3. Vertical drift is small (< 50px)
+        // Запускаем переход назад, если:
+        // 1. Свайп начался у левого края (первые 100px экрана)
+        // 2. Горизонтальное расстояние свайпа > 70px
+        // 3. Вертикальный снос мал (< 50px)
         if (touchStartX <= 100 && deltaX > 70 && deltaY < 50) {
           if (window.history.length > 1) {
             window.history.back()

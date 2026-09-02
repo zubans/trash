@@ -18,27 +18,27 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// The verification service end to end, through the same code the application
-// runs: the script decides, the core applies. What is pinned here is the part a
-// script cannot be trusted with — that the money moves once, in one direction,
-// and that the books still close afterwards.
+// Услуга верификации от начала до конца, тем же кодом, который выполняет
+// приложение: скрипт решает, ядро применяет. Здесь фиксируется та часть,
+// которую нельзя доверить скрипту: что деньги двигаются один раз, в одну
+// сторону, и что книги после этого по-прежнему сходятся.
 
 var verificationVariantID = uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
 
-// --- fakes ------------------------------------------------------------------
+// --- подделки ---------------------------------------------------------------
 
-// verificationUsers is a small user store. It embeds the interface so the
-// methods this flow never calls do not have to be written out; calling one
-// panics, which is the right outcome for a test that grew a dependency nobody
-// declared.
+// verificationUsers — небольшое хранилище пользователей. Оно встраивает
+// интерфейс, чтобы методы, которые этот поток никогда не вызывает, не пришлось
+// расписывать; вызов такого паникует, и это верный исход для теста, у которого
+// завелась незаявленная зависимость.
 type verificationUsers struct {
 	repository.UserRepository
 	users map[uuid.UUID]*repository.User
 }
 
-// add creates a user with a name of their own: a test where everybody is called
-// the same thing cannot tell "the executor sees the customer's name" from "the
-// executor sees their own".
+// add создаёт пользователя с собственным именем: тест, где всех зовут
+// одинаково, не отличит «исполнитель видит имя заказчика» от «исполнитель видит
+// собственное».
 func (u *verificationUsers) add(role string, roles []string, verified bool) *repository.User {
 	birth := time.Date(1990, time.March, 14, 0, 0, 0, 0, time.UTC)
 	nth := len(u.users) + 1
@@ -54,8 +54,8 @@ func (u *verificationUsers) add(role string, roles []string, verified bool) *rep
 	return user
 }
 
-// passportOf is what a moderator would type off the customer's document when it
-// is genuinely their document.
+// passportOf — то, что модератор набрал бы с документа заказчика, если это
+// действительно его документ.
 func passportOf(user *repository.User) map[string]string {
 	return map[string]string{
 		"last_name":  user.LastName,
@@ -96,7 +96,7 @@ func (u *verificationUsers) UpdateVerifiedTx(ctx context.Context, q repository.Q
 	return nil
 }
 
-// verificationCatalog serves the seeded verification variant.
+// verificationCatalog отдаёт засеянный вариант верификации.
 type verificationCatalog struct {
 	repository.ServiceCatalogRepository
 	node *repository.ServiceNode
@@ -167,8 +167,8 @@ func (c *verificationClaims) CountsForUser(ctx context.Context, userID uuid.UUID
 	return counts, nil
 }
 
-// verificationEvents is the outbox, in memory, with the same idempotency rule
-// the table enforces.
+// verificationEvents — тот же outbox в памяти, с тем же правилом
+// идемпотентности, которое обеспечивает таблица.
 type verificationEvents struct {
 	published []*repository.DomainEvent
 	processed map[uuid.UUID]bool
@@ -218,7 +218,7 @@ func (e *verificationEvents) RecordEffect(ctx context.Context, q repository.Quer
 	return nil
 }
 
-// PurgeProcessed trims history; nothing in these tests depends on it.
+// PurgeProcessed подрезает историю; ничто в этих тестах от неё не зависит.
 func (e *verificationEvents) PurgeProcessed(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }
@@ -227,7 +227,7 @@ func (e *verificationEvents) CountPending(ctx context.Context) (int, error) {
 	return len(e.published) - len(e.processed), nil
 }
 
-// verificationSubmissions is the store behind data checks and escalations.
+// verificationSubmissions — хранилище за проверками данных и эскалациями.
 type verificationSubmissions struct {
 	submissions []*repository.OrderSubmission
 	escalations []*repository.BehaviorEscalation
@@ -311,7 +311,7 @@ func (s *verificationSubmissions) ResolveByOrder(ctx context.Context, q reposito
 	return nil
 }
 
-// --- harness ----------------------------------------------------------------
+// --- обвязка ----------------------------------------------------------------
 
 type verificationWorld struct {
 	orders      *mockOrderRepo
@@ -329,8 +329,8 @@ type verificationWorld struct {
 	customer    *repository.User
 	moderator   *repository.User
 	executor    *repository.User
-	// rewardBase is the verifier's balance before the reward, because the
-	// balance fake seeds new users with money of their own.
+	// rewardBase — баланс проверяющего до вознаграждения, потому что подделка
+	// баланса засевает новым пользователям собственные деньги.
 	rewardBase money.Amount
 }
 
@@ -350,9 +350,9 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 		BasePrice:    &free,
 		IsActive:     true,
 		BehaviorCode: "verification",
-		// Empty, exactly as the migration seeds it: the amounts, the role and
-		// the mode are constants of the behaviour, and this column holds only
-		// what a node changes about them.
+		// Пусто, ровно как засевает миграция: суммы, роль и режим — это
+		// константы поведения, а в этой колонке лежит только то, что узел
+		// про них меняет.
 		BehaviorConfig: repository.BehaviorConfig{},
 	}
 
@@ -383,8 +383,8 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 	return w
 }
 
-// orderView renders the order the way a list endpoint does, which is how the
-// executor's app sees it.
+// orderView отрисовывает заказ так же, как это делает списковый эндпоинт, — то
+// есть так, как его видит приложение исполнителя.
 func (w *verificationWorld) orderView(t *testing.T, orderID uuid.UUID) *repository.Order {
 	t.Helper()
 	orders, err := w.orderSvc.ListAssigned(context.Background(), w.moderator.ID)
@@ -404,10 +404,10 @@ func (w *verificationWorld) books() money.Amount {
 	return booksTotal(w.tx, w.accounts)
 }
 
-// --- tests ------------------------------------------------------------------
+// --- тесты ------------------------------------------------------------------
 
-// The whole loop: a free order, taken by a moderator, closed by the visit
-// report, with the reward paid once and the books still closed.
+// Весь цикл: бесплатный заказ, взятый модератором, закрытый отчётом о визите, с
+// однократно выплаченным вознаграждением и по-прежнему сошедшимися книгами.
 func TestVerificationServiceFullFlow(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -428,13 +428,13 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 		t.Errorf("the service is free, but %s was held", order.HoldAmount)
 	}
 
-	// Once per user: the second attempt is refused by the script, before any
-	// row is written.
+	// Один раз на пользователя: вторая попытка отклоняется скриптом, до записи
+	// какой-либо строки.
 	if _, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil); err == nil {
 		t.Error("the verification service must be orderable only once")
 	}
 
-	// Executor side: moderators only.
+	// Сторона исполнителя: только модераторы.
 	if err := w.orderSvc.Accept(ctx, order.ID, w.executor.ID); err == nil {
 		t.Error("a plain executor must not be able to take a verification order")
 	}
@@ -442,8 +442,8 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 		t.Fatalf("a moderator must be able to take it: %v", err)
 	}
 
-	// The moderator is shown the address and nothing else: what they type comes
-	// off the document in front of them.
+	// Модератору показывают адрес и ничего больше: то, что он набирает, он берёт с
+	// документа перед собой.
 	if got := w.orderView(t, order.ID).SubmitFields; len(got) != 4 {
 		t.Errorf("the executor is not told which fields to submit: %v", got)
 	}
@@ -478,8 +478,8 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 	}
 }
 
-// Commission is not taken out of a reward unless the behaviour asks for it, and
-// when it does, the gross still splits exactly.
+// Комиссия не берётся с вознаграждения, пока поведение об этом не попросит, а
+// когда просит, брутто всё равно делится ровно.
 func TestRewardCommissionIsOptIn(t *testing.T) {
 	ctx := context.Background()
 
@@ -523,7 +523,7 @@ func TestRewardCommissionIsOptIn(t *testing.T) {
 		if got, want := w.accounts.balances[repository.AccountCommission], money.FromRubles(20); got != want {
 			t.Errorf("COMMISSION = %s, want %s", got, want)
 		}
-		// The gross still leaves BONUSES in one piece: 180 to the user, 20 to
+		// Брутто по-прежнему уходит с BONUSES целиком: 180 пользователю, 20 в
 		// COMMISSION.
 		if got, want := w.accounts.balances[repository.AccountBonuses], money.FromRubles(-200); got != want {
 			t.Errorf("BONUSES = %s, want %s", got, want)
@@ -531,8 +531,8 @@ func TestRewardCommissionIsOptIn(t *testing.T) {
 	})
 }
 
-// A redelivered event must not pay a second reward. The idempotency key the
-// script attaches to the payment is what stops it.
+// Переотправленное событие не должно выплатить второе вознаграждение. Мешает
+// этому ключ идемпотентности, который скрипт прикрепляет к платежу.
 func TestVerificationRewardIsPaidOnce(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -549,8 +549,8 @@ func TestVerificationRewardIsPaidOnce(t *testing.T) {
 	}
 	paidOnce := w.tx.balances[w.moderator.ID]
 
-	// The same event again: a retry after a crash, a second replica, a
-	// duplicated row — all look like this.
+	// То же событие снова: повтор после падения, вторая реплика, продублированная
+	// строка — всё это выглядит так.
 	if err := w.events.Publish(ctx, nil, &repository.DomainEvent{
 		Type:        repository.EventUserVerified,
 		SubjectType: repository.EventSubjectUser,
@@ -566,8 +566,8 @@ func TestVerificationRewardIsPaidOnce(t *testing.T) {
 	}
 }
 
-// A cancelled order gives the customer their one attempt back — otherwise
-// cancelling once would leave them unable to ever get verified.
+// Отменённый заказ возвращает заказчику его единственную попытку — иначе одна
+// отмена навсегда лишила бы его возможности верифицироваться.
 func TestCancelledVerificationOrderReleasesTheClaim(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -584,8 +584,8 @@ func TestCancelledVerificationOrderReleasesTheClaim(t *testing.T) {
 	}
 }
 
-// The admin checkbox is the other way in: verifying a customer by hand closes
-// the order they had open and pays whoever was performing it.
+// Админский чекбокс — второй путь: ручная верификация заказчика закрывает
+// открытый у него заказ и платит тому, кто его выполнял.
 func TestAdminVerificationClosesTheOpenOrder(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -599,7 +599,7 @@ func TestAdminVerificationClosesTheOpenOrder(t *testing.T) {
 	}
 	beforeReward := w.tx.balances[w.moderator.ID]
 
-	// Exactly what AdminService.SetUserVerified writes.
+	// Ровно то, что пишет AdminService.SetUserVerified.
 	if err := w.users.UpdateVerified(ctx, w.customer.ID, true); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -626,8 +626,8 @@ func TestAdminVerificationClosesTheOpenOrder(t *testing.T) {
 	}
 }
 
-// The core, not the script, decides who may be paid and how much. These are the
-// guards that make a wrong script a wrong decision rather than a stolen payout.
+// Кому и сколько можно платить, решает ядро, а не скрипт. Это те проверки,
+// которые делают неверный скрипт неверным решением, а не украденной выплатой.
 func TestEffectGuardsRefuseWhatAScriptMayNotDo(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -690,7 +690,7 @@ func TestEffectGuardsRefuseWhatAScriptMayNotDo(t *testing.T) {
 	}
 }
 
-// A moderator's own verification order must not be self-served.
+// Собственный заказ верификации модератора не должен обслуживаться им самим.
 func TestVerifierCannotBeTheCustomer(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -709,11 +709,11 @@ func TestVerifierCannotBeTheCustomer(t *testing.T) {
 	}
 }
 
-// --- Identity check ---------------------------------------------------------
+// --- Проверка личности ------------------------------------------------------
 
-// The moderator submits what the document says; the platform compares. A first
-// mismatch is a warning to check the passport again — not a verification, not a
-// payment, and not a hint about which field was wrong.
+// Модератор отправляет то, что написано в документе; платформа сравнивает.
+// Первое несовпадение — предупреждение перепроверить паспорт: не верификация,
+// не платёж и не подсказка о том, какое поле было неверным.
 func TestIdentityMismatchWarnsFirst(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -745,8 +745,8 @@ func TestIdentityMismatchWarnsFirst(t *testing.T) {
 		t.Errorf("a failed check paid %s", got.Sub(w.rewardBase))
 	}
 
-	// The mismatched field is reported to the caller for its own form, but the
-	// message that reaches the moderator must not narrow the search for them.
+	// Несовпавшее поле сообщается вызывающему для его собственной формы, но
+	// сообщение, доходящее до модератора, не должно сужать ему поиск.
 	for _, message := range result.Messages {
 		if strings.Contains(message, "Петров") || strings.Contains(message, w.customer.LastName) {
 			t.Errorf("the warning leaks the compared values: %q", message)
@@ -754,8 +754,8 @@ func TestIdentityMismatchWarnsFirst(t *testing.T) {
 	}
 }
 
-// Out of attempts, the case goes to an administrator and the moderator cannot
-// keep guessing.
+// Попытки кончились, случай уходит администратору, и модератор не может
+// продолжать угадывать.
 func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -779,14 +779,14 @@ func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
 	if !open {
 		t.Error("no escalation was recorded")
 	}
-	// Both attempts are kept: that is what the administrator reviews.
+	// Сохраняются обе попытки: именно их и разбирает администратор.
 	attempts, _ := w.submissions.ListForOrder(ctx, order.ID)
 	if len(attempts) != 2 {
 		t.Errorf("stored %d attempts, want 2", len(attempts))
 	}
 
-	// Even correct data is not accepted afterwards: the decision is no longer
-	// the moderator's.
+	// Даже верные данные после этого не принимаются: решение больше не за
+	// модератором.
 	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrSubmissionEscalated) {
 		t.Errorf("submitting after an escalation returned %v, want ErrSubmissionEscalated", err)
 	}
@@ -795,8 +795,8 @@ func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
 	}
 }
 
-// The administrator settles it the ordinary way — by verifying the customer —
-// and that closes both the order and the escalation.
+// Администратор улаживает это обычным путём — верифицируя заказчика, — и это
+// закрывает и заказ, и эскалацию.
 func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
@@ -810,7 +810,7 @@ func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
 		}
 	}
 
-	// Exactly what AdminService.SetUserVerified writes.
+	// Ровно то, что пишет AdminService.SetUserVerified.
 	if err := w.users.UpdateVerified(ctx, w.customer.ID, true); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -837,8 +837,8 @@ func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
 	}
 }
 
-// What the moderator is given to work with: the address, and nothing that would
-// let them copy the answer instead of reading the document.
+// То, с чем модератору дают работать: адрес и ничего, что позволило бы
+// списать ответ вместо чтения документа.
 func TestExecutorSeesTheAddressAndNoCustomerIdentity(t *testing.T) {
 	w := newVerificationWorld(t)
 
@@ -866,8 +866,8 @@ func TestExecutorSeesTheAddressAndNoCustomerIdentity(t *testing.T) {
 	}
 }
 
-// acceptedVerificationOrder creates a verification order and puts the moderator
-// on it, which is the state every check starts from.
+// acceptedVerificationOrder создаёт заказ верификации и ставит на него
+// модератора — состояние, с которого начинается любая проверка.
 func (w *verificationWorld) acceptedVerificationOrder(t *testing.T) *repository.Order {
 	t.Helper()
 	ctx := context.Background()

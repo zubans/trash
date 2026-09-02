@@ -1,26 +1,26 @@
-// Command opsbot exposes a few operational actions over Telegram.
+// Command opsbot открывает несколько операционных действий через Telegram.
 //
-// Three things run the platform on a bad day: force a books reconciliation,
-// look at the headline metrics, restart the services. All three used to need an
-// SSH session, which is a poor fit for the moment they are actually wanted.
+// В плохой день платформой управляют три вещи: принудительная сверка книг,
+// взгляд на ключевые метрики, перезапуск сервисов. Все три раньше требовали
+// SSH-сессии, что плохо сочетается с моментом, когда они действительно нужны.
 //
-// The bot is a privileged tool and is built like one:
+// Бот — привилегированный инструмент и устроен соответственно:
 //
-//   - it polls Telegram outbound and listens on no port, so it has no inbound
-//     attack surface at all;
-//   - every message is checked against an allowlist of chat and user ids before
-//     it is even parsed as a command;
-//   - the restart takes a fixed argument list with no shell, so the only thing
-//     a message decides is whether to run it, never what runs;
-//   - the restart also needs a second, explicit confirmation, because a stray
-//     tap must not bounce production;
-//   - messages that predate the process are acknowledged and discarded, so a
-//     command sent while the bot was down cannot fire on boot — which for a
-//     restart command would otherwise be a loop.
+//   - он опрашивает Telegram исходящими запросами и не слушает ни одного порта,
+//     поэтому входящей поверхности атаки у него нет вовсе;
+//   - каждое сообщение сверяется со списком разрешённых чатов и пользователей
+//     ещё до того, как будет разобрано как команда;
+//   - перезапуск получает фиксированный список аргументов без шелла, поэтому
+//     сообщение решает лишь, запускать ли, но никогда — что запускается;
+//   - перезапуску нужно ещё и второе явное подтверждение, потому что случайный
+//     тап не должен ронять прод;
+//   - сообщения, появившиеся раньше процесса, подтверждаются и отбрасываются,
+//     чтобы команда, отправленная при лежащем боте, не сработала при старте —
+//     для команды перезапуска это иначе был бы цикл.
 //
-// It needs the Docker socket to restart the stack, which is root on the host.
-// That is why it is a separate service and not a goroutine in the backend: the
-// backend faces the internet, and this must not.
+// Чтобы перезапускать стек, ему нужен сокет Docker, а это root на хосте.
+// Поэтому он — отдельный сервис, а не горутина в бэкенде: бэкенд смотрит в
+// интернет, а этот смотреть не должен.
 package main
 
 import (
@@ -59,8 +59,8 @@ type bot struct {
 	tg   *telegram
 	http *http.Client
 
-	// One command at a time. Two concurrent restarts, or a reconciliation
-	// racing a restart, is never what anybody meant.
+	// По одной команде за раз. Два одновременных перезапуска или сверка,
+	// гоняющаяся с перезапуском, — никогда не то, что имелось в виду.
 	mu             sync.Mutex
 	pendingRestart map[int64]time.Time
 }
@@ -102,8 +102,8 @@ func (b *bot) run(ctx context.Context) {
 		}
 
 		for _, u := range updates {
-			// Acknowledged whatever happens: an update that keeps coming back
-			// because handling it failed would retry a privileged command.
+			// Подтверждаем в любом случае: апдейт, который возвращается снова и снова
+			// из-за сбоя обработки, повторял бы привилегированную команду.
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
@@ -130,16 +130,16 @@ func (b *bot) handle(ctx context.Context, u update) {
 		username = u.Message.From.Username
 	}
 
-	// The allowlist is checked before the message is interpreted at all. An
-	// unknown chat gets no answer: replying would confirm the bot exists and
-	// tell an unwanted visitor which commands to try.
+	// Список разрешённых проверяется до того, как сообщение вообще будет
+	// истолковано. Неизвестный чат не получает ответа: ответ подтвердил бы, что
+	// бот есть, и подсказал незваному гостю, какие команды пробовать.
 	if !b.cfg.allowedChats[chatID] || (len(b.cfg.allowedUsers) > 0 && !b.cfg.allowedUsers[userID]) {
 		log.Printf("[opsbot] ignoring a message from chat=%d user=%d", chatID, userID)
 		return
 	}
 
 	command, _, _ := strings.Cut(text, " ")
-	// Group chats deliver commands as /restart@thebot.
+	// Групповые чаты доставляют команды в виде /restart@thebot.
 	command, _, _ = strings.Cut(command, "@")
 	command = strings.ToLower(command)
 
@@ -203,8 +203,8 @@ func loadConfig() config {
 
 	chats := parseIDs(os.Getenv("TELEGRAM_CHAT_ID") + "," + os.Getenv("OPSBOT_ALLOWED_CHATS"))
 	if len(chats) == 0 {
-		// Refusing to start beats starting with an empty allowlist, which would
-		// take commands from anyone who found the bot.
+		// Отказаться стартовать лучше, чем стартовать с пустым списком разрешённых —
+		// тогда команды принимались бы от любого, кто нашёл бота.
 		log.Fatal("[opsbot] no allowed chats: set TELEGRAM_CHAT_ID (and optionally OPSBOT_ALLOWED_CHATS)")
 	}
 

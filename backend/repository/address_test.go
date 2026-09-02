@@ -55,7 +55,7 @@ func TestAddressRepository_CRUD(t *testing.T) {
 
 	userID := createTestUser(t, db, "CUSTOMER")
 
-	// 1. Add first address (should become default automatically)
+	// 1. Добавляем первый адрес (должен автоматически стать адресом по умолчанию)
 	lat1, lon1 := 55.7558, 37.6173
 	addr1 := repository.Address{
 		Address: "Россия, г. Москва, ул. Арбат, д. 10",
@@ -81,7 +81,7 @@ func TestAddressRepository_CRUD(t *testing.T) {
 		t.Errorf("expected city Москва, got %s", list[0].City)
 	}
 
-	// 2. Add second address
+	// 2. Добавляем второй адрес
 	lat2, lon2 := 55.7512, 37.6184
 	addr2 := repository.Address{
 		Address: "Россия, г. Москва, ул. Тверская, д. 5",
@@ -100,14 +100,14 @@ func TestAddressRepository_CRUD(t *testing.T) {
 		t.Fatalf("expected 2 addresses, got %d", len(list))
 	}
 
-	// 3. Attempting to add a third address must return ErrAddressLimitReached
+	// 3. Попытка добавить третий адрес должна вернуть ErrAddressLimitReached
 	addr3 := repository.Address{Address: "Россия, г. Москва, ул. Ленина, д. 1"}
 	_, err = repo.Add(ctx, userID, addr3)
 	if err != repository.ErrAddressLimitReached {
 		t.Fatalf("expected ErrAddressLimitReached, got %v", err)
 	}
 
-	// 4. Set second address as default
+	// 4. Делаем второй адрес адресом по умолчанию
 	var secondID uuid.UUID
 	for _, a := range list {
 		if a.Address == addr2.Address {
@@ -124,7 +124,7 @@ func TestAddressRepository_CRUD(t *testing.T) {
 		}
 	}
 
-	// 5. Delete default address -> remaining address should become default
+	// 5. Удаляем адрес по умолчанию -> оставшийся адрес должен стать умолчанием
 	list, err = repo.Delete(ctx, userID, secondID)
 	if err != nil {
 		t.Fatalf("unexpected error deleting address: %v", err)
@@ -137,9 +137,9 @@ func TestAddressRepository_CRUD(t *testing.T) {
 	}
 }
 
-// Re-saving an address the user already has is an update. It must not clear the
-// default flag: doing so leaves an account holding addresses while having no
-// default at all, and the profile then reports an empty address.
+// Повторное сохранение уже имеющегося адреса — это обновление. Оно не должно
+// сбрасывать флаг умолчания: иначе учётка держит адреса, не имея ни одного
+// адреса по умолчанию, и профиль тогда сообщает пустой адрес.
 func TestAddressRepository_ResavingKeepsDefault(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
@@ -153,8 +153,8 @@ func TestAddressRepository_ResavingKeepsDefault(t *testing.T) {
 		t.Fatalf("unexpected error adding address: %v", err)
 	}
 
-	// The same line again, this time carrying the coordinates that arrive with
-	// a suggestion, and without asking to be the default.
+	// Та же строка ещё раз, теперь с координатами, приходящими с подсказкой,
+	// и без просьбы стать адресом по умолчанию.
 	lat, lon := 55.7512, 37.6000
 	list, err := repo.Add(ctx, userID, repository.Address{
 		Address: line, City: "Москва", Lat: &lat, Lon: &lon,
@@ -173,8 +173,8 @@ func TestAddressRepository_ResavingKeepsDefault(t *testing.T) {
 	}
 }
 
-// The limit counts addresses, so it may only reject a genuinely new one. A user
-// holding the maximum must still be able to correct one they already have.
+// Предел считает адреса, поэтому отклонять он может только по-настоящему новый.
+// Пользователь на максимуме должен всё же уметь поправить уже имеющийся.
 func TestAddressRepository_LimitAllowsUpdatingExisting(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
@@ -192,12 +192,12 @@ func TestAddressRepository_LimitAllowsUpdatingExisting(t *testing.T) {
 		t.Fatalf("unexpected error adding second address: %v", err)
 	}
 
-	// At the limit: a new address is refused ...
+	// На пределе: новый адрес отвергается...
 	if _, err := repo.Add(ctx, userID, repository.Address{Address: "Россия, г. Москва, ул. Ленина, д. 1"}); err != repository.ErrAddressLimitReached {
 		t.Fatalf("expected ErrAddressLimitReached for a new address, got %v", err)
 	}
 
-	// ... but updating one that is already stored is not a new address.
+	// ...но обновление уже сохранённого — не новый адрес.
 	list, err := repo.Add(ctx, userID, repository.Address{Address: second, City: "Москва", House: "5"})
 	if err != nil {
 		t.Fatalf("updating an existing address at the limit must succeed, got %v", err)
@@ -212,8 +212,8 @@ func TestAddressRepository_LimitAllowsUpdatingExisting(t *testing.T) {
 	}
 }
 
-// Adding with IsDefault promotes the address and demotes the previous default,
-// which is how an admin correcting an address makes it the one orders use.
+// Добавление с IsDefault повышает адрес и снимает прежний по умолчанию —
+// именно так админ, исправляющий адрес, делает его тем, по которому идут заказы.
 func TestAddressRepository_AddAsDefaultPromotes(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()

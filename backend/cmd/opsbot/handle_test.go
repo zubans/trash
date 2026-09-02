@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// newTestBot wires a bot whose Telegram calls land on a local stub, so the
-// dispatch logic can be exercised without touching the network.
+// newTestBot собирает бота, чьи вызовы Telegram уходят на локальную заглушку,
+// чтобы логику диспетчеризации можно было прогнать, не трогая сеть.
 func newTestBot(t *testing.T, cfg config) (*bot, *[]string) {
 	t.Helper()
 	var sent []string
@@ -25,7 +25,7 @@ func newTestBot(t *testing.T, cfg config) (*bot, *[]string) {
 
 	tg := newTelegram("test-token")
 	tg.client = srv.Client()
-	// Point every API call at the stub.
+	// Направляем все вызовы API на заглушку.
 	tg.client.Transport = rewriteHost{srv.URL, http.DefaultTransport}
 
 	return &bot{cfg: cfg, tg: tg, http: srv.Client(), pendingRestart: map[int64]time.Time{}}, &sent
@@ -76,8 +76,8 @@ func baseConfig() config {
 	}
 }
 
-// A bot that can restart production must not answer strangers at all. Replying
-// would confirm it exists and advertise which commands to try.
+// Бот, умеющий перезапускать прод, не должен вообще отвечать посторонним. Ответ
+// подтвердил бы, что он существует, и подсказал, какие команды пробовать.
 func TestUnknownChatGetsNoReply(t *testing.T) {
 	b, sent := newTestBot(t, baseConfig())
 
@@ -88,7 +88,7 @@ func TestUnknownChatGetsNoReply(t *testing.T) {
 	}
 }
 
-// An allowed chat is not enough when a user allowlist is also configured.
+// Разрешённого чата мало, когда настроен ещё и список разрешённых пользователей.
 func TestUnknownUserInAnAllowedChatIsIgnored(t *testing.T) {
 	cfg := baseConfig()
 	cfg.allowedUsers = map[int64]bool{7: true}
@@ -101,8 +101,8 @@ func TestUnknownUserInAnAllowedChatIsIgnored(t *testing.T) {
 	}
 }
 
-// The restart must never happen on a single message. This asserts the first
-// /restart only arms it — the command itself is not reached.
+// Перезапуск не должен происходить по одному сообщению. Здесь проверяется, что
+// первый /restart лишь взводит его — до самой команды дело не доходит.
 func TestRestartRequiresConfirmation(t *testing.T) {
 	b, sent := newTestBot(t, baseConfig())
 
@@ -126,8 +126,8 @@ func TestConfirmationWithoutARequestIsRefused(t *testing.T) {
 	}
 }
 
-// An expired arming must not be usable: the window exists so that a
-// confirmation typed much later cannot revive a forgotten intent.
+// Просроченный взвод не должен срабатывать: окно существует затем, чтобы
+// подтверждение, набранное много позже, не оживило забытое намерение.
 func TestExpiredConfirmationIsRefused(t *testing.T) {
 	cfg := baseConfig()
 	cfg.confirmWindow = time.Millisecond
@@ -146,7 +146,7 @@ func TestExpiredConfirmationIsRefused(t *testing.T) {
 	}
 }
 
-// One chat arming a restart must not let another chat confirm it.
+// Чат, взводивший перезапуск, не даёт другому чату его подтвердить.
 func TestConfirmationIsPerChat(t *testing.T) {
 	cfg := baseConfig()
 	cfg.allowedChats[200] = true
@@ -161,7 +161,7 @@ func TestConfirmationIsPerChat(t *testing.T) {
 	}
 }
 
-// Group chats deliver commands as /restart@thebot.
+// Групповые чаты доставляют команды в виде /restart@thebot.
 func TestCommandWithBotSuffixIsRecognised(t *testing.T) {
 	b, sent := newTestBot(t, baseConfig())
 
@@ -172,7 +172,7 @@ func TestCommandWithBotSuffixIsRecognised(t *testing.T) {
 	}
 }
 
-// Ordinary chatter must not be answered; the bot lives in a chat people use.
+// Обычная болтовня не должна получать ответа; бот живёт в чате, которым пользуются.
 func TestPlainTextIsIgnored(t *testing.T) {
 	b, sent := newTestBot(t, baseConfig())
 

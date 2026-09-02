@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
 import api, { getCookie, clearSession, storeSession } from '../services/api'
 
-// CurrentUser mirrors the payload of GET /auth/me. It is the single source of
-// truth for the signed-in user across every screen: pages must not keep their
-// own copy of the balance, or they end up showing values of different ages.
+// CurrentUser повторяет полезную нагрузку GET /auth/me. Это единственный
+// источник истины о вошедшем пользователе на всех экранах: страницы не должны
+// держать собственную копию баланса, иначе они покажут значения разного возраста.
 export interface CurrentUser {
   id: string
   phone: string
@@ -37,7 +37,7 @@ function parseJwtSub(token: string): string {
   }
 }
 
-// Helper to save a cookie
+// Помощник для сохранения cookie
 function setCookie(name: string, value: string, days = 1) {
   const date = new Date()
   date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000))
@@ -45,13 +45,13 @@ function setCookie(name: string, value: string, days = 1) {
   document.cookie = `${name}=${value}${expires}; path=/; SameSite=Lax`
 }
 
-// Helpers for localStorage, which is the primary auth storage for the mobile
-// app because mobile WebViews cannot access cookies set for the API origin.
+// Помощники для localStorage — основного хранилища авторизации в мобильном
+// приложении, потому что мобильные WebView не видят cookie источника API.
 function setStoredItem(name: string, value: string) {
   try {
     localStorage.setItem(name, value)
   } catch {
-    // ignore environments where localStorage is unavailable
+    // игнорируем окружения, где localStorage недоступен
   }
 }
 
@@ -66,8 +66,8 @@ function getStoredItem(name: string): string {
 
 export const useAuthStore = defineStore('auth', {
   state: () => {
-    // localStorage is checked first so the mobile app can restore the session
-    // after restart (cookies for the API origin are not visible in WebView).
+    // localStorage проверяется первым, чтобы мобильное приложение могло
+    // восстановить сессию после перезапуска (cookie источника API в WebView не видны).
     const token = getStoredItem('token') || getCookie('token') || ''
     const role = getStoredItem('role') || getCookie('role') || ''
     let roles: string[] = []
@@ -82,14 +82,14 @@ export const useAuthStore = defineStore('auth', {
       token,
       userID: getStoredItem('userID') || getCookie('userID') || parseJwtSub(token),
       role,
-      // Every role the user holds (multi-role). Permissions key off this set.
+      // Все роли пользователя (мультироль). Права опираются на этот набор.
       roles,
-      // The role whose dashboard is currently shown; the user switches it in the UI.
+      // Роль, чей дашборд сейчас показан; пользователь переключает её в интерфейсе.
       activeRole: getStoredItem('activeRole') || role,
       phone: getStoredItem('phone') || getCookie('phone') || '',
       currency: 'RUB',
-      // null means "not loaded yet" and is deliberately distinct from a zero
-      // balance, so the UI can show a placeholder instead of a wrong 0.
+      // null означает «ещё не загружено» и намеренно отличается от нулевого
+      // баланса, чтобы интерфейс показывал заглушку, а не неверный 0.
       user: null as CurrentUser | null,
       userLoading: false,
       userError: '',
@@ -104,8 +104,8 @@ export const useAuthStore = defineStore('auth', {
         .filter((part) => part && part.trim())
         .join(' ')
     },
-    // The effective role set: the multi-role list when loaded, else the single
-    // primary role. Permissions and menus key off membership here.
+    // Действующий набор ролей: список мультиролей, когда он загружен, иначе одна
+    // основная роль. Права и меню опираются на членство здесь.
     roleSet: (state): string[] => (state.roles.length ? state.roles : state.role ? [state.role] : []),
     hasRole(): (role: string) => boolean {
       const set = this.roleSet
@@ -123,8 +123,8 @@ export const useAuthStore = defineStore('auth', {
     isModerator(): boolean {
       return this.roleSet.includes('MODERATOR')
     },
-    // Roles the user can switch the UI between (MODERATOR shares the executor
-    // dashboard, so it is not offered as a separate switch target).
+    // Роли, между дашбордами которых пользователь может переключаться (MODERATOR
+    // делит дашборд с исполнителем, поэтому отдельной целью переключения не служит).
     switchableRoles(): string[] {
       return this.roleSet.filter((r) => r === 'CUSTOMER' || r === 'EXECUTOR' || r === 'ADMIN')
     },
@@ -134,8 +134,8 @@ export const useAuthStore = defineStore('auth', {
       this.token = token
       this.userID = userID
       this.role = role
-      // The full set arrives from fetchMe; seed it with the primary role so the
-      // UI is coherent immediately after login.
+      // Полный набор приходит из fetchMe; засеваем его основной ролью, чтобы
+      // интерфейс был связным сразу после входа.
       this.roles = role ? [role] : []
       this.activeRole = role
       this.phone = phone
@@ -165,7 +165,7 @@ export const useAuthStore = defineStore('auth', {
       setStoredItem('activeRole', '')
       clearSession()
     },
-    // Switch which role's dashboard the UI shows. Callers navigate afterwards.
+    // Переключает, чей дашборд показывает интерфейс. Навигацию делают вызывающие.
     setActiveRole(role: string) {
       if (!this.roleSet.includes(role)) return
       this.activeRole = role
@@ -176,9 +176,9 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /**
-     * Loads the signed-in user. Every screen that shows the balance calls this
-     * instead of fetching /auth/me on its own, so all of them display the same
-     * number at the same time.
+     * Загружает вошедшего пользователя. Каждый экран, показывающий баланс,
+     * вызывает это вместо собственного запроса /auth/me, поэтому все они
+     * показывают одно и то же число в одно и то же время.
      */
     async fetchMe(): Promise<CurrentUser | null> {
       if (!this.token) return null
@@ -187,8 +187,8 @@ export const useAuthStore = defineStore('auth', {
         const res = await api.get('/auth/me')
         this.user = res.data as CurrentUser
         this.role = this.user.role || this.role
-        // Adopt the authoritative role set. Keep the active role if it is still
-        // held, otherwise fall back to the primary role.
+        // Принимаем авторитетный набор ролей. Оставляем активную роль, если она всё
+        // ещё есть, иначе откатываемся к основной роли.
         const loaded = this.user.roles && this.user.roles.length ? this.user.roles : this.role ? [this.role] : []
         this.roles = loaded
         setStoredItem('roles', JSON.stringify(loaded))
@@ -200,8 +200,8 @@ export const useAuthStore = defineStore('auth', {
         this.userError = ''
         return this.user
       } catch (err: any) {
-        // The previous value is kept: a failed refresh must not blank out a
-        // balance that was correct a moment ago.
+        // Прежнее значение сохраняется: неудачное обновление не должно обнулять
+        // баланс, который мгновение назад был верным.
         this.userError = err?.response?.data || 'Не удалось обновить профиль'
         return this.user
       } finally {

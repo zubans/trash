@@ -2,7 +2,7 @@
   <div class="transactions-history">
     <h1 class="va-h3 mb-4">{{ $t('transactions.title') }}</h1>
 
-    <!-- Transactions Table -->
+    <!-- Таблица транзакций -->
     <va-data-table :items="transactions" :columns="columns" :loading="loading">
       <template #cell(type)="{ value }">
         <va-badge :color="getTypeColor(value)">{{ value }}</va-badge>

@@ -1,9 +1,9 @@
 import api from '../services/api'
 
-// A case a service behaviour handed to an administrator: the verification order
-// whose submitted data did not match twice, for instance. The attempts come with
-// it, because comparing what the moderator read off the document with the
-// account is the whole task on that screen.
+// Случай, переданный поведением услуги администратору: например, заказ
+// верификации, чьи отправленные данные дважды не совпали. Попытки идут вместе с
+// ним, потому что сравнить прочитанное модератором в документе с учётной
+// записью — вся задача того экрана.
 export interface OrderSubmission {
   id: string
   order_id: string

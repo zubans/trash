@@ -15,43 +15,43 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Context keys used by the middleware.
+// Ключи контекста, используемые middleware.
 type contextKey string
 
 const (
-	// UserKey stores the authenticated *repository.User in the request context.
+	// UserKey хранит аутентифицированного *repository.User в контексте запроса.
 	UserKey contextKey = "user"
-	// TokenKey stores the raw JWT token string in the request context.
+	// TokenKey хранит сырую строку JWT-токена в контексте запроса.
 	TokenKey contextKey = "token"
-	// RoleKey stores the user role string in the request context.
+	// RoleKey хранит строку роли пользователя в контексте запроса.
 	RoleKey contextKey = "role"
 )
 
-// SessionChecker reports whether an access token has been blacklisted. It is
-// satisfied by *service.AuthService; the middleware only needs this much.
+// SessionChecker сообщает, занесён ли access-токен в чёрный список. Ему
+// удовлетворяет *service.AuthService; middleware нужно ровно столько.
 type SessionChecker interface {
 	IsAccessTokenRevoked(ctx context.Context, token string) (bool, error)
 }
 
-// AuthMiddleware validates JWTs and injects user information into the request context.
+// AuthMiddleware проверяет JWT и кладёт данные пользователя в контекст запроса.
 type AuthMiddleware struct {
 	userRepo repository.UserRepository
 	sessions SessionChecker
 	secret   []byte
 
-	// Short-TTL cache of the authenticated user (with roles). Every request used
-	// to hit the DB twice — the user row and the roles — which multiplies under a
-	// client surge (steady polling from every client goes through here). The
-	// cache collapses that to one lookup per user per TTL.
+	// Кэш аутентифицированного пользователя (с ролями) с коротким TTL. Раньше
+	// каждый запрос дважды ходил в базу — строка пользователя и роли, — что
+	// множится при всплеске клиентов (постоянный опрос от каждого клиента идёт
+	// сюда). Кэш сводит это к одному чтению на пользователя за TTL.
 	//
-	// A ban is still immediate: banning revokes the session, and the revocation
-	// check runs on every request BEFORE this cache is consulted, so the old
-	// token is rejected regardless of a stale entry. A role/verification change
-	// also revokes the session; the only residual is that after the user logs in
-	// again the cached row can be up to TTL stale, so a just-changed role or
-	// verification (and profile fields like balance) takes effect within TTL
-	// rather than instantly. TTL is kept well below the client poll interval to
-	// keep that window tiny; set AUTH_CACHE_TTL_SEC=0 to disable entirely.
+	// Бан по-прежнему мгновенный: бан отзывает сессию, а проверка отзыва
+	// выполняется на каждом запросе ДО обращения к этому кэшу, поэтому старый
+	// токен отвергается независимо от устаревшей записи. Смена роли или
+	// верификации тоже отзывает сессию; остаётся лишь то, что после повторного
+	// входа пользователя кэшированная строка может отставать на TTL, поэтому
+	// только что изменённая роль или верификация (и поля профиля вроде баланса)
+	// вступают в силу в пределах TTL, а не мгновенно. TTL держится заметно ниже
+	// интервала опроса клиента, чтобы окно было крошечным; AUTH_CACHE_TTL_SEC=0 выключает кэш.
 	userCacheTTL time.Duration
 	userCache    sync.Map // userID -> cachedUser
 }
@@ -61,7 +61,7 @@ type cachedUser struct {
 	expires time.Time
 }
 
-// NewAuthMiddleware creates an AuthMiddleware.
+// NewAuthMiddleware создаёт AuthMiddleware.
 func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionChecker, jwtSecret string) *AuthMiddleware {
 	if jwtSecret == "" {
 		jwtSecret = "dev-secret-change-me"
@@ -78,13 +78,13 @@ func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionCheck
 	return m
 }
 
-// collectUserCache drops expired entries.
+// collectUserCache удаляет истёкшие записи.
 //
-// Without it the cache is a map that only ever grows: an entry is written for
-// every user who makes a request and is never removed, so a process that has
-// been up for months holds a copy of every user who signed in during that time.
-// Expiry alone does not free anything — a stale entry is ignored on read but
-// still occupies its slot.
+// Без неё кэш — это карта, которая только растёт: запись создаётся для каждого
+// пользователя, сделавшего запрос, и никогда не удаляется, поэтому процесс,
+// проработавший месяцы, держит копию каждого, кто за это время входил.
+// Одно истечение ничего не освобождает — устаревшая запись игнорируется при
+// чтении, но продолжает занимать своё место.
 func (m *AuthMiddleware) collectUserCache() {
 	ticker := time.NewTicker(10 * time.Minute)
 	for range ticker.C {
@@ -98,8 +98,8 @@ func (m *AuthMiddleware) collectUserCache() {
 	}
 }
 
-// authCacheTTL reads AUTH_CACHE_TTL_SEC (default 5s). Set it to 0 to disable the
-// cache and read the user fresh on every request.
+// authCacheTTL читает AUTH_CACHE_TTL_SEC (по умолчанию 5 с). Установите 0,
+// чтобы выключить кэш и читать пользователя заново на каждом запросе.
 func authCacheTTL() time.Duration {
 	if v := os.Getenv("AUTH_CACHE_TTL_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -109,9 +109,9 @@ func authCacheTTL() time.Duration {
 	return 5 * time.Second
 }
 
-// loadUser returns the user for id, from the short-TTL cache when possible. It
-// hands back a shallow copy so a handler mutating the returned struct cannot
-// corrupt the cached entry (the Roles slice is treated as read-only).
+// loadUser возвращает пользователя по id, по возможности из кэша с коротким
+// TTL. Он отдаёт поверхностную копию, чтобы обработчик, меняющий возвращённую
+// структуру, не портил кэшированную запись (срез Roles считается только для чтения).
 func (m *AuthMiddleware) loadUser(ctx context.Context, id uuid.UUID) (*repository.User, error) {
 	if m.userCacheTTL > 0 {
 		if v, ok := m.userCache.Load(id); ok {
@@ -148,10 +148,10 @@ func extractBearerToken(r *http.Request) string {
 	return ""
 }
 
-// StripQueryToken moves a ?token= parameter into the Authorization header and
-// removes it from the URL. Browsers cannot set headers on a WebSocket handshake,
-// so the parameter has to be accepted, but it must never reach the request
-// logger, the access log or a Referer header.
+// StripQueryToken переносит параметр ?token= в заголовок Authorization и
+// убирает его из URL. Браузеры не умеют ставить заголовки на рукопожатии
+// WebSocket, поэтому параметр приходится принимать, но он не должен попадать ни
+// в логгер запросов, ни в лог доступа, ни в заголовок Referer.
 func StripQueryToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -172,7 +172,7 @@ func StripQueryToken(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAuth ensures the request contains a valid non-revoked JWT.
+// RequireAuth требует, чтобы запрос содержал действительный неотозванный JWT.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenStr := extractBearerToken(r)
@@ -192,7 +192,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check revocation if session storage is available.
+		// Проверяем отзыв, если доступно хранилище сессий.
 		if m.sessions != nil {
 			revoked, err := m.sessions.IsAccessTokenRevoked(r.Context(), tokenStr)
 			if err != nil {
@@ -233,9 +233,9 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Authorization always follows the role stored in the database, never the
-		// role captured in the token: a demotion or a ban must take effect
-		// immediately instead of at token expiry.
+		// Авторизация всегда следует роли, сохранённой в базе, и никогда — роли,
+		// зафиксированной в токене: понижение или бан должны вступать в силу
+		// немедленно, а не по истечении токена.
 		role := user.Role
 
 		ctx := r.Context()
@@ -246,11 +246,11 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// OptionalAuth populates the request context with the authenticated user when a
-// valid, non-revoked token is present, but never rejects the request when it is
-// absent or invalid. Handlers on otherwise-public endpoints use it to tailor the
-// response to the caller (e.g. hiding verification-only services from unverified
-// customers) while still serving anonymous visitors.
+// OptionalAuth кладёт аутентифицированного пользователя в контекст запроса,
+// когда есть действительный неотозванный токен, но никогда не отвергает запрос,
+// если токена нет или он неверен. Обработчики публичных в остальном эндпоинтов
+// используют это, чтобы подогнать ответ под вызывающего (например, скрыть
+// услуги «только для верифицированных»), продолжая обслуживать анонимов.
 func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenStr := extractBearerToken(r)
@@ -306,18 +306,18 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdmin restricts access to users with the ADMIN role.
+// RequireAdmin ограничивает доступ пользователями с ролью ADMIN.
 func (m *AuthMiddleware) RequireAdmin(next http.Handler) http.Handler {
 	return RequireRole("ADMIN")(next)
 }
 
-// UserFrom returns the authenticated user stored by RequireAuth.
+// UserFrom возвращает аутентифицированного пользователя, сохранённого RequireAuth.
 func UserFrom(r *http.Request) *repository.User {
 	user, _ := r.Context().Value(UserKey).(*repository.User)
 	return user
 }
 
-// RequireRole restricts access to users with one of the allowed roles.
+// RequireRole ограничивает доступ пользователями с одной из разрешённых ролей.
 func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedRoles))
 	for _, role := range allowedRoles {
@@ -326,10 +326,10 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Authorization follows the user's full role set loaded from the
-			// database by RequireAuth (never the token claims). A user passes if
-			// ANY of their roles is allowed, so a multi-role account (e.g.
-			// EXECUTOR + MODERATOR) reaches every surface either role grants.
+			// Авторизация следует полному набору ролей пользователя, загруженному из
+			// базы в RequireAuth (никогда — утверждениям токена). Пользователь проходит,
+			// если разрешена ЛЮБАЯ из его ролей, поэтому мультиролевая учётка (например,
+			// EXECUTOR + MODERATOR) достаёт до всех поверхностей, что даёт любая из ролей.
 			user, ok := r.Context().Value(UserKey).(*repository.User)
 			if !ok || user == nil {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)

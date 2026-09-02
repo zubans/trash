@@ -16,9 +16,9 @@ func TestParseRubles(t *testing.T) {
 		"+7.07":    707,
 		" 12.34 ":  1234,
 		".5":       50,
-		"1500.256": 150026, // half away from zero
+		"1500.256": 150026, // половина от нуля
 		"1500.254": 150025,
-		"9.999":    1000, // carries into the whole part
+		"9.999":    1000, // переносится в целую часть
 	}
 	for in, want := range cases {
 		got, err := ParseRubles(in)
@@ -50,9 +50,9 @@ func TestStringRoundTrip(t *testing.T) {
 	}
 }
 
-// TestScaleIsExactWhereFloatWasNot pins the case the audit found: a base price
-// multiplied by a tariff coefficient produced a value the NUMERIC column then
-// rounded, and the error accumulated.
+// TestScaleIsExactWhereFloatWasNot фиксирует случай, найденный аудитом: базовая
+// цена, умноженная на тарифный коэффициент, давала значение, которое колонка
+// NUMERIC затем округляла, и ошибка накапливалась.
 func TestScaleIsExactWhereFloatWasNot(t *testing.T) {
 	base := Amount(10000) // 100.00
 
@@ -62,13 +62,13 @@ func TestScaleIsExactWhereFloatWasNot(t *testing.T) {
 	if got := base.Scale(0.5); got != 5000 {
 		t.Errorf("100.00 × 0.5 should be 50.00, got %s", got)
 	}
-	// A third of a ruble has no exact representation; rounding is defined and
-	// happens once.
+	// У трети рубля нет точного представления; округление определено и
+	// происходит один раз.
 	if got := Amount(100).Scale(1.0 / 3.0); got != 33 {
 		t.Errorf("1.00 × 1/3 should round to 0.33, got %s", got)
 	}
 
-	// The float path drifts; the integer path does not.
+	// Путь через float дрейфует; целочисленный — нет.
 	drifting := 0.0
 	for i := 0; i < 10; i++ {
 		drifting += 0.1
@@ -103,8 +103,8 @@ func TestArithmetic(t *testing.T) {
 	}
 }
 
-// TestJSONStaysInRubles is the reason the wire format did not change: an
-// installed mobile client must keep seeing 1500.25, not 150025.
+// TestJSONStaysInRubles — причина, по которой формат обмена не изменился:
+// установленный мобильный клиент должен и дальше видеть 1500.25, а не 150025.
 func TestJSONStaysInRubles(t *testing.T) {
 	payload, err := json.Marshal(map[string]Amount{"balance": 150025})
 	if err != nil {
@@ -137,8 +137,8 @@ func TestJSONStaysInRubles(t *testing.T) {
 	}
 }
 
-// TestDatabaseRoundTrip covers the Scan/Value pair that lets the NUMERIC columns
-// stay as they are.
+// TestDatabaseRoundTrip покрывает пару Scan/Value, которая позволяет колонкам
+// NUMERIC остаться как есть.
 func TestDatabaseRoundTrip(t *testing.T) {
 	for _, want := range []Amount{0, 1, 150025, -4250} {
 		v, err := want.Value()

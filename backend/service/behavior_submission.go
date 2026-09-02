@@ -15,21 +15,21 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Submitting data for a check, and what a mismatch leads to.
+// Отправка данных на проверку и то, к чему ведёт несовпадение.
 //
-// The shape of the flow comes from the verification service: the moderator is
-// shown the address and nothing else about the customer, types in what the
-// document says, and the *system* compares it. Neither the moderator nor the
-// script ever receives the stored values — the comparison happens here, and only
-// its result travels onward. A mismatch is therefore not information about the
-// customer; it is "this did not match", which is all anybody needs to act on.
+// Форма потока идёт от услуги верификации: модератору показывают адрес и ничего
+// больше о заказчике, он вводит то, что написано в документе, и сравнивает это
+// *система*. Ни модератор, ни
+// скрипт никогда не получают сохранённых значений — сравнение происходит здесь,
+// и дальше едет только его результат. Поэтому несовпадение — не информация о
+// заказчике; это «это не совпало», а больше ни для каких действий и не нужно.
 //
-// What the behaviour decides: how many attempts there are, what the warning
-// says, and when the case goes to an administrator. What this file decides:
-// who may submit, what is compared, and that the comparison is honest.
+// Что решает поведение: сколько будет попыток, что говорит предупреждение и
+// когда случай уходит администратору. Что решает этот файл: кто может
+// отправлять, что сравнивается и что сравнение честное.
 
-// Fields the core knows how to compare. A behaviour naming anything else is
-// refused rather than silently checking nothing.
+// Поля, которые ядро умеет сравнивать. Поведению, назвавшему что-то ещё,
+// отказывают, а не проверяют молча ничего.
 const (
 	FieldLastName   = "last_name"
 	FieldFirstName  = "first_name"
@@ -37,27 +37,27 @@ const (
 	FieldBirthDate  = "birth_date"
 )
 
-// ErrSubmissionNotSupported reports that this service does not take submissions.
+// ErrSubmissionNotSupported сообщает, что эта услуга не принимает отправок.
 var ErrSubmissionNotSupported = errors.New("для этой услуги проверка данных не предусмотрена")
 
-// ErrSubmissionEscalated reports that the case is already with an administrator.
+// ErrSubmissionEscalated сообщает, что случай уже у администратора.
 var ErrSubmissionEscalated = errors.New("заказ передан на модерацию администратору")
 
-// SubmissionResult is what the executor's app gets back immediately. The
-// behaviour's own effects — a warning, an escalation, closing the order — are
-// applied before this returns, so the answer on screen is the outcome and not a
-// promise of one.
+// SubmissionResult — то, что приложение исполнителя получает сразу.
+// Собственные эффекты поведения — предупреждение, эскалация, закрытие заказа —
+// применяются до этого возврата, поэтому ответ на экране и есть исход, а не
+// обещание исхода.
 type SubmissionResult struct {
 	Attempt    int      `json:"attempt"`
 	Matched    bool     `json:"matched"`
 	Escalated  bool     `json:"escalated"`
 	Mismatched []string `json:"mismatched_fields,omitempty"`
-	// Messages are what the behaviour said about it, in the order it said them.
+	// Messages — то, что поведение об этом сказало, в том порядке, в каком сказало.
 	Messages []string `json:"messages,omitempty"`
 }
 
-// SubmitOrderData records what an executor submitted for an order, compares it
-// with the customer's record, and runs the behaviour on the result.
+// SubmitOrderData записывает отправленное исполнителем по заказу, сравнивает с
+// записью заказчика и запускает поведение по результату.
 func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, executorID uuid.UUID, fields map[string]string) (*SubmissionResult, error) {
 	if d == nil || d.submissions == nil {
 		return nil, ErrSubmissionNotSupported
@@ -83,8 +83,8 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		return nil, ErrSubmissionNotSupported
 	}
 
-	// A case already with an administrator does not take more attempts: that is
-	// what escalating it meant.
+	// Случай, уже находящийся у администратора, попыток больше не принимает: в
+	// этом и был смысл эскалации.
 	escalated, err := d.submissions.HasOpenEscalation(ctx, orderID)
 	if err != nil {
 		return nil, err
@@ -118,9 +118,9 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		ActorID:     &executorID,
 	}
 
-	// The attempt and the event it produces commit together: an attempt the
-	// behaviour never saw would let the executor retry for free, and an event
-	// with no attempt behind it would count one that never happened.
+	// Попытка и порождаемое ею событие коммитятся вместе: попытка, которой
+	// поведение не видело, позволила бы исполнителю пробовать бесплатно, а
+	// событие без попытки за ним засчитало бы то, чего не было.
 	if err := d.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		if err := d.submissions.Record(ctx, tx, submission); err != nil {
 			return err
@@ -136,10 +136,10 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		return nil, err
 	}
 
-	// Processed here rather than on the next worker tick: somebody is standing
-	// in front of the customer waiting to hear whether it matched. A failure is
-	// not fatal — the event stays unprocessed and the worker retries it — but
-	// the answer then arrives late, so it is reported.
+	// Обрабатывается здесь, а не на следующем тике воркера: кто-то стоит перед
+	// заказчиком и ждёт ответа, совпало ли. Сбой не фатален — событие остаётся
+	// необработанным, и воркер его повторит, — но ответ тогда приходит поздно,
+	// поэтому о сбое сообщается.
 	messages, err := d.dispatch(ctx, event)
 	if err != nil {
 		_ = d.events.MarkFailed(ctx, event.ID, err.Error())
@@ -162,10 +162,10 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 	}, nil
 }
 
-// compareCustomerFields checks the submitted values against the customer's
-// record. Names are compared case-insensitively and with "ё" folded to "е",
-// because a mismatch has consequences and a keyboard habit is not one worth
-// escalating; the birth date is compared as a date.
+// compareCustomerFields сверяет отправленные значения с записью заказчика.
+// Имена сравниваются без учёта регистра и со сведением «ё» к «е», потому что у
+// несовпадения есть последствия, а привычка набора — не повод для эскалации;
+// дата рождения сравнивается как дата.
 func compareCustomerFields(customer *repository.User, checkFields []string, submitted map[string]string) (map[string]bool, []string, error) {
 	matches := make(map[string]bool, len(checkFields))
 	mismatched := []string{}
@@ -179,7 +179,7 @@ func compareCustomerFields(customer *repository.User, checkFields []string, subm
 		case FieldFirstName:
 			ok = sameName(value, customer.FirstName)
 		case FieldPatronymic:
-			// An empty patronymic on both sides is a match: not everybody has one.
+			// Пустое отчество с обеих сторон — совпадение: оно есть не у всех.
 			ok = sameName(value, customer.Patronymic)
 		case FieldBirthDate:
 			ok = sameBirthDate(value, customer.BirthDate)
@@ -213,8 +213,8 @@ func sameBirthDate(submitted string, stored *time.Time) bool {
 	return parsed.Year() == stored.Year() && parsed.Month() == stored.Month() && parsed.Day() == stored.Day()
 }
 
-// normalizeSubmitted keeps only the fields the behaviour asked for, so a client
-// cannot store arbitrary text on the order by adding keys to the request.
+// normalizeSubmitted оставляет только поля, которые запросило поведение, чтобы
+// клиент не мог сохранить на заказе произвольный текст, добавив ключи в запрос.
 func normalizeSubmitted(checkFields []string, submitted map[string]string) map[string]string {
 	out := make(map[string]string, len(checkFields))
 	for _, field := range checkFields {
@@ -223,16 +223,16 @@ func normalizeSubmitted(checkFields []string, submitted map[string]string) map[s
 	return out
 }
 
-// submissionFacts turns the event payload back into what the script sees.
+// submissionFacts превращает нагрузку события обратно в то, что видит скрипт.
 func submissionFacts(event *repository.DomainEvent, escalated bool) *behavior.SubmissionFacts {
 	if event.Type != repository.EventOrderSubmission {
 		return nil
 	}
 	facts := &behavior.SubmissionFacts{Matches: map[string]bool{}, Escalated: escalated}
-	// The payload is a number whichever way it arrived: as float64 out of JSONB,
-	// or as an int from the transaction that has just written it. Reading only
-	// one of the two would silently make every attempt "attempt 0", and the
-	// escalation after the last attempt would never happen.
+	// Нагрузка — число, каким бы путём оно ни пришло: как float64 из JSONB или
+	// как int из транзакции, которая его только что записала. Чтение лишь одного
+	// из двух молча делало бы любую попытку «попыткой 0», и эскалация после
+	// последней попытки не случилась бы никогда.
 	switch attempt := event.Payload["attempt"].(type) {
 	case float64:
 		facts.Attempt = int(attempt)

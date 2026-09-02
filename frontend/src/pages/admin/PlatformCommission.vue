@@ -29,7 +29,7 @@
       </div>
     </div>
 
-    <!-- What the account holds and what is being charged -->
+    <!-- Что лежит на счёте и что сейчас взимается -->
     <div class="metrics-grid mb-4">
       <div class="metric-card highlight">
         <div class="metric-label">{{ $t('commission.balance') }}</div>
@@ -51,7 +51,7 @@
       <span>{{ $t('commission.explainer') }}</span>
     </div>
 
-    <!-- Payout -->
+    <!-- Выплата -->
     <div class="payout-card">
       <div class="section-header">
         <div class="section-icon"><i class="ph-fill ph-bank"></i></div>
@@ -131,8 +131,8 @@ export default defineComponent({
 
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
-    // The server refuses an overdraw anyway; this only keeps the button from
-    // offering an amount that is already known to be impossible.
+    // Сервер всё равно откажет в овердрафте; это лишь не даёт кнопке предлагать
+    // сумму, о которой уже известно, что она невозможна.
     const canWithdraw = computed(() => amount.value > 0 && amount.value <= balance.value)
 
     const formatMoney = (value: number) => {

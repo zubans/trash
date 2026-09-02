@@ -7,9 +7,9 @@ import (
 	"healthlogin/backend/behaviors"
 )
 
-// The binary carries the scripts, and only this test proves it: everything else
-// reads them from disk. A wrong embed pattern would otherwise ship an image
-// whose services all fail closed on the first request.
+// Скрипты несёт сам бинарник, и доказывает это только этот тест: всё остальное
+// читает их с диска. Иначе неверный шаблон embed выпустил бы образ, все услуги
+// которого отказывают на первом же запросе.
 func TestEmbeddedBehaviorsCompile(t *testing.T) {
 	engine := behavior.New(behavior.DefaultLimits)
 	if err := engine.Load(behaviors.FS, "embedded"); err != nil {
@@ -22,8 +22,8 @@ func TestEmbeddedBehaviorsCompile(t *testing.T) {
 	if !engine.Has("verification") {
 		t.Errorf("the verification behaviour is not embedded: got %v", manifests)
 	}
-	// The constants file is a separate script; if it had not been executed the
-	// manifest would carry no defaults, and the behaviour would pay nothing.
+	// Файл констант — отдельный скрипт; если бы он не выполнился, манифест не нёс
+	// бы умолчаний, и поведение не платило бы ничего.
 	m, _ := engine.Manifest("verification")
 	if len(m.Defaults) == 0 {
 		t.Error("verification loaded without its config.star constants")

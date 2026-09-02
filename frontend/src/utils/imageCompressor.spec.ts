@@ -9,7 +9,7 @@ describe('compressImage', () => {
   })
 
   it('returns image file unchanged if size is already within target bounds', async () => {
-    // Create a dummy file around 200 KB
+    // Создаём фиктивный файл размером около 200 КБ
     const content = new ArrayBuffer(200 * 1024)
     const imageFile = new File([content], 'test.jpg', { type: 'image/jpeg' })
     const result = await compressImage(imageFile, 150, 300)

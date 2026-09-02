@@ -44,10 +44,10 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
-// FollowDevice puts the working anchor back under the device's control, at the
-// position the client just read from it. This is the "my location" button: it
-// is the only thing that resumes automatic positioning after the executor has
-// placed their marker by hand.
+// FollowDevice возвращает рабочий якорь под управление устройства, в позицию,
+// которую клиент только что с него считал. Это кнопка «моё местоположение»:
+// только она возобновляет автоматическое позиционирование после того, как
+// исполнитель поставил свою метку вручную.
 func (h *ExecutorGeoHandler) FollowDevice(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -82,8 +82,8 @@ func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Scoped to the authenticated executor: the location belongs to user.ID and
-	// cannot be requested for anyone else.
+	// Ограничено аутентифицированным исполнителем: местоположение принадлежит
+	// user.ID и не может быть запрошено для кого-то другого.
 	resp, err := h.geoService.GetLocation(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -101,8 +101,8 @@ func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Coordinates are read from the executor's stored location, not from the
-	// query string, so the endpoint cannot be used to scan arbitrary areas.
+	// Координаты читаются из сохранённого местоположения исполнителя, а не из
+	// строки запроса, поэтому эндпоинтом нельзя сканировать произвольные районы.
 	orders, err := h.geoService.GetMapOrders(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

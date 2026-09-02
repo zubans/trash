@@ -7,9 +7,9 @@ export interface Coordinates {
 }
 
 /**
- * Why a position could not be obtained. The caller needs the distinction: a
- * denied permission is fixed in the app's settings, disabled location services
- * are fixed in the system ones, and a timeout is worth simply retrying.
+ * Почему не удалось получить позицию. Вызывающему нужно различие: отказ в
+ * разрешении чинится в настройках приложения, выключенные службы геолокации — в
+ * системных, а таймаут стоит просто повторить.
  */
 export type GeolocationFailure =
   | 'denied'
@@ -38,21 +38,21 @@ export function geolocationMessage(err: unknown): string {
   return MESSAGES.unavailable
 }
 
-// A cold device has no fix to hand out, and asking for a precise one indoors can
-// take far longer than a person will wait. So the first attempt accepts a
-// cached or network-derived position quickly, and only if that yields nothing
-// do we pay for a real GNSS fix with a timeout long enough to actually get one.
-// The previous single attempt — low accuracy, five seconds — simply expired on
-// most Android devices and left the caller with no coordinates and no error.
+// У холодного устройства нет готовой координаты, а запрос точной в помещении
+// может занять куда больше, чем человек согласен ждать. Поэтому первая попытка
+// быстро принимает кэшированную или сетевую позицию, и только если она ничего
+// не даёт, мы платим за настоящую координату GNSS с таймаутом, которого хватит.
+// Прежняя единственная попытка — низкая точность, пять секунд — на большинстве
+// Android просто истекала, оставляя вызывающего без координат и без ошибки.
 const FAST_ATTEMPT = { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
 const PRECISE_ATTEMPT = { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 }
 
 /**
- * Makes sure the app may read the device position, asking the user if it has
- * not been decided yet.
+ * Убеждается, что приложению можно читать позицию устройства, и спрашивает
+ * пользователя, если это ещё не решено.
  *
- * Android grants location at runtime, so a manifest entry alone is not enough:
- * without this the very first getCurrentPosition simply fails.
+ * Android выдаёт геолокацию во время работы, поэтому одной записи в манифесте
+ * мало: без этого самый первый getCurrentPosition просто падает.
  */
 export async function ensureLocationPermission(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
@@ -61,8 +61,8 @@ export async function ensureLocationPermission(): Promise<void> {
   try {
     status = await Geolocation.checkPermissions()
   } catch (err) {
-    // The plugin throws here when the device's location services are off,
-    // which is a different problem from a permission the user declined.
+    // Плагин бросает здесь, когда службы геолокации устройства выключены, —
+    // а это другая проблема, нежели разрешение, в котором отказал пользователь.
     throw new GeolocationError('services-disabled', String(err))
   }
 
@@ -109,9 +109,9 @@ async function nativePosition(options: PositionOptions): Promise<Coordinates> {
 }
 
 /**
- * Reads the device's current position, or throws a GeolocationError saying why
- * it could not. Never resolves with stale or made-up coordinates: a caller that
- * gets a value can rely on it.
+ * Читает текущую позицию устройства или бросает GeolocationError с причиной,
+ * по которой не смог. Никогда не возвращает устаревшие или выдуманные
+ * координаты: вызывающий, получивший значение, может на него положиться.
  */
 export async function getCurrentCoordinates(): Promise<Coordinates> {
   const native = Capacitor.isNativePlatform()
@@ -126,8 +126,8 @@ export async function getCurrentCoordinates(): Promise<Coordinates> {
   try {
     return await read(FAST_ATTEMPT)
   } catch (err) {
-    // A denial will not be cured by asking again, and asking twice would put a
-    // second permission prompt in front of the user.
+    // Отказ не вылечится повторным вопросом, а спросить дважды означало бы
+    // показать пользователю второй запрос разрешения.
     if (err instanceof GeolocationError && (err.reason === 'denied' || err.reason === 'services-disabled')) {
       throw err
     }

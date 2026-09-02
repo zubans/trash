@@ -11,16 +11,16 @@ import (
 	"github.com/lib/pq"
 )
 
-// Escalation statuses.
+// Статусы эскалации.
 const (
 	EscalationOpen     = "OPEN"
 	EscalationResolved = "RESOLVED"
 )
 
-// OrderSubmission is one set of fields an executor sent for checking, together
-// with how it compared. The values it was compared against are not copied here:
-// they live on the customer's record, and duplicating them would spread the very
-// data the flow exists to keep out of the executor's hands.
+// OrderSubmission — один набор полей, отправленный исполнителем на проверку,
+// вместе с результатом сравнения. Значения, с которыми сравнивали, сюда не
+// копируются: они живут в записи заказчика, а их дублирование расползлось бы
+// теми самыми данными, которые поток и существует держать вне рук исполнителя.
 type OrderSubmission struct {
 	ID         uuid.UUID         `json:"id"`
 	OrderID    uuid.UUID         `json:"order_id"`
@@ -32,7 +32,7 @@ type OrderSubmission struct {
 	CreatedAt  time.Time         `json:"created_at"`
 }
 
-// BehaviorEscalation is an order a behaviour handed to an administrator.
+// BehaviorEscalation — заказ, переданный поведением администратору.
 type BehaviorEscalation struct {
 	ID           uuid.UUID  `json:"id"`
 	OrderID      uuid.UUID  `json:"order_id"`
@@ -43,7 +43,7 @@ type BehaviorEscalation struct {
 	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
 	ResolvedBy   *uuid.UUID `json:"resolved_by,omitempty"`
 
-	// Filled in by the admin listing, which has to show what the case is about.
+	// Заполняется админским списком, который обязан показать, о чём случай.
 	CustomerID   uuid.UUID          `json:"customer_id"`
 	CustomerName string             `json:"customer_name,omitempty"`
 	OrderStatus  string             `json:"order_status"`
@@ -51,27 +51,27 @@ type BehaviorEscalation struct {
 	Submissions  []*OrderSubmission `json:"submissions,omitempty"`
 }
 
-// ErrEscalationNotFound is returned for an id with no open escalation.
+// ErrEscalationNotFound возвращается для id, по которому нет открытой эскалации.
 var ErrEscalationNotFound = errors.New("escalation not found")
 
-// SubmissionRepository stores executor submissions and the escalations they
-// produce.
+// SubmissionRepository хранит отправки исполнителей и порождаемые ими
+// эскалации.
 type SubmissionRepository interface {
-	// Record writes one submission inside the caller's transaction. The attempt
-	// number is derived in the same statement, so two submissions racing cannot
-	// both be "attempt 2".
+	// Record пишет одну отправку внутри транзакции вызывающего. Номер попытки
+	// выводится в том же операторе, поэтому две гоняющиеся отправки не могут обе
+	// быть «попыткой 2».
 	Record(ctx context.Context, q Querier, submission *OrderSubmission) error
 	CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error)
 	ListForOrder(ctx context.Context, orderID uuid.UUID) ([]*OrderSubmission, error)
 
-	// Escalate opens an escalation for the order, or does nothing when one is
-	// already open — a behaviour asking twice is describing the same case.
+	// Escalate открывает эскалацию по заказу или ничего не делает, когда одна уже
+	// открыта: поведение, спрашивающее дважды, описывает тот же случай.
 	Escalate(ctx context.Context, q Querier, escalation *BehaviorEscalation) error
 	HasOpenEscalation(ctx context.Context, orderID uuid.UUID) (bool, error)
 	ListEscalations(ctx context.Context, status string, limit int) ([]*BehaviorEscalation, error)
 	ResolveEscalation(ctx context.Context, id, adminID uuid.UUID) error
-	// ResolveByOrder closes whatever was open on an order, for the paths where
-	// the case ends by itself: the customer gets verified, the order is closed.
+	// ResolveByOrder закрывает всё открытое по заказу — для путей, где случай
+	// заканчивается сам: заказчик верифицирован, заказ закрыт.
 	ResolveByOrder(ctx context.Context, q Querier, orderID uuid.UUID, adminID *uuid.UUID) error
 }
 
@@ -79,7 +79,7 @@ type submissionRepo struct {
 	db *sql.DB
 }
 
-// NewSubmissionRepository creates a SubmissionRepository.
+// NewSubmissionRepository создаёт SubmissionRepository.
 func NewSubmissionRepository(db *sql.DB) SubmissionRepository {
 	return &submissionRepo{db: db}
 }
@@ -150,8 +150,8 @@ func (r *submissionRepo) Escalate(ctx context.Context, q Querier, escalation *Be
 	if escalation.ID == uuid.Nil {
 		escalation.ID = uuid.New()
 	}
-	// The partial unique index is what makes this idempotent; the conflict is a
-	// normal outcome, not an error.
+	// Идемпотентным это делает частичный уникальный индекс; конфликт — нормальный
+	// исход, а не ошибка.
 	_, err := r.exec(q).ExecContext(ctx, `
         INSERT INTO behavior_escalations (id, order_id, behavior_code, reason)
         VALUES ($1, $2, $3, $4)
@@ -203,8 +203,8 @@ func (r *submissionRepo) ListEscalations(ctx context.Context, status string, lim
 		return nil, err
 	}
 
-	// The submitted attempts are the point of the screen: the administrator
-	// compares what the moderator read off the document with the account.
+	// Отправленные попытки — смысл этого экрана: администратор сравнивает
+	// прочитанное модератором в документе с учётной записью.
 	for _, e := range escalations {
 		submissions, err := r.ListForOrder(ctx, e.OrderID)
 		if err != nil {

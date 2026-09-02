@@ -1,7 +1,7 @@
 <template>
   <div class="user-list">
     <div class="admin-table-card mb-4">
-      <!-- Table Toolbar -->
+      <!-- Панель инструментов таблицы -->
       <div class="table-toolbar">
         <div class="search-box">
           <i class="ph ph-magnifying-glass"></i>
@@ -37,9 +37,9 @@
         </div>
       </div>
 
-      <!-- Modern Grid Table -->
+      <!-- Современная табличная сетка -->
       <div class="grid-table">
-        <!-- Headers -->
+        <!-- Заголовки -->
         <div class="grid-row grid-header">
           <div>Пользователь</div>
           <div>Роль</div>
@@ -50,7 +50,7 @@
           <div class="cell-actions">Действия</div>
         </div>
 
-        <!-- Rows -->
+        <!-- Строки -->
         <div v-for="u in users" :key="u.id" class="grid-row grid-item">
           <div class="cell-user">
             <div class="avatar" :class="getAvatarClass(u.role)">
@@ -96,7 +96,7 @@
           </div>
 
           <div class="cell-actions">
-            <!-- Fast Top Up Icon Button -->
+            <!-- Кнопка-иконка быстрого пополнения -->
             <button
               class="btn-ghost topup"
               data-tooltip="Пополнить"
@@ -105,7 +105,7 @@
               <i class="ph-bold ph-plus-circle"></i>
             </button>
 
-            <!-- Kebab Dropdown Menu -->
+            <!-- Выпадающее меню-кебаб -->
             <div class="dropdown-wrapper">
               <button class="btn-ghost" data-tooltip="Меню">
                 <i class="ph-bold ph-dots-three-vertical"></i>
@@ -150,7 +150,7 @@
       </div>
     </div>
 
-    <!-- Mobile card list (shown instead of the table on phones) -->
+    <!-- Список мобильных карточек (показывается вместо таблицы на телефонах) -->
     <div class="user-cards mb-4">
       <div v-for="u in users" :key="u.id" class="user-card">
         <div class="uc-top">
@@ -196,7 +196,7 @@
           </button>
         </div>
 
-        <!-- Expandable action sheet -->
+        <!-- Разворачиваемая панель действий -->
         <div v-if="cardMenuId === u.id" class="uc-actions">
           <button @click="openNameModal(u); cardMenuId = null"><i class="ph-bold ph-user"></i> ФИО</button>
           <button @click="openRolesModal(u); cardMenuId = null"><i class="ph-bold ph-user-gear"></i> Роли</button>
@@ -214,7 +214,7 @@
       <div v-if="users.length === 0" class="uc-empty">Пользователи не найдены</div>
     </div>
 
-    <!-- Pagination -->
+    <!-- Постраничная навигация -->
     <div class="d-flex justify-content-between align-items-center mt-3">
       <span class="text-muted font-weight-500">{{ $t('users.total', { count: totalUsers }) }}</span>
       <va-pagination
@@ -225,7 +225,7 @@
       />
     </div>
 
-    <!-- Change Role Modal -->
+    <!-- Модальное окно смены роли -->
     <va-modal
       v-model="showRoleModal"
       :title="$t('users.changeRoleTitle')"
@@ -242,7 +242,7 @@
       />
     </va-modal>
 
-    <!-- Multi-role Modal -->
+    <!-- Модальное окно мультиролей -->
     <va-modal
       v-model="showRolesModal"
       title="Роли пользователя"
@@ -262,7 +262,7 @@
       <p v-if="newRoles.length === 0" class="roles-warn">Выберите хотя бы одну роль.</p>
     </va-modal>
 
-    <!-- Top Up Balance Modal -->
+    <!-- Модальное окно пополнения баланса -->
     <va-modal
       v-model="showTopUpModal"
       :title="$t('users.topUpTitle')"
@@ -282,7 +282,7 @@
       />
     </va-modal>
 
-    <!-- Change Address Modal -->
+    <!-- Модальное окно смены адреса -->
     <va-modal
       v-model="showAddressModal"
       :title="$t('users.changeAddressTitle')"
@@ -302,7 +302,7 @@
       />
     </va-modal>
 
-    <!-- Personal Details Modal -->
+    <!-- Модальное окно личных данных -->
     <va-modal
       v-model="showNameModal"
       title="Редактировать личные данные"
@@ -361,7 +361,7 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const users = ref<any[]>([])
-    // Which mobile card's action sheet is open (null = none).
+    // Панель действий какой мобильной карточки открыта (null — ни одной).
     const cardMenuId = ref<string | null>(null)
     const totalUsers = ref(0)
     const page = ref(1)
@@ -471,7 +471,7 @@ export default defineComponent({
     const selectedUser = ref<any>(null)
     const newRole = ref<{ text: string; value: string } | string>('CUSTOMER')
 
-    // Multi-role editing.
+    // Редактирование мультиролей.
     const allRoles = [
       { value: 'CUSTOMER', label: 'Заказчик' },
       { value: 'EXECUTOR', label: 'Исполнитель' },
@@ -502,7 +502,7 @@ export default defineComponent({
       try {
         await api.post(`/admin/users/${selectedUser.value.id}/roles`, { roles: newRoles.value })
         selectedUser.value.roles = [...newRoles.value]
-        // Keep the primary role coherent if it was removed.
+        // Держим основную роль согласованной, если её убрали.
         if (!newRoles.value.includes(selectedUser.value.role)) {
           selectedUser.value.role = newRoles.value[0]
         }
@@ -557,8 +557,8 @@ export default defineComponent({
       return parts.length > 0 ? parts.join(' ') : '-'
     }
 
-    // The listing serialises birth_date as a timestamp; both the date input and
-    // the cell want the plain day.
+    // Список сериализует birth_date как метку времени; и поле даты, и ячейка хотят
+    // просто день.
     const toDateInput = (value?: string) => (value ? String(value).slice(0, 10) : '')
 
     const formatBirthDate = (value?: string) => {
@@ -597,9 +597,9 @@ export default defineComponent({
         return
       }
       try {
-        // The birth date goes first: it is the field the server can reject, and
-        // saving it before the name keeps a refusal from leaving half the form
-        // applied.
+        // Дата рождения идёт первой: это поле, которое сервер может отклонить, и её
+        // сохранение раньше имени не даёт отказу оставить форму применённой
+        // наполовину.
         if (newBirthDate.value !== toDateInput(selectedUser.value.birth_date)) {
           await api.post(`/admin/users/${selectedUser.value.id}/birth-date`, {
             birth_date: newBirthDate.value,
@@ -651,8 +651,8 @@ export default defineComponent({
     const openAddressModal = (user: any) => {
       selectedUser.value = user
       newAddress.value = user.address || ''
-      // Start empty so the admin picks a fresh suggestion from the register; the
-      // current address is shown above the field for reference.
+      // Начинаем с пустого, чтобы админ выбрал свежую подсказку из реестра; текущий
+      // адрес показан над полем для справки.
       newAddressStruct.value = null
       showAddressModal.value = true
     }
@@ -672,8 +672,8 @@ export default defineComponent({
         return
       }
       try {
-        // Send the composed line the register produced; the backend stores it as
-        // the customer's pickup address.
+        // Отправляем составленную строку, которую выдал реестр; бэкенд сохраняет её как
+        // адрес подачи заказчика.
         await api.post(`/admin/users/${selectedUser.value.id}/address`, { address: chosen.value.trim() })
         selectedUser.value.address = chosen.value.trim()
         closeAddressModal()
@@ -683,9 +683,9 @@ export default defineComponent({
       }
     }
 
-    // Split into day and time explicitly. The cell used to render
-    // toLocaleString().split(','), which puts the whole timestamp in one line
-    // wherever the browser locale does not separate them with a comma.
+    // Явно делим на день и время. Раньше ячейка рисовала
+    // toLocaleString().split(','), из-за чего вся метка времени оказывалась в одной
+    // строке везде, где локаль браузера не разделяет их запятой.
     const formatDay = (dateStr: string) => {
       if (!dateStr) return '—'
       return new Date(dateStr).toLocaleDateString('ru-RU')
@@ -710,8 +710,8 @@ export default defineComponent({
       }
     }
 
-    // Role chips are coloured by role, so a moderator reads differently from a
-    // plain executor at a glance. Shared with the mobile cards.
+    // Чипы ролей раскрашены по роли, поэтому модератор с первого взгляда читается
+    // иначе, чем обычный исполнитель. Общее с мобильными карточками.
     const getRoleClass = (role: string) => getAvatarClass(role)
 
     const getAvatarChar = (role: string) => {
@@ -789,8 +789,8 @@ export default defineComponent({
   flex-direction: column;
 }
 
-/* Toolbar and table share one surface, so the filters read as part of the
-   table rather than as a floating strip above it. */
+/* Панель инструментов и таблица делят одну поверхность, поэтому фильтры
+   читаются как часть таблицы, а не как плавающая полоса над ней. */
 .admin-table-card {
   background: #ffffff;
   border-radius: 16px;
@@ -890,8 +890,8 @@ export default defineComponent({
   overflow-x: auto;
 }
 
-/* Sum of the fixed columns: narrower than this the table scrolls rather than
-   crushing the address and status cells. */
+/* Сумма фиксированных колонок: уже этого таблица прокручивается, а не давит
+   ячейки адреса и статуса. */
 .grid-row {
   min-width: 1100px;
 }
@@ -899,9 +899,9 @@ export default defineComponent({
 .grid-row {
   display: grid;
   /* Пользователь | Роль | Баланс | Адрес | Статус | Регистрация | Действия.
-     The last two are wider than the mockup's 120/80: at that size the uppercase
-     headers "РЕГИСТРАЦИЯ" and "ДЕЙСТВИЯ" run into each other, and two 32px
-     buttons do not fit an 80px column once the cell padding is counted. */
+     Последние две шире, чем 120/80 из макета: при таком размере заголовки
+     «РЕГИСТРАЦИЯ» и «ДЕЙСТВИЯ» набегают друг на друга, а две кнопки по 32px не
+     влезают в колонку 80px, если учесть отступы ячейки. */
   grid-template-columns: minmax(250px, 1.5fr) 120px 110px minmax(200px, 1fr) 160px 140px 120px;
   align-items: center;
 }
@@ -937,8 +937,8 @@ export default defineComponent({
   background: #f8fafc;
 }
 
-/* Phone, name and birth date share one column: three lines about the same
-   person read better together than split across two columns. */
+/* Телефон, имя и дата рождения делят одну колонку: три строки об одном и том
+   же человеке читаются вместе лучше, чем разнесённые на две колонки. */
 .cell-user {
   gap: 16px;
 }
@@ -1000,7 +1000,7 @@ export default defineComponent({
   color: #d946ef;
 }
 
-/* Roles stack: a user with several of them stays inside a fixed column. */
+/* Роли складываются стопкой: пользователь с несколькими остаётся внутри фиксированной колонки. */
 .cell-role {
   flex-direction: column;
   align-items: flex-start;
@@ -1190,14 +1190,14 @@ export default defineComponent({
   background: #f1f5f9;
 }
 
-/* Actions & Kebab Dropdown */
+/* Действия и выпадающее меню-кебаб */
 .cell-actions {
   display: flex;
   gap: 4px;
   padding-left: 8px;
   justify-content: flex-end;
   align-items: center;
-  /* overflow:hidden from the shared cell rule would clip the kebab menu */
+  /* overflow:hidden из общего правила ячейки обрезал бы меню-кебаб */
   overflow: visible;
 }
 
@@ -1232,7 +1232,7 @@ export default defineComponent({
   color: #ef4444;
 }
 
-/* Tooltip */
+/* Подсказка */
 .btn-ghost::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -1338,7 +1338,7 @@ export default defineComponent({
   margin: 4px 0;
 }
 
-/* Mobile card list: hidden on desktop, replaces the table on phones. */
+/* Список мобильных карточек: скрыт на десктопе, заменяет таблицу на телефонах. */
 .user-cards {
   display: none;
   flex-direction: column;
@@ -1512,8 +1512,8 @@ export default defineComponent({
     flex: 1;
     min-width: 120px;
   }
-  /* Swap the wide table for cards; the toolbar keeps the surface to itself,
-     so it must not keep the table's chrome. */
+  /* Меняем широкую таблицу на карточки; панель инструментов оставляет
+     поверхность себе, поэтому таблице её оформление сохранять нельзя. */
   .admin-table-card {
     background: transparent;
     box-shadow: none;

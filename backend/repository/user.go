@@ -13,8 +13,8 @@ import (
 	"healthlogin/backend/money"
 )
 
-// Role constants. A user's primary role lives in users.role; the full set a
-// user holds lives in user_roles (see migration 039).
+// Константы ролей. Основная роль пользователя живёт в users.role; полный набор,
+// которым он обладает, — в user_roles (см. миграцию 039).
 const (
 	RoleCustomer  = "CUSTOMER"
 	RoleExecutor  = "EXECUTOR"
@@ -22,7 +22,7 @@ const (
 	RoleAdmin     = "ADMIN"
 )
 
-// User represents a user record in the database.
+// User представляет запись пользователя в базе.
 type User struct {
 	ID                     uuid.UUID    `json:"id"`
 	Role                   string       `json:"role"`
@@ -40,15 +40,15 @@ type User struct {
 	EmailTokenExpiresAt    *time.Time   `json:"-"`
 	PasswordResetCode      string       `json:"-"`
 	PasswordResetExpiresAt *time.Time   `json:"-"`
-	Password               string       `json:"-"` // bcrypt hash, managed by the service layer
+	Password               string       `json:"-"` // bcrypt-хеш, управляется слоем сервисов
 	Balance                money.Amount `json:"balance"`
 	Status                 string       `json:"status"`
 	CreatedAt              time.Time    `json:"created_at"`
 	Address                string       `json:"address,omitempty"`
 }
 
-// BirthDateString renders the birth date the way every client expects it —
-// YYYY-MM-DD, empty when unset. Three call sites used to format it by hand.
+// BirthDateString отдаёт дату рождения в том виде, какого ждёт любой клиент, —
+// YYYY-MM-DD, пусто, если не задана. Три места вызова форматировали её вручную.
 func (u *User) BirthDateString() string {
 	if u.BirthDate == nil {
 		return ""
@@ -68,18 +68,18 @@ func (u *User) GetAge() int {
 	return age
 }
 
-// IsVerified reports whether an admin has manually verified this user. It is
-// deliberately independent of EmailVerified: confirming an email proves address
-// ownership, not that the account is trusted. Every eligibility gate — customer
-// order visibility and service variants that set requires_verification — reads
-// this single flag.
+// IsVerified сообщает, верифицировал ли админ этого пользователя вручную. Флаг
+// намеренно независим от EmailVerified: подтверждение почты доказывает владение
+// адресом, а не доверие к учётной записи. Каждая проверка допуска — видимость
+// заказов для заказчика и варианты услуг с requires_verification — читает этот
+// единственный флаг.
 func (u *User) IsVerified() bool {
 	return u.Verified
 }
 
-// HasRole reports whether the user holds the given role. It consults the full
-// role set when loaded, and always falls back to the primary role so a caller
-// that did not load Roles still gets a correct answer for the primary role.
+// HasRole сообщает, обладает ли пользователь заданной ролью. Он смотрит в
+// полный набор ролей, когда тот загружен, и всегда откатывается к основной
+// роли, поэтому вызывающий, не загрузивший Roles, получает верный ответ по ней.
 func (u *User) HasRole(role string) bool {
 	for _, r := range u.Roles {
 		if r == role {
@@ -89,7 +89,7 @@ func (u *User) HasRole(role string) bool {
 	return u.Role == role
 }
 
-// CustomerProfile holds customer-specific profile data.
+// CustomerProfile хранит данные профиля, специфичные для заказчика.
 type CustomerProfile struct {
 	UserID   uuid.UUID `json:"user_id"`
 	FullName string    `json:"full_name"`
@@ -98,30 +98,30 @@ type CustomerProfile struct {
 	DeviceIP string    `json:"device_ip,omitempty"`
 }
 
-// UserRepository defines storage operations for users.
+// UserRepository описывает операции хранения пользователей.
 type UserRepository interface {
 	FindByPhone(ctx context.Context, phone string) (*User, error)
 	FindByEmail(ctx context.Context, email string) (*User, error)
 	FindByEmailVerificationToken(ctx context.Context, token string) (*User, error)
 	Create(ctx context.Context, user *User) error
 	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
-	// FindByIDs loads a set of users, with their roles, in two queries rather
-	// than two per user. It exists for the list endpoints, which need one user
-	// per row to answer "may this viewer see this order" and used to ask the
-	// database once per row to find out. Ids that do not exist are simply
-	// absent from the result — a missing user is a normal outcome for a caller
-	// filtering a list, not an error.
+	// FindByIDs загружает набор пользователей с их ролями двумя запросами, а не
+	// двумя на пользователя. Он существует ради списковых эндпоинтов, которым нужен
+	// один пользователь на строку, чтобы ответить «может ли этот смотрящий видеть
+	// этот заказ», и которые раньше спрашивали базу по разу на строку.
+	// Несуществующие id просто отсутствуют в результате — отсутствующий
+	// пользователь для фильтрующего список вызывающего нормальный исход, а не ошибка.
 	FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
-	// ListUserRoles returns every role the user holds (from user_roles).
+	// ListUserRoles возвращает все роли пользователя (из user_roles).
 	ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error)
-	// SetUserRoles replaces the user's role set with the given roles and keeps
-	// users.role (the primary role) pointing at one of them.
+	// SetUserRoles заменяет набор ролей пользователя заданным и держит users.role
+	// (основную роль) указывающей на одну из них.
 	SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error
 	UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error
-	// UpdateVerifiedTx is the same write inside the caller's transaction, for
-	// the callers that must commit it together with a domain event.
+	// UpdateVerifiedTx — та же запись внутри транзакции вызывающего, для тех, кто
+	// обязан закоммитить её вместе с доменным событием.
 	UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error
 	UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error
 	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error
@@ -135,12 +135,12 @@ type UserRepository interface {
 	UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error
 }
 
-// repo implements UserRepository using *sql.DB.
+// repo реализует UserRepository поверх *sql.DB.
 type repo struct {
 	db *sql.DB
 }
 
-// New creates a new UserRepository backed by the provided database connection.
+// New создаёт новый UserRepository поверх переданного соединения с базой.
 func New(db *sql.DB) UserRepository {
 	return &repo{db: db}
 }
@@ -247,12 +247,12 @@ func (r *repo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	return &u, nil
 }
 
-// FindByIDs loads several users at once. See the interface for why.
+// FindByIDs загружает нескольких пользователей разом. Почему — см. интерфейс.
 //
-// The column list is deliberately the same one FindByID reads: callers use the
-// two interchangeably, and a batch that returned a thinner user would make the
-// eligibility predicate behave differently depending on which path loaded its
-// input.
+// Список колонок намеренно тот же, что читает FindByID: вызывающие используют
+// их взаимозаменяемо, и пакетный вариант, вернувший более скудного
+// пользователя, заставил бы предикат допуска вести себя по-разному в
+// зависимости от того, каким путём загрузили его вход.
 func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error) {
 	result := make(map[uuid.UUID]*User, len(ids))
 	placeholders, args := idList(ids)
@@ -299,8 +299,8 @@ func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*U
 	return result, nil
 }
 
-// attachRolesBatch fills Roles for every loaded user in one query, applying the
-// same fallback to the primary role that attachRoles applies for one user.
+// attachRolesBatch заполняет Roles для каждого загруженного пользователя одним
+// запросом, применяя тот же откат к основной роли, что и attachRoles для одного.
 func (r *repo) attachRolesBatch(ctx context.Context, users map[uuid.UUID]*User) error {
 	if len(users) == 0 {
 		return nil
@@ -334,8 +334,8 @@ func (r *repo) attachRolesBatch(ctx context.Context, users map[uuid.UUID]*User) 
 		return err
 	}
 
-	// Same fallback as the single-user path: a user with no user_roles row (one
-	// predating the migration 039 seed) still holds their primary role.
+	// Тот же откат, что и на пути одного пользователя: пользователь без строки в
+	// user_roles (появившийся до наполнения в миграции 039) всё равно держит основную роль.
 	for _, u := range users {
 		if len(u.Roles) == 0 && u.Role != "" {
 			u.Roles = []string{u.Role}
@@ -344,8 +344,8 @@ func (r *repo) attachRolesBatch(ctx context.Context, users map[uuid.UUID]*User) 
 	return nil
 }
 
-// attachRoles loads the user's full role set into u.Roles. It falls back to the
-// primary role so a user predating the user_roles seed still has a usable set.
+// attachRoles загружает полный набор ролей пользователя в u.Roles. Он
+// откатывается к основной роли, чтобы у пользователя старше наполнения user_roles был рабочий набор.
 func (r *repo) attachRoles(ctx context.Context, u *User) {
 	roles, err := r.ListUserRoles(ctx, u.ID)
 	if err != nil || len(roles) == 0 {
@@ -374,8 +374,8 @@ func (r *repo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error
 	return roles, rows.Err()
 }
 
-// SetUserRoles replaces the user's roles atomically and repoints users.role at
-// one of the remaining roles when the current primary is no longer present.
+// SetUserRoles атомарно заменяет роли пользователя и перенаправляет users.role
+// на одну из оставшихся ролей, когда текущей основной больше нет.
 func (r *repo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -395,8 +395,8 @@ func (r *repo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) e
 			return err
 		}
 	}
-	// Keep the primary role consistent: if it was removed, adopt the first of
-	// the new set so the default dashboard still resolves.
+	// Держим основную роль согласованной: если её убрали, берём первую из
+	// нового набора, чтобы дашборд по умолчанию всё ещё разрешался.
 	if len(roles) > 0 {
 		var current string
 		if err := tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id = $1`, id).Scan(&current); err != nil {
@@ -432,8 +432,8 @@ func (r *repo) Create(ctx context.Context, user *User) error {
 	if err != nil {
 		return err
 	}
-	// Mirror the primary role into user_roles so the multi-role table is the
-	// authoritative set from the moment the account exists.
+	// Зеркалим основную роль в user_roles, чтобы мультиролевая таблица была
+	// авторитетным набором с момента существования учётной записи.
 	if user.Role != "" {
 		if _, err := r.db.ExecContext(ctx,
 			`INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, user.Role); err != nil {
@@ -473,8 +473,8 @@ func (r *repo) VerifyEmailToken(ctx context.Context, token string) (*User, error
 	return r.FindByID(ctx, userID)
 }
 
-// UpdatePassword replaces the stored hash and clears any pending reset code, so
-// a code issued before the change cannot be used afterwards.
+// UpdatePassword заменяет сохранённый хеш и очищает любой ожидающий код сброса,
+// чтобы код, выданный до изменения, нельзя было использовать после.
 func (r *repo) UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error {
 	return execExpectingOne(ctx, r.db,
 		`UPDATE users SET password = $1, password_reset_code = NULL,
@@ -484,7 +484,7 @@ func (r *repo) UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPa
 }
 
 func (r *repo) SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error {
-	// A fresh code resets the attempt counter.
+	// Свежий код обнуляет счётчик попыток.
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE users SET password_reset_code = $1, password_reset_expires_at = $2, password_reset_attempts = 0 WHERE id = $3`,
 		code, expiresAt, userID,
@@ -492,12 +492,12 @@ func (r *repo) SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code 
 	return err
 }
 
-// maxResetAttempts limits how many codes may be tried for one reset request.
-// Without it a numeric code can simply be enumerated inside its validity window.
+// maxResetAttempts ограничивает, сколько кодов можно попробовать на один запрос
+// сброса. Без него числовой код просто перебирается внутри срока его действия.
 const maxResetAttempts = 5
 
-// ResetPasswordWithCode verifies the code under a row lock and counts failed
-// attempts, invalidating the code once the limit is reached.
+// ResetPasswordWithCode проверяет код под блокировкой строки и считает неудачные
+// попытки, обнуляя код по достижении предела.
 func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashedPassword string) (*User, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -574,24 +574,24 @@ func (r *repo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) er
 	return err
 }
 
-// UpdateRole is the legacy single-role setter: it makes the given role the
-// user's only role, keeping user_roles (the multi-role source of truth) in step
-// so the two never drift.
+// UpdateRole — легаси-сеттер одной роли: он делает заданную роль единственной
+// ролью пользователя, держа user_roles (мультиролевой источник истины) в такт,
+// чтобы эти двое никогда не разъезжались.
 func (r *repo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
 	return r.SetUserRoles(ctx, id, []string{role})
 }
 
-// UpdateVerified sets the manual verification flag on its own connection.
+// UpdateVerified выставляет флаг ручной верификации на собственном соединении.
 func (r *repo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
 	return r.UpdateVerifiedTx(ctx, nil, id, verified)
 }
 
-// UpdateVerifiedTx sets the flag inside the caller's transaction. Both writers
-// of users.is_verified need one: the admin endpoint publishes the
-// user.verified event with the change, and the behaviour applier sets the flag
-// alongside closing the order and paying the verifier. A flag set without its
-// event, or an event without the flag, is exactly the split the outbox exists
-// to prevent.
+// UpdateVerifiedTx выставляет флаг внутри транзакции вызывающего. Такой нужен
+// обоим писателям users.is_verified: админский эндпоинт публикует вместе с
+// изменением событие user.verified, а применитель поведений выставляет флаг
+// заодно с закрытием заказа и оплатой проверяющему. Флаг без своего события или
+// событие без флага — ровно тот разрыв, который outbox и существует
+// предотвращать.
 func (r *repo) UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error {
 	exec := Querier(r.db)
 	if q != nil {
@@ -635,12 +635,12 @@ func (r *repo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*Custo
 	return &p, nil
 }
 
-// UpdateUserEmail records a requested address as pending and sends the user a
-// verification link. The current address stays in place until the new one is
-// confirmed: writing it straight into email meant an unverified address became
-// the account's address immediately, which let somebody occupy an address that
-// its real owner had not registered yet, and dropped the working address of a
-// user who mistyped.
+// UpdateUserEmail записывает запрошенный адрес как ожидающий и отправляет
+// пользователю ссылку подтверждения. Текущий адрес остаётся на месте, пока
+// новый не подтверждён: запись сразу в email означала, что неподтверждённый
+// адрес немедленно становился адресом учётки, а это позволяло занять адрес,
+// который его настоящий владелец ещё не зарегистрировал, и роняло рабочий адрес
+// пользователя, сделавшего опечатку.
 func (r *repo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
 	row := r.db.QueryRowContext(ctx,
 		`UPDATE users

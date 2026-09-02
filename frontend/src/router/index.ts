@@ -99,9 +99,9 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/Escalations.vue'),
       },
       {
-        // Reference for the script editor in the service constructor. Not in the
-        // menu: it is reached from the "как писать скрипты" link next to the
-        // editor, where the question actually comes up.
+        // Справочник для редактора скриптов в конструкторе услуг. Не в меню: до него
+        // добираются по ссылке «как писать скрипты» рядом с редактором, там, где
+        // вопрос и возникает.
         path: 'service-scripts',
         name: 'admin-service-scripts-help',
         component: () => import('../pages/admin/ServiceScriptHelp.vue'),
@@ -150,9 +150,9 @@ const routes: Array<RouteRecordRaw> = [
   },
 ]
 
-// dashboardHome picks the landing route for a signed-in user, honouring the
-// role they last switched to (activeRole) and falling back to any role they
-// hold. MODERATOR shares the executor dashboard.
+// dashboardHome выбирает начальный маршрут для вошедшего пользователя, учитывая
+// роль, на которую он переключался последней (activeRole), и откатываясь к любой
+// его роли. MODERATOR делит дашборд с исполнителем.
 function dashboardHome(authStore: ReturnType<typeof useAuthStore>): string {
   const active = authStore.activeRole
   if (active === 'ADMIN' && authStore.isAdmin) return '/admin'
@@ -164,8 +164,8 @@ function dashboardHome(authStore: ReturnType<typeof useAuthStore>): string {
   return '/login'
 }
 
-// canAccessRole reports whether the user may open a route gated on requiredRole.
-// A MODERATOR may open the EXECUTOR dashboard (moderator orders live there).
+// canAccessRole сообщает, может ли пользователь открыть маршрут с требованием requiredRole.
+// MODERATOR может открыть дашборд EXECUTOR (заказы модератора живут там).
 function canAccessRole(authStore: ReturnType<typeof useAuthStore>, requiredRole: string): boolean {
   if (!requiredRole) return true
   if (authStore.hasRole(requiredRole)) return true
@@ -187,7 +187,7 @@ router.beforeEach((to, _from, next) => {
     } else {
       const requiredRole = to.meta.role as string
       if (!canAccessRole(authStore, requiredRole)) {
-        // Not authorized for this role — send to a dashboard they can use.
+        // Нет прав на эту роль — отправляем на дашборд, которым он может пользоваться.
         next(dashboardHome(authStore))
       } else {
         next()

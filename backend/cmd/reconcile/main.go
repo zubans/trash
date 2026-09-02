@@ -1,9 +1,9 @@
-// Command reconcile checks that every stored balance still equals the sum of
-// that user's ledger entries, and reports orders whose held amount contradicts
-// their status.
+// Command reconcile проверяет, что каждый сохранённый баланс всё ещё равен
+// сумме проводок этого пользователя, и сообщает о заказах, чья удержанная
+// сумма противоречит их статусу.
 //
-// It exits with status 1 when the books do not balance, so it can be wired into
-// a cron job or a deployment check.
+// Завершается с кодом 1, когда книги не сходятся, — чтобы её можно было
+// встроить в cron или в проверку деплоя.
 package main
 
 import (

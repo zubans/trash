@@ -21,28 +21,28 @@ import (
 	"healthlogin/backend/service"
 )
 
-// ChatHandler holds dependencies for chat room endpoints.
+// ChatHandler хранит зависимости эндпоинтов чат-комнат.
 type ChatHandler struct {
 	chatService *service.ChatService
 }
 
-// NewChatHandler creates a new ChatHandler.
+// NewChatHandler создаёт новый ChatHandler.
 func NewChatHandler(chatService *service.ChatService) *ChatHandler {
 	return &ChatHandler{chatService: chatService}
 }
 
-// maxAttachmentBytes is the hard limit for a single uploaded file.
+// maxAttachmentBytes — жёсткий предел на один загружаемый файл.
 const maxAttachmentBytes = 25 << 20
 
-// allowedAttachmentExtensions is a whitelist: anything that a browser could
-// execute in the application's origin (html, svg, js, ...) must never be stored
-// and served back, otherwise an attachment becomes stored XSS.
+// allowedAttachmentExtensions — белый список: всё, что браузер мог бы выполнить
+// в источнике приложения (html, svg, js, ...), не должно храниться и отдаваться
+// обратно, иначе вложение превращается в хранимую XSS.
 var allowedAttachmentExtensions = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true, ".heic": true,
 	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true, ".txt": true, ".csv": true,
 }
 
-// uploadsBaseDir resolves the upload root consistently for every upload path.
+// uploadsBaseDir единообразно разрешает корень загрузок для любого пути загрузки.
 func uploadsBaseDir() string {
 	if dir := os.Getenv("UPLOADS_DIR"); dir != "" {
 		return dir
@@ -50,8 +50,8 @@ func uploadsBaseDir() string {
 	return "uploads"
 }
 
-// safeExtension validates the client supplied file name and returns the
-// normalised extension to store the file under.
+// safeExtension проверяет присланное клиентом имя файла и возвращает
+// нормализованное расширение, под которым файл будет сохранён.
 func safeExtension(fileName string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(fileName))
 	if ext == "" {
@@ -63,8 +63,8 @@ func safeExtension(fileName string) (string, error) {
 	return ext, nil
 }
 
-// writeChatError maps service errors to HTTP status codes by error identity,
-// never by matching on the message text.
+// writeChatError сопоставляет ошибки сервиса с кодами HTTP по тождеству ошибки,
+// а не по совпадению текста сообщения.
 func writeChatError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
@@ -76,9 +76,9 @@ func writeChatError(w http.ResponseWriter, err error) {
 	}
 }
 
-// ServeAttachmentHandler serves an uploaded file only to a participant of the
-// conversation it belongs to. Attachments used to be exposed by a bare file
-// server with directory listing enabled.
+// ServeAttachmentHandler отдаёт загруженный файл только участнику переписки,
+// которой он принадлежит. Раньше вложения раздавал голый файловый сервер с
+// включённым листингом каталогов.
 func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -87,7 +87,7 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	name := chi.URLParam(r, "*")
-	// Reject anything that is not a plain relative path inside the upload root.
+	// Отклоняем всё, что не является обычным относительным путём внутри корня загрузок.
 	if name == "" || strings.Contains(name, "..") || strings.HasPrefix(name, "/") {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -100,7 +100,7 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !allowed {
-		// 404 rather than 403: existence of a file is itself information.
+		// 404, а не 403: сам факт существования файла — уже информация.
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -121,24 +121,24 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Never let the browser render a stored file in the app origin.
+	// Никогда не позволяем браузеру отрисовать хранимый файл в источнике приложения.
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(full)+"\"")
 	http.ServeFile(w, r, full)
 }
 
-// messageQueryFrom reads the history window from the query string.
+// messageQueryFrom читает окно истории из строки запроса.
 //
-//	?limit=N     how many messages to return (capped by the repository)
-//	?after=TS    only messages newer than TS — what a poll should ask for
-//	?before=TS   the newest messages older than TS — scrolling back
+//	?limit=N     сколько сообщений вернуть (ограничено репозиторием)
+//	?after=TS    только сообщения новее TS — то, что должен спрашивать опрос
+//	?before=TS   самые новые сообщения старше TS — прокрутка назад
 //
-// Timestamps are RFC3339, the format the API already renders created_at in, so
-// a client can hand back a value it was given without reformatting it. An
-// unparseable value is ignored rather than rejected: the fallback is the most
-// recent page, which is a sane answer for a chat screen, whereas a 400 would
-// leave the user staring at an empty conversation.
+// Метки времени в RFC3339 — том же формате, в котором API уже отдаёт
+// created_at, поэтому клиент может вернуть полученное значение без
+// переформатирования. Неразбираемое значение игнорируется, а не отвергается:
+// запасной вариант — самая свежая страница, разумный ответ для экрана чата,
+// тогда как 400 оставил бы пользователя перед пустой перепиской.
 func messageQueryFrom(r *http.Request) repository.MessageQuery {
 	var q repository.MessageQuery
 	params := r.URL.Query()
@@ -161,7 +161,7 @@ func messageQueryFrom(r *http.Request) repository.MessageQuery {
 	return q
 }
 
-// GetMessagesHandler retrieves history of messages.
+// GetMessagesHandler отдаёт историю сообщений.
 func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -187,8 +187,8 @@ func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(messages)
 }
 
-// SendMessageHandler saves and broadcasts a chat message via REST (classic HTTP
-// fallback for clients that cannot send over WebSocket, e.g. mobile WebViews).
+// SendMessageHandler сохраняет и рассылает сообщение чата через REST (классический
+// запасной путь для клиентов, которые не умеют слать по WebSocket, например мобильных WebView).
 func (h *ChatHandler) SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -228,7 +228,7 @@ func (h *ChatHandler) SendMessageHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(msg)
 }
 
-// WebSocketHandler upgrades request and processes chat loop.
+// WebSocketHandler апгрейдит запрос и обрабатывает цикл чата.
 func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -246,7 +246,7 @@ func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	h.chatService.HandleWS(r.Context(), w, r, orderID, user.ID, user.Role)
 }
 
-// MarkReadHandler marks all messages in a chat as read.
+// MarkReadHandler отмечает все сообщения чата прочитанными.
 func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -274,7 +274,7 @@ func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetUnreadSummaryHandler returns unread order IDs for the authenticated user.
+// GetUnreadSummaryHandler возвращает ID заказов с непрочитанным для аутентифицированного пользователя.
 func (h *ChatHandler) GetUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -294,7 +294,7 @@ func (h *ChatHandler) GetUnreadSummaryHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// UploadAttachmentHandler handles POST /api/chats/{order_id}/upload for file/photo attachments.
+// UploadAttachmentHandler обслуживает POST /api/chats/{order_id}/upload для файлов и фото.
 func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -309,8 +309,8 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// MaxBytesReader bounds what actually reaches the disk; ParseMultipartForm's
-	// argument only sizes the in-memory buffer and spills the rest to temp files.
+	// MaxBytesReader ограничивает то, что реально доходит до диска; аргумент
+	// ParseMultipartForm задаёт лишь размер буфера в памяти, а остаток уходит во временные файлы.
 	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		http.Error(w, "file too large (max 25MB)", http.StatusBadRequest)
@@ -354,7 +354,7 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Determine file type category: image vs document
+	// Определяем категорию файла: изображение или документ
 	mimeType := header.Header.Get("Content-Type")
 	fileType := "document"
 	if strings.HasPrefix(mimeType, "image/") || strings.Contains(strings.ToLower(ext), ".jpg") || strings.Contains(strings.ToLower(ext), ".png") || strings.Contains(strings.ToLower(ext), ".webp") || strings.Contains(strings.ToLower(ext), ".jpeg") {
@@ -376,7 +376,7 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(msg)
 }
 
-// EditMessageHandler handles PUT /api/chats/{order_id}/messages/{message_id}.
+// EditMessageHandler обслуживает PUT /api/chats/{order_id}/messages/{message_id}.
 func (h *ChatHandler) EditMessageHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -421,7 +421,7 @@ func (h *ChatHandler) EditMessageHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(msg)
 }
 
-// DeleteMessageHandler handles DELETE /api/chats/{order_id}/messages/{message_id}.
+// DeleteMessageHandler обслуживает DELETE /api/chats/{order_id}/messages/{message_id}.
 func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -451,7 +451,7 @@ func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusOK)
 }
 
-// GetUserSupportChatHandler returns or creates the support chat for current user.
+// GetUserSupportChatHandler возвращает или создаёт чат поддержки текущего пользователя.
 func (h *ChatHandler) GetUserSupportChatHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -469,7 +469,7 @@ func (h *ChatHandler) GetUserSupportChatHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(chat)
 }
 
-// GetSupportMessagesHandler retrieves support messages.
+// GetSupportMessagesHandler отдаёт сообщения поддержки.
 func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -495,7 +495,7 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(messages)
 }
 
-// SendSupportMessageHandler posts text message to support chat.
+// SendSupportMessageHandler публикует текстовое сообщение в чат поддержки.
 func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -540,7 +540,7 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(msg)
 }
 
-// UploadSupportAttachmentHandler uploads an attachment for support chat.
+// UploadSupportAttachmentHandler загружает вложение для чата поддержки.
 func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -621,7 +621,7 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	json.NewEncoder(w).Encode(msg)
 }
 
-// GetAdminSupportChatListHandler returns Telegram-style chat list for admin panel.
+// GetAdminSupportChatListHandler возвращает список чатов в стиле Telegram для админ-панели.
 func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil || user.Role != "ADMIN" {
@@ -639,7 +639,7 @@ func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *h
 	json.NewEncoder(w).Encode(list)
 }
 
-// BanSupportChatHandler bans a support chat for specified duration ("10m", "1h", "forever").
+// BanSupportChatHandler банит чат поддержки на указанный срок («10m», «1h», «forever»).
 func (h *ChatHandler) BanSupportChatHandler(w http.ResponseWriter, r *http.Request) {
 	chatIDStr := chi.URLParam(r, "chat_id")
 	chatID, err := uuid.Parse(chatIDStr)
@@ -667,7 +667,7 @@ func (h *ChatHandler) BanSupportChatHandler(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": true, "duration": req.Duration})
 }
 
-// UnbanSupportChatHandler unbans a support chat.
+// UnbanSupportChatHandler снимает бан с чата поддержки.
 func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Request) {
 	chatIDStr := chi.URLParam(r, "chat_id")
 	chatID, err := uuid.Parse(chatIDStr)
@@ -685,7 +685,7 @@ func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": false})
 }
 
-// GetAdminSupportUnreadSummaryHandler returns total unread count for admin sidebar.
+// GetAdminSupportUnreadSummaryHandler возвращает общее число непрочитанного для боковой панели админа.
 func (h *ChatHandler) GetAdminSupportUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil || user.Role != "ADMIN" {

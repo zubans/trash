@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// loadReal compiles the behaviour scripts that ship with the service, so these
-// tests fail when a script is edited into something the core cannot use — the
-// scripts live outside the Go code, and this is what keeps them covered by it.
+// loadReal компилирует скрипты поведений, поставляемые с сервисом, чтобы эти
+// тесты падали, когда скрипт правят во что-то непригодное для ядра: скрипты
+// живут вне Go-кода, и только это держит их им покрытыми.
 func loadReal(t *testing.T) *Engine {
 	t.Helper()
 	e := New(DefaultLimits)
@@ -47,7 +47,7 @@ func TestVerificationManifest(t *testing.T) {
 			t.Errorf("manifest declares no default for %q: %v", key, m.Defaults)
 		}
 	}
-	// Commission on a reward is opt-in, and this behaviour does not opt in.
+	// Комиссия с вознаграждения — по явному согласию, а это поведение его не даёт.
 	if applies, _ := m.Defaults["apply_commission"].(bool); applies {
 		t.Error("verification rewards must not be commissioned by default")
 	}
@@ -171,9 +171,9 @@ func TestVerificationCompletesAndPaysWhenTheDataMatches(t *testing.T) {
 	}
 }
 
-// Both rewards are constants of the behaviour: the customer's is zero by
-// default and paid when a node configures one, and each has its own key so the
-// two payments cannot collide.
+// Оба вознаграждения — константы поведения: заказчику по умолчанию ноль и
+// платится, когда узел его настроил, и у каждого свой ключ, чтобы две выплаты
+// не столкнулись.
 func TestVerificationPaysBothSidesWhenConfigured(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -211,14 +211,14 @@ func TestVerificationPaysBothSidesWhenConfigured(t *testing.T) {
 	if paid[mod.ID].Key == paid[cust.ID].Key {
 		t.Errorf("both rewards share the key %q, so only one of them would ever be paid", paid[mod.ID].Key)
 	}
-	// Turned on explicitly by the node, so it must reach the core.
+	// Включено узлом явно, поэтому обязано дойти до ядра.
 	if !paid[mod.ID].Commission || !paid[cust.ID].Commission {
 		t.Error("apply_commission was set but the effects do not carry it")
 	}
 }
 
-// A reward of zero is not a payment: the effect must not be produced at all,
-// or the applier would refuse a zero amount and fail the whole event.
+// Нулевое вознаграждение — не платёж: эффект не должен порождаться вовсе, иначе
+// применитель отклонит нулевую сумму и уронит всё событие.
 func TestVerificationSkipsZeroRewards(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -240,9 +240,9 @@ func TestVerificationSkipsZeroRewards(t *testing.T) {
 	}
 }
 
-// The constants live in config.star; the logic reads them by name. A behaviour
-// whose config file did not load would fail here rather than silently paying
-// nothing.
+// Константы живут в config.star; логика читает их по имени. Поведение, чей
+// конфигурационный файл не загрузился, упало бы здесь, а не платило бы молча
+// ничего.
 func TestBehaviorConstantsComeFromTheConfigFile(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -264,8 +264,8 @@ func TestBehaviorConstantsComeFromTheConfigFile(t *testing.T) {
 	t.Errorf("no reward taken from config.star (REWARD_EXECUTOR = 200): %v", effects)
 }
 
-// A finished order must not be completed or paid for a second time, whichever
-// event arrives afterwards.
+// Завершённый заказ не должен быть завершён или оплачен второй раз, какое бы
+// событие ни пришло следом.
 func TestVerificationIgnoresFinishedOrders(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(true)
@@ -282,8 +282,8 @@ func TestVerificationIgnoresFinishedOrders(t *testing.T) {
 	}
 }
 
-// The admin-driven configuration keeps the flag an admin's decision: marking the
-// visit done must not verify anybody by itself.
+// Конфигурация, задаваемая админом, оставляет флаг решением админа: отметка о
+// выполненном визите сама по себе никого не верифицирует.
 func TestVerificationAdminModeIgnoresExecution(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -302,8 +302,8 @@ func TestVerificationAdminModeIgnoresExecution(t *testing.T) {
 	}
 }
 
-// The identity check: the manifest declares which fields the moderator submits
-// and that they see nothing else about the customer.
+// Проверка личности: манифест объявляет, какие поля отправляет модератор и что
+// больше он о заказчике ничего не видит.
 func TestVerificationDeclaresTheIdentityCheck(t *testing.T) {
 	e := loadReal(t)
 	m, _ := e.Manifest("verification")
@@ -321,8 +321,8 @@ func TestVerificationDeclaresTheIdentityCheck(t *testing.T) {
 	}
 }
 
-// A first mismatch is a typo until proven otherwise: warn, do not escalate, and
-// do not say which field was wrong — the rest could then be found by trying.
+// Первое несовпадение — опечатка, пока не доказано обратное: предупредить, не
+// эскалировать и не говорить, какое поле неверно, — иначе остальные подберут.
 func TestVerificationWarnsOnTheFirstMismatch(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -355,7 +355,7 @@ func TestVerificationWarnsOnTheFirstMismatch(t *testing.T) {
 	}
 }
 
-// The last allowed attempt hands the case to an administrator.
+// Последняя разрешённая попытка передаёт случай администратору.
 func TestVerificationEscalatesAfterTheLastAttempt(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -389,7 +389,7 @@ func TestVerificationEscalatesAfterTheLastAttempt(t *testing.T) {
 	}
 }
 
-// Once a case is with an administrator the script stops acting on it.
+// Как только случай у администратора, скрипт перестаёт на него влиять.
 func TestVerificationLeavesAnEscalatedOrderAlone(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -407,7 +407,7 @@ func TestVerificationLeavesAnEscalatedOrderAlone(t *testing.T) {
 	}
 }
 
-// Marking the visit done no longer verifies anybody by itself: the check does.
+// Отметка о выполненном визите больше никого не верифицирует сама: это делает проверка.
 func TestVerificationDoesNotCompleteWithoutTheCheck(t *testing.T) {
 	e := loadReal(t)
 	cust := customer(false)
@@ -444,7 +444,7 @@ def on_event(f):
 	}
 }
 
-// A runaway script fails its own call and nothing else.
+// Зациклившийся скрипт роняет собственный вызов и ничего больше.
 func TestRunawayScriptIsStopped(t *testing.T) {
 	e := New(Limits{MaxSteps: 10_000, Timeout: 50 * time.Millisecond})
 	src := []byte(`
@@ -462,7 +462,7 @@ def visible(f):
 	if err == nil {
 		t.Fatal("an endless script must fail its hook")
 	}
-	// Fail closed for the caller: an error means the node is not shown.
+	// Отказ в безопасную сторону для вызывающего: ошибка означает, что узел не показан.
 	if !visible {
 		t.Log("hook failed as expected:", err)
 	}

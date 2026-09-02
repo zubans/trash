@@ -4,7 +4,7 @@ import (
 	"math"
 )
 
-// IsWithinRadius checks whether a point is within a circle, in metres.
+// IsWithinRadius проверяет, лежит ли точка внутри круга, в метрах.
 func IsWithinRadius(lat1, lon1, lat2, lon2 float64, radius int) bool {
 	return haversineDistance(lat1, lon1, lat2, lon2) <= float64(radius)
 }

@@ -79,13 +79,13 @@ func TestReviewService_CreateReview(t *testing.T) {
 	}
 	orderRepo.orders = append(orderRepo.orders, order)
 
-	// Invalid rating
+	// Недопустимый рейтинг
 	_, err := srv.CreateReview(context.Background(), orderID, custID, CreateReviewDTO{Rating: 0})
 	if err == nil {
 		t.Error("expected error for invalid rating")
 	}
 
-	// Create review successfully
+	// Успешное создание отзыва
 	rev, err := srv.CreateReview(context.Background(), orderID, custID, CreateReviewDTO{
 		Rating:  5,
 		Tags:    []string{"fast"},
@@ -98,38 +98,38 @@ func TestReviewService_CreateReview(t *testing.T) {
 		t.Errorf("expected target ID %s, got %s", execID, rev.TargetID)
 	}
 
-	// Duplicate review attempt
+	// Попытка дублирующего отзыва
 	_, err = srv.CreateReview(context.Background(), orderID, custID, CreateReviewDTO{Rating: 4})
 	if err == nil {
 		t.Error("expected error on duplicate review")
 	}
 
-	// Uninvolved user attempt
+	// Попытка от непричастного пользователя
 	strangerID := uuid.New()
 	_, err = srv.CreateReview(context.Background(), orderID, strangerID, CreateReviewDTO{Rating: 5})
 	if err == nil {
 		t.Error("expected error for uninvolved user")
 	}
 
-	// Review by order and author
+	// Отзыв по заказу и автору
 	found, err := srv.GetReviewByOrderAndAuthor(context.Background(), orderID, custID)
 	if err != nil || found == nil {
 		t.Errorf("expected to find review, got err: %v", err)
 	}
 
-	// Get reviews for user
+	// Получаем отзывы о пользователе
 	revs, err := srv.GetReviewsForUser(context.Background(), execID, 10, 0)
 	if err != nil || len(revs) != 1 {
 		t.Errorf("expected 1 review for executor, got %d", len(revs))
 	}
 
-	// Get user rating
+	// Получаем рейтинг пользователя
 	summary, err := srv.GetUserRating(context.Background(), execID, "EXECUTOR")
 	if err != nil || summary.Rating != 5.0 || summary.ReviewsCount != 1 {
 		t.Errorf("expected rating 5.0 count 1, got summary: %v", summary)
 	}
 
-	// 7 days SLA window expired test
+	// Проверка истёкшего 7-дневного окна SLA
 	oldOrderID := uuid.New()
 	eightDaysAgo := time.Now().Add(-8 * 24 * time.Hour)
 	orderRepo.orders = append(orderRepo.orders, &repository.Order{
@@ -163,7 +163,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 	}
 	orderRepo.orders = append(orderRepo.orders, order)
 
-	// Create active shift for executor
+	// Создаём активную смену исполнителю
 	shiftRepo.shifts = append(shiftRepo.shifts, &repository.Shift{
 		ID:           uuid.New(),
 		ExecutorID:   execID,
@@ -176,7 +176,7 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 		t.Fatalf("unexpected error creating bid: %v", err)
 	}
 
-	// Only the order's own customer may list its bids.
+	// Перечислять ставки по заказу может только его собственный заказчик.
 	bids, err := srv.GetBidsForOrder(context.Background(), orderID, custID)
 	if err != nil || len(bids) != 1 {
 		t.Fatalf("expected 1 bid for order, got %d (err %v)", len(bids), err)
@@ -186,13 +186,13 @@ func TestBidService_AcceptAndGetBids(t *testing.T) {
 		t.Error("expected error when a stranger lists bids for someone else's order")
 	}
 
-	// Invalid bid price (0 or negative)
+	// Недопустимая цена ставки (0 или отрицательная)
 	_, err = srv.CreateBid(context.Background(), orderID, execID, money.FromRubles(0))
 	if err == nil {
 		t.Error("expected error for bid price 0")
 	}
 
-	// Accept bid
+	// Принимаем ставку
 	err = srv.AcceptBid(context.Background(), bid.ID, custID)
 	if err != nil {
 		t.Fatalf("unexpected error accepting bid: %v", err)
@@ -211,7 +211,7 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 	execID := uuid.New()
 	order, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
 
-	// Accept
+	// Принятие
 	err := srv.Accept(context.Background(), order.ID, execID)
 	if err != nil {
 		t.Fatalf("unexpected error accepting order: %v", err)
@@ -226,7 +226,7 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 		t.Errorf("expected status EXECUTED, got %s", order.Status)
 	}
 
-	// RejectAssignedOrder (verify 50% penalty fine transaction)
+	// RejectAssignedOrder (проверяем транзакцию штрафа в 50%)
 	order2, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
 	_ = srv.Accept(context.Background(), order2.ID, execID)
 	err = srv.RejectAssignedOrder(context.Background(), order2.ID, execID)
@@ -240,7 +240,7 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 		t.Errorf("expected FINE transaction created on rejection")
 	}
 
-	// ListAssigned & ListByCustomer & FindNearbyOrders
+	// ListAssigned, ListByCustomer и FindNearbyOrders
 	custOrders, _ := srv.ListByCustomer(context.Background(), custID)
 	if len(custOrders) != 2 {
 		t.Errorf("expected 2 customer orders, got %d", len(custOrders))
@@ -292,19 +292,19 @@ func TestExecutorGeoService(t *testing.T) {
 
 	execID := uuid.New()
 
-	// Invalid coordinates
+	// Недопустимые координаты
 	_, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 100.0, Lon: 200.0})
 	if err == nil {
 		t.Error("expected error for invalid coordinates")
 	}
 
-	// Valid set location
+	// Корректная установка местоположения
 	res, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 55.7558, Lon: 37.6173, IsManual: false})
 	if err != nil || !res.Success {
 		t.Fatalf("unexpected error setting location: %v", err)
 	}
 
-	// Manual location shift (>2km) triggering cooldown
+	// Ручной сдвиг местоположения (>2 км), включающий паузу
 	res2, err := srv.SetLocation(context.Background(), execID, SetLocationRequest{Lat: 55.8000, Lon: 37.7000, IsManual: true})
 	if err != nil || !res2.Success {
 		t.Fatalf("unexpected error setting manual location: %v", err)
@@ -314,7 +314,7 @@ func TestExecutorGeoService(t *testing.T) {
 		t.Error("expected cooldown rejection for manual shift within 10 min")
 	}
 
-	// Orders on map
+	// Заказы на карте
 	plat, plon := 55.7558, 37.6173
 	orderRepo.orders = append(orderRepo.orders, &repository.Order{
 		ID:        uuid.New(),
@@ -323,7 +323,7 @@ func TestExecutorGeoService(t *testing.T) {
 		PickupLon: &plon,
 	})
 
-	// Coordinates now come from the executor's stored location, not the caller.
+	// Координаты теперь берутся из сохранённого местоположения исполнителя, а не от вызывающего.
 	orders, err := srv.GetMapOrders(context.Background(), execID)
 	if err != nil || len(orders) != 1 {
 		t.Errorf("expected 1 map order, got %d", len(orders))
@@ -357,7 +357,7 @@ func TestAdminService_Extended(t *testing.T) {
 
 	users, total, _ := srv.GetUsers(context.Background(), 1, 10, "", "", "")
 	if total != 0 || len(users) != 0 {
-		// mockAdminRepo returned empty
+		// mockAdminRepo вернул пусто
 	}
 
 	_, _ = srv.GetActiveShifts(context.Background())
@@ -424,7 +424,7 @@ func TestShiftService_Extended(t *testing.T) {
 	_ = srv.EndShiftByID(context.Background(), shift.ID)
 	srv.AutoEndExpiredShifts(context.Background())
 
-	// Test Start, GetActive, GetCurrent, End
+	// Проверяем Start, GetActive, GetCurrent, End
 	execID2 := uuid.New()
 	s2, err := srv.Start(context.Background(), execID2, 1)
 	if err != nil {
@@ -484,7 +484,7 @@ func TestOrderService_Aliases(t *testing.T) {
 		t.Fatalf("unexpected error in Create alias: %v", err)
 	}
 
-	// Confirm alias
+	// Псевдоним Confirm
 	_ = orderRepo.AssignOrder(context.Background(), order.ID, execID)
 	_ = orderRepo.Execute(context.Background(), nil, order.ID)
 	err = srv.Confirm(context.Background(), custID, order.ID)
@@ -492,7 +492,7 @@ func TestOrderService_Aliases(t *testing.T) {
 		t.Errorf("unexpected error in Confirm alias: %v", err)
 	}
 
-	// Cancel alias
+	// Псевдоним Cancel
 	order2, _ := srv.Create(context.Background(), custID, CreateOrderRequest{ServiceVariantID: standardVariantID})
 	err = srv.Cancel(context.Background(), custID, order2.ID)
 	if err != nil {
@@ -535,13 +535,13 @@ func TestMatchingService_MatchOrders(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
 	srv := NewMatchingService(orderRepo, shiftRepo, newMockUserRepo(), newMockCatalogRepo())
 
-	// When no pending orders exist
+	// Когда ожидающих заказов нет
 	err := srv.MatchOrders(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error matching orders: %v", err)
 	}
 
-	// Test StartMatchingWorker
+	// Проверяем StartMatchingWorker
 	srv.StartMatchingWorker(context.Background(), 10*time.Millisecond)
 	time.Sleep(25 * time.Millisecond)
 }

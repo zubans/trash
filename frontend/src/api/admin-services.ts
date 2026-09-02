@@ -31,10 +31,10 @@ export interface UpdateServiceNodeRequest {
   behavior_source?: string
 }
 
-// ServiceBehavior is one behaviour script the server has loaded: what a node
-// may name in behavior_code, and what configuring it means. The list comes from
-// the scripts themselves, so a new behaviour appears in the admin panel as soon
-// as its file is deployed.
+// ServiceBehavior — один скрипт поведения, загруженный сервером: то, что узел
+// может назвать в behavior_code, и что означает его настройка. Список берётся из
+// самих скриптов, поэтому новое поведение появляется в админ-панели, как только
+// его файл выкачен.
 export interface ServiceBehavior {
   code: string
   name: string
@@ -44,8 +44,8 @@ export interface ServiceBehavior {
   events?: string[]
   defaults?: Record<string, unknown>
   hooks?: string[]
-  // The script's own text, which the constructor offers as a starting template
-  // and shows for a node that runs this library behaviour.
+  // Собственный текст скрипта, который конструктор предлагает как стартовый
+  // шаблон и показывает для узла, выполняющего это библиотечное поведение.
   constants_source?: string
   source?: string
 }
@@ -59,6 +59,9 @@ export interface DeleteServiceNodeResult {
   message: string
   soft: boolean
   had_orders: boolean
+  // Сколько узлов ушло вместе с этим (узел + всё поддерево). Для категории с
+  // вложенными элементами > 1.
+  deleted_count: number
 }
 
 export async function getAdminServiceNodes(
@@ -85,8 +88,8 @@ export async function updateServiceNode(nodeId: string, payload: UpdateServiceNo
   return response.data
 }
 
-// Deletion is soft: the node is retired, orders placed for it keep their
-// service, and restoreServiceNode brings it back (switched off).
+// Удаление мягкое: узел списывается, размещённые по нему заказы сохраняют свою
+// услугу, а restoreServiceNode возвращает его (выключенным).
 export async function deleteServiceNode(nodeId: string): Promise<DeleteServiceNodeResult> {
   const response = await api.delete(`/admin/service-nodes/${nodeId}`)
   return response.data

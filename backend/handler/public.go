@@ -12,25 +12,25 @@ import (
 	"healthlogin/backend/service"
 )
 
-// PublicHandler holds public HTTP handlers (health, registration, login).
+// PublicHandler хранит публичные HTTP-обработчики (health, регистрация, вход).
 type PublicHandler struct {
 	authService *service.AuthService
 }
 
-// NewPublicHandler creates a PublicHandler with the provided AuthService.
+// NewPublicHandler создаёт PublicHandler с переданным AuthService.
 func NewPublicHandler(authService *service.AuthService) *PublicHandler {
 	return &PublicHandler{authService: authService}
 }
 
-// AuthRequest is used for login.
+// AuthRequest используется для входа.
 type AuthRequest struct {
 	Phone    string `json:"phone"`
 	Password string `json:"password"`
 }
 
-// RegisterRequest extends AuthRequest with the required pickup address, birth
-// date, role and optional coordinates. Role must be CUSTOMER or EXECUTOR, and
-// birth_date is YYYY-MM-DD.
+// RegisterRequest дополняет AuthRequest обязательным адресом подачи, датой
+// рождения, ролью и необязательными координатами. Роль должна быть CUSTOMER
+// или EXECUTOR, а birth_date — в формате YYYY-MM-DD.
 type RegisterRequest struct {
 	Phone      string   `json:"phone"`
 	Email      string   `json:"email"`
@@ -45,15 +45,15 @@ type RegisterRequest struct {
 	Lon        *float64 `json:"lon,omitempty"`
 }
 
-// AuthResponse returns the token pair after a successful login or refresh.
-// The refresh token is opaque and single-use: every refresh returns a new one.
+// AuthResponse возвращает пару токенов после успешного входа или обновления.
+// Refresh-токен непрозрачен и одноразов: каждое обновление возвращает новый.
 type AuthResponse struct {
 	Token        string `json:"token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresAt    string `json:"expires_at"`
 }
 
-// RegisterResponse returns the created user without sensitive fields.
+// RegisterResponse возвращает созданного пользователя без чувствительных полей.
 type RegisterResponse struct {
 	ID    string `json:"id"`
 	Phone string `json:"phone"`
@@ -61,7 +61,7 @@ type RegisterResponse struct {
 	Role  string `json:"role"`
 }
 
-// HealthHandler returns the service health status.
+// HealthHandler возвращает состояние здоровья сервиса.
 func (h *PublicHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -72,7 +72,7 @@ func (h *PublicHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// RegisterHandler creates a new user account.
+// RegisterHandler создаёт новую учётную запись.
 func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -108,10 +108,10 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(resp)
 }
 
-// LoginHandler authenticates a user and returns a JWT.
+// LoginHandler аутентифицирует пользователя и возвращает JWT.
 func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	// POST only: credentials must never travel in a URL, and a GET login is
-	// also trivially triggerable cross-site.
+	// Только POST: учётные данные не должны путешествовать в URL, а вход через
+	// GET к тому же тривиально запускается с чужого сайта.
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -125,9 +125,9 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.authService.Authenticate(r.Context(), req.Phone, req.Password)
 	if err != nil {
-		// Counted separately from the 401 rate in the HTTP metrics: a burst of
-		// denied logins against valid accounts is a credential-stuffing signal,
-		// not just traffic.
+		// Считается отдельно от общей доли 401 в HTTP-метриках: всплеск отказанных
+		// входов по действительным учёткам — сигнал подстановки учётных данных, а не
+		// просто трафик.
 		metrics.AuthEvent("login", "denied")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -144,8 +144,8 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	writeTokenPair(w, pair)
 }
 
-// writeTokenPair renders a token pair. Responses carrying credentials must not
-// be stored by any cache along the way.
+// writeTokenPair отдаёт пару токенов. Ответы с учётными данными не должны
+// кэшироваться ничем по дороге.
 func writeTokenPair(w http.ResponseWriter, pair *service.TokenPair) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -156,10 +156,10 @@ func writeTokenPair(w http.ResponseWriter, pair *service.TokenPair) {
 	})
 }
 
-// RefreshHandler exchanges a refresh token for a new pair.
+// RefreshHandler обменивает refresh-токен на новую пару.
 //
-// It is intentionally unauthenticated: by the time a client needs it, the
-// access token has already expired. The refresh token is the credential.
+// Он намеренно не аутентифицирован: к моменту, когда клиенту он нужен,
+// access-токен уже истёк. Учётными данными здесь служит refresh-токен.
 func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
@@ -173,8 +173,8 @@ func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		metrics.AuthEvent("refresh", "denied")
 		if errors.Is(err, service.ErrInvalidRefreshToken) {
-			// One answer for every failure mode: unknown, expired, already
-			// used or revoked must not be distinguishable.
+			// Один ответ на все виды отказа: неизвестный, истёкший, уже
+			// использованный или отозванный не должны различаться.
 			http.Error(w, "Invalid or expired refresh token", http.StatusUnauthorized)
 			return
 		}
@@ -186,10 +186,10 @@ func (h *PublicHandler) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	writeTokenPair(w, pair)
 }
 
-// LogoutHandler ends the current session. The access token is blacklisted for
-// the rest of its lifetime and the refresh token, when the client sends one, is
-// revoked — without that, logging out would leave a credential that can mint
-// fresh access tokens for another 30 days.
+// LogoutHandler завершает текущую сессию. Access-токен заносится в чёрный
+// список до конца своего срока, а refresh-токен, если клиент его прислал,
+// отзывается: без этого выход оставил бы учётные данные, способные ещё 30
+// дней штамповать свежие access-токены.
 func (h *PublicHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	tokenStr, ok := r.Context().Value(middleware.TokenKey).(string)
 	if !ok || tokenStr == "" {
@@ -197,7 +197,7 @@ func (h *PublicHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The body is optional: older clients do not send the refresh token.
+	// Тело необязательно: старые клиенты не присылают refresh-токен.
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
 	}
@@ -212,7 +212,7 @@ func (h *PublicHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "logged out successfully"})
 }
 
-// MeHandler returns the current authenticated user details.
+// MeHandler возвращает данные текущего аутентифицированного пользователя.
 func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -239,7 +239,7 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// VerifyEmailHandler verifies email by token or redirects legacy clicks to frontend /login page.
+// VerifyEmailHandler подтверждает почту по токену или перенаправляет старые переходы на страницу /login фронтенда.
 func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -247,7 +247,7 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// If request comes directly from a browser click (not AJAX JSON request), redirect to frontend /login?token=...
+	// Если запрос пришёл прямо из клика в браузере (а не AJAX-запросом JSON), редиректим на /login?token=... фронтенда
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
 		http.Redirect(w, r, "/login?token="+token, http.StatusFound)
 		return
@@ -278,7 +278,7 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// ForgotPasswordHandler sends a password reset code to the specified email.
+// ForgotPasswordHandler отправляет код сброса пароля на указанную почту.
 func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -305,7 +305,7 @@ func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// ResetPasswordHandler resets user password with verification code.
+// ResetPasswordHandler сбрасывает пароль пользователя по коду подтверждения.
 func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email       string `json:"email"`
@@ -330,7 +330,7 @@ func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// UpdateEmailHandler updates user's email address and triggers a verification email.
+// UpdateEmailHandler меняет адрес почты пользователя и запускает письмо подтверждения.
 func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -352,8 +352,8 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// The address only changes once the link in the mail is followed, so the
-	// response says what is pending rather than claiming it is done.
+	// Адрес меняется только после перехода по ссылке из письма, поэтому ответ
+	// сообщает, что операция ожидает подтверждения, а не что она выполнена.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":        "ok",
@@ -363,7 +363,7 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// ChangePasswordHandler replaces the caller's password.
+// ChangePasswordHandler заменяет пароль вызывающего.
 func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -386,11 +386,11 @@ func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// The new pair keeps this device signed in; every other session was ended.
+	// Новая пара оставляет это устройство в системе; все прочие сессии завершены.
 	writeTokenPair(w, pair)
 }
 
-// UpdateBirthDateHandler updates user's birth date.
+// UpdateBirthDateHandler обновляет дату рождения пользователя.
 func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {

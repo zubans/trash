@@ -11,7 +11,7 @@ import (
 	"healthlogin/backend/service"
 )
 
-// maxReviewPageSize caps the public reviews listing.
+// maxReviewPageSize ограничивает публичный список отзывов.
 const maxReviewPageSize = 100
 
 type ReviewHandler struct {
@@ -89,8 +89,8 @@ func (h *ReviewHandler) GetUserReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The endpoint is public, so the page size is capped: an unbounded limit
-	// turns a rating widget into a way to pull the whole review table.
+	// Эндпоинт публичный, поэтому размер страницы ограничен: неограниченный limit
+	// превращает виджет рейтинга в способ выкачать всю таблицу отзывов.
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {
 		limit = 20

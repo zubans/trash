@@ -11,7 +11,7 @@ import (
 	"healthlogin/backend/money"
 )
 
-// TransactionType represents the type of a financial transaction.
+// TransactionType представляет тип финансовой транзакции.
 type TransactionType string
 
 const (
@@ -22,36 +22,36 @@ const (
 	TransactionTypeFine       TransactionType = "FINE"
 	TransactionTypeTopUp      TransactionType = "TOP_UP"
 	TransactionTypeWithdrawal TransactionType = "WITHDRAWAL"
-	// TransactionTypeWithdrawalHold reserves money when a withdrawal is
-	// requested; TransactionTypeWithdrawalPaid records that reservation being
-	// paid out. Together they mirror HOLD/PAYMENT on the order side.
+	// TransactionTypeWithdrawalHold резервирует деньги при запросе вывода;
+	// TransactionTypeWithdrawalPaid фиксирует выплату этого резерва. Вместе они
+	// зеркалят HOLD/PAYMENT на стороне заказа.
 	TransactionTypeWithdrawalHold TransactionType = "WITHDRAWAL_HOLD"
 	TransactionTypeWithdrawalPaid TransactionType = "WITHDRAWAL_PAID"
-	// TransactionTypeTip debits a customer who tips the executor after a
-	// completed order; TransactionTypeTipReward credits the executor. The tip
-	// passes through ESCROW in one transaction, so the pair nets to zero there.
+	// TransactionTypeTip списывает с заказчика, дающего чаевые исполнителю после
+	// завершённого заказа; TransactionTypeTipReward зачисляет исполнителю. Чаевые
+	// проходят через ESCROW одной транзакцией, поэтому пара там сводится в ноль.
 	TransactionTypeTip       TransactionType = "TIP"
 	TransactionTypeTipReward TransactionType = "TIP_REWARD"
-	// TransactionTypeCommission records the platform's share of a completed
-	// order moving from escrow to the commission account;
-	// TransactionTypeCommissionPayout records an admin paying that account out
-	// of the system. Neither touches a user balance.
+	// TransactionTypeCommission фиксирует переход доли платформы с завершённого
+	// заказа из эскроу на счёт комиссии;
+	// TransactionTypeCommissionPayout фиксирует вывод этого счёта админом из
+	// системы. Ни один из них не трогает баланс пользователя.
 	TransactionTypeCommission       TransactionType = "COMMISSION"
 	TransactionTypeCommissionPayout TransactionType = "COMMISSION_PAYOUT"
-	// TransactionTypeBonus credits a user from the platform's own pocket: the
-	// reward a behaviour script pays for performing a service that the customer
-	// did not pay for. It faces the BONUSES account (see migration 043).
+	// TransactionTypeBonus зачисляет пользователю из собственного кармана
+	// платформы: вознаграждение, которое скрипт поведения платит за услугу, не
+	// оплаченную заказчиком. Он смотрит на счёт BONUSES (см. миграцию 043).
 	TransactionTypeBonus TransactionType = "BONUS"
 )
 
-// ledgerSigns declares how each transaction type moves a user's balance. This is
-// the ledger's sign convention, and it is deliberately written down once:
-// amounts in the table are all positive and the direction lives in the type, so
-// without a single declaration the rule has to be re-derived from the service
-// code every time somebody wants to add up the log.
+// ledgerSigns объявляет, как каждый тип транзакции двигает баланс пользователя.
+// Это соглашение о знаках в реестре, и оно намеренно записано один раз: суммы в
+// таблице все положительные, а направление живёт в типе, поэтому без
+// единственного объявления правило пришлось бы заново выводить из кода сервисов
+// всякий раз, когда кому-то надо сложить журнал.
 //
-// PAYMENT is 0 on purpose. The customer's money left their balance when the hold
-// was taken; PAYMENT records that hold being spent and moves nothing.
+// PAYMENT равен 0 намеренно. Деньги заказчика ушли с его баланса, когда бралось
+// удержание; PAYMENT фиксирует расход этого удержания и ничего не двигает.
 var ledgerSigns = map[TransactionType]int{
 	TransactionTypeTopUp:      +1,
 	TransactionTypeReward:     +1,
@@ -59,35 +59,35 @@ var ledgerSigns = map[TransactionType]int{
 	TransactionTypeHold:       -1,
 	TransactionTypeFine:       -1,
 	TransactionTypeWithdrawal: -1,
-	// Reserving the money is the debit; paying it out moves nothing, because it
-	// already left the balance when the request was created.
+	// Списание — это резервирование денег; выплата ничего не двигает, потому что
+	// они ушли с баланса ещё при создании заявки.
 	TransactionTypeWithdrawalHold: -1,
 	TransactionTypePayment:        0,
 	TransactionTypeWithdrawalPaid: 0,
-	// A tip debits the customer and credits the executor by the same amount, in
-	// one transaction through ESCROW.
+	// Чаевые списывают с заказчика и зачисляют исполнителю ту же сумму, одной
+	// транзакцией через ESCROW.
 	TransactionTypeTip:       -1,
 	TransactionTypeTipReward: +1,
-	// Commission moves between two system accounts. The user it is recorded
-	// against — the executor whose order it came from, the admin who paid it
-	// out — is there to make the entry findable, not to move their balance.
+	// Комиссия перемещается между двумя системными счетами. Пользователь, против
+	// которого она записана, — исполнитель, с чьего заказа она пришла, админ,
+	// который её вывел, — нужен, чтобы запись находилась, а не чтобы двигать баланс.
 	TransactionTypeCommission:       0,
 	TransactionTypeCommissionPayout: 0,
-	// A bonus credits the user; the platform's BONUSES account goes negative by
-	// the same amount, so the books still close.
+	// Бонус зачисляет пользователю; счёт платформы BONUSES уходит в минус на ту же
+	// сумму, поэтому книги всё равно сходятся.
 	TransactionTypeBonus: +1,
 }
 
-// LedgerSign reports how a transaction type moves the balance, and whether the
-// type is known at all. An unknown type means the convention above was not
-// updated alongside a new kind of transaction, which makes every reconciliation
-// result meaningless — callers must treat it as an error, not skip it.
+// LedgerSign сообщает, как тип транзакции двигает баланс и известен ли тип
+// вообще. Неизвестный тип означает, что соглашение выше не обновили вместе с
+// новым видом транзакции, а это делает любой результат сверки бессмысленным —
+// вызывающие обязаны трактовать это как ошибку, а не пропускать.
 func LedgerSign(t TransactionType) (int, bool) {
 	sign, ok := ledgerSigns[t]
 	return sign, ok
 }
 
-// KnownTransactionTypes lists the types covered by the sign convention.
+// KnownTransactionTypes перечисляет типы, покрытые соглашением о знаках.
 func KnownTransactionTypes() []TransactionType {
 	types := make([]TransactionType, 0, len(ledgerSigns))
 	for t := range ledgerSigns {
@@ -96,34 +96,34 @@ func KnownTransactionTypes() []TransactionType {
 	return types
 }
 
-// TransactionRepository defines storage operations for financial transactions and balance.
+// TransactionRepository описывает операции хранения финансовых транзакций и баланса.
 type TransactionRepository interface {
 	GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error)
-	// UpdateBalance applies an unconditional delta. Use Debit instead whenever
-	// the balance must stay non-negative.
+	// UpdateBalance применяет безусловную дельту. Используйте Debit всякий раз,
+	// когда баланс обязан остаться неотрицательным.
 	UpdateBalance(ctx context.Context, tx *sql.Tx, userID uuid.UUID, delta money.Amount) error
-	// Debit subtracts amount only if the balance covers it, atomically.
-	// Returns ErrInsufficientFunds when it does not.
+	// Debit вычитает amount, только если баланс это покрывает, атомарно.
+	// Возвращает ErrInsufficientFunds, когда не покрывает.
 	Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error
 	CreateTransaction(ctx context.Context, tx *sql.Tx, t *Transaction) error
-	// GetTransactionsByUserID returns a user's ledger entries, newest first,
-	// capped at limit. A limit of zero or less means DefaultHistoryPageSize:
-	// this feeds a history screen, and an account with years of activity must
-	// not be able to make one request read its entire past.
+	// GetTransactionsByUserID возвращает проводки пользователя, сначала новые, не
+	// более limit. Limit, равный нулю или меньше, означает DefaultHistoryPageSize:
+	// это питает экран истории, и учётка с годами активности не должна уметь
+	// заставить один запрос прочитать всё её прошлое.
 	GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*Transaction, error)
-	// HasTip reports whether the customer already tipped this order, so a tip is
-	// charged at most once. Runs inside the caller's transaction so the check
-	// and the write are one atomic step.
+	// HasTip сообщает, давал ли заказчик чаевые по этому заказу, чтобы чаевые
+	// списывались не более одного раза. Выполняется внутри транзакции вызывающего,
+	// поэтому проверка и запись — один атомарный шаг.
 	HasTip(ctx context.Context, q Querier, orderID uuid.UUID) (bool, error)
 	RunInTx(ctx context.Context, fn func(*sql.Tx) error) error
 }
 
-// transactionRepo implements TransactionRepository using *sql.DB.
+// transactionRepo реализует TransactionRepository поверх *sql.DB.
 type transactionRepo struct {
 	db *sql.DB
 }
 
-// NewTransactionRepository creates a new TransactionRepository.
+// NewTransactionRepository создаёт новый TransactionRepository.
 func NewTransactionRepository(db *sql.DB) TransactionRepository {
 	return &transactionRepo{db: db}
 }
@@ -142,8 +142,8 @@ func (r *transactionRepo) UpdateBalance(ctx context.Context, tx *sql.Tx, userID 
 		`UPDATE users SET balance = balance + $1 WHERE id = $2`, delta, userID)
 }
 
-// Debit subtracts amount in a single guarded statement, so a check-then-write
-// race cannot push the balance below zero.
+// Debit вычитает amount одним охраняемым оператором, поэтому гонка
+// «проверил-записал» не может увести баланс ниже нуля.
 func (r *transactionRepo) Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
 	if amount.IsNegative() {
 		return errors.New("debit amount must not be negative")
@@ -193,9 +193,9 @@ func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *
 	return err
 }
 
-// HasTip checks for an existing TIP entry on the order. The customer's debit is
-// the TIP row; TIP_REWARD sits on the executor, so one type is enough to look
-// for.
+// HasTip проверяет наличие записи TIP по заказу. Списание с заказчика — это
+// строка TIP; TIP_REWARD лежит на исполнителе, поэтому искать достаточно по
+// одному типу.
 func (r *transactionRepo) HasTip(ctx context.Context, q Querier, orderID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.querierAny(ctx, q).QueryRowContext(ctx,

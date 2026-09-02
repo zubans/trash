@@ -7,8 +7,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// TestCanViewOrTakeOrder exercises the unified visibility/accept predicate that
-// the order list, the map and the accept path all share.
+// TestCanViewOrTakeOrder прогоняет единый предикат видимости/принятия, который
+// делят список заказов, карта и путь принятия.
 func TestCanViewOrTakeOrder(t *testing.T) {
 	verifiedExec := &repository.User{Role: repository.RoleExecutor, Verified: true, Status: "ACTIVE"}
 	unverifiedExec := &repository.User{Role: repository.RoleExecutor, Verified: false, Status: "ACTIVE"}
@@ -30,26 +30,26 @@ func TestCanViewOrTakeOrder(t *testing.T) {
 		variant  *repository.ServiceNode
 		wantOK   bool
 	}{
-		// Moderator-only orders: moderators only.
+		// Заказы только для модераторов: только модераторы.
 		{"mod-only visible to moderator", moderator, unverifiedCust, modOnly, true},
 		{"mod-only visible to exec+mod", execAndMod, verifiedCust, modOnly, true},
 		{"mod-only hidden from verified exec", verifiedExec, unverifiedCust, modOnly, false},
 		{"mod-only hidden from unverified exec", unverifiedExec, unverifiedCust, modOnly, false},
 
-		// Normal order from an UNVERIFIED customer: visible to everyone.
+		// Обычный заказ от НЕВЕРИФИЦИРОВАННОГО заказчика: виден всем.
 		{"unverified customer -> verified exec", verifiedExec, unverifiedCust, normal, true},
 		{"unverified customer -> unverified exec", unverifiedExec, unverifiedCust, normal, true},
 
-		// Normal order from a VERIFIED customer: verified execs / moderators only.
+		// Обычный заказ от ВЕРИФИЦИРОВАННОГО заказчика: только верифицированным исполнителям / модераторам.
 		{"verified customer -> verified exec", verifiedExec, verifiedCust, normal, true},
 		{"verified customer -> unverified exec hidden", unverifiedExec, verifiedCust, normal, false},
 		{"verified customer -> moderator", moderator, verifiedCust, normal, true},
 
-		// Standard executor gates still apply on normal orders.
+		// Стандартные проверки исполнителя по обычным заказам всё равно действуют.
 		{"requires_verification blocks unverified exec", unverifiedExec, unverifiedCust, reqVerif, false},
 		{"requires_verification allows verified exec", verifiedExec, unverifiedCust, reqVerif, true},
 
-		// Ban always blocks.
+		// Бан блокирует всегда.
 		{"banned exec blocked", bannedExec, unverifiedCust, normal, false},
 	}
 

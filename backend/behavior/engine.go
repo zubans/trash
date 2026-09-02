@@ -13,8 +13,8 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// Hook names. A script defines the ones it needs and no more; an undefined hook
-// means "no opinion", and the core keeps its own default.
+// Имена хуков. Скрипт определяет те, что ему нужны, и не больше; неопределённый
+// хук означает «нет мнения», и ядро остаётся при своём умолчании.
 const (
 	HookVisible       = "visible"
 	HookCanOrder      = "can_order"
@@ -25,15 +25,15 @@ const (
 
 var hookNames = []string{HookVisible, HookCanOrder, HookCanViewOrTake, HookPrice, HookOnEvent}
 
-// Limits bound one hook call. They exist because a hook runs on the request
-// path: a script with a runaway loop must fail its own call, not the process.
+// Limits ограничивают один вызов хука. Они нужны потому, что хук выполняется на
+// пути запроса: скрипт с зациклившимся циклом должен уронить свой вызов, а не процесс.
 type Limits struct {
 	MaxSteps uint64
 	Timeout  time.Duration
 }
 
-// DefaultLimits are generous for the decisions these scripts make (a handful of
-// comparisons) and small enough that a mistake is a failed hook.
+// DefaultLimits щедры для решений, которые принимают эти скрипты (несколько
+// сравнений), и достаточно малы, чтобы ошибка оборачивалась провалом хука.
 var DefaultLimits = Limits{MaxSteps: 200_000, Timeout: 100 * time.Millisecond}
 
 type script struct {
@@ -42,21 +42,21 @@ type script struct {
 	manifest Manifest
 }
 
-// NodeCodePrefix marks a behaviour that belongs to one catalog node — a script
-// written in the admin panel rather than shipped as a file. The prefix keeps the
-// two namespaces apart: a node can never shadow a library behaviour, and a
-// library behaviour can never be edited away by a node.
+// NodeCodePrefix помечает поведение, принадлежащее одному узлу каталога, —
+// скрипт, написанный в админ-панели, а не поставленный файлом. Префикс разводит
+// два пространства имён: узел никогда не перекроет библиотечное поведение, а
+// библиотечное поведение никогда не будет затёрто правкой узла.
 const NodeCodePrefix = "node:"
 
-// NodeCode is the behaviour code under which a node's own script is registered.
+// NodeCode — код поведения, под которым регистрируется собственный скрипт узла.
 func NodeCode(nodeID string) string { return NodeCodePrefix + nodeID }
 
-// IsNodeCode reports whether a code belongs to a node's own script.
+// IsNodeCode сообщает, принадлежит ли код собственному скрипту узла.
 func IsNodeCode(code string) bool { return strings.HasPrefix(code, NodeCodePrefix) }
 
-// Engine holds the compiled behaviour scripts. Compilation happens once at
-// startup; the globals are frozen afterwards, which is what makes concurrent
-// calls from request handlers safe.
+// Engine хранит скомпилированные скрипты поведений. Компиляция происходит один
+// раз при старте; после этого глобалы замораживаются — именно это делает
+// безопасными параллельные вызовы из обработчиков запросов.
 type Engine struct {
 	limits Limits
 
@@ -64,7 +64,7 @@ type Engine struct {
 	scripts map[string]*script
 }
 
-// New creates an empty engine.
+// New создаёт пустой движок.
 func New(limits Limits) *Engine {
 	if limits.MaxSteps == 0 {
 		limits.MaxSteps = DefaultLimits.MaxSteps
@@ -75,30 +75,30 @@ func New(limits Limits) *Engine {
 	return &Engine{limits: limits, scripts: map[string]*script{}}
 }
 
-// ConfigFile is executed before the rest of a behaviour, and its globals are
-// visible to every file after it. That is what lets a behaviour keep its
-// constants — amounts, roles, event names, messages — in one file separate from
-// the logic that reads them.
+// ConfigFile выполняется раньше остального поведения, и его глобалы видны
+// каждому последующему файлу. Именно это позволяет поведению держать свои
+// константы — суммы, роли, имена событий, сообщения — в одном файле, отдельно
+// от логики, которая их читает.
 const ConfigFile = "config.star"
 
-// SourceFile is one file of a behaviour, in the order it must be executed.
+// SourceFile — один файл поведения, в том порядке, в котором он должен выполняться.
 type SourceFile struct {
 	Name string
 	Src  []byte
 }
 
-// Load compiles every behaviour directory at the root of fsys. The directory
-// name is the behaviour code that service_nodes.behavior_code names, and the
-// *.star files inside it make up the behaviour: ConfigFile first, then the rest
-// in name order, each seeing the globals of the ones before it.
+// Load компилирует каждый каталог поведения в корне fsys. Имя каталога — это код
+// поведения, на который ссылается service_nodes.behavior_code, а лежащие внутри
+// файлы *.star и составляют поведение: сперва ConfigFile, затем остальные в
+// порядке имён, каждый видит глобалы предыдущих.
 //
-// Loading the same code twice replaces it, which is how a directory on disk
-// overrides the copy embedded in the binary.
+// Повторная загрузка того же кода заменяет предыдущую — так каталог на диске
+// перекрывает копию, встроенную в бинарник.
 //
-// A behaviour that fails to compile is reported and skipped rather than fatal:
-// one broken behaviour must not stop the service from starting. Nodes pointing
-// at it fall back to the built-in rules and refuse orders (see the service
-// layer), which is the safe direction.
+// Поведение, которое не компилируется, логируется и пропускается, а не роняет
+// процесс: одно сломанное поведение не должно мешать сервису стартовать. Узлы,
+// ссылающиеся на него, откатываются к встроенным правилам и отклоняют заказы
+// (см. слой сервисов) — это безопасное направление.
 func (e *Engine) Load(fsys fs.FS, label string) error {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
@@ -108,8 +108,8 @@ func (e *Engine) Load(fsys fs.FS, label string) error {
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			if strings.HasSuffix(entry.Name(), ".star") {
-				// A script outside a behaviour directory belongs to no
-				// behaviour and would silently never run.
+				// Скрипт вне каталога поведения не принадлежит ни одному
+				// поведению и молча никогда бы не выполнился.
 				log.Printf("[behavior] %s/%s: ignored, a behaviour must live in its own directory", label, entry.Name())
 			}
 			continue
@@ -137,7 +137,7 @@ func (e *Engine) Load(fsys fs.FS, label string) error {
 	return nil
 }
 
-// readBehaviorDir collects one behaviour's files in execution order.
+// readBehaviorDir собирает файлы одного поведения в порядке выполнения.
 func readBehaviorDir(fsys fs.FS, dir string) ([]SourceFile, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -151,8 +151,8 @@ func readBehaviorDir(fsys fs.FS, dir string) ([]SourceFile, error) {
 		names = append(names, entry.Name())
 	}
 	sort.Slice(names, func(i, j int) bool {
-		// The config file first whatever it sorts as; everything else by name,
-		// so the order is the same on every machine.
+		// Файл конфигурации первым, как бы он ни сортировался; всё остальное по имени,
+		// чтобы порядок был одинаковым на любой машине.
 		if (names[i] == ConfigFile) != (names[j] == ConfigFile) {
 			return names[i] == ConfigFile
 		}
@@ -170,16 +170,16 @@ func readBehaviorDir(fsys fs.FS, dir string) ([]SourceFile, error) {
 	return files, nil
 }
 
-// Compile parses a single-file behaviour. It exists for tests and for the
-// simplest possible behaviour; the loader above uses CompileFiles.
+// Compile разбирает однофайловое поведение. Существует для тестов и для самого
+// простого возможного поведения; загрузчик выше использует CompileFiles.
 func (e *Engine) Compile(code, filename string, src []byte) error {
 	return e.CompileFiles(code, []SourceFile{{Name: filename, Src: src}})
 }
 
-// CompileFiles parses one behaviour's files in order and registers it under
-// code. Each file is executed with the builtins plus everything the previous
-// files defined, so config.star's constants are ordinary globals to the logic
-// that follows.
+// CompileFiles разбирает файлы одного поведения по порядку и регистрирует его
+// под кодом code. Каждый файл выполняется со встроенными функциями плюс всем,
+// что определили предыдущие файлы, поэтому константы config.star для идущей
+// следом логики — обычные глобалы.
 func (e *Engine) CompileFiles(code string, files []SourceFile) error {
 	if len(files) == 0 {
 		return fmt.Errorf("behavior %s has no scripts", code)
@@ -191,8 +191,8 @@ func (e *Engine) CompileFiles(code string, files []SourceFile) error {
 	env := predeclared()
 	globals := starlark.StringDict{}
 	for _, file := range files {
-		// Top-level code runs at compile time: it may define constants and
-		// functions, and nothing else is reachable from it.
+		// Код верхнего уровня выполняется во время компиляции: он может определять
+		// константы и функции, и больше ничего ему недоступно.
 		defined, err := starlark.ExecFile(thread, file.Name, file.Src, env)
 		if err != nil {
 			return err
@@ -209,8 +209,8 @@ func (e *Engine) CompileFiles(code string, files []SourceFile) error {
 		return err
 	}
 
-	// The sources travel with the compiled behaviour so the admin panel can show
-	// a shipped script as the starting template for a new one.
+	// Исходники путешествуют вместе со скомпилированным поведением, чтобы
+	// админ-панель показывала поставляемый скрипт как стартовый шаблон для нового.
 	for _, file := range files {
 		if path.Base(file.Name) == ConfigFile {
 			manifest.ConstantsSource = string(file.Src)
@@ -225,8 +225,8 @@ func (e *Engine) CompileFiles(code string, files []SourceFile) error {
 	return nil
 }
 
-// Remove unregisters a behaviour. Used when a node's own script is deleted, so
-// the node stops being special the moment the admin saves it.
+// Remove снимает регистрацию поведения. Используется при удалении собственного
+// скрипта узла, чтобы узел переставал быть особым сразу после сохранения.
 func (e *Engine) Remove(code string) {
 	if e == nil {
 		return
@@ -236,8 +236,8 @@ func (e *Engine) Remove(code string) {
 	delete(e.scripts, code)
 }
 
-// Library lists the behaviours that ship with the build — everything except the
-// per-node scripts. This is what the service constructor offers as templates.
+// Library перечисляет поведения, поставляемые со сборкой, — всё, кроме скриптов
+// отдельных узлов. Именно это конструктор услуг предлагает как шаблоны.
 func (e *Engine) Library() []Manifest {
 	all := e.Manifests()
 	out := make([]Manifest, 0, len(all))
@@ -249,10 +249,10 @@ func (e *Engine) Library() []Manifest {
 	return out
 }
 
-// Validate compiles a candidate script without registering it, so the admin
-// panel can refuse a broken script at save time instead of taking the service
-// off sale at run time. The error is the Starlark one, which names the file,
-// the line and the problem.
+// Validate компилирует кандидата, не регистрируя его, чтобы админ-панель могла
+// отклонить сломанный скрипт при сохранении, а не снимать услугу с продажи во
+// время работы. Ошибка — это ошибка Starlark, называющая файл, строку и суть
+// проблемы.
 func (e *Engine) Validate(files []SourceFile) error {
 	probe := New(e.limits)
 	return probe.CompileFiles("candidate", files)
@@ -316,7 +316,7 @@ func readManifest(code string, globals starlark.StringDict) (Manifest, error) {
 	return m, nil
 }
 
-// Has reports whether a behaviour with this code is loaded.
+// Has сообщает, загружено ли поведение с таким кодом.
 func (e *Engine) Has(code string) bool {
 	if e == nil || code == "" {
 		return false
@@ -327,7 +327,7 @@ func (e *Engine) Has(code string) bool {
 	return ok
 }
 
-// Manifest returns the static declaration of a behaviour.
+// Manifest возвращает статическое объявление поведения.
 func (e *Engine) Manifest(code string) (Manifest, bool) {
 	if e == nil {
 		return Manifest{}, false
@@ -341,7 +341,7 @@ func (e *Engine) Manifest(code string) (Manifest, bool) {
 	return s.manifest, true
 }
 
-// Manifests lists every loaded behaviour, for the admin panel's picker.
+// Manifests перечисляет все загруженные поведения — для выбора в админ-панели.
 func (e *Engine) Manifests() []Manifest {
 	if e == nil {
 		return nil
@@ -356,8 +356,8 @@ func (e *Engine) Manifests() []Manifest {
 	return out
 }
 
-// Visible answers whether a catalog node may be shown. A script with no
-// `visible` hook shows the node, which is what a node with no behaviour does.
+// Visible отвечает, можно ли показывать узел каталога. Скрипт без хука
+// `visible` показывает узел — так же, как узел вовсе без поведения.
 func (e *Engine) Visible(code string, f Facts) (bool, error) {
 	result, err := e.call(code, HookVisible, f)
 	if err != nil || result == nil {
@@ -366,20 +366,20 @@ func (e *Engine) Visible(code string, f Facts) (bool, error) {
 	return bool(result.Truth()), nil
 }
 
-// CanOrder answers whether the customer may place this order. A refusal comes
-// back as *DeniedError carrying the message for the user.
+// CanOrder отвечает, может ли заказчик разместить этот заказ. Отказ возвращается
+// как *DeniedError с сообщением для пользователя.
 func (e *Engine) CanOrder(code string, f Facts) error {
 	return e.decide(code, HookCanOrder, f)
 }
 
-// CanViewOrTake answers whether an executor or moderator may see and accept an
-// order for this service.
+// CanViewOrTake отвечает, может ли исполнитель или модератор видеть и принимать
+// заказ по этой услуге.
 func (e *Engine) CanViewOrTake(code string, f Facts) error {
 	return e.decide(code, HookCanViewOrTake, f)
 }
 
-// decide interprets the shared convention of the two gate hooks: None or True
-// allows, False refuses without a reason, a string refuses with that message.
+// decide трактует общее соглашение двух хуков-«ворот»: None или True разрешают,
+// False отказывает без причины, строка отказывает с этим сообщением.
 func (e *Engine) decide(code, hook string, f Facts) error {
 	result, err := e.call(code, hook, f)
 	if err != nil || result == nil {
@@ -403,9 +403,9 @@ func (e *Engine) decide(code, hook string, f Facts) error {
 	}
 }
 
-// Price returns the price in rubles a behaviour dictates, and whether it
-// dictated one at all. A script that defines no `price` hook, or returns None,
-// leaves the catalog's own pricing alone.
+// Price возвращает цену в рублях, которую диктует поведение, и признак того,
+// диктовало ли оно её вообще. Скрипт без хука `price` или вернувший None
+// оставляет ценообразование каталога нетронутым.
 func (e *Engine) Price(code string, f Facts) (float64, bool, error) {
 	result, err := e.call(code, HookPrice, f)
 	if err != nil || result == nil {
@@ -424,8 +424,8 @@ func (e *Engine) Price(code string, f Facts) (float64, bool, error) {
 	return price, true, nil
 }
 
-// OnEvent runs the event hook and returns the effects the script asks for. The
-// effects are requests: the caller applies them, with its own guards.
+// OnEvent выполняет хук события и возвращает эффекты, которые просит скрипт.
+// Эффекты — это просьбы: применяет их вызывающий, со своими проверками.
 func (e *Engine) OnEvent(code string, f Facts) ([]Effect, error) {
 	result, err := e.call(code, HookOnEvent, f)
 	if err != nil || result == nil {
@@ -451,8 +451,8 @@ func (e *Engine) OnEvent(code string, f Facts) ([]Effect, error) {
 	}
 }
 
-// call runs one hook. It returns (nil, nil) when the behaviour does not define
-// it, so every caller can fall back to the core's own rule.
+// call выполняет один хук. Возвращает (nil, nil), когда поведение его не
+// определяет, чтобы любой вызывающий мог откатиться к собственному правилу ядра.
 func (e *Engine) call(code, hook string, f Facts) (starlark.Value, error) {
 	if e == nil || code == "" {
 		return nil, nil
@@ -475,8 +475,8 @@ func (e *Engine) call(code, hook string, f Facts) (starlark.Value, error) {
 
 	thread := &starlark.Thread{Name: code + ":" + hook}
 	thread.SetMaxExecutionSteps(e.limits.MaxSteps)
-	// The step limit stops an endless loop; the timer stops everything else,
-	// including a script that is merely slow on a loaded machine.
+	// Лимит шагов останавливает бесконечный цикл; таймер останавливает всё
+	// остальное, включая скрипт, который просто медлит на нагруженной машине.
 	timer := time.AfterFunc(e.limits.Timeout, func() { thread.Cancel("timeout") })
 	defer timer.Stop()
 
@@ -487,8 +487,8 @@ func (e *Engine) call(code, hook string, f Facts) (starlark.Value, error) {
 	return result, nil
 }
 
-// mergeConfig lays the node's configuration over the script's defaults, so a
-// node only has to state what it changes.
+// mergeConfig накладывает конфигурацию узла поверх умолчаний скрипта, чтобы узлу
+// достаточно было указать только то, что он меняет.
 func mergeConfig(defaults, node map[string]interface{}) map[string]interface{} {
 	merged := make(map[string]interface{}, len(defaults)+len(node))
 	for k, v := range defaults {

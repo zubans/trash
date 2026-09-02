@@ -11,7 +11,7 @@
       </div>
 
       <div class="review-body">
-        <!-- Interactive Star Rating -->
+        <!-- Интерактивная оценка звёздами -->
         <div class="rating-stars-wrapper">
           <button
             v-for="star in 5"
@@ -30,7 +30,7 @@
           {{ ratingLabels[selectedRating] }}
         </div>
 
-        <!-- Quick Tags -->
+        <!-- Быстрые метки -->
         <div class="quick-tags-section">
           <div class="tags-label">Что вы хотите отметить?</div>
           <div class="tags-grid">
@@ -46,7 +46,7 @@
           </div>
         </div>
 
-        <!-- Comment Field -->
+        <!-- Поле комментария -->
         <div class="comment-field-group">
           <label class="comment-label">Отзыв (необязательно)</label>
           <textarea
@@ -58,7 +58,7 @@
           ></textarea>
         </div>
 
-        <!-- Tips (only the customer tips the executor) -->
+        <!-- Чаевые (чаевые исполнителю даёт только заказчик) -->
         <div v-if="showTips" class="tips-section">
           <div class="tips-label">
             <i class="ph-fill ph-hand-coins"></i> Чаевые исполнителю
@@ -129,9 +129,9 @@ export default defineComponent({
     modelValue: { type: Boolean, required: true },
     orderId: { type: String, required: true },
     role: { type: String, default: 'CUSTOMER' },
-    // The paid amount of the order, used to compute the 5% / 10% presets.
+    // Оплаченная сумма заказа, по которой считаются пресеты 5% / 10%.
     orderAmount: { type: Number, default: 0 },
-    // The customer's current balance, to warn before a tip that would bounce.
+    // Текущий баланс заказчика, чтобы предупредить до чаевых, которые не пройдут.
     balance: { type: Number, default: 0 },
     currencySymbol: { type: String, default: '₽' },
   },
@@ -142,7 +142,7 @@ export default defineComponent({
       set: (val) => emit('update:modelValue', val),
     })
 
-    // Overflow handled by parent views
+    // Переполнение обрабатывают родительские представления
 
     const selectedRating = ref(5)
     const hoverRating = ref(0)
@@ -151,15 +151,15 @@ export default defineComponent({
     const submitting = ref(false)
     const errorText = ref('')
 
-    // --- Tips ---
-    // Only a customer tips the executor; an executor reviewing a customer sees
-    // no tip block.
+    // --- Чаевые ---
+    // Чаевые исполнителю даёт только заказчик; исполнитель, оставляющий отзыв о
+    // заказчике, блока чаевых не видит.
     const showTips = computed(() => props.role === 'CUSTOMER')
     type TipKey = 'none' | 'p5' | 'p10' | 'custom'
     const tipChoice = ref<TipKey>('none')
     const customTipInput = ref('')
 
-    // Percentages round to a whole ruble so the charged amount matches the label.
+    // Проценты округляются до целого рубля, чтобы списанная сумма совпадала с подписью.
     const percentTip = (percent: number) => Math.max(0, Math.round((props.orderAmount * percent) / 100))
 
     const tipOptions = computed<Array<{ key: TipKey; label: string }>>(() => [
@@ -186,7 +186,7 @@ export default defineComponent({
 
     const tipExceedsBalance = computed(() => tipAmount.value > 0 && tipAmount.value > props.balance)
 
-    // Reset the tip selector each time the modal opens for a new order.
+    // Сбрасываем выбор чаевых каждый раз, когда модалка открывается для нового заказа.
     watch(
       () => props.modelValue,
       (open) => {
@@ -233,8 +233,8 @@ export default defineComponent({
       const tip = tipAmount.value
 
       try {
-        // The tip goes first: it is the part that can fail on balance, and a
-        // rejected tip should not leave the review already sent under it.
+        // Чаевые идут первыми: это та часть, которая может не пройти по балансу, и
+        // отклонённые чаевые не должны оставить под собой уже отправленный отзыв.
         if (tip > 0) {
           await sendOrderTip(props.orderId, tip)
         }
@@ -436,7 +436,7 @@ export default defineComponent({
   margin-bottom: 16px;
 }
 
-/* --- Tips --- */
+/* --- Чаевые --- */
 .tips-section {
   margin-bottom: 20px;
   padding: 16px;

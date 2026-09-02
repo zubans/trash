@@ -7,26 +7,26 @@ import (
 	"net/http"
 )
 
-// OpsHandlers are the privileged actions the metrics listener will expose when
-// they are supplied. They live here rather than on the API router for the same
-// reason /metrics does: this listener is reachable only from the compose
-// network, nginx never proxies it and its port is not published, so nothing on
-// it is one misconfigured route away from the internet.
+// OpsHandlers — привилегированные действия, которые слушатель метрик откроет,
+// если их передать. Они живут здесь, а не на роутере API, по той же причине,
+// что и /metrics: этот слушатель достижим только из сети compose, nginx его не
+// проксирует, а порт не публикуется, поэтому ничто на нём не отделено от
+// интернета одним неверно настроенным маршрутом.
 type OpsHandlers struct {
-	// Secret gates every ops route with a constant-time comparison. Empty
-	// disables the routes entirely — a shared secret that was never configured
-	// must not become an open door.
+	// Secret закрывает каждый ops-маршрут сравнением за константное время. Пустое
+	// значение полностью выключает маршруты — общий секрет, который так и не
+	// настроили, не должен превращаться в открытую дверь.
 	Secret string
 
-	// Reconcile runs the books check on demand and returns a JSON-serialisable
-	// summary. It is expected to publish the reconciliation gauges itself.
+	// Reconcile выполняет проверку книг по требованию и возвращает сводку,
+	// пригодную для сериализации в JSON. Ожидается, что он сам публикует датчики сверки.
 	Reconcile func() (any, error)
 }
 
 func (o OpsHandlers) enabled() bool { return o.Secret != "" && o.Reconcile != nil }
 
-// authorize compares the shared secret in constant time. The header is checked
-// before anything else runs, and the answer never says which half was wrong.
+// authorize сравнивает общий секрет за константное время. Заголовок проверяется
+// раньше всего прочего, и ответ никогда не говорит, какая половина неверна.
 func (o OpsHandlers) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

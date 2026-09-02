@@ -1,6 +1,6 @@
 <template>
   <div>
-    <!-- Force update: modal overlay, cannot be dismissed -->
+    <!-- Принудительное обновление: модальный оверлей, закрыть нельзя -->
     <div
       v-if="showForceUpdate"
       class="force-update-overlay"
@@ -22,7 +22,7 @@
           {{ releaseNotes }}
         </p>
 
-        <!-- Progress indicator when downloading -->
+        <!-- Индикатор прогресса при загрузке -->
         <div v-if="installing || isDownloading" class="progress-section my-3">
           <va-progress-bar :model-value="downloadProgress" color="primary" class="mb-1" />
           <div class="d-flex justify-content-between text-xs text-secondary">
@@ -42,7 +42,7 @@
       </div>
     </div>
 
-    <!-- Regular update: dismissible banner -->
+    <!-- Обычное обновление: закрываемый баннер -->
     <div
       v-else-if="showBanner"
       class="update-banner-bar"
@@ -59,7 +59,7 @@
             {{ releaseNotes }}
           </div>
 
-          <!-- Progress bar in banner -->
+          <!-- Полоса прогресса в баннере -->
           <div v-if="installing || isDownloading" class="progress-section mt-2">
             <div class="progress-bar-bg">
               <div class="progress-bar-fill" :style="{ width: downloadProgress + '%' }"></div>

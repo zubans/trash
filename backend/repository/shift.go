@@ -10,7 +10,7 @@ import (
 	"healthlogin/backend/money"
 )
 
-// ShiftStatus represents the status of an executor shift.
+// ShiftStatus представляет статус смены исполнителя.
 type ShiftStatus string
 
 const (
@@ -19,7 +19,7 @@ const (
 	ShiftStatusPenalized ShiftStatus = "PENALIZED"
 )
 
-// Shift represents an executor work shift.
+// Shift представляет рабочую смену исполнителя.
 type Shift struct {
 	ID            uuid.UUID    `json:"id"`
 	ExecutorID    uuid.UUID    `json:"executor_id"`
@@ -31,7 +31,7 @@ type Shift struct {
 	FineAmount    money.Amount `json:"fine_amount"`
 }
 
-// ShiftRepository defines storage operations for shifts.
+// ShiftRepository описывает операции хранения смен.
 type ShiftRepository interface {
 	Create(ctx context.Context, shift *Shift) error
 	GetActiveShift(ctx context.Context, executorID uuid.UUID) (*Shift, error)
@@ -40,23 +40,23 @@ type ShiftRepository interface {
 	End(ctx context.Context, shiftID uuid.UUID) error
 	Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error
 
-	// EarlyEnd terminates a shift before its planned end time, records the
-	// penalty amount and marks the shift as PENALIZED.
+	// EarlyEnd завершает смену раньше запланированного конца, записывает сумму
+	// штрафа и помечает смену как PENALIZED.
 	EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error
 
-	// GetLastShiftByExecutor returns the most recent shift for an executor,
-	// regardless of status (active, completed or penalized).
+	// GetLastShiftByExecutor возвращает самую свежую смену исполнителя,
+	// независимо от статуса (активная, завершённая или со штрафом).
 	GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error)
 
 	StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*Shift, error)
 }
 
-// shiftRepo implements ShiftRepository using *sql.DB.
+// shiftRepo реализует ShiftRepository поверх *sql.DB.
 type shiftRepo struct {
 	db *sql.DB
 }
 
-// NewShiftRepository creates a new ShiftRepository.
+// NewShiftRepository создаёт новый ShiftRepository.
 func NewShiftRepository(db *sql.DB) ShiftRepository {
 	return &shiftRepo{db: db}
 }
@@ -86,7 +86,7 @@ func (r *shiftRepo) Create(ctx context.Context, shift *Shift) error {
 	return err
 }
 
-// findActiveByExecutor is the implementation behind GetActiveShift.
+// findActiveByExecutor — реализация, стоящая за GetActiveShift.
 func (r *shiftRepo) findActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
@@ -155,7 +155,7 @@ func (r *shiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fine money.
 	return err
 }
 
-// EarlyEnd terminates a shift before its planned end time and records the fine.
+// EarlyEnd завершает смену раньше запланированного конца и записывает штраф.
 func (r *shiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE shifts SET status = $1, actual_end_at = now(), fine_amount = fine_amount + $2 WHERE id = $3`,
@@ -164,8 +164,8 @@ func (r *shiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.
 	return err
 }
 
-// GetLastShiftByExecutor returns the most recent shift for an executor,
-// regardless of status.
+// GetLastShiftByExecutor возвращает самую свежую смену исполнителя,
+// независимо от статуса.
 func (r *shiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
@@ -182,7 +182,7 @@ func (r *shiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.
 	return &s, nil
 }
 
-// StartShift creates and persists a new active shift.
+// StartShift создаёт и сохраняет новую активную смену.
 func (r *shiftRepo) StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*Shift, error) {
 	now := time.Now()
 	shift := &Shift{

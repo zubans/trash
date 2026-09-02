@@ -91,9 +91,9 @@
         </div>
       </div>
 
-      <!-- Toast Notifications Container -->
+      <!-- Контейнер всплывающих уведомлений -->
       <div class="toast-container">
-        <!-- Chat / Support Toast Notification -->
+        <!-- Всплывающее уведомление чата / поддержки -->
         <div
           v-if="chatToast"
           class="toast info chat-toast cursor-pointer"
@@ -111,7 +111,7 @@
           </button>
         </div>
 
-        <!-- Success Toast -->
+        <!-- Уведомление об успехе -->
         <div v-if="successMsg" class="toast success">
           <div class="toast-icon">
             <i class="ph-bold ph-check"></i>
@@ -125,7 +125,7 @@
           </button>
         </div>
 
-        <!-- Error Toast -->
+        <!-- Уведомление об ошибке -->
         <div v-if="errorMsg" class="toast error">
           <div class="toast-icon">
             <i class="ph-bold ph-warning"></i>
@@ -161,7 +161,7 @@
             :key="order.id"
             :class="['order-row', { 'chat-open': openChatOrderId === order.id }]"
           >
-            <!-- Ultra-compact Summary Row -->
+            <!-- Ультракомпактная строка сводки -->
             <div class="order-summary list-item-compact cursor-pointer" @click="openOrderDetails(order)">
               <div class="item-left-group">
                 <div :class="['o-icon item-icon', order.is_urgent ? 'orange' : 'purple']">
@@ -199,9 +199,9 @@
               </div>
             </div>
 
-            <!-- Inline Accordion Chat Area -->
+            <!-- Встроенная область чата-аккордеона -->
             <div v-if="openChatOrderId === order.id" class="inline-chat">
-              <!-- Hidden File Input for Image Attachments -->
+              <!-- Скрытый файловый input для вложений-изображений -->
               <input
                 ref="chatFileInputRef"
                 type="file"
@@ -219,7 +219,7 @@
                   :key="msg.id"
                   :class="['msg-container', msg.sender_id === currentUserId ? 'outgoing' : 'incoming']"
                 >
-                  <!-- Actions (Edit/Delete for outgoing user messages only, hidden for system messages) -->
+                  <!-- Действия (правка/удаление только для исходящих сообщений пользователя, скрыты для системных) -->
                   <div v-if="msg.sender_id === currentUserId && !isSystemMessage(msg)" class="msg-actions">
                     <button type="button" class="action-icon-btn" title="Редактировать" @click="startEditMessage(msg)">
                       <i class="ph ph-pencil-simple"></i>
@@ -231,7 +231,7 @@
 
                   <div class="msg-content">
                     <div :class="['bubble', { 'has-attachment': isImageAttachment(msg) }]">
-                      <!-- Image Attachment -->
+                      <!-- Вложение-изображение -->
                       <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
                         <img
                           :src="getImageSrc(msg)"
@@ -257,7 +257,7 @@
                 </div>
               </div>
 
-              <!-- Chat Input Area with Editing indicator -->
+              <!-- Область ввода чата с индикатором редактирования -->
               <div class="chat-input-area">
                 <div v-if="editingMessageId" class="edit-banner d-flex justify-content-between align-items-center mb-2 px-3 py-1 bg-light rounded border text-xs">
                   <span><i class="ph ph-pencil-simple me-1"></i> Редактирование сообщения</span>
@@ -332,7 +332,7 @@
         </div>
       </div>
 
-      <!-- Order Details Modal -->
+      <!-- Модальное окно деталей заказа -->
       <OrderDetailsModal
         v-model="showOrderDetailsModal"
         :selected-order-details="selectedOrderDetails"
@@ -344,7 +344,7 @@
         @open-review-modal="openReviewModal"
       />
 
-      <!-- Review Modal -->
+      <!-- Модальное окно отзыва -->
       <ReviewModal
         v-model="showReviewModal"
         :order-id="reviewTargetOrderId"
@@ -355,7 +355,7 @@
         @reviewed="onReviewSubmitted"
       />
 
-      <!-- Create Order Modal -->
+      <!-- Модальное окно создания заказа -->
       <CreateOrderModal
         v-model="showCreateOrderModal"
         v-model:is-urgent="isUrgent"
@@ -376,7 +376,7 @@
         @submit-order="submitOrder"
       />
 
-      <!-- Top-up Modal -->
+      <!-- Модальное окно пополнения -->
       <div v-if="showTopUpModal" class="topup-modal-overlay" @click.self="showTopUpModal = false">
         <div class="topup-modal-card">
           <div class="topup-modal-header">
@@ -417,7 +417,7 @@
         </div>
       </div>
 
-      <!-- Customer Profile Modal -->
+      <!-- Модальное окно профиля заказчика -->
       <CustomerProfileModal
         v-model="showProfileModal"
         v-model:new-address="newAddress"
@@ -434,7 +434,7 @@
         @cancel-edit-address="cancelEditAddress"
       />
 
-      <!-- Image Preview Modal -->
+      <!-- Модальное окно просмотра изображения -->
       <div v-if="showImagePreviewModal" class="img-preview-overlay" @click.self="showImagePreviewModal = false">
         <div class="img-preview-card">
           <button type="button" class="btn-close-preview" aria-label="Закрыть" @click="showImagePreviewModal = false">
@@ -443,7 +443,7 @@
           <img :src="previewImageUrl" alt="Предпросмотр" class="img-preview-full" />
         </div>
       </div>
-      <!-- Modal Поддержка -->
+      <!-- Модальное окно поддержки -->
       <SupportChatModal v-model:show="showSupportChatModal" />
     </div>
   </div>
@@ -491,12 +491,12 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const phone = ref('79207050707')
-    // Reads through to the auth store: no local copy, and no placeholder amount
-    // standing in for a real balance while the profile loads.
+    // Читает напрямую из хранилища авторизации: ни локальной копии, ни
+    // подставной суммы вместо настоящего баланса, пока грузится профиль.
     const balance = computed(() => authStore.balance)
     const balanceLoaded = computed(() => authStore.balance !== null)
-    // The template has always rendered a "verified" badge on this value, and it
-    // was never defined anywhere: the badge could not appear for anyone.
+    // Шаблон всегда рисовал бейдж «верифицирован» по этому значению, а оно нигде не
+    // было определено: бейдж не мог появиться ни у кого.
     const isVerified = computed(() => authStore.user?.is_verified ?? false)
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
@@ -532,23 +532,23 @@ export default defineComponent({
       }
     })
 
-    // Addresses
+    // Адреса
     const defaultAddress = ref('Москва, ул. Тверская, д. 1')
     const customerAddresses = ref<any[]>([
       { address: 'Москва, ул. Тверская, д. 1' }
     ])
     const newAddress = ref<StructuredAddress | null>(null)
     const addressSaving = ref(false)
-    // Id of the saved address currently being edited (null = adding a new one).
+    // Id сохранённого адреса, который сейчас редактируют (null — добавляется новый).
     const editingAddressId = ref<string | null>(null)
     const addressError = ref('')
 
-    // Orders
+    // Заказы
     const orders = ref<any[]>([])
     const isHistoryCollapsed = ref(false)
     const orderReviewsMap = ref<Record<string, OrderReview>>({})
 
-    // Modals
+    // Модальные окна
     const showCreateOrderModal = ref(false)
     const showOrderDetailsModal = ref(false)
     const showTopUpModal = ref(false)
@@ -566,12 +566,12 @@ export default defineComponent({
     const submitting = ref(false)
     const creatingOrder = ref(false)
 
-    // Catalog & Order Create
+    // Каталог и создание заказа
     const serviceCategories = ref<ServiceNode[]>([])
-    // The catalog is a tree of arbitrary depth in which a category and a service
-    // can sit side by side, so the picker walks it one level at a time instead
-    // of assuming category -> subcategory -> service. catalogItems holds the
-    // level currently on screen, catalogPath the categories opened to reach it.
+    // Каталог — дерево произвольной глубины, где категория и услуга могут стоять
+    // рядом, поэтому выбор идёт по одному уровню за раз, а не предполагает цепочку
+    // категория -> подкатегория -> услуга. catalogItems держит уровень, который
+    // сейчас на экране, catalogPath — категории, открытые, чтобы до него дойти.
     const catalogItems = ref<ServiceNode[]>([])
     const catalogPath = ref<ServiceNode[]>([])
     const catalogLoading = ref(false)
@@ -628,7 +628,7 @@ export default defineComponent({
       catalogPath.value.map((node) => ({ id: node.id, label: localizedName(node) }))
     )
 
-    // Loads the children of a category, or the root level when id is null.
+    // Загружает потомков категории или корневой уровень, когда id равен null.
     const loadCatalogLevel = async (id: string | null) => {
       catalogLoading.value = true
       try {
@@ -641,7 +641,7 @@ export default defineComponent({
       }
     }
 
-    // A category descends one level; a service is simply picked.
+    // Категория опускает на уровень ниже; услуга просто выбирается.
     const openCatalogNode = async (item: { id: string; node_type: string }) => {
       if (item.node_type === 'VARIANT') {
         selectedVariantId.value = item.id
@@ -654,7 +654,7 @@ export default defineComponent({
       await loadCatalogLevel(node.id)
     }
 
-    // index -1 is the root level; anything else keeps the breadcrumb up to it.
+    // index -1 — корневой уровень; всё остальное сохраняет хлебные крошки до него.
     const goToCatalogLevel = async (index: number) => {
       selectedVariantId.value = null
       if (index < 0) {
@@ -688,15 +688,15 @@ export default defineComponent({
           const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
           fullName.value = parts.join(' ')
         }
-        // Keep the shared user state in step with what this screen just read.
+        // Держим общее состояние пользователя в такт с тем, что экран только что прочитал.
         authStore.fetchMe()
         const response = await api.get('/customer/profile')
         if (response.data) {
           if (response.data.phone) phone.value = response.data.phone
-          // The profile returns saved addresses with the coordinates they were
-          // picked with (from the address provider). Keep the full objects so an
-          // order sends the stored lat/lon; rebuilding them as { address } here
-          // dropped the coordinates and produced orders with no
+          // Профиль возвращает сохранённые адреса с координатами, с которыми их
+          // выбирали (от адресного провайдера). Держим объекты целиком, чтобы заказ
+          // отправлял сохранённые lat/lon; пересборка их здесь как { address }
+          // теряла координаты и порождала заказы без
           // pickup_lat/pickup_lon.
           const addrs = Array.isArray(response.data.addresses) ? response.data.addresses : []
           if (addrs.length) {
@@ -715,11 +715,11 @@ export default defineComponent({
       }
     }
 
-    // Coordinates for the order come from the saved address the customer picked:
-    // DaData returns them with the suggestion, and they are kept on the address
-    // through the profile. A legacy address without them leaves the pair null —
-    // the backend then resolves the coordinates from the address line at order
-    // creation, so the client makes no separate geocoding round trip.
+    // Координаты для заказа берутся из сохранённого адреса, который выбрал
+    // заказчик: DaData возвращает их вместе с подсказкой, и они хранятся при адресе
+    // в профиле. Легаси-адрес без них оставляет пару null — тогда бэкенд разрешает
+    // координаты по строке адреса при создании заказа, поэтому клиент не делает
+    // отдельного похода за геокодированием.
     const applyStoredCoordinates = () => {
       const saved = customerAddresses.value.find((a: any) => a.address === orderAddress.value)
       orderLat.value = saved && saved.lat != null ? saved.lat : null
@@ -736,7 +736,7 @@ export default defineComponent({
               orderReviewsMap.value[order.id] = res.review
             }
           } catch (err) {
-            // ignore
+            // игнорируем
           }
         }
       }
@@ -748,7 +748,7 @@ export default defineComponent({
         fetchUnreadSummary()
         checkSupportNotification()
         const newOrders = response.data || []
-        // Update items in place or update orders if structure changed to prevent re-rendering active chat accordion
+        // Обновляем элементы на месте или обновляем заказы, если изменилась структура, чтобы не перерисовывать открытый аккордеон чата
         orders.value = newOrders
         fetchReviewsForHistory()
       } catch (err) {
@@ -767,8 +767,8 @@ export default defineComponent({
       orderComment.value = ''
       showCreateOrderModal.value = true
       await loadCatalogLevel(null)
-      // The root level doubles as the lookup the order history uses to resolve
-      // a variant's parent category.
+      // Корневой уровень заодно служит справочником, по которому история заказов
+      // разрешает родительскую категорию варианта.
       serviceCategories.value = catalogItems.value.filter((n) => n.node_type === 'CATEGORY')
     }
 
@@ -803,8 +803,8 @@ export default defineComponent({
     }
 
     const confirmOrder = async (orderId: string, status?: string) => {
-      // Confirming an order that the executor has not yet marked as executed
-      // closes it and pays out immediately, so guard the early-approval case.
+      // Подтверждение заказа, который исполнитель ещё не отметил выполненным,
+      // закрывает его и сразу выплачивает, поэтому страхуем случай раннего одобрения.
       if (status === 'ASSIGNED' &&
           !confirm('Исполнитель ещё не отметил заказ выполненным. Подтвердить и закрыть заказ досрочно? Средства спишутся исполнителю.')) {
         return
@@ -843,7 +843,7 @@ export default defineComponent({
 
     const showReviewModal = ref(false)
     const reviewTargetOrderId = ref('')
-    // The order's paid amount feeds the 5% / 10% tip presets in the modal.
+    // Оплаченная сумма заказа питает пресеты чаевых 5% / 10% в модалке.
     const reviewTargetOrderAmount = ref(0)
 
     const openReviewModal = (order: any) => {
@@ -859,7 +859,7 @@ export default defineComponent({
         delete orderReviewsMap.value[reviewTargetOrderId.value]
       }
       fetchReviewsForHistory()
-      // A tip changes the balance, so refresh the profile alongside the reviews.
+      // Чаевые меняют баланс, поэтому обновляем профиль вместе с отзывами.
       if (payload?.tipped) {
         fetchProfile()
       }
@@ -870,7 +870,7 @@ export default defineComponent({
       showOrderDetailsModal.value = true
     }
 
-    // Chat State & Logic
+    // Состояние и логика чата
     const openChatOrderId = ref<string | null>(null)
     const chatMessages = ref<any[]>([])
     const chatInputText = ref('')
@@ -1196,7 +1196,7 @@ export default defineComponent({
       openChatOrderId.value = order.id
       markChatAsRead(order.id)
 
-      // 1. Fetch message history
+      // 1. Получаем историю сообщений
       try {
         const response = await api.get(`/chats/${order.id}/messages`)
         chatMessages.value = response.data || []
@@ -1205,17 +1205,17 @@ export default defineComponent({
         console.error('Failed to load chat messages:', err)
       }
 
-      // 2. Open WebSocket connection
+      // 2. Открываем соединение WebSocket
       try {
         const wsUrl = buildChatWebSocketUrl(order.id)
-        // Diagnostics: the scheme here should be wss:// on the app.
+        // Диагностика: схема здесь в приложении должна быть wss://.
         logWsEvent('connect ' + wsUrl.replace(/token=[^&]+/, 'token=…'))
         ws.value = new WebSocket(wsUrl)
         ws.value.onopen = () => {
           logWsEvent('open (readyState=' + ws.value?.readyState + ')', { ok: true })
-          // Round-trip probe: if the server answers with a "pong", outgoing
-          // frames from this WebView reach the server. If we log the ping send
-          // but never see the pong, the send is being swallowed.
+          // Проба round-trip: если сервер отвечает «pong», исходящие кадры из
+          // этого WebView до сервера доходят. Если мы логируем отправку ping,
+          // но pong не видим, значит отправку проглатывают.
           try {
             ws.value?.send(JSON.stringify({ type: 'ping' }))
             logWsEvent('send ping → expecting pong', { ok: true })
@@ -1320,10 +1320,10 @@ export default defineComponent({
 
       chatInputText.value = ''
 
-      // Always send over REST — the same path the (working) support chat uses.
-      // ws.send() gives no delivery confirmation and the native WebView can
-      // swallow it, which is what broke the order chat; the REST endpoint saves
-      // the message and broadcasts it to the room, so realtime still works.
+      // Всегда шлём через REST — тем же путём, что и (работающий) чат поддержки.
+      // ws.send() не даёт подтверждения доставки, а нативный WebView может его
+      // проглотить — именно это ломало чат заказа; REST-эндпоинт сохраняет
+      // сообщение и рассылает его в комнату, поэтому реалтайм всё равно работает.
       try {
         const res = await api.post(`/chats/${openChatOrderId.value}/messages`, { text })
         if (res.data) {
@@ -1351,7 +1351,7 @@ export default defineComponent({
     const startEditAddress = (addr: any) => {
       editingAddressId.value = addr.id
       addressError.value = ''
-      // Seed the field with the saved parts so it can be adjusted in place.
+      // Заполняем поле сохранёнными частями, чтобы адрес можно было поправить на месте.
       newAddress.value = {
         value: addr.address,
         region: addr.region,
@@ -1372,8 +1372,8 @@ export default defineComponent({
       addressError.value = ''
     }
 
-    // These used to change the local array and nothing else, so an address
-    // added here vanished on the next load and one removed here came back.
+    // Раньше это меняло локальный массив и больше ничего, поэтому добавленный здесь
+    // адрес пропадал при следующей загрузке, а удалённый здесь возвращался.
     const addNewAddress = async () => {
       const chosen = newAddress.value
       const editingId = editingAddressId.value
@@ -1387,8 +1387,8 @@ export default defineComponent({
           ? customerAddresses.value.find((a: any) => a.id === editingId)?.address === defaultAddress.value
           : false
 
-        // Editing replaces the saved address: remove the old row first so the
-        // new one fits within the two-address cap, then save the new parts.
+        // Редактирование заменяет сохранённый адрес: сначала убираем старую строку,
+        // чтобы новая влезла в лимит двух адресов, затем сохраняем новые части.
         if (editingId) {
           await api.delete(`/user/address/${editingId}`)
         }
@@ -1406,8 +1406,8 @@ export default defineComponent({
           source: chosen.source,
         })
         customerAddresses.value = res.data.addresses || []
-        // Keep the edited address active if it was the default before; a brand
-        // new address becomes the working one as before.
+        // Оставляем отредактированный адрес активным, если он был адресом по умолчанию;
+        // совершенно новый адрес становится рабочим, как и прежде.
         if (!editingId || wasDefault) {
           defaultAddress.value = chosen.value
           orderAddress.value = chosen.value
@@ -1446,7 +1446,7 @@ export default defineComponent({
         return { category: '', variant: 'Заказ' }
       }
       const variantName = localizedName(variant)
-      // Find parent category from serviceCategories if parent_id exists
+      // Ищем родительскую категорию в serviceCategories, если есть parent_id
       if (variant.parent_id && serviceCategories.value && serviceCategories.value.length > 0) {
         const parent = serviceCategories.value.find((c: any) => c.id === variant.parent_id)
         if (parent) {
@@ -1507,8 +1507,8 @@ export default defineComponent({
       phone,
       formattedPhone,
       balance,
-      // Exposed so the template can tell "not loaded yet" from a real zero.
-      // Without it v-if reads undefined and the card shows a dash forever.
+      // Вынесено наружу, чтобы шаблон отличал «ещё не загружено» от настоящего нуля.
+      // Без этого v-if читает undefined, и карточка навсегда показывает прочерк.
       balanceLoaded,
       isVerified,
       currencySymbol,
@@ -1656,7 +1656,7 @@ export default defineComponent({
   gap: 24px;
 }
 
-/* --- Header --- */
+/* --- Шапка --- */
 .header {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
 }
@@ -1710,9 +1710,9 @@ export default defineComponent({
 .sidebar-nav {
   padding: 16px; flex: 1;
   display: flex; flex-direction: column; gap: 6px;
-  /* The menu scrolls rather than being clipped by the fixed-height sidebar:
-     min-height lets this flex child shrink below its content, and contained
-     overscroll keeps the page behind the overlay still. */
+  /* Меню прокручивается, а не обрезается боковой панелью фиксированной высоты:
+     min-height позволяет этому flex-элементу сжаться меньше содержимого, а
+     ограниченный overscroll держит страницу за оверлеем неподвижной. */
   min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -1737,14 +1737,14 @@ export default defineComponent({
 }
 .lang-control span { font-weight: 700; font-size: 14px; color: var(--text-title, #0f172a); }
 
-/* --- Grid --- */
+/* --- Сетка --- */
 .premium-grid {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   gap: 24px;
 }
 
-/* --- Profile Card (New Compact Design) --- */
+/* --- Карточка профиля (новый компактный дизайн) --- */
 .profile-card {
   background: var(--surface-card, #ffffff);
   border-radius: var(--rad-lg, 24px);
@@ -1784,7 +1784,7 @@ export default defineComponent({
   cursor: pointer;
 }
 
-/* --- Balance Card (New Compact Dark Design) --- */
+/* --- Карточка баланса (новый компактный тёмный дизайн) --- */
 .balance-card {
   background: linear-gradient(135deg, #1e1b4b, #3b2c6b);
   border-radius: var(--rad-lg, 24px);
@@ -1896,7 +1896,7 @@ export default defineComponent({
   transform: translateY(-2px);
 }
 
-/* --- Giant Action Button --- */
+/* --- Гигантская кнопка действия --- */
 .create-order-btn {
   background: linear-gradient(135deg, #6366f1, #4f46e5);
   color: white;
@@ -1920,7 +1920,7 @@ export default defineComponent({
   box-shadow: 0 20px 40px -10px rgba(99, 102, 241, 0.6);
 }
 
-/* --- Floating Orders List --- */
+/* --- Плавающий список заказов --- */
 .section-title {
   font-size: 22px;
   font-weight: 700;
@@ -2181,7 +2181,7 @@ export default defineComponent({
   }
 }
 
-/* Top-up Modal Styles */
+/* Стили модального окна пополнения */
 .topup-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -2262,7 +2262,7 @@ export default defineComponent({
   transform: rotate(90deg);
 }
 
-/* Form input & icon inside modal */
+/* Поле ввода и иконка внутри модалки */
 .topup-modal-card .input-wrapper {
   position: relative;
   display: flex;
@@ -2354,7 +2354,7 @@ export default defineComponent({
   box-shadow: 0 15px 30px -6px rgba(99, 102, 241, 0.6);
 }
 
-/* Toast Notifications Styles */
+/* Стили всплывающих уведомлений */
 .toast-container {
   position: fixed;
   top: 84px;
@@ -2491,7 +2491,7 @@ export default defineComponent({
   }
 }
 
-/* --- Inline Accordion Chat Styles --- */
+/* --- Стили встроенного чата-аккордеона --- */
 .order-row {
   background: var(--surface-card);
   backdrop-filter: blur(24px);
@@ -2563,10 +2563,10 @@ export default defineComponent({
   background: #f8fafc;
 }
 
-/* Message bubbles — matched to the support chat (SupportChatModal.vue) so the
-   two chats read as one product. The colour rules target .msg-container, the
-   class the markup actually uses (they used to target a stale .msg class, which
-   left the bubbles with no background). */
+/* Пузыри сообщений — согласованы с чатом поддержки (SupportChatModal.vue),
+   чтобы два чата читались как один продукт. Правила цвета нацелены на
+   .msg-container — класс, который реально используется в разметке (раньше они
+   целились в устаревший .msg, из-за чего пузыри оставались без фона). */
 .bubble {
   padding: 10px 14px; font-size: 14px; border-radius: 18px; line-height: 1.4;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -2647,7 +2647,7 @@ export default defineComponent({
   animation: spin 1s linear infinite;
 }
 
-/* Image Preview Modal */
+/* Модальное окно просмотра изображения */
 .img-preview-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -2703,7 +2703,7 @@ export default defineComponent({
   transform: scale(1.1);
 }
 
-/* --- Message Actions & Container Styling --- */
+/* --- Стили действий над сообщением и контейнера --- */
 .msg-container {
   display: flex;
   align-items: center;
@@ -2829,7 +2829,7 @@ export default defineComponent({
   text-overflow: ellipsis;
 }
 
-/* --- Ultra-compact Order Item Styles --- */
+/* --- Стили ультракомпактного элемента заказа --- */
 .list-item-compact {
   background: var(--surface-card, #ffffff);
   border-radius: var(--rad-md, 16px);

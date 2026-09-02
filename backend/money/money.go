@@ -1,16 +1,16 @@
-// Package money represents amounts as whole kopecks.
+// Package money представляет суммы целым числом копеек.
 //
-// Money used to be float64 all the way through the Go side while the database
-// stored NUMERIC(18,2). Postgres was never the problem — the drift came from
-// arithmetic done before the value reached it. Multiplying a base price by a
-// tariff coefficient, or halving a hold to compute a penalty, produced values
-// like 800.0000000000001 that the column then silently rounded, and the error
-// accumulated across refunds and partial payments.
+// Раньше деньги были float64 на всём протяжении Go-части, тогда как база
+// хранила NUMERIC(18,2). Проблемой был не Postgres — расхождение приходило из
+// арифметики, выполненной до того, как значение до него доберётся. Умножение
+// базовой цены на тарифный коэффициент или деление удержания пополам ради
+// штрафа давали значения вроде 800.0000000000001, которые колонка затем молча
+// округляла, и ошибка накапливалась по возвратам и частичным выплатам.
 //
-// An Amount is an exact integer count of kopecks. It crosses the database
-// boundary as NUMERIC through Scan/Value, so queries did not have to change,
-// and it crosses the API boundary as a number in rubles, so clients did not
-// either.
+// Amount — точное целое число копеек. Границу базы он пересекает как
+// NUMERIC через Scan/Value, поэтому запросы менять не пришлось, а границу
+// API — как число в рублях, поэтому и клиентов менять не пришлось
+// тоже.
 package money
 
 import (
@@ -23,21 +23,21 @@ import (
 	"strings"
 )
 
-// Amount is a signed number of kopecks. A balance may legitimately be negative:
-// executors go into the red through fines.
+// Amount — знаковое число копеек. Баланс законно может быть отрицательным:
+// исполнители уходят в минус из-за штрафов.
 type Amount int64
 
-// Zero is the empty amount.
+// Zero — пустая сумма.
 const Zero Amount = 0
 
-// kopecksPerRuble is the scale of the NUMERIC(18,2) columns behind these values.
+// kopecksPerRuble — масштаб колонок NUMERIC(18,2), стоящих за этими значениями.
 const kopecksPerRuble = 100
 
-// FromKopecks builds an Amount from a whole number of kopecks.
+// FromKopecks строит Amount из целого числа копеек.
 func FromKopecks(k int64) Amount { return Amount(k) }
 
-// FromRubles converts a rubles value to kopecks, rounding half away from zero.
-// Use it only at the edges, where a float is what arrived; never for arithmetic.
+// FromRubles переводит значение в рублях в копейки, округляя половину от нуля.
+// Используйте только на границах, куда пришёл float; никогда — для арифметики.
 func FromRubles(v float64) Amount {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0
@@ -45,8 +45,8 @@ func FromRubles(v float64) Amount {
 	return Amount(math.Round(v * kopecksPerRuble))
 }
 
-// ParseRubles reads a decimal string such as "1500.25". It is exact: the digits
-// are read directly rather than going through a float.
+// ParseRubles читает десятичную строку вроде "1500.25". Он точен: цифры
+// читаются напрямую, а не через float.
 func ParseRubles(s string) (Amount, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -68,13 +68,13 @@ func ParseRubles(s string) (Amount, error) {
 	if whole == "" {
 		whole = "0"
 	}
-	// Only digits from here on: without this a second sign character ("--5")
-	// would be swallowed by ParseInt and flip the result back to positive.
+	// Дальше только цифры: без этого второй знак ("--5") проглотил бы
+	// ParseInt и вернул результату положительный знак.
 	if !isDigits(whole) || (frac != "" && !isDigits(frac)) {
 		return 0, fmt.Errorf("invalid amount %q", s)
 	}
 
-	// Pad or round the fractional part to exactly two digits.
+	// Дополняем или округляем дробную часть ровно до двух знаков.
 	switch {
 	case len(frac) < 2:
 		frac += strings.Repeat("0", 2-len(frac))
@@ -115,7 +115,7 @@ func ParseRubles(s string) (Amount, error) {
 	return Amount(total), nil
 }
 
-// isDigits reports whether every byte is an ASCII digit.
+// isDigits сообщает, все ли байты — ASCII-цифры.
 func isDigits(s string) bool {
 	if s == "" {
 		return false
@@ -128,14 +128,14 @@ func isDigits(s string) bool {
 	return true
 }
 
-// Kopecks returns the raw count.
+// Kopecks возвращает сырое количество.
 func (a Amount) Kopecks() int64 { return int64(a) }
 
-// Rubles renders the amount as a float. For display and for callers that still
-// speak float; never feed the result back into arithmetic.
+// Rubles отдаёт сумму как float. Для отображения и для вызывающих, которые всё
+// ещё говорят на float; никогда не подавайте результат обратно в арифметику.
 func (a Amount) Rubles() float64 { return float64(a) / kopecksPerRuble }
 
-// String formats the amount with two decimals, without a currency sign.
+// String форматирует сумму с двумя знаками после запятой, без знака валюты.
 func (a Amount) String() string {
 	sign := ""
 	v := int64(a)
@@ -145,19 +145,19 @@ func (a Amount) String() string {
 	return fmt.Sprintf("%s%d.%02d", sign, v/kopecksPerRuble, v%kopecksPerRuble)
 }
 
-// IsZero, IsPositive and IsNegative read better than comparisons at call sites.
+// IsZero, IsPositive и IsNegative читаются в местах вызова лучше сравнений.
 func (a Amount) IsZero() bool     { return a == 0 }
 func (a Amount) IsPositive() bool { return a > 0 }
 func (a Amount) IsNegative() bool { return a < 0 }
 
-// Add and Sub are exact.
+// Add и Sub точны.
 func (a Amount) Add(b Amount) Amount { return a + b }
 func (a Amount) Sub(b Amount) Amount { return a - b }
 
-// Neg returns the amount with the opposite sign.
+// Neg возвращает сумму с противоположным знаком.
 func (a Amount) Neg() Amount { return -a }
 
-// Abs returns the magnitude.
+// Abs возвращает модуль.
 func (a Amount) Abs() Amount {
 	if a < 0 {
 		return -a
@@ -165,9 +165,9 @@ func (a Amount) Abs() Amount {
 	return a
 }
 
-// Scale multiplies by a ratio — a tariff coefficient, a penalty share — and
-// rounds half away from zero. Rounding happens once, here, instead of being
-// spread across the call sites.
+// Scale умножает на коэффициент — тарифный, долю штрафа — и округляет половину
+// от нуля. Округление происходит один раз, здесь, а не размазывается по местам
+// вызова.
 func (a Amount) Scale(ratio float64) Amount {
 	if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
 		return 0
@@ -175,15 +175,15 @@ func (a Amount) Scale(ratio float64) Amount {
 	return Amount(math.Round(float64(a) * ratio))
 }
 
-// MarshalJSON emits rubles as a JSON number, which is the shape every client
-// already expects: 150025 kopecks marshals as 1500.25.
+// MarshalJSON выдаёт рубли числом JSON — в том виде, какого уже ждёт любой
+// клиент: 150025 копеек сериализуются как 1500.25.
 func (a Amount) MarshalJSON() ([]byte, error) {
 	return []byte(a.String()), nil
 }
 
-// UnmarshalJSON accepts a JSON number or a quoted decimal string, both in
-// rubles. Strings are parsed exactly; numbers go through the float the client
-// sent us, which is the best that can be done with what arrived.
+// UnmarshalJSON принимает число JSON или десятичную строку в кавычках, и то и
+// другое в рублях. Строки разбираются точно; числа проходят через float,
+// который прислал клиент, — лучшее, что можно сделать с тем, что пришло.
 func (a *Amount) UnmarshalJSON(data []byte) error {
 	text := strings.TrimSpace(string(data))
 	if text == "null" {
@@ -211,14 +211,14 @@ func (a *Amount) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Value writes the amount as a decimal string, which Postgres reads into
-// NUMERIC exactly. Because of this the SQL itself did not have to change.
+// Value пишет сумму десятичной строкой, которую Postgres точно читает в
+// NUMERIC. Именно поэтому сам SQL менять не пришлось.
 func (a Amount) Value() (driver.Value, error) {
 	return a.String(), nil
 }
 
-// Scan reads a NUMERIC column. lib/pq hands numerics over as []byte, so the
-// digits are parsed directly and never pass through a float.
+// Scan читает колонку NUMERIC. lib/pq отдаёт numeric как []byte, поэтому цифры
+// разбираются напрямую и никогда не проходят через float.
 func (a *Amount) Scan(src interface{}) error {
 	switch v := src.(type) {
 	case nil:
@@ -242,7 +242,7 @@ func (a *Amount) Scan(src interface{}) error {
 		*a = Amount(v * kopecksPerRuble)
 		return nil
 	case float64:
-		// Only reachable through drivers that pre-convert; rounded immediately.
+		// Достижимо только через драйверы, конвертирующие заранее; округляется сразу.
 		*a = FromRubles(v)
 		return nil
 	default:

@@ -7,63 +7,63 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Address is a postal address held as its parts rather than as one string.
+// Address — почтовый адрес, хранимый частями, а не одной строкой.
 //
-// The previous design stored the address as text and recovered its components
-// with a regular expression, on both the client and the server. That parse
-// accepted only "Россия, Город, Улица, д. <digits>", so a building with a
-// корпус or a строение ("12к1", "10 стр. 2"), or any suggestion that arrived
-// without a house number, was rejected after the user had already picked it
-// from the list. Keeping the parts means nothing has to be parsed back out.
+// Прежняя схема хранила адрес текстом и восстанавливала его составляющие
+// регулярным выражением, и на клиенте, и на сервере. Тот разбор принимал только
+// «Россия, Город, Улица, д. <цифры>», поэтому дом с корпусом или строением
+// («12к1», «10 стр. 2»), да и любая подсказка, пришедшая без номера дома,
+// отвергались уже после того, как пользователь выбрал её из списка. Хранение
+// частей означает, что ничего не нужно выпарсивать обратно.
 type Address struct {
-	// Value is what a person reads: the whole address on one line, apartment
-	// included. It is derived from the parts, never parsed to recover them.
+	// Value — то, что читает человек: весь адрес одной строкой, включая квартиру.
+	// Он выводится из частей и никогда не разбирается ради их восстановления.
 	Value string `json:"value"`
 
 	Region string `json:"region,omitempty"`
 	City   string `json:"city,omitempty"`
 	Street string `json:"street,omitempty"`
-	// House keeps whatever the provider gave, including корпус and строение.
+	// House хранит то, что дал провайдер, включая корпус и строение.
 	House string `json:"house,omitempty"`
 	Flat  string `json:"flat,omitempty"`
 
-	// FiasID identifies the address in the state address register. It is the
-	// stable key: two spellings of one address share it.
+	// FiasID идентифицирует адрес в государственном адресном реестре. Это
+	// устойчивый ключ: два написания одного адреса его разделяют.
 	FiasID string `json:"fias_id,omitempty"`
 
 	Lat *float64 `json:"lat,omitempty"`
 	Lon *float64 `json:"lon,omitempty"`
 
-	// Source records which provider produced this, so a support question about
-	// a wrong address can be traced to where it came from.
+	// Source фиксирует, какой провайдер это произвёл, чтобы вопрос в поддержку про
+	// неверный адрес можно было проследить до его источника.
 	Source string `json:"source,omitempty"`
 }
 
-// Address sources.
+// Источники адресов.
 const (
 	SourceDaData     = "dadata"
 	SourceLegacyText = "legacy"
 )
 
-// IsDeliverable reports whether the address names a specific building. An
-// address that stops at the street is fine to show while someone is typing but
-// cannot be delivered to, so it must not be accepted as a pickup address.
+// IsDeliverable сообщает, называет ли адрес конкретное здание. Адрес,
+// заканчивающийся улицей, нормально показывать, пока человек печатает, но
+// доставить по нему нельзя, поэтому как адрес подачи он не принимается.
 func (a Address) IsDeliverable() bool {
 	return strings.TrimSpace(a.City) != "" &&
 		strings.TrimSpace(a.Street) != "" &&
 		strings.TrimSpace(a.House) != ""
 }
 
-// HasCoordinates reports whether the address can take part in distance
-// matching. Orders are matched to executors by coordinates, so an address
-// without them is invisible to the dispatcher.
+// HasCoordinates сообщает, может ли адрес участвовать в подборе по расстоянию.
+// Заказы сопоставляются с исполнителями по координатам, поэтому адрес без них
+// для диспетчера невидим.
 func (a Address) HasCoordinates() bool {
 	return a.Lat != nil && a.Lon != nil
 }
 
-// WithFlat returns a copy carrying the apartment, with Value rebuilt to include
-// it. Providers return the apartment separately when the user picks a building
-// rather than a flat, and the two have to be joined somewhere.
+// WithFlat возвращает копию с квартирой и с перестроенным Value, включающим её.
+// Провайдеры возвращают квартиру отдельно, когда пользователь выбирает здание,
+// а не квартиру, и где-то эти двое должны соединиться.
 func (a Address) WithFlat(flat string) Address {
 	flat = strings.TrimSpace(flat)
 	a.Flat = flat
@@ -71,8 +71,8 @@ func (a Address) WithFlat(flat string) Address {
 	return a
 }
 
-// Compose renders the one-line form from the parts. This is the only place a
-// display string is built, so every screen shows the same address the same way.
+// Compose собирает однострочную форму из частей. Это единственное место, где
+// строится отображаемая строка, поэтому каждый экран показывает адрес одинаково.
 func (a Address) Compose() string {
 	parts := make([]string, 0, 5)
 	for _, p := range []string{a.City, a.Street} {
@@ -88,15 +88,15 @@ func (a Address) Compose() string {
 	}
 
 	if len(parts) == 0 {
-		// Nothing structured survived; fall back to whatever text we hold so a
-		// legacy address is still shown rather than blanked out.
+		// Ничего структурного не уцелело; откатываемся к тому тексту, что есть, чтобы
+		// легаси-адрес всё же показался, а не превратился в пустоту.
 		return strings.TrimSpace(a.Value)
 	}
 	return strings.Join(parts, ", ")
 }
 
-// Validate reports why an address cannot be used for a pickup, in words a
-// person can act on.
+// Validate сообщает, почему адрес нельзя использовать для подачи, словами, по
+// которым человек может действовать.
 func (a Address) Validate() error {
 	if strings.TrimSpace(a.Value) == "" && !a.IsDeliverable() {
 		return fmt.Errorf("укажите адрес")
@@ -107,18 +107,18 @@ func (a Address) Validate() error {
 	return nil
 }
 
-// ParseAddressLine recovers the parts of an address that arrived as one line.
-// Only two things still produce those: the mobile builds already installed, and
-// the rows saved before the parts were stored. Anything picked from the
-// suggestion list arrives already split.
+// ParseAddressLine восстанавливает части адреса, пришедшего одной строкой.
+// Такие строки до сих пор порождают лишь двое: уже установленные мобильные
+// сборки и строки, сохранённые до того, как части стали храниться. Всё
+// выбранное из списка подсказок приходит уже разделённым.
 func ParseAddressLine(line string) Address {
 	return parseLegacyCanonical(line)
 }
 
-// ToRecord converts an address into the row the repository stores. Value is
-// recomposed rather than trusted, so the line shown to a person always matches
-// the parts beside it — including the apartment, which used to be appended by
-// the client and could disagree with what was stored.
+// ToRecord превращает адрес в строку, которую хранит репозиторий. Value
+// пересобирается, а не принимается на веру, поэтому показываемая человеку
+// строка всегда соответствует частям рядом — включая квартиру, которую раньше
+// дописывал клиент и которая могла расходиться с сохранённым.
 func (a Address) ToRecord() repository.Address {
 	return repository.Address{
 		Address: a.Compose(),
@@ -134,8 +134,8 @@ func (a Address) ToRecord() repository.Address {
 	}
 }
 
-// AddressFromRecord rebuilds the working address from a stored row, filling the
-// parts from the display line for rows written before they were stored.
+// AddressFromRecord восстанавливает рабочий адрес из сохранённой строки,
+// заполняя части из отображаемой строки для записей старше их хранения.
 func AddressFromRecord(rec repository.Address) Address {
 	addr := Address{
 		Value:  rec.Address,

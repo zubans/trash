@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// scrape reads a Prometheus exposition and returns the sum of each metric
-// family, ignoring labels. The bot reports headline numbers — "how many
-// endpoints work", "do the books close" — and for those a total is the answer;
-// anything needing labels belongs on the dashboard.
+// scrape читает выкладку Prometheus и возвращает сумму по каждому семейству
+// метрик, игнорируя лейблы. Бот сообщает ключевые числа — «сколько эндпоинтов
+// работает», «сходятся ли книги», — и для них ответ это итог; всё, чему нужны
+// лейблы, место на дашборде.
 func scrape(ctx context.Context, client *http.Client, url string) (map[string]float64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -65,9 +65,9 @@ func parseSample(line string) (string, float64, bool) {
 	return name, value, true
 }
 
-// prettyMetric and formatValue turn a metric name into something readable in a
-// chat window. A bot that answers with raw metric names is a worse dashboard,
-// not a better one.
+// prettyMetric и formatValue превращают имя метрики в нечто читаемое в окне
+// чата. Бот, отвечающий сырыми именами метрик, — это худший дашборд, а не
+// лучший.
 var metricLabels = map[string]string{
 	"healthlogin_reconcile_ok":                         "Книги сходятся",
 	"healthlogin_reconcile_drift_rubles":               "Расхождение, ₽",
@@ -96,7 +96,7 @@ func formatValue(name string, value float64) string {
 		if value == 1 {
 			return "да"
 		}
-		// NaN is "no pass has completed yet", which is not the same as "no".
+		// NaN означает «ни один проход ещё не завершился», а это не то же самое, что «нет».
 		if value != value {
 			return "ещё не проверялось"
 		}

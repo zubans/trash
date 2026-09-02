@@ -17,39 +17,39 @@ import (
 )
 
 const (
-	// accessTokenTTL is deliberately short: authorization data (role, ban) is
-	// re-read from the database on every request, but a stolen access token
-	// stays usable until it expires.
+	// accessTokenTTL намеренно короткий: данные авторизации (роль, бан)
+	// перечитываются из базы на каждом запросе, но украденный access-токен
+	// остаётся годным до своего истечения.
 	accessTokenTTL = 15 * time.Minute
 
-	// refreshTokenTTL bounds how long a client can stay signed in without
-	// entering credentials again.
+	// refreshTokenTTL ограничивает, как долго клиент может оставаться в системе,
+	// не вводя учётные данные заново.
 	refreshTokenTTL = 30 * 24 * time.Hour
 
 	refreshTokenBytes = 32
 )
 
-// ErrInvalidRefreshToken is returned for anything that makes a refresh token
-// unusable: unknown, expired, already used or revoked. The caller must not be
-// told which of those it was.
+// ErrInvalidRefreshToken возвращается для всего, что делает refresh-токен
+// непригодным: неизвестный, истёкший, уже использованный или отозванный.
+// Вызывающему нельзя сообщать, что именно из этого произошло.
 var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 
-// TokenPair is what a client receives on login and on every refresh.
+// TokenPair — то, что клиент получает при входе и при каждом обновлении.
 type TokenPair struct {
 	AccessToken  string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// hashRefreshToken derives the value stored in the database. SHA-256 is
-// sufficient here (unlike for passwords): the token is 32 random bytes, so
-// there is nothing to brute force.
+// hashRefreshToken выводит значение, сохраняемое в базе. SHA-256 здесь
+// достаточно (в отличие от паролей): токен — это 32 случайных байта, так что
+// перебирать нечего.
 func hashRefreshToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
-// newRefreshToken returns a fresh opaque token and its hash.
+// newRefreshToken возвращает свежий непрозрачный токен и его хеш.
 func newRefreshToken() (string, string, error) {
 	buf := make([]byte, refreshTokenBytes)
 	if _, err := rand.Read(buf); err != nil {
@@ -59,7 +59,7 @@ func newRefreshToken() (string, string, error) {
 	return token, hashRefreshToken(token), nil
 }
 
-// IssueTokenPair creates an access token and a refresh token for a user.
+// IssueTokenPair создаёт access-токен и refresh-токен для пользователя.
 func (s *AuthService) IssueTokenPair(ctx context.Context, user *repository.User) (*TokenPair, error) {
 	if s.refreshRepo == nil {
 		return nil, errors.New("refresh token storage is not configured")
@@ -86,12 +86,12 @@ func (s *AuthService) IssueTokenPair(ctx context.Context, user *repository.User)
 	}, nil
 }
 
-// Refresh exchanges a refresh token for a new pair and rotates it.
+// Refresh обменивает refresh-токен на новую пару и ротирует его.
 //
-// Rotation is what makes a leaked token detectable: each token may be exchanged
-// once. Presenting a token that was already used means the value is in two
-// places at once, so every session of that user is ended and the client has to
-// sign in again.
+// Именно ротация делает утёкший токен обнаружимым: каждый токен можно обменять
+// один раз. Предъявление уже использованного токена означает, что значение
+// находится в двух местах сразу, поэтому все сессии этого пользователя
+// завершаются и ему приходится войти заново.
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	if s.refreshRepo == nil {
 		return nil, errors.New("refresh token storage is not configured")
@@ -109,7 +109,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, err
 	}
 
-	// Replay: the token was already exchanged. Treat it as a compromise.
+	// Повтор: токен уже обменивали. Считаем это компрометацией.
 	if stored.UsedAt != nil {
 		log.Printf("[SECURITY] refresh token replay for user %s; revoking all sessions", stored.UserID)
 		if err := s.refreshRepo.RevokeAllForUser(ctx, stored.UserID); err != nil {
@@ -121,8 +121,8 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, ErrInvalidRefreshToken
 	}
 
-	// Consume the token. The guarded UPDATE makes two parallel refreshes with
-	// the same token resolve to exactly one winner.
+	// Расходуем токен. Охраняемый UPDATE приводит два параллельных обновления
+	// с одним токеном ровно к одному победителю.
 	if err := s.refreshRepo.MarkUsed(ctx, hash); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return nil, ErrInvalidRefreshToken
@@ -134,7 +134,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 	if err != nil {
 		return nil, ErrInvalidRefreshToken
 	}
-	// A banned account must not be able to extend its session.
+	// Забаненная учётная запись не должна уметь продлевать свою сессию.
 	if user.Status == "BANNED" {
 		if err := s.refreshRepo.RevokeAllForUser(ctx, user.ID); err != nil {
 			log.Printf("[AuthService] failed to revoke sessions for banned user %s: %v", user.ID, err)
@@ -145,15 +145,15 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 	return s.IssueTokenPair(ctx, user)
 }
 
-// RevokeAccessToken blacklists an access token until it expires. Access tokens
-// are self-contained, so the only way to end one early is to remember it.
+// RevokeAccessToken заносит access-токен в чёрный список до его истечения.
+// Access-токены самодостаточны, поэтому завершить один досрочно можно, только запомнив его.
 func (s *AuthService) RevokeAccessToken(ctx context.Context, tokenStr string) error {
 	if s.tokenRepo == nil {
 		return nil
 	}
 
-	// Parse without verifying: the token may already be expired, and all that
-	// is needed is how long the blacklist entry has to live.
+	// Разбираем без проверки: токен может быть уже истёкшим, а нужно лишь то,
+	// сколько должна прожить запись в чёрном списке.
 	expiresAt := time.Now().Add(accessTokenTTL)
 	if parsed, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{}); err == nil {
 		if claims, ok := parsed.Claims.(jwt.MapClaims); ok {
@@ -165,7 +165,7 @@ func (s *AuthService) RevokeAccessToken(ctx context.Context, tokenStr string) er
 	return s.tokenRepo.RevokeToken(ctx, hashRefreshToken(tokenStr), expiresAt)
 }
 
-// IsAccessTokenRevoked reports whether a token was blacklisted.
+// IsAccessTokenRevoked сообщает, был ли токен занесён в чёрный список.
 func (s *AuthService) IsAccessTokenRevoked(ctx context.Context, tokenStr string) (bool, error) {
 	if s.tokenRepo == nil {
 		return false, nil
@@ -173,9 +173,9 @@ func (s *AuthService) IsAccessTokenRevoked(ctx context.Context, tokenStr string)
 	return s.tokenRepo.IsTokenRevoked(ctx, hashRefreshToken(tokenStr))
 }
 
-// Logout ends the current session: the presented access token is blacklisted
-// for the remainder of its lifetime and the refresh token, if the client sent
-// one, is revoked so it cannot be exchanged.
+// Logout завершает текущую сессию: предъявленный access-токен заносится в
+// чёрный список до конца своего срока, а refresh-токен, если клиент его
+// прислал, отзывается, чтобы его нельзя было обменять.
 func (s *AuthService) Logout(ctx context.Context, accessToken, refreshToken string) error {
 	if err := s.RevokeAccessToken(ctx, accessToken); err != nil {
 		return err
@@ -183,8 +183,8 @@ func (s *AuthService) Logout(ctx context.Context, accessToken, refreshToken stri
 	return s.RevokeRefreshToken(ctx, refreshToken)
 }
 
-// RevokeRefreshToken ends a single session. Used on logout; unknown values are
-// ignored so a logout never fails because of a stale client.
+// RevokeRefreshToken завершает одну сессию. Используется при выходе;
+// неизвестные значения игнорируются, чтобы выход не падал из-за старого клиента.
 func (s *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
 	if s.refreshRepo == nil || refreshToken == "" {
 		return nil
@@ -192,8 +192,8 @@ func (s *AuthService) RevokeRefreshToken(ctx context.Context, refreshToken strin
 	return s.refreshRepo.Revoke(ctx, hashRefreshToken(refreshToken))
 }
 
-// RevokeAllSessions ends every session of a user. Used when an account is
-// banned or its role changes.
+// RevokeAllSessions завершает все сессии пользователя. Используется при бане
+// учётной записи или смене её роли.
 func (s *AuthService) RevokeAllSessions(ctx context.Context, userID uuid.UUID) error {
 	if s.refreshRepo == nil {
 		return nil
@@ -201,7 +201,7 @@ func (s *AuthService) RevokeAllSessions(ctx context.Context, userID uuid.UUID) e
 	return s.refreshRepo.RevokeAllForUser(ctx, userID)
 }
 
-// CleanupExpiredRefreshTokens drops rows that can no longer be exchanged.
+// CleanupExpiredRefreshTokens удаляет строки, которые уже нельзя обменять.
 func (s *AuthService) CleanupExpiredRefreshTokens(ctx context.Context) {
 	if s.refreshRepo == nil {
 		return

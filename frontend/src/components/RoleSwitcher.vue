@@ -23,10 +23,10 @@ const HOME: Record<string, string> = {
   ADMIN: '/admin',
 }
 
-// A compact switcher for users who hold more than one dashboard role. It changes
-// the active role and navigates to that role's dashboard. Hidden for single-role
-// users (the common case). MODERATOR shares the executor dashboard and is not a
-// separate switch target.
+// Компактный переключатель для пользователей, у которых больше одной роли с
+// дашбордом. Он меняет активную роль и переходит на дашборд этой роли. Скрыт для
+// однорольных пользователей (обычный случай). MODERATOR делит дашборд с
+// исполнителем и отдельной целью переключения не является.
 export default defineComponent({
   name: 'RoleSwitcher',
   setup() {

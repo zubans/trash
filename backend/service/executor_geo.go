@@ -15,16 +15,16 @@ import (
 type ExecutorGeoService struct {
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
-	// Optional. When wired, the map applies the same visibility predicate as the
-	// executor order list (roles, customer verification, moderator-only), so the
-	// map and the list never disagree about which orders are shown.
+	// Необязательно. Когда подключено, карта применяет тот же предикат видимости,
+	// что и список заказов исполнителя (роли, верификация заказчика, только для
+	// модераторов), поэтому карта и список никогда не расходятся в том, что показано.
 	userRepo     repository.UserRepository
 	settingsRepo repository.SettingsRepository
 	catalogRepo  repository.ServiceCatalogRepository
-	// behaviors applies the scripted rules of a service to the map, so the map
-	// shows exactly the orders the list does. Optional.
+	// behaviors применяет скриптовые правила услуги к карте, чтобы карта показывала
+	// ровно те заказы, что и список. Необязательно.
 	behaviors *Behaviors
-	// In-memory cache & mutex lock for fast cooldown checks
+	// Кэш в памяти и мьютекс для быстрых проверок паузы
 	cooldownMap sync.Map
 }
 
@@ -35,8 +35,8 @@ func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo r
 	}
 }
 
-// WithEligibility wires the dependencies the map needs to apply the same
-// visibility predicate as the executor order list.
+// WithEligibility подключает зависимости, нужные карте, чтобы применять тот же
+// предикат видимости, что и список заказов исполнителя.
 func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository, settingsRepo repository.SettingsRepository, catalogRepo repository.ServiceCatalogRepository) *ExecutorGeoService {
 	s.userRepo = userRepo
 	s.settingsRepo = settingsRepo
@@ -44,7 +44,7 @@ func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository,
 	return s
 }
 
-// WithBehaviors wires the behaviour scripts into the map's visibility check.
+// WithBehaviors подключает скрипты поведений к проверке видимости на карте.
 func (s *ExecutorGeoService) WithBehaviors(behaviors *Behaviors) *ExecutorGeoService {
 	s.behaviors = behaviors
 	return s
@@ -89,19 +89,19 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	now := time.Now()
 	acceptRadiusKM := getAcceptRadiusKM()
 
-	// Check manual shift distance
+	// Проверяем дистанцию ручного сдвига смены
 	var shiftDist float64
 	if oldLat != nil && oldLon != nil {
 		shiftDist = HaversineDistanceKM(*oldLat, *oldLon, req.Lat, req.Lon)
 	}
 
-	// Whether a move counts as "manual" is decided here, from the distance
-	// travelled, and not by a flag the client sends: an executor could
-	// otherwise bypass the cooldown by flipping is_manual to false.
+	// Считается ли перемещение «ручным», решается здесь, по пройденному
+	// расстоянию, а не по флагу, который присылает клиент: иначе исполнитель мог
+	// бы обойти паузу, выставив is_manual в false.
 	isManual := req.IsManual || shiftDist > acceptRadiusKM
 
 	if isManual && oldLat != nil && oldLon != nil {
-		// Reject manual moves within inner circle
+		// Отвергаем ручные перемещения внутри внутреннего круга
 		if shiftDist <= acceptRadiusKM {
 			return &SetLocationResponse{
 				Success: false,
@@ -111,7 +111,7 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 			}, nil
 		}
 
-		// District change requires 10 min cooldown
+		// Смена района требует паузы в 10 минут
 		var lastManualTime time.Time
 		if val, ok := s.cooldownMap.Load(executorID); ok {
 			lastManualTime = val.(time.Time)
@@ -134,7 +134,7 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 		}
 	}
 
-	// Async Goroutine: Deep Geo-Validation for Speed Spoofing Check
+	// Асинхронная горутина: глубокая гео-проверка на подделку скорости
 	if oldLat != nil && oldLon != nil && shiftDist > 2.0 {
 		go func(exID uuid.UUID, oLat, oLon, nLat, nLon float64, tNow time.Time) {
 			var lastTime time.Time
@@ -147,7 +147,7 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 			if hours > 0 {
 				speed := shiftDist / hours
 				if speed > 150.0 {
-					// GPS Spoofing detected! Log GeoAlert for Admin
+					// Обнаружена подделка GPS! Пишем GeoAlert для админа
 					_ = s.geoRepo.CreateGeoAlert(ctx, &repository.GeoAlert{
 						ExecutorID:         exID,
 						OldLat:             &oLat,
@@ -178,18 +178,18 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}, nil
 }
 
-// RecordLiveLocation stores a position the executor's app reports on its own
-// during a shift.
+// RecordLiveLocation сохраняет позицию, о которой приложение исполнителя
+// сообщает само во время смены.
 //
-// The report is telemetry, not a command. It is always recorded, but it moves
-// the working anchor only while the executor has not chosen a district by hand:
-// otherwise the phone would quietly drag the work area back off the district
-// they picked, a few seconds after they picked it. Pressing "my location" is
-// what puts the anchor back under the device's control — see FollowDevice.
+// Отчёт — это телеметрия, а не команда. Он записывается всегда, но двигает
+// рабочий якорь только пока исполнитель не выбрал район вручную: иначе телефон
+// тихо утаскивал бы рабочую зону с выбранного района через несколько секунд
+// после выбора. Нажатие «моё местоположение» — то, что возвращает якорь под
+// управление устройства, см. FollowDevice.
 //
-// This also closes the loophole the old wiring had: because the anchor no
-// longer moves on a passive report, the report can no longer be used to sidestep
-// the district-change cooldown.
+// Это заодно закрывает лазейку старой схемы: раз якорь больше не двигается
+// по пассивному отчёту, отчётом больше нельзя обойти паузу при смене
+// района.
 func (s *ExecutorGeoService) RecordLiveLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
 	if err := validateCoordinates(lat, lon); err != nil {
 		return false, err
@@ -200,12 +200,12 @@ func (s *ExecutorGeoService) RecordLiveLocation(ctx context.Context, executorID 
 	return true, nil
 }
 
-// FollowDevice moves the working anchor onto the position the executor's phone
-// reports and hands control back to the device.
+// FollowDevice переносит рабочий якорь на позицию, о которой сообщает телефон
+// исполнителя, и возвращает управление устройству.
 //
-// This is what the "my location" button does. It is not a district change: the
-// executor is returning to where they actually are, so it carries no cooldown
-// and clears the manual override rather than setting one.
+// Это то, что делает кнопка «моё местоположение». Это не смена района:
+// исполнитель возвращается туда, где он на самом деле есть, поэтому паузы это
+// не несёт и ручное переопределение снимает, а не ставит.
 func (s *ExecutorGeoService) FollowDevice(ctx context.Context, executorID uuid.UUID, lat, lon float64) (*SetLocationResponse, error) {
 	if err := validateCoordinates(lat, lon); err != nil {
 		return nil, err
@@ -213,8 +213,8 @@ func (s *ExecutorGeoService) FollowDevice(ctx context.Context, executorID uuid.U
 	if err := s.geoRepo.FollowDevicePosition(ctx, executorID, lat, lon); err != nil {
 		return nil, err
 	}
-	// The cooldown is keyed to manual moves, and this ends the manual override,
-	// so the in-memory copy has to go with it.
+	// Пауза привязана к ручным перемещениям, а это завершает ручное
+	// переопределение, поэтому копия в памяти должна уйти вместе с ним.
 	s.cooldownMap.Delete(executorID)
 	return &SetLocationResponse{
 		Success: true,
@@ -224,7 +224,7 @@ func (s *ExecutorGeoService) FollowDevice(ctx context.Context, executorID uuid.U
 	}, nil
 }
 
-// validateCoordinates rejects points that are not on the globe.
+// validateCoordinates отвергает точки, которых нет на глобусе.
 func validateCoordinates(lat, lon float64) error {
 	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return fmt.Errorf("invalid coordinates")
@@ -232,18 +232,18 @@ func validateCoordinates(lat, lon float64) error {
 	return nil
 }
 
-// LocationResponse reports the executor's authoritative stored position. It is
-// the single source of truth the map UI centers on, so the client never has to
-// guess from a possibly stale device fix.
+// LocationResponse сообщает авторитетную сохранённую позицию исполнителя. Это
+// единственный источник истины, по которому центрируется карта, поэтому клиенту
+// никогда не приходится гадать по возможно устаревшей координате устройства.
 type LocationResponse struct {
 	HasLocation bool     `json:"has_location"`
 	Lat         *float64 `json:"lat,omitempty"`
 	Lon         *float64 `json:"lon,omitempty"`
 }
 
-// GetLocation returns the executor's own stored coordinates. Like GetMapOrders,
-// the position comes from the database and is scoped to the caller, so it can
-// never be used to read another executor's whereabouts.
+// GetLocation возвращает собственные сохранённые координаты исполнителя. Как и
+// в GetMapOrders, позиция берётся из базы и ограничена вызывающим, поэтому ею
+// нельзя узнать, где находится другой исполнитель.
 func (s *ExecutorGeoService) GetLocation(ctx context.Context, executorID uuid.UUID) (*LocationResponse, error) {
 	lat, lon, _, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
 	if err != nil {
@@ -255,10 +255,10 @@ func (s *ExecutorGeoService) GetLocation(ctx context.Context, executorID uuid.UU
 	return &LocationResponse{HasLocation: true, Lat: lat, Lon: lon}, nil
 }
 
-// GetMapOrders returns searching orders around the executor's own stored
-// position. The position deliberately comes from the database rather than from
-// request parameters: with client supplied coordinates any account could sweep
-// the map and harvest customer addresses country-wide.
+// GetMapOrders возвращает заказы в поиске вокруг собственной сохранённой
+// позиции исполнителя. Позиция намеренно берётся из базы, а не из параметров
+// запроса: с координатами от клиента любая учётка могла бы прочесать карту и
+// собрать адреса заказчиков по всей стране.
 func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.UUID) ([]repository.MapOrder, error) {
 	lat, lon, _, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
 	if err != nil {
@@ -271,14 +271,14 @@ func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.U
 }
 
 func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
-	// Find pending orders within 10km
+	// Ищем ожидающие заказы в радиусе 10 км
 	const overviewRadiusKM = 10.0
 	acceptRadiusKM := getAcceptRadiusKM()
 
-	// Bound the search at the database rather than in this loop. Reading every
-	// searching order in the country and discarding all but the nearby ones made
-	// the cost of this endpoint grow with the whole marketplace — on a screen
-	// every executor keeps open and polls.
+	// Ограничиваем поиск в базе, а не в этом цикле. Чтение каждого заказа в
+	// поиске по всей стране с отбрасыванием всех, кроме ближних, делало стоимость
+	// этого эндпоинта растущей вместе со всем маркетплейсом — на экране, который
+	// каждый исполнитель держит открытым и опрашивает.
 	pendingOrders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, int(overviewRadiusKM*1000))
 	if err != nil {
 		return nil, err
@@ -287,20 +287,20 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		return nil, nil
 	}
 
-	// The viewer's roles and verification drive visibility, exactly like the
-	// executor order list, so the map and the list never disagree.
+	// Видимость определяют роли и верификация смотрящего, ровно как в списке
+	// заказов исполнителя, поэтому карта и список никогда не расходятся.
 	var viewer *repository.User
 	if s.userRepo != nil {
 		viewer, _ = s.userRepo.FindByID(ctx, executorID)
 	}
 
-	// Everything the predicate needs, in two queries instead of two per order.
-	// The predicate itself is unchanged and still the only thing deciding
-	// visibility: only how its inputs are loaded is different.
+	// Всё, что нужно предикату, за два запроса вместо двух на заказ. Сам предикат
+	// не изменился и по-прежнему единственный решает видимость: отличается лишь
+	// то, как загружаются его входные данные.
 	customers, variants := s.eligibilityInputs(ctx, pendingOrders)
 
-	// Categories (the variants' parents) so the map can label each order with
-	// "category · service". Batched, so it stays two extra queries, not N.
+	// Категории (родители вариантов), чтобы карта могла подписать каждый заказ
+	// как «категория · услуга». Пакетно, поэтому это два лишних запроса, а не N.
 	categories := map[uuid.UUID]*repository.ServiceNode{}
 	if s.catalogRepo != nil {
 		parentIDs := make([]uuid.UUID, 0, len(variants))
@@ -319,16 +319,16 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 	var mapOrders []repository.MapOrder
 
 	for _, o := range pendingOrders {
-		// FindNearbyOrders only returns orders that carry coordinates, so the
-		// dereference below is safe; the guard stays as a belt-and-braces check
-		// in case the query's contract ever changes.
+		// FindNearbyOrders возвращает только заказы с координатами, поэтому
+		// разыменование ниже безопасно; проверка остаётся на всякий случай, если
+		// контракт запроса когда-нибудь изменится.
 		if o.PickupLat == nil || o.PickupLon == nil {
 			continue
 		}
 
-		// Same predicate as FindNearbyOrdersForExecutor and the accept path:
-		// moderator-only orders → moderators; normal orders → customer-verification
-		// segmentation plus the standard executor gates.
+		// Тот же предикат, что в FindNearbyOrdersForExecutor и на пути принятия:
+		// заказы только для модераторов → модераторам; обычные заказы → сегментация
+		// по верификации заказчика плюс стандартные проверки исполнителя.
 		if s.userRepo != nil {
 			if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
 				continue
@@ -339,8 +339,8 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 
 		dist := HaversineDistanceKM(lat, lon, oLat, oLon)
 		if dist <= overviewRadiusKM {
-			// Attach the variant (service name) and resolve the category name so
-			// the client can render "category · service" without extra lookups.
+			// Прикрепляем вариант (название услуги) и разрешаем название категории,
+			// чтобы клиент рисовал «категория · услуга» без лишних запросов.
 			oc := *o
 			categoryName := ""
 			if v := variants[o.ServiceVariantID]; v != nil {
@@ -366,13 +366,13 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 	return mapOrders, nil
 }
 
-// eligibilityInputs batch-loads the customers and service variants that
-// canViewOrTakeOrder needs for a page of orders.
+// eligibilityInputs пакетно загружает заказчиков и варианты услуг, которые
+// нужны canViewOrTakeOrder для страницы заказов.
 //
-// A lookup failure yields a missing map entry rather than an error, matching
-// what the per-order calls did before: the predicate already treats a nil
-// customer or variant as "no extra restriction", and one unreadable row must
-// not blank out the whole map.
+// Неудача чтения даёт отсутствующую запись в карте, а не ошибку, — так же, как
+// вели себя вызовы по одному заказу: предикат уже трактует nil-заказчика или
+// nil-вариант как «нет дополнительных ограничений», и одна нечитаемая строка не
+// должна обнулять всю карту.
 func (s *ExecutorGeoService) eligibilityInputs(ctx context.Context, orders []*repository.Order) (map[uuid.UUID]*repository.User, map[uuid.UUID]*repository.ServiceNode) {
 	customerIDs := make([]uuid.UUID, 0, len(orders))
 	variantIDs := make([]uuid.UUID, 0, len(orders))

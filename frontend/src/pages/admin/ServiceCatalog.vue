@@ -1,6 +1,6 @@
 <template>
   <div class="service-catalog-page">
-    <!-- Header -->
+    <!-- Шапка -->
     <div class="page-header">
       <div>
         <h1 class="page-title">
@@ -20,7 +20,7 @@
       </div>
     </div>
 
-    <!-- Alert Messages -->
+    <!-- Уведомления -->
     <div v-if="successMsg" class="catalog-alert alert-success mb-3">
       <i class="ph-bold ph-check-circle alert-icon"></i>
       <span>{{ successMsg }}</span>
@@ -33,15 +33,15 @@
       <button type="button" class="btn-dismiss" @click="errorMsg = ''"><i class="ph ph-x"></i></button>
     </div>
 
-    <!-- Main Catalog Card -->
+    <!-- Основная карточка каталога -->
     <div class="catalog-card">
-      <!-- Loading State -->
+      <!-- Состояние загрузки -->
       <div v-if="loading" class="loading-state py-5">
         <div class="spinner"></div>
         <span>Загрузка каталога...</span>
       </div>
 
-      <!-- Tree View -->
+      <!-- Вид дерева -->
       <div v-else class="tree-container">
         <div v-if="tree.length === 0" class="empty-tree-state">
           <i class="ph-fill ph-folders empty-icon"></i>
@@ -63,7 +63,7 @@
       </div>
     </div>
 
-    <!-- Custom Form Modal Overlay -->
+    <!-- Оверлей модальной формы -->
     <div v-if="showFormModal" class="catalog-modal-overlay" @click.self="showFormModal = false">
       <service-node-form
         :node="editingNode"
@@ -106,9 +106,9 @@ export default defineComponent({
     const defaultParentId = ref<string | null>(null)
     const successMsg = ref('')
     const errorMsg = ref('')
-    // A save refused by the server has to be readable inside the modal: the
-    // usual place for the message is the page behind it, and a compile error
-    // shown there is a compile error nobody sees.
+    // Сохранение, отклонённое сервером, должно читаться внутри модалки: обычное
+    // место для сообщения — страница за ней, а ошибка компиляции, показанная там, —
+    // это ошибка компиляции, которой никто не видит.
     const saveError = ref('')
     const showDeleted = ref(false)
 
@@ -121,7 +121,7 @@ export default defineComponent({
       return out
     }
 
-    // A deleted category is listed in the tree but cannot take new children.
+    // Удалённая категория есть в дереве, но новых потомков принять не может.
     const parentOptions = computed(() =>
       flatten(tree.value)
         .filter((n) => n.node_type === 'CATEGORY' && !n.deleted_at)
@@ -176,14 +176,20 @@ export default defineComponent({
       }
     }
 
-    // Deletion is soft on the backend: the element leaves the catalog, the
-    // orders placed for it keep their service, and it can be restored.
+    // Удаление на бэкенде мягкое и каскадное: элемент уходит из каталога вместе со
+    // всем вложенным поддеревом, размещённые заказы сохраняют свою услугу, и всё
+    // можно восстановить.
     const confirmDelete = async (node: ServiceNode) => {
       const title = node.name['ru'] || node.code
+      const cascadeNote =
+        node.node_type === 'CATEGORY'
+          ? '\n\nВместе с категорией будут скрыты и все вложенные подкатегории и услуги.'
+          : ''
       if (
         !confirm(
           `Удалить "${title}"?\n\nЭлемент будет скрыт из приложения. ` +
-            'История заказов сохранится, элемент можно восстановить.'
+            'История заказов сохранится, элемент можно восстановить.' +
+            cascadeNote
         )
       ) {
         return
@@ -192,9 +198,14 @@ export default defineComponent({
       errorMsg.value = ''
       try {
         const result = await deleteServiceNode(node.id)
-        successMsg.value = result?.had_orders
-          ? 'Элемент скрыт из каталога. Ранее созданные заказы сохранены.'
-          : 'Элемент удален из каталога'
+        const count = result?.deleted_count ?? 1
+        if (count > 1) {
+          successMsg.value = `Скрыто из каталога элементов: ${count} (категория и вложенные). Ранее созданные заказы сохранены.`
+        } else if (result?.had_orders) {
+          successMsg.value = 'Элемент скрыт из каталога. Ранее созданные заказы сохранены.'
+        } else {
+          successMsg.value = 'Элемент удален из каталога'
+        }
         await fetchTree()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка при удалении'
@@ -247,7 +258,7 @@ export default defineComponent({
   color: #0f172a;
 }
 
-/* Header */
+/* Шапка */
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -320,7 +331,7 @@ export default defineComponent({
   box-shadow: 0 8px 16px rgba(92, 96, 245, 0.3);
 }
 
-/* Catalog Card */
+/* Карточка каталога */
 .catalog-card {
   background: #ffffff;
   border-radius: 24px;
@@ -335,7 +346,7 @@ export default defineComponent({
   flex-direction: column;
 }
 
-/* Alert Messages */
+/* Уведомления */
 .catalog-alert {
   display: flex;
   align-items: center;

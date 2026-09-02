@@ -12,11 +12,11 @@ import (
 	"healthlogin/backend/money"
 )
 
-// TopUpRequest represents a manual balance top-up request.
+// TopUpRequest представляет ручную заявку на пополнение баланса.
 type TopUpRequest struct {
 	ID        uuid.UUID    `json:"id"`
 	UserID    uuid.UUID    `json:"user_id"`
-	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
 	Amount    money.Amount `json:"amount"`
 	Status    string       `json:"status"`
 	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
@@ -24,11 +24,11 @@ type TopUpRequest struct {
 	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
 }
 
-// WithdrawalRequest represents a manual balance withdrawal request.
+// WithdrawalRequest представляет ручную заявку на вывод средств.
 type WithdrawalRequest struct {
 	ID        uuid.UUID    `json:"id"`
 	UserID    uuid.UUID    `json:"user_id"`
-	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
 	Amount    money.Amount `json:"amount"`
 	Status    string       `json:"status"`
 	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
@@ -36,28 +36,28 @@ type WithdrawalRequest struct {
 	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
 }
 
-// Transaction represents a financial log entry.
+// Transaction представляет запись финансового журнала.
 type Transaction struct {
 	ID        uuid.UUID    `json:"id"`
 	UserID    uuid.UUID    `json:"user_id"`
-	UserPhone string       `json:"user_phone"` // Populated via JOIN
+	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
 	OrderID   *uuid.UUID   `json:"order_id,omitempty"`
 	Type      string       `json:"type"`
 	Amount    money.Amount `json:"amount"`
-	// Counterparty is the system account on the other side of this entry.
-	// Empty on rows written before system accounts existed.
+	// Counterparty — системный счёт по другую сторону этой проводки.
+	// Пусто в строках, записанных до появления системных счетов.
 	Counterparty string     `json:"counterparty,omitempty"`
 	AdminID      *uuid.UUID `json:"admin_id,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
-// AdminShift extends Shift with executor phone for admin views.
+// AdminShift дополняет Shift телефоном исполнителя для админских представлений.
 type AdminShift struct {
 	Shift
 	ExecutorPhone string `json:"executor_phone"`
 }
 
-// AdminOrder extends Order with customer/executor phone and service variant name for admin views.
+// AdminOrder дополняет Order телефонами заказчика/исполнителя и названием варианта услуги для админских представлений.
 type AdminOrder struct {
 	Order
 	CustomerPhone      string `json:"customer_phone"`
@@ -65,7 +65,7 @@ type AdminOrder struct {
 	ServiceVariantName string `json:"service_variant_name"`
 }
 
-// AdminRepository defines admin database operations.
+// AdminRepository описывает операции админа с базой.
 type AdminRepository interface {
 	GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error)
 	GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error)
@@ -75,8 +75,8 @@ type AdminRepository interface {
 	SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
 	GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*WithdrawalRequest, error)
 	GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*WithdrawalRequest, error)
-	// Withdrawals are a money workflow and live in AdminService; the repository
-	// provides the locked read and the individual writes it needs.
+	// Выводы — денежный процесс и живут в AdminService; репозиторий предоставляет
+	// заблокированное чтение и отдельные записи, которые ему нужны.
 	CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
 	LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
 	SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
@@ -89,31 +89,31 @@ type AdminRepository interface {
 	CompletedOrderFacets(ctx context.Context) (CompletedOrderFacets, error)
 }
 
-// CompletedOrderFacets are the values the completed-orders filters can be set
-// to. They are computed over every completed order rather than over the current
-// page, so choosing one filter never empties the other.
+// CompletedOrderFacets — значения, в которые можно выставить фильтры
+// завершённых заказов. Они считаются по всем завершённым заказам, а не по
+// текущей странице, поэтому выбор одного фильтра никогда не опустошает другой.
 type CompletedOrderFacets struct {
 	Services []string `json:"services"`
 	Periods  []string `json:"periods"`
 }
 
-// CompletedOrdersFilter describes one page of the completed-orders listing.
-// Search, service and period narrow the set; Sort picks the column. All of it
-// runs in SQL, so what the admin sees and exports covers every completed order,
-// not just the rows that happened to be loaded.
+// CompletedOrdersFilter описывает одну страницу списка завершённых заказов.
+// Search, service и period сужают набор; Sort выбирает колонку. Всё это
+// выполняется в SQL, поэтому то, что админ видит и выгружает, покрывает каждый
+// завершённый заказ, а не только строки, которые случайно загрузились.
 type CompletedOrdersFilter struct {
-	Search  string // phone, order id or service name, matched loosely
-	Service string // exact service name
-	Period  string // YYYY-MM over completed_at
-	Sort    string // one of completedOrderSorts; anything else falls back
+	Search  string // телефон, id заказа или название услуги, нестрогое совпадение
+	Service string // точное название услуги
+	Period  string // YYYY-MM по completed_at
+	Sort    string // один из completedOrderSorts; всё прочее откатывается к умолчанию
 	Desc    bool
 	Limit   int
 	Offset  int
 }
 
-// completedOrderSorts whitelists what may reach ORDER BY. The key arrives from
-// the client, so it must never be interpolated: only these fixed expressions
-// can be selected.
+// completedOrderSorts — белый список того, что может дойти до ORDER BY. Ключ
+// приходит от клиента, поэтому его нельзя подставлять в запрос: выбрать можно
+// только эти фиксированные выражения.
 var completedOrderSorts = map[string]string{
 	"completed_at": "o.completed_at",
 	"final_amount": "o.final_amount",
@@ -126,7 +126,7 @@ type adminRepo struct {
 	db *sql.DB
 }
 
-// NewAdminRepository creates a repository for admin operations.
+// NewAdminRepository создаёт репозиторий для админских операций.
 func NewAdminRepository(db *sql.DB) AdminRepository {
 	return &adminRepo{db: db}
 }
@@ -160,7 +160,7 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		argCount++
 	}
 
-	// Get total count
+	// Получаем общее количество
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users %s", whereClause)
 	var total int
 	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
@@ -168,11 +168,11 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		return nil, 0, err
 	}
 
-	// Get paginated list with the customer's default address. The address now
-	// lives in the unified `addresses` table (migration 037 dropped
-	// customer_profiles.address), so it is read from there. The multi-role set is
-	// fetched separately (attachRoles) so a missing user_roles table can never
-	// take down the whole admin listing.
+	// Получаем постраничный список с адресом заказчика по умолчанию. Адрес теперь
+	// живёт в единой таблице `addresses` (миграция 037 удалила
+	// customer_profiles.address), поэтому читается оттуда. Набор мультиролей
+	// берётся отдельно (attachRoles), чтобы отсутствующая таблица user_roles
+	// никогда не могла уронить весь админский список.
 	listQuery := fmt.Sprintf(
 		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at,
 		        COALESCE((SELECT a.address FROM addresses a WHERE a.user_id = u.id AND a.is_default LIMIT 1), '') AS address,
@@ -193,8 +193,8 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	for rows.Next() {
 		var u User
 		var birthDate sql.NullTime
-		// The password hash is deliberately not selected: it has no use in an
-		// admin listing and must not travel through the application at all.
+		// Хеш пароля намеренно не выбирается: в админском списке он бесполезен и
+		// вообще не должен путешествовать через приложение.
 		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address,
 			&u.LastName, &u.FirstName, &u.Patronymic, &birthDate)
 		if err != nil {
@@ -214,10 +214,10 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	return users, total, nil
 }
 
-// attachRoles populates each user's multi-role set from user_roles. It is
-// deliberately best-effort: any failure (most importantly the table not existing
-// yet because migration 039 has not run) is swallowed and leaves Roles empty, so
-// the admin user list still renders — the client falls back to the primary role.
+// attachRoles заполняет набор мультиролей каждого пользователя из user_roles.
+// Он намеренно «по мере возможности»: любой сбой (прежде всего ещё не
+// существующая таблица, потому что миграция 039 не выполнялась) проглатывается
+// и оставляет Roles пустым, поэтому список всё равно рисуется — клиент откатится к основной роли.
 func (r *adminRepo) attachRoles(ctx context.Context, users []*User) {
 	if len(users) == 0 {
 		return
@@ -303,8 +303,8 @@ func (r *adminRepo) CreateTopUpRequest(ctx context.Context, q Querier, userID uu
 	return &req, nil
 }
 
-// LockTopUpRequest reads a request taking a row lock, so two admins deciding at
-// the same time serialise instead of both crediting the balance.
+// LockTopUpRequest читает заявку, беря блокировку строки, чтобы два админа,
+// решающих одновременно, сериализовались, а не зачислили баланс оба.
 func (r *adminRepo) LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error) {
 	var req TopUpRequest
 	err := r.exec(ctx, q).QueryRowContext(ctx, `
@@ -317,8 +317,8 @@ func (r *adminRepo) LockTopUpRequest(ctx context.Context, q Querier, requestID u
 	return &req, nil
 }
 
-// SetTopUpStatus decides a pending request; the guard keeps a second decision
-// from crediting the balance twice.
+// SetTopUpStatus решает судьбу ожидающей заявки; охрана не даёт второму решению
+// зачислить баланс дважды.
 func (r *adminRepo) SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
 	return execExpectingOne(ctx, r.exec(ctx, q), `
 		UPDATE balance_topup_requests
@@ -388,8 +388,8 @@ func (r *adminRepo) CreateWithdrawalRequest(ctx context.Context, q Querier, user
 	return &req, nil
 }
 
-// LockWithdrawalRequest reads a request taking a row lock, so two admins acting
-// at the same time serialise instead of both seeing it as PENDING.
+// LockWithdrawalRequest читает заявку, беря блокировку строки, чтобы два
+// действующих одновременно админа сериализовались, а не увидели её оба как PENDING.
 func (r *adminRepo) LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error) {
 	var req WithdrawalRequest
 	err := r.exec(ctx, q).QueryRowContext(ctx, `
@@ -402,8 +402,8 @@ func (r *adminRepo) LockWithdrawalRequest(ctx context.Context, q Querier, reques
 	return &req, nil
 }
 
-// SetWithdrawalStatus decides a pending request. The guard makes a second
-// decision on the same request fail instead of overwriting the first.
+// SetWithdrawalStatus решает судьбу ожидающей заявки. Охрана заставляет второе
+// решение по той же заявке упасть, а не переписать первое.
 func (r *adminRepo) SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
 	return execExpectingOne(ctx, r.exec(ctx, q), `
 		UPDATE balance_withdrawal_requests
@@ -411,9 +411,9 @@ func (r *adminRepo) SetWithdrawalStatus(ctx context.Context, q Querier, requestI
 		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
 }
 
-// HasPendingWithdrawal reports whether the user already has an open request.
-// Requests do not reserve funds, so several open ones for the same balance
-// would leave the admin approving payouts that cannot all be honoured.
+// HasPendingWithdrawal сообщает, есть ли у пользователя уже открытая заявка.
+// Заявки не резервируют средства, поэтому несколько открытых на один баланс
+// заставили бы админа одобрять выплаты, которые нельзя выполнить все.
 func (r *adminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx,
@@ -423,7 +423,7 @@ func (r *adminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) 
 	return exists, err
 }
 
-// CountAdmins is used to keep the last administrator from being demoted.
+// CountAdmins используется, чтобы не дать понизить последнего администратора.
 func (r *adminRepo) CountAdmins(ctx context.Context) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
@@ -528,11 +528,11 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFil
 	args := []interface{}{OrderStatusCompleted}
 
 	if search := strings.TrimSpace(f.Search); search != "" {
-		// A phone is stored as +79997454656 but typed as "+7 (999) 745-46-56"
-		// or just "9997": both sides are reduced to digits before comparing, so
-		// the admin does not have to reproduce the stored spelling. Digits are
-		// only used when the term actually has some — otherwise every row would
-		// match the empty string.
+		// Телефон хранится как +79997454656, а набирают его как
+		// «+7 (999) 745-46-56» или просто «9997»: обе стороны перед сравнением
+		// сводятся к цифрам, поэтому админу не нужно воспроизводить сохранённое
+		// написание. Цифры используются, только когда они в запросе реально
+		// есть, — иначе пустой строке соответствовала бы каждая строка.
 		digits := digitsOnly(search)
 		args = append(args, "%"+search+"%")
 		like := fmt.Sprintf("$%d", len(args))
@@ -659,8 +659,8 @@ func (r *adminRepo) CompletedOrderFacets(ctx context.Context) (CompletedOrderFac
 	return facets, periodRows.Err()
 }
 
-// digitsOnly keeps the digits of a search term so a typed phone matches a
-// stored one whatever punctuation either side uses.
+// digitsOnly оставляет от поискового запроса цифры, чтобы набранный телефон
+// совпадал с сохранённым при любой пунктуации с обеих сторон.
 func digitsOnly(s string) string {
 	var b strings.Builder
 	for _, r := range s {

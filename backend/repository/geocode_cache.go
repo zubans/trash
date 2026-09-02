@@ -5,27 +5,27 @@ import (
 	"database/sql"
 )
 
-// CachedGeocode is a resolved address read back from the geocoding_cache table.
+// CachedGeocode — разрешённый адрес, прочитанный из таблицы geocoding_cache.
 type CachedGeocode struct {
 	Address string
 	Lat     float64
 	Lon     float64
 }
 
-// GeocodeCacheRepository stores resolved address→coordinate pairs so that
-// resolving the same address twice does not call the paid address provider
-// again. Only the fallback resolve path writes here; addresses picked from the
-// suggestion box already carry their coordinates and never need resolving.
+// GeocodeCacheRepository хранит пары «разрешённый адрес → координаты», чтобы
+// повторное разрешение того же адреса не обращалось снова к платному
+// провайдеру. Сюда пишет только запасной путь разрешения; адреса, выбранные из
+// списка подсказок, уже несут свои координаты и в разрешении не нуждаются.
 type GeocodeCacheRepository interface {
-	// Lookup returns the cached result for an exact query, or (nil, nil) on miss.
+	// Lookup возвращает закэшированный результат для точного запроса или (nil, nil) при промахе.
 	Lookup(ctx context.Context, query string) (*CachedGeocode, error)
-	// Save upserts the result for a query.
+	// Save вставляет или обновляет результат для запроса.
 	Save(ctx context.Context, query, address string, lat, lon float64) error
 }
 
 type geocodeCacheRepo struct{ db *sql.DB }
 
-// NewGeocodeCacheRepository builds a GeocodeCacheRepository backed by Postgres.
+// NewGeocodeCacheRepository собирает GeocodeCacheRepository поверх Postgres.
 func NewGeocodeCacheRepository(db *sql.DB) GeocodeCacheRepository {
 	return &geocodeCacheRepo{db: db}
 }

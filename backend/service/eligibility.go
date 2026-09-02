@@ -9,8 +9,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Business defaults. Each one can be overridden through system_settings so the
-// rules are not buried in the code as magic numbers.
+// Бизнес-умолчания. Каждое можно переопределить через system_settings, чтобы
+// правила не были закопаны в коде магическими числами.
 const (
 	defaultMaxActiveOrders        = 3
 	defaultMaxExecutedUnconfirmed = 6
@@ -18,24 +18,24 @@ const (
 	defaultMinBalanceLimit        = 0.0
 )
 
-// ErrExecutorNotEligible reports that an executor may not take a specific order.
+// ErrExecutorNotEligible сообщает, что исполнитель не может взять конкретный заказ.
 var ErrExecutorNotEligible = errors.New("executor is not eligible for this order")
 
-// ErrCustomerNotEligible reports that a customer may not order a specific service variant.
+// ErrCustomerNotEligible сообщает, что заказчик не может заказать конкретный вариант услуги.
 var ErrCustomerNotEligible = errors.New("customer is not eligible for this service")
 
-// canCustomerOrderVariant is the single place that decides whether a customer
-// may place an order for a service variant. A variant flagged
-// requires_verification can only be ordered by a manually verified customer —
-// the mirror of canExecutorTakeOrder on the executor side. It is used both when
-// filtering the catalog and when the order is actually created, so the gate
-// cannot be bypassed by posting a known variant id directly. Age (min_age) is
-// deliberately an executor-side gate only: it restricts who may perform the job,
-// not who may request it.
+// canCustomerOrderVariant — единственное место, решающее, может ли заказчик
+// разместить заказ по варианту услуги. Вариант с флагом
+// requires_verification может заказать только вручную верифицированный
+// заказчик — зеркало canExecutorTakeOrder на стороне исполнителя. Он
+// используется и при фильтрации каталога, и при собственно создании заказа,
+// поэтому проверку нельзя обойти, отправив напрямую известный id варианта.
+// Возраст (min_age) намеренно проверяется только на стороне исполнителя: он
+// ограничивает, кто может выполнять работу, а не кто может её попросить.
 //
-// A variant governed by a behaviour script gets the script's can_order hook on
-// top of these rules, never instead of them: a script may restrict who orders a
-// service, it cannot hand out an exemption from a ban.
+// Вариант, управляемый скриптом поведения, получает хук can_order этого скрипта
+// поверх этих правил, но никогда вместо них: скрипт может ограничить, кто
+// заказывает услугу, но не может выдать освобождение от бана.
 func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, customer *repository.User, variant *repository.ServiceNode) error {
 	if customer == nil {
 		return ErrCustomerNotEligible
@@ -52,14 +52,14 @@ func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, customer
 	return behaviors.CanOrder(ctx, customer, variant)
 }
 
-// formatGeo renders a coordinate pair in the "lat,lon" form used by
-// customer_profiles.last_geo. The column is parsed as coordinates by the
-// matching worker, so nothing else may be written into it.
+// formatGeo отдаёт пару координат в форме «lat,lon», используемой в
+// customer_profiles.last_geo. Воркер подбора разбирает эту колонку как
+// координаты, поэтому писать туда что-либо иное нельзя.
 func formatGeo(lat, lon float64) string {
 	return fmt.Sprintf("%f,%f", lat, lon)
 }
 
-// settingsGetter is the small slice of SettingsRepository used for tunables.
+// settingsGetter — небольшой срез SettingsRepository, используемый для настраиваемых величин.
 type settingsGetter interface {
 	GetSettings(ctx context.Context) (map[string]string, error)
 }
@@ -84,11 +84,11 @@ func settingInt(ctx context.Context, repo settingsGetter, key string, defaultVal
 	return int(settingFloat(ctx, repo, key, float64(defaultValue)))
 }
 
-// canExecutorTakeOrder is the single place that decides whether an executor is
-// allowed to work on a given service variant. It is used both when filtering
-// the order lists and when the executor actually acts on an order, so the
-// restrictions cannot be bypassed by calling the endpoint directly with a
-// known order id.
+// canExecutorTakeOrder — единственное место, решающее, позволено ли
+// исполнителю работать по данному варианту услуги. Он используется и при
+// фильтрации списков заказов, и когда исполнитель реально действует по заказу,
+// поэтому ограничения нельзя обойти, вызвав эндпоинт напрямую с известным id
+// заказа.
 func canExecutorTakeOrder(executor *repository.User, variant *repository.ServiceNode) error {
 	if executor == nil {
 		return ErrExecutorNotEligible
@@ -108,22 +108,22 @@ func canExecutorTakeOrder(executor *repository.User, variant *repository.Service
 	return nil
 }
 
-// canViewOrTakeOrder is the single predicate that decides whether a viewer (an
-// executor and/or moderator) may both SEE and ACCEPT a given order. The order
-// lists (map + table) and the accept path all go through it, so what an executor
-// can act on never diverges from what they were shown.
+// canViewOrTakeOrder — единственный предикат, решающий, может ли смотрящий
+// (исполнитель и/или модератор) и ВИДЕТЬ, и ПРИНЯТЬ данный заказ. Через него
+// идут списки заказов (карта и таблица) и путь принятия, поэтому то, с чем
+// исполнитель может действовать, никогда не расходится с показанным ему.
 //
-// Rules:
-//   - Moderator-only service: only a MODERATOR may see or take the order; the
-//     normal executor gates do not apply (moderators are trusted staff).
-//   - Scripted service: whatever its behaviour's can_view_or_take hook says, on
-//     top of the rules below.
-//   - Normal service: the executor gates (ban, requires_verification, min_age)
-//     apply, and on top of them a customer-verification segmentation —
-//   - an unverified customer's order is visible to everyone (this is what
-//     lets an unverified executor work the unverified pool);
-//   - a verified customer's order is visible only to a verified executor or
-//     to a moderator.
+// Правила:
+//   - Услуга только для модераторов: видеть и брать заказ может только
+//     MODERATOR; обычные проверки исполнителя не применяются (это доверенный персонал).
+//   - Скриптовая услуга: что скажет хук can_view_or_take её поведения, поверх
+//     правил ниже.
+//   - Обычная услуга: применяются проверки исполнителя (бан,
+//     requires_verification, min_age), а поверх них — сегментация по
+//   - верификации заказчика: заказ неверифицированного заказчика виден всем
+//     (именно это позволяет неверифицированному исполнителю работать с их пулом);
+//   - заказ верифицированного заказчика виден только верифицированному
+//     исполнителю или модератору.
 func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, viewer *repository.User, customer *repository.User, variant *repository.ServiceNode) error {
 	if viewer == nil {
 		return ErrExecutorNotEligible
@@ -145,7 +145,7 @@ func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, viewer *repos
 			return ErrExecutorNotEligible
 		}
 	}
-	// The script runs last and can only narrow what the built-in rules allowed.
-	// The verification service uses it to admit moderators alone.
+	// Скрипт выполняется последним и может только сузить разрешённое встроенными правилами.
+	// Услуга верификации пользуется этим, чтобы допускать одних модераторов.
 	return behaviors.CanViewOrTake(ctx, viewer, customer, variant)
 }

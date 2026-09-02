@@ -14,8 +14,8 @@ func opsMux(t *testing.T, o OpsHandlers) *http.ServeMux {
 	return mux
 }
 
-// A shared secret that was never configured must not become an open door: the
-// routes are not registered at all rather than registered without a check.
+// Общий секрет, который так и не настроили, не должен становиться открытой
+// дверью: маршруты вообще не регистрируются, а не регистрируются без проверки.
 func TestOpsRoutesAreAbsentWithoutASecret(t *testing.T) {
 	mux := opsMux(t, OpsHandlers{Reconcile: func() (any, error) { return "ran", nil }})
 
@@ -47,8 +47,8 @@ func TestOpsRouteRejectsAWrongKey(t *testing.T) {
 	}
 }
 
-// GET must not trigger a privileged action: anything that can be reached by a
-// link, a crawler or a prefetch is not a safe way to run one.
+// GET не должен запускать привилегированное действие: всё, до чего дотягивается
+// ссылка, краулер или предзагрузка, — небезопасный способ его выполнить.
 func TestOpsRouteRejectsGet(t *testing.T) {
 	var ran bool
 	mux := opsMux(t, OpsHandlers{Secret: "right", Reconcile: func() (any, error) {

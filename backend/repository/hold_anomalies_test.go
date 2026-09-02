@@ -12,12 +12,12 @@ import (
 	"healthlogin/backend/money"
 )
 
-// Free services are a supported product decision, not a defect, so an order for
-// one holds nothing by design and must not be reported. An order that did take
-// money and no longer holds it still must be — that is a refund or a payout
-// that ran without its state transition, and it is the case the check exists
-// for. The two are told apart by the ledger rather than by the current price,
-// because a service can be repriced after the order was placed.
+// Бесплатные услуги — поддерживаемое продуктовое решение, а не дефект, поэтому
+// заказ такой услуги по замыслу ничего не удерживает и не должен попадать в
+// отчёт. Заказ, который деньги взял и больше их не удерживает, — должен: это
+// возврат или выплата, прошедшие без своего перехода состояния, и именно ради
+// этого случая проверка существует. Различают их по реестру, а не по текущей
+// цене, потому что услугу могут переоценить после размещения заказа.
 func TestHoldAnomaliesAgainstDatabase(t *testing.T) {
 	dsn := os.Getenv("RECONCILE_TEST_DSN")
 	if dsn == "" {
@@ -81,17 +81,17 @@ func TestHoldAnomaliesAgainstDatabase(t *testing.T) {
 	variant(paidVariant, money.FromRubles(150), false)
 	variant(auctionVariant, money.Zero, true)
 
-	// Supported: a free service holds nothing and never took anything.
+	// Поддерживается: бесплатная услуга ничего не удерживает и никогда ничего не брала.
 	order(freeOrder, freeVariant, "ASSIGNED", money.Zero)
-	// Supported: an auction holds nothing until a bid is accepted.
+	// Поддерживается: аукцион ничего не удерживает, пока не принята ставка.
 	order(auctionOrder, auctionVariant, "ASSIGNED", money.Zero)
-	// Correct: a paid order holding what it took.
+	// Верно: платный заказ удерживает то, что взял.
 	order(healthyOrder, paidVariant, "ASSIGNED", money.FromRubles(150))
 	held(healthyOrder, money.FromRubles(150))
-	// Broken: money was taken and is gone while the order is still live.
+	// Сломано: деньги взяли, и их нет, а заказ ещё жив.
 	order(brokenOrder, paidVariant, "EXECUTED", money.Zero)
 	held(brokenOrder, money.FromRubles(150))
-	// Broken the other way: finished but still holding.
+	// Сломано в другую сторону: завершён, но всё ещё удерживает.
 	order(finishedOrder, paidVariant, "COMPLETED", money.FromRubles(150))
 	held(finishedOrder, money.FromRubles(150))
 

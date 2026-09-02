@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// telegram is a deliberately small client for the two calls this bot needs.
+// telegram — намеренно маленький клиент для двух вызовов, нужных этому боту.
 //
-// Long polling rather than a webhook: a webhook would mean an inbound port,
-// a public URL and a route through nginx for a service whose whole job is to
-// run privileged commands. Polling keeps the bot reachable only outbound.
+// Длинный опрос вместо вебхука: вебхук означал бы входящий порт,
+// публичный URL и маршрут через nginx для сервиса, вся работа которого —
+// выполнять привилегированные команды. Опрос оставляет бота доступным лишь исходящим.
 type telegram struct {
 	token  string
 	client *http.Client
@@ -23,8 +23,8 @@ type telegram struct {
 func newTelegram(token string) *telegram {
 	return &telegram{
 		token: token,
-		// Longer than the poll timeout below, or every long poll would be cut
-		// off by the client itself.
+		// Больше, чем таймаут опроса ниже, иначе каждый длинный опрос обрывал бы
+		// сам клиент.
 		client: &http.Client{Timeout: 90 * time.Second},
 	}
 }
@@ -67,7 +67,7 @@ func (t *telegram) call(method string, params url.Values, out any) error {
 		return fmt.Errorf("%s: malformed response", method)
 	}
 	if !envelope.OK {
-		// The token must never reach a log line; the description is safe.
+		// Токен не должен попадать в лог; описание безопасно.
 		return fmt.Errorf("%s: %s", method, envelope.Description)
 	}
 	if out == nil {
@@ -76,15 +76,15 @@ func (t *telegram) call(method string, params url.Values, out any) error {
 	return json.Unmarshal(envelope.Result, out)
 }
 
-// getUpdates long-polls for the next batch, acknowledging everything before
-// offset. Telegram drops acknowledged updates, which is what keeps a command
-// from being replayed after a restart.
+// getUpdates длинным опросом получает следующую пачку, подтверждая всё до
+// offset. Telegram выбрасывает подтверждённые апдейты — это и не даёт команде
+// повториться после перезапуска.
 func (t *telegram) getUpdates(offset int, timeout time.Duration) ([]update, error) {
 	params := url.Values{}
 	params.Set("offset", fmt.Sprint(offset))
 	params.Set("timeout", fmt.Sprint(int(timeout.Seconds())))
-	// Only messages: this bot has no use for edits, reactions or channel posts,
-	// and an edited message must never re-trigger a command.
+	// Только сообщения: этому боту не нужны правки, реакции и посты каналов, а
+	// отредактированное сообщение не должно повторно запускать команду.
 	params.Set("allowed_updates", `["message"]`)
 
 	var updates []update
@@ -99,8 +99,8 @@ func (t *telegram) send(chatID int64, text string) error {
 	params.Set("chat_id", fmt.Sprint(chatID))
 	params.Set("parse_mode", "HTML")
 	params.Set("disable_web_page_preview", "true")
-	// Telegram rejects anything over 4096 characters, and a rejected reply is
-	// worse than a trimmed one when it is the answer to an ops command.
+	// Telegram отклоняет всё длиннее 4096 символов, а отклонённый ответ хуже
+	// урезанного, когда это ответ на операционную команду.
 	params.Set("text", truncate(text, 4000))
 	return t.call("sendMessage", params, nil)
 }
@@ -113,9 +113,9 @@ func truncate(s string, limit int) string {
 	return string(runes[:limit]) + "\n…"
 }
 
-// escape makes text safe for Telegram's HTML parse mode. Reconciliation output
-// carries phone numbers and free-form reasons; an unescaped angle bracket would
-// silently drop the rest of the message.
+// escape делает текст безопасным для HTML-режима разбора Telegram. Вывод сверки
+// несёт номера телефонов и произвольные причины; неэкранированная угловая
+// скобка молча съела бы остаток сообщения.
 func escape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 	return r.Replace(s)

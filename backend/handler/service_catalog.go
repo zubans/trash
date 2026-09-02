@@ -18,51 +18,51 @@ import (
 	"healthlogin/backend/service"
 )
 
-// ServiceCatalogHandler handles public and admin service catalog HTTP endpoints.
+// ServiceCatalogHandler обслуживает публичные и админские HTTP-эндпоинты каталога услуг.
 type ServiceCatalogHandler struct {
 	catalogRepo repository.ServiceCatalogRepository
-	// behaviors decides visibility for nodes whose rules come from a script.
-	// Optional: without it only the built-in flags apply, which is what the
-	// catalog did before behaviours existed.
+	// behaviors решает видимость узлов, чьи правила приходят из скрипта.
+	// Необязательно: без него применяются только встроенные флаги — так каталог
+	// и работал до появления поведений.
 	behaviors *service.Behaviors
 }
 
-// NewServiceCatalogHandler creates a ServiceCatalogHandler.
+// NewServiceCatalogHandler создаёт ServiceCatalogHandler.
 func NewServiceCatalogHandler(catalogRepo repository.ServiceCatalogRepository) *ServiceCatalogHandler {
 	return &ServiceCatalogHandler{catalogRepo: catalogRepo}
 }
 
-// WithBehaviors wires the behaviour scripts into the catalog listings.
+// WithBehaviors подключает скрипты поведений к спискам каталога.
 func (h *ServiceCatalogHandler) WithBehaviors(behaviors *service.Behaviors) *ServiceCatalogHandler {
 	h.behaviors = behaviors
 	return h
 }
 
-// hideVerificationOnly reports whether the requester is a customer who has not
-// been manually verified. Such customers must not see services flagged
-// requires_verification — they cannot order them (enforced at order creation),
-// so listing them would only mislead. Executors, admins and anonymous visitors
-// are left unaffected; this is populated by the OptionalAuth middleware.
+// hideVerificationOnly сообщает, является ли запрашивающий заказчиком, не
+// прошедшим ручную верификацию. Таким заказчикам нельзя показывать услуги с
+// флагом requires_verification — заказать их они не могут (проверка на создании
+// заказа), так что показ только вводил бы в заблуждение. Исполнителей, админов
+// и анонимов это не затрагивает; поле заполняет middleware OptionalAuth.
 func hideVerificationOnly(r *http.Request) bool {
 	user := userFromContext(r)
 	return user != nil && user.Role == "CUSTOMER" && !user.IsVerified()
 }
 
-// visibleTo drops the nodes this requester must not see: the ones flagged
-// requires_verification when they are an unverified customer, and the ones a
-// behaviour script hides from them.
+// visibleTo отбрасывает узлы, которые этот запрашивающий видеть не должен: с
+// флагом requires_verification, когда он неверифицированный заказчик, и те,
+// что от него скрывает скрипт поведения.
 //
-// Both rules are applied here, in one pass, because a node the caller cannot
-// order must not be listed either — a listing that shows what checkout will
-// refuse is worse than not listing it at all. The claim counts are read once
-// per request, not once per node.
+// Оба правила применяются здесь, за один проход, потому что узел, который
+// вызывающий не может заказать, не должен и перечисляться: список, показывающий
+// то, в чём откажет оформление, хуже, чем отсутствие узла в списке. Счётчики
+// claim читаются один раз на запрос, а не один раз на узел.
 func (h *ServiceCatalogHandler) visibleTo(r *http.Request, nodes []*repository.ServiceNode) []*repository.ServiceNode {
 	hide := hideVerificationOnly(r)
 	user := userFromContext(r)
 
-	// Claims are read only when something on this page can use them. A catalog
-	// of ordinary services must not gain a query per request because scripted
-	// services exist elsewhere.
+	// Claim'ы читаются, только когда на этой странице их кому-то есть куда деть.
+	// Каталог обычных услуг не должен получать лишний запрос на каждый вызов лишь
+	// потому, что где-то существуют скриптовые услуги.
 	var claims map[uuid.UUID]int
 	for _, n := range nodes {
 		if h.behaviors.Governs(n) {
@@ -84,7 +84,7 @@ func (h *ServiceCatalogHandler) visibleTo(r *http.Request, nodes []*repository.S
 	return out
 }
 
-// ListRootCategories handles GET /service-categories.
+// ListRootCategories обслуживает GET /service-categories.
 func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *http.Request) {
 	nodes, err := h.catalogRepo.GetRootCategories(r.Context(), repository.FilterActive)
 	if err != nil {
@@ -94,7 +94,7 @@ func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *htt
 	writeJSON(w, h.visibleTo(r, nodes))
 }
 
-// ListChildren handles GET /service-categories/:id/children.
+// ListChildren обслуживает GET /service-categories/:id/children.
 func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -109,7 +109,7 @@ func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, h.visibleTo(r, nodes))
 }
 
-// ListCategoryVariants handles GET /service-categories/:id/variants.
+// ListCategoryVariants обслуживает GET /service-categories/:id/variants.
 func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -121,7 +121,7 @@ func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *h
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Return only active variants.
+	// Возвращаем только активные варианты.
 	variants := make([]*repository.ServiceNode, 0, len(nodes))
 	for _, n := range nodes {
 		if n.IsVariant() && n.IsActive {
@@ -131,7 +131,7 @@ func (h *ServiceCatalogHandler) ListCategoryVariants(w http.ResponseWriter, r *h
 	writeJSON(w, h.visibleTo(r, variants))
 }
 
-// ListVariants handles GET /service-variants.
+// ListVariants обслуживает GET /service-variants.
 func (h *ServiceCatalogHandler) ListVariants(w http.ResponseWriter, r *http.Request) {
 	nodes, err := h.catalogRepo.GetActiveVariants(r.Context())
 	if err != nil {
@@ -141,7 +141,7 @@ func (h *ServiceCatalogHandler) ListVariants(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, h.visibleTo(r, nodes))
 }
 
-// GetVariant handles GET /service-variants/:id.
+// GetVariant обслуживает GET /service-variants/:id.
 func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -157,8 +157,8 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// A variant the caller cannot see in a listing must not be readable by id
-	// either — otherwise the gate is only cosmetic.
+	// Вариант, который вызывающий не видит в списке, не должен читаться и по id, —
+	// иначе проверка чисто косметическая.
 	if variant != nil && len(h.visibleTo(r, []*repository.ServiceNode{variant})) == 0 {
 		http.Error(w, "variant not found", http.StatusNotFound)
 		return
@@ -169,13 +169,13 @@ func (h *ServiceCatalogHandler) GetVariant(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// AdminListBehaviors handles GET /admin/service-behaviors. It returns the
-// library behaviours that ship with the build, each with its full text: the
-// service constructor shows them as the starting template for a special
-// service, and reading one is how an admin learns what a script may do.
+// AdminListBehaviors обслуживает GET /admin/service-behaviors. Он возвращает
+// библиотечные поведения, поставляемые со сборкой, каждое с полным текстом:
+// конструктор услуг показывает их как стартовый шаблон особой услуги, и именно
+// чтением такого скрипта админ узнаёт, что скрипту вообще позволено.
 //
-// Per-node scripts are deliberately not listed here — a node's script is part of
-// that node and is edited on it.
+// Скрипты отдельных узлов здесь намеренно не перечисляются — скрипт узла есть
+// часть этого узла и правится на нём.
 func (h *ServiceCatalogHandler) AdminListBehaviors(w http.ResponseWriter, r *http.Request) {
 	if h.behaviors == nil || h.behaviors.Engine() == nil {
 		writeJSON(w, []interface{}{})
@@ -184,8 +184,8 @@ func (h *ServiceCatalogHandler) AdminListBehaviors(w http.ResponseWriter, r *htt
 	writeJSON(w, h.behaviors.Engine().Library())
 }
 
-// AdminListNodes handles GET /admin/service-nodes. Retired nodes are left out
-// unless the caller asks for them with include_deleted=true.
+// AdminListNodes обслуживает GET /admin/service-nodes. Списанные узлы не
+// показываются, пока вызывающий не попросит их через include_deleted=true.
 func (h *ServiceCatalogHandler) AdminListNodes(w http.ResponseWriter, r *http.Request) {
 	filter := repository.ServiceNodeFilter{IncludeDeleted: queryBool(r, "include_deleted")}
 
@@ -213,7 +213,7 @@ func (h *ServiceCatalogHandler) buildTree(ctx context.Context, node *repository.
 	}
 }
 
-// AdminGetNode handles GET /admin/service-nodes/:id.
+// AdminGetNode обслуживает GET /admin/service-nodes/:id.
 func (h *ServiceCatalogHandler) AdminGetNode(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -232,7 +232,7 @@ func (h *ServiceCatalogHandler) AdminGetNode(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, node)
 }
 
-// AdminCreateNode handles POST /admin/service-nodes.
+// AdminCreateNode обслуживает POST /admin/service-nodes.
 func (h *ServiceCatalogHandler) AdminCreateNode(w http.ResponseWriter, r *http.Request) {
 	var req repository.ServiceNode
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -254,15 +254,15 @@ func (h *ServiceCatalogHandler) AdminCreateNode(w http.ResponseWriter, r *http.R
 		writeCatalogError(w, err)
 		return
 	}
-	// The script is compiled into the running engine now, so the service behaves
-	// as edited on the very next request rather than after a restart.
+	// Скрипт компилируется в работающий движок сразу, поэтому услуга ведёт себя
+	// как отредактировано уже на следующем запросе, а не после перезапуска.
 	h.syncBehavior(&req)
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, req)
 }
 
-// AdminUpdateNode handles PUT /admin/service-nodes/:id.
+// AdminUpdateNode обслуживает PUT /admin/service-nodes/:id.
 func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -277,10 +277,10 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 	}
 	req.ID = id
 
-	// code and node_type are immutable, so clients do not send them on update.
-	// Validating the request against its own empty node_type used to reject
-	// every variant edit with "CATEGORY cannot have base_price"; the rules
-	// apply to the stored node.
+	// code и node_type неизменяемы, поэтому клиенты не шлют их при обновлении.
+	// Проверка запроса по его же пустому node_type раньше отклоняла любую правку
+	// варианта с «CATEGORY cannot have base_price»; правила применяются к
+	// сохранённому узлу.
 	existing, err := h.catalogRepo.GetNodeByID(r.Context(), id)
 	if err != nil {
 		if isNotFound(err) {
@@ -320,9 +320,9 @@ func (h *ServiceCatalogHandler) AdminUpdateNode(w http.ResponseWriter, r *http.R
 	writeJSON(w, req)
 }
 
-// AdminDeleteNode handles DELETE /admin/service-nodes/:id. The node is retired,
-// not removed: orders placed for it keep their service, and the node can be
-// restored later.
+// AdminDeleteNode обслуживает DELETE /admin/service-nodes/:id. Узел списывается,
+// а не удаляется: у размещённых по нему заказов остаётся их услуга, а сам узел
+// можно позже восстановить.
 func (h *ServiceCatalogHandler) AdminDeleteNode(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -330,29 +330,45 @@ func (h *ServiceCatalogHandler) AdminDeleteNode(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Read before deleting: the answer would not change afterwards, but the
-	// admin panel wants to say that order history is being kept.
+	// Читаем перед удалением: ответ после него не изменился бы, но админ-панель
+	// хочет сказать, что история заказов сохраняется.
 	hadOrders, _ := h.catalogRepo.HasOrders(r.Context(), id)
+
+	// Удаление каскадное, поэтому и снятие поведений — по всему поддереву.
+	// Собираем живых потомков до удаления: после него GetDescendants их уже не
+	// вернёт (они отфильтруются по deleted_at). depth-0 (сам узел) добавляем
+	// отдельно, потому что GetDescendants отдаёт только потомков.
+	subtree := []uuid.UUID{id}
+	if descendants, err := h.catalogRepo.GetDescendants(r.Context(), id, nil); err == nil {
+		for _, d := range descendants {
+			subtree = append(subtree, d.ID)
+		}
+	}
 
 	if err := h.catalogRepo.DeleteNode(r.Context(), id); err != nil {
 		writeCatalogError(w, err)
 		return
 	}
-	// A retired node stops running its script at once; the row keeps it, so a
-	// restore brings the service back exactly as it was.
+	// Списанный узел немедленно перестаёт выполнять свой скрипт; строка его
+	// хранит, поэтому восстановление возвращает услугу ровно такой, какой она была.
 	if h.behaviors != nil {
-		h.behaviors.RemoveNode(id)
+		for _, nodeID := range subtree {
+			h.behaviors.RemoveNode(nodeID)
+		}
 	}
 
 	writeJSON(w, map[string]interface{}{
 		"message":    "node deleted successfully",
 		"soft":       true,
 		"had_orders": hadOrders,
+		// Сколько узлов ушло вместе с этим (узел + поддерево), чтобы админ-панель
+		// могла сказать «удалена категория и N вложенных элементов».
+		"deleted_count": len(subtree),
 	})
 }
 
-// AdminRestoreNode handles POST /admin/service-nodes/:id/restore. The node comes
-// back switched off so that it is re-published deliberately.
+// AdminRestoreNode обслуживает POST /admin/service-nodes/:id/restore. Узел
+// возвращается выключенным, чтобы его публиковали заново осознанно.
 func (h *ServiceCatalogHandler) AdminRestoreNode(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -374,10 +390,10 @@ func (h *ServiceCatalogHandler) AdminRestoreNode(w http.ResponseWriter, r *http.
 	writeJSON(w, node)
 }
 
-// syncBehavior registers (or unregisters) the node's own script in the running
-// engine. The script has already been compiled by validateNode, so a failure
-// here is a surprise worth logging; the periodic resync in the behaviour worker
-// is what covers it, and what carries the edit to the other processes.
+// syncBehavior регистрирует (или снимает с регистрации) собственный скрипт узла
+// в работающем движке. Скрипт уже скомпилирован в validateNode, поэтому сбой
+// здесь — неожиданность, которую стоит залогировать; страхует периодическая
+// пересинхронизация в воркере поведений, она же разносит правку по процессам.
 func (h *ServiceCatalogHandler) syncBehavior(node *repository.ServiceNode) {
 	if h.behaviors == nil {
 		return
@@ -387,8 +403,8 @@ func (h *ServiceCatalogHandler) syncBehavior(node *repository.ServiceNode) {
 	}
 }
 
-// writeCatalogError maps repository errors to status codes so the admin panel
-// can tell a conflict from a bug.
+// writeCatalogError сопоставляет ошибки репозитория с кодами статуса, чтобы
+// админ-панель отличала конфликт от бага.
 func writeCatalogError(w http.ResponseWriter, err error) {
 	switch {
 	case isNotFound(err):
@@ -404,16 +420,16 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 	}
 }
 
-// isNotFound covers the repository calls that still surface a missing row as
-// sql.ErrNoRows.
+// isNotFound покрывает вызовы репозитория, которые до сих пор отдают
+// отсутствующую строку как sql.ErrNoRows.
 func isNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrServiceNodeNotFound)
 }
 
 var codeRegexp = regexp.MustCompile(`^[a-z0-9_]+$`)
 
-// maxScriptBytes bounds one script field. A behaviour is a page of rules, not a
-// program; the limit is here so a paste accident cannot fill a column.
+// maxScriptBytes ограничивает одно поле скрипта. Поведение — это страница
+// правил, а не программа; предел стоит, чтобы случайная вставка не забила колонку.
 const maxScriptBytes = 64 * 1024
 
 func (h *ServiceCatalogHandler) validateParent(ctx context.Context, parentID *uuid.UUID) error {
@@ -430,7 +446,7 @@ func (h *ServiceCatalogHandler) validateParent(ctx context.Context, parentID *uu
 	if parent.NodeType != repository.ServiceNodeTypeCategory {
 		return errors.New("parent must be a category")
 	}
-	// A node under a deleted category would be unreachable from the catalog.
+	// Узел под удалённой категорией был бы недостижим из каталога.
 	if parent.IsDeleted() {
 		return errors.New("parent category is deleted")
 	}
@@ -454,10 +470,10 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 		return errors.New("name must contain at least the 'ru' key")
 	}
 
-	// The node's own script is compiled here, before the row is written: a
-	// script that does not compile would fail every gate on the node, which
-	// reads to a customer as the service having disappeared. Better to refuse
-	// the save while the admin is still looking at the editor.
+	// Собственный скрипт узла компилируется здесь, до записи строки: скрипт,
+	// который не компилируется, провалил бы все проверки узла, а заказчик прочёл бы
+	// это как исчезновение услуги. Лучше отказать в сохранении, пока админ ещё
+	// смотрит в редактор.
 	if node.HasOwnScript() {
 		if len(node.BehaviorSource) > maxScriptBytes || len(node.BehaviorConstants) > maxScriptBytes {
 			return fmt.Errorf("скрипт длиннее %d КБ", maxScriptBytes/1024)
@@ -469,7 +485,7 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 			return fmt.Errorf("скрипт не компилируется: %w", err)
 		}
 	} else if node.BehaviorCode != "" {
-		// A library code with no script behind it fails closed in the same way.
+		// Библиотечный код, за которым нет скрипта, точно так же отказывает в безопасную сторону.
 		if h.behaviors == nil || !h.behaviors.Engine().Has(node.BehaviorCode) {
 			return errors.New("unknown behavior_code: " + node.BehaviorCode)
 		}
@@ -483,8 +499,8 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 			return errors.New("auction variant base_price must be 0")
 		}
 	} else {
-		// A client that keeps one form for both node types sends base_price: 0
-		// for a category. That is "no price", not a conflicting price.
+		// Клиент, у которого одна форма на оба типа узлов, шлёт base_price: 0 для
+		// категории. Это «нет цены», а не противоречащая цена.
 		if node.BasePrice != nil && node.BasePrice.IsZero() {
 			node.BasePrice = nil
 		}
@@ -496,8 +512,8 @@ func (h *ServiceCatalogHandler) validateNode(node *repository.ServiceNode, isCre
 	return nil
 }
 
-// queryBool reads a boolean query parameter in the spellings a browser query
-// string tends to carry.
+// queryBool читает булев параметр запроса в тех написаниях, какие обычно
+// встречаются в строке запроса браузера.
 func queryBool(r *http.Request, name string) bool {
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get(name))) {
 	case "1", "true", "yes":

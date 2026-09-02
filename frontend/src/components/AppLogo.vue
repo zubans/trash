@@ -55,8 +55,8 @@ export default defineComponent({
 }
 
 .text-block {
-  /* Optical alignment of the wordmark against the SVG "М" stem.
-     Grouped here so the offsets are tunable in one place. */
+  /* Оптическое выравнивание словесного знака по стойке «М» из SVG.
+     Сгруппировано здесь, чтобы смещения настраивались в одном месте. */
   --top-offset-x: -9px;
   --top-offset-y: 12px;
   --bottom-offset-x: -18px;

@@ -1,6 +1,6 @@
 <template>
   <div class="card shadow-sm border-0 rounded-2xl mb-4 bg-white overflow-hidden">
-    <!-- Header with Toggle Button -->
+    <!-- Шапка с кнопкой сворачивания -->
     <div
       class="d-flex justify-content-between align-items-center p-4 cursor-pointer user-select-none border-bottom"
       @click="isHistoryCollapsed = !isHistoryCollapsed"
@@ -20,9 +20,9 @@
       </button>
     </div>
 
-    <!-- Collapsible Body -->
+    <!-- Сворачиваемое тело -->
     <div v-if="!isHistoryCollapsed" class="p-4 pt-3">
-      <!-- Summary Badges Bar -->
+      <!-- Полоса сводных бейджей -->
       <div class="summary-badges-row d-flex gap-3 mb-4 flex-wrap">
         <div class="summary-pill-card p-3 rounded-xl border d-flex align-items-center gap-3 bg-light-green">
           <span class="icon-circle bg-success text-white">✓</span>
@@ -49,13 +49,13 @@
         </div>
       </div>
 
-      <!-- Empty State -->
+      <!-- Пустое состояние -->
       <div v-if="historyOrders.length === 0" class="text-center py-5 text-secondary">
         <va-icon name="folder_off" size="large" color="secondary" class="mb-2" />
         <p class="text-secondary text-sm m-0">{{ $t('customer.noHistoryOrders') }}</p>
       </div>
 
-      <!-- Table -->
+      <!-- Таблица -->
       <div v-else class="table-responsive">
         <table class="table align-middle table-hover text-sm m-0">
           <thead>
@@ -105,7 +105,7 @@
           </tbody>
         </table>
 
-        <!-- Show More Button -->
+        <!-- Кнопка «Показать ещё» -->
         <div v-if="historyOrders.length > visibleLimit" class="text-center mt-3">
           <button type="button" class="btn-show-more" @click="visibleLimit += 5">
             Показать ещё ∨
@@ -157,7 +157,7 @@ export default defineComponent({
               orderReviewsMap.value[order.id] = res.review
             }
           } catch (err) {
-            // ignore
+            // игнорируем
           }
         }
       }

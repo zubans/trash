@@ -1,6 +1,6 @@
 <template>
   <div class="catalog-form-container">
-    <!-- Header -->
+    <!-- Шапка -->
     <div class="form-header">
       <div class="header-icon-wrap">
         <i class="ph-fill ph-folders header-icon"></i>
@@ -18,9 +18,9 @@
       </button>
     </div>
 
-    <!-- Form Body -->
+    <!-- Тело формы -->
     <div class="form-body">
-      <!-- Row 1: Node Type & System Code -->
+      <!-- Ряд 1: тип узла и системный код -->
       <div class="form-grid grid-2 mb-4">
         <div class="form-group">
           <label class="form-label">ТИП УЗЛА <span class="req">*</span></label>
@@ -46,7 +46,7 @@
         </div>
       </div>
 
-      <!-- Row 2: Parent Category -->
+      <!-- Ряд 2: родительская категория -->
       <div class="form-group mb-4">
         <label class="form-label">РОДИТЕЛЬСКАЯ КАТЕГОРИЯ</label>
         <div class="select-wrapper">
@@ -62,7 +62,7 @@
 
       <div class="form-divider mb-4"></div>
 
-      <!-- Row 3: Names (RU / EN) -->
+      <!-- Ряд 3: названия (RU / EN) -->
       <div class="form-grid grid-2 mb-4">
         <div class="form-group">
           <label class="form-label">НАЗВАНИЕ (РУССКИЙ) <span class="req">*</span></label>
@@ -92,7 +92,7 @@
         </div>
       </div>
 
-      <!-- Row 4: Descriptions (RU / EN) -->
+      <!-- Ряд 4: описания (RU / EN) -->
       <div class="form-grid grid-2 mb-4">
         <div class="form-group">
           <label class="form-label">ОПИСАНИЕ (РУССКИЙ)</label>
@@ -121,7 +121,7 @@
         </div>
       </div>
 
-      <!-- Row 5: Sort Order, Base Price & Min Age -->
+      <!-- Ряд 5: порядок сортировки, базовая цена и минимальный возраст -->
       <div class="form-grid grid-3 mb-4">
         <div class="form-group">
           <label class="form-label">ПОРЯДОК (СОРТИРОВКА)</label>
@@ -155,7 +155,7 @@
         </div>
       </div>
 
-      <!-- Row 6: Toggles Container -->
+      <!-- Ряд 6: контейнер переключателей -->
       <div class="toggles-card">
         <label class="toggle-item">
           <input v-model="form.is_active" type="checkbox" class="toggle-checkbox" />
@@ -182,8 +182,8 @@
         </label>
       </div>
 
-      <!-- Row 7: Special service. The flags above cover the rules that are the
-           same for every service; a script carries the ones that are not. -->
+      <!-- Ряд 7: особая услуга. Флаги выше покрывают правила, одинаковые для
+           любой услуги; скрипт несёт те, что не одинаковы. -->
       <div class="form-divider mt-4 mb-4"></div>
 
       <label class="toggle-item special-toggle">
@@ -255,7 +255,7 @@
       </div>
     </div>
 
-    <!-- Footer -->
+    <!-- Подвал -->
     <p v-if="saveError" class="save-error">{{ saveError }}</p>
     <div class="form-footer">
       <button type="button" class="btn-cancel" @click="$emit('cancel')">
@@ -288,8 +288,8 @@ export default defineComponent({
       type: String as PropType<string | null>,
       default: null,
     },
-    // What the server said when it refused the last save — a script that does
-    // not compile, most often. Shown in the footer, where the admin is looking.
+    // Что сказал сервер, когда отклонил последнее сохранение, — чаще всего скрипт,
+    // который не компилируется. Показывается в подвале, куда админ и смотрит.
     saveError: {
       type: String as PropType<string>,
       default: '',
@@ -299,16 +299,16 @@ export default defineComponent({
   setup(props, { emit }) {
     const isEditing = computed(() => props.node !== null)
 
-    // The behaviour list comes from the server, which reads it from the scripts
-    // themselves: a behaviour deployed today is selectable here today, with no
-    // change to this form.
+    // Список поведений приходит с сервера, который читает его из самих скриптов:
+    // поведение, выкаченное сегодня, сегодня же выбирается здесь, без единой правки
+    // этой формы.
     const behaviors = ref<ServiceBehavior[]>([])
     const scriptError = ref('')
     const template = ref('')
 
-    // The two fields of an empty special service. A blank editor is a worse
-    // starting point than a script that already compiles and does nothing
-    // surprising.
+    // Два поля пустой особой услуги. Чистый редактор — стартовая точка хуже, чем
+    // скрипт, который уже компилируется и не делает ничего
+    // неожиданного.
     const EMPTY_CONSTANTS = `# Константы и переменные услуги.
 # Суммы, роли, тексты сообщений — всё, что меняют, не читая логику.
 
@@ -366,9 +366,9 @@ def can_order(f):
           min_age: props.node.min_age || 0,
           behavior_code: props.node.behavior_code || '',
           behavior_config: props.node.behavior_config || {},
-          // A node is special when it runs a script: its own, or a library one
-          // it names. Both are shown in the editor; saving a library one makes
-          // the copy its own.
+          // Узел особый, когда он выполняет скрипт: собственный или библиотечный,
+          // который он называет. В редакторе показываются оба; сохранение
+          // библиотечного делает копию собственной.
           is_special: Boolean(props.node.behavior_source || props.node.behavior_code),
           behavior_constants: props.node.behavior_constants || '',
           behavior_source: props.node.behavior_source || '',
@@ -403,14 +403,14 @@ def can_order(f):
       behaviors.value.find((b) => b.code === form.value.behavior_code) || null
     )
 
-    // True while the node still runs the library script rather than a copy of
-    // its own — the state the editor warns about, because saving forks it.
+    // Истинно, пока узел всё ещё выполняет библиотечный скрипт, а не собственную
+    // копию, — то состояние, о котором предупреждает редактор, ведь сохранение форкает.
     const fromLibrary = computed(
       () => Boolean(form.value.behavior_code) && !props.node?.behavior_source
     )
 
-    // Ticking the flag on an empty node fills both fields, so the admin starts
-    // from something that compiles instead of a blank page.
+    // Установка флага на пустом узле заполняет оба поля, чтобы админ стартовал с
+    // того, что компилируется, а не с чистого листа.
     const onSpecialToggled = () => {
       scriptError.value = ''
       if (!form.value.is_special) {
@@ -421,8 +421,8 @@ def can_order(f):
       }
     }
 
-    // Loading a template replaces both fields. Only ever done on request: it
-    // would otherwise overwrite an edit in progress.
+    // Загрузка шаблона заменяет оба поля. Делается только по запросу: это
+    // иначе перезаписало бы правку, которая в процессе.
     const applyTemplate = () => {
       scriptError.value = ''
       const chosen = behaviors.value.find((b) => b.code === template.value)
@@ -435,8 +435,8 @@ def can_order(f):
       form.value.behavior_source = chosen.source || ''
     }
 
-    // A node running a library script shows that script, so the editor always
-    // displays the rules the service actually runs.
+    // Узел, выполняющий библиотечный скрипт, показывает этот скрипт, поэтому
+    // редактор всегда отображает правила, которые услуга и правда выполняет.
     const showLibrarySource = () => {
       if (!form.value.behavior_code || form.value.behavior_source) {
         return
@@ -453,8 +453,8 @@ def can_order(f):
         behaviors.value = await getServiceBehaviors()
         showLibrarySource()
       } catch {
-        // An admin panel that cannot list the library must still be able to edit
-        // the rest of a service; only the templates are missing.
+        // Админ-панель, не сумевшая перечислить библиотеку, всё равно обязана давать
+        // править остальную часть услуги; не хватает только шаблонов.
         behaviors.value = []
       }
     })
@@ -491,8 +491,8 @@ def can_order(f):
         requires_verification: form.value.requires_verification,
         moderator_only: form.value.moderator_only,
         min_age: form.value.min_age || 0,
-        // The code records which library script this started from; the text
-        // below is what the service actually runs.
+        // Код фиксирует, с какого библиотечного скрипта это началось; текст
+        // ниже — то, что услуга выполняет на самом деле.
         behavior_code: form.value.is_special ? form.value.behavior_code || '' : '',
         behavior_config: form.value.is_special ? form.value.behavior_config : {},
         behavior_constants: form.value.is_special ? form.value.behavior_constants : '',
@@ -539,7 +539,7 @@ def can_order(f):
   margin: 0 auto;
 }
 
-/* Header */
+/* Шапка */
 .form-header {
   display: flex;
   align-items: center;
@@ -601,7 +601,7 @@ def can_order(f):
   color: #0f172a;
 }
 
-/* Body */
+/* Тело */
 .form-body {
   padding: 24px 28px;
   background: #fafbfd;
@@ -815,7 +815,7 @@ def can_order(f):
   overflow-x: auto;
 }
 
-/* Toggles Card */
+/* Карточка переключателей */
 .toggles-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
@@ -876,7 +876,7 @@ def can_order(f):
   color: #0f172a;
 }
 
-/* Footer */
+/* Подвал */
 .form-footer {
   display: flex;
   align-items: center;

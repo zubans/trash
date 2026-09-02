@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// A collector that panics or clashes on gather only shows up when something
-// scrapes it, which in production means the first time anyone looks — usually
-// during an incident.
+// Коллектор, который паникует или конфликтует при сборе, проявляется только
+// когда его кто-то собирает, а в проде это значит — когда кто-то впервые
+// посмотрит, обычно во время инцидента.
 func TestRegistryGathers(t *testing.T) {
-	// Touch every family so the exposition is not trivially empty.
+	// Трогаем каждое семейство, чтобы выкладка не оказалась тривиально пустой.
 	ObserveHTTP("GET", "/api/health", 200, 5*time.Millisecond)
 	AuthEvent("login", "ok")
 	OrderEvent("created")
@@ -36,7 +36,7 @@ func TestRegistryGathers(t *testing.T) {
 		t.Fatal("registry exposed nothing")
 	}
 
-	// An empty address disables the listener; it must return, not panic.
+	// Пустой адрес выключает слушатель; он должен вернуться, а не паниковать.
 	Serve("", OpsHandlers{})
 
 	body := renderForTest(t)
@@ -45,8 +45,8 @@ func TestRegistryGathers(t *testing.T) {
 		"healthlogin_ledger_amount_rubles_total",
 		"healthlogin_reconcile_ok",
 		"healthlogin_build_info",
-		// Registered by default, and the reason a leaking goroutine or a
-		// saturated pool is diagnosable at all.
+		// Зарегистрированы по умолчанию, и именно поэтому утекающая горутина или
+		// забитый пул вообще поддаются диагностике.
 		"go_goroutines",
 	} {
 		if !strings.Contains(body, want) {
@@ -55,9 +55,9 @@ func TestRegistryGathers(t *testing.T) {
 	}
 }
 
-// SetBuildInfo registers a collector on every call. Calling it twice must not
-// take the registry down — main calls it once, but a test binary or a future
-// hot reload could call it again.
+// SetBuildInfo регистрирует коллектор на каждом вызове. Двойной вызов не должен
+// ронять реестр — main вызывает его один раз, но тестовый бинарник или будущая
+// горячая перезагрузка могут вызвать снова.
 func TestSetBuildInfoIsIdempotent(t *testing.T) {
 	SetBuildInfo("1.0.0", "aaa")
 	SetBuildInfo("2.0.0", "bbb")

@@ -54,7 +54,7 @@ func (m *mockShiftRepo) GetActiveShifts(ctx context.Context) ([]*repository.Shif
 	return m.shifts, nil
 }
 
-// Methods required by the ShiftRepository interface.
+// Методы, требуемые интерфейсом ShiftRepository.
 func (m *mockShiftRepo) Create(ctx context.Context, shift *repository.Shift) error {
 	m.shifts = append(m.shifts, shift)
 	return nil
@@ -122,7 +122,7 @@ func TestShiftService_StartShift(t *testing.T) {
 
 	executorID := uuid.New()
 
-	// Case 1: Valid shift (1 hour)
+	// Случай 1: корректная смена (1 час)
 	s, err := srv.StartShift(context.Background(), executorID, 1)
 	if err != nil {
 		t.Fatalf("unexpected error starting shift: %v", err)
@@ -131,7 +131,7 @@ func TestShiftService_StartShift(t *testing.T) {
 		t.Errorf("expected 1 hour duration, got %d", s.DurationHours)
 	}
 
-	// Case 2: Invalid duration (2 hours)
+	// Случай 2: недопустимая длительность (2 часа)
 	_, err = srv.StartShift(context.Background(), executorID, 2)
 	if err == nil {
 		t.Error("expected error starting shift with duration 2")
@@ -139,20 +139,20 @@ func TestShiftService_StartShift(t *testing.T) {
 }
 
 func TestShiftService_IsWithinRadius(t *testing.T) {
-	// Center: Moscow (55.7558, 37.6173)
-	// Point 1: Red Square (approx 55.7539, 37.6208) - should be within 1000m
+	// Центр: Москва (55.7558, 37.6173)
+	// Точка 1: Красная площадь (примерно 55.7539, 37.6208) — должна быть в пределах 1000 м
 	if !IsWithinRadius(55.7558, 37.6173, 55.7539, 37.6208, 1000.0) {
 		t.Error("expected Red Square to be within 1km of Moscow Center")
 	}
 
-	// Point 2: Domodedovo Airport (approx 55.4087, 37.9063) - should be outside 5000m
+	// Точка 2: аэропорт Домодедово (примерно 55.4087, 37.9063) — должна быть за пределами 5000 м
 	if IsWithinRadius(55.7558, 37.6173, 55.4087, 37.9063, 5000.0) {
 		t.Error("expected Domodedovo Airport to be outside 5km of Moscow Center")
 	}
 }
 
 type mockShiftTransactionRepo struct {
-	// txs records the ledger entries written by the service under test.
+	// txs записывает проводки, сделанные проверяемым сервисом.
 	txs []*repository.Transaction
 }
 
@@ -185,8 +185,8 @@ func (m *mockShiftTransactionRepo) HasTip(ctx context.Context, q repository.Quer
 	return false, nil
 }
 
-// recordedLocation is what a fake recorder captured, so a test can assert that
-// the coordinates reached the store rather than being accepted and dropped.
+// recordedLocation — то, что захватил поддельный регистратор, чтобы тест мог
+// убедиться, что координаты дошли до хранилища, а не были приняты и выброшены.
 type recordedLocation struct {
 	executorID uuid.UUID
 	lat, lon   float64
@@ -212,9 +212,9 @@ func newShiftServiceForLocation(recorder ExecutorLocationRecorder) (*ShiftServic
 	return srv, repo
 }
 
-// A reported position is only useful if it is actually stored: automatic
-// matching measures distance against it, so a report that is accepted and
-// dropped leaves matching working from a stale fix.
+// Сообщённая позиция полезна, только если она действительно сохранена:
+// автоподбор меряет по ней расстояние, поэтому отчёт, который приняли и
+// выбросили, оставляет подбор работать по устаревшей координате.
 func TestShiftService_RecordLocationPersistsCoordinates(t *testing.T) {
 	recorder := &fakeLocationRecorder{stored: true}
 	srv, _ := newShiftServiceForLocation(recorder)
@@ -240,8 +240,8 @@ func TestShiftService_RecordLocationPersistsCoordinates(t *testing.T) {
 	}
 }
 
-// The location rules may decline a move that looks like a district change
-// inside its cooldown. That is a legitimate outcome, not a failure.
+// Правила местоположения могут отклонить перемещение, похожее на смену района,
+// пока идёт пауза. Это законный исход, а не сбой.
 func TestShiftService_RecordLocationReportsDeclinedMove(t *testing.T) {
 	recorder := &fakeLocationRecorder{stored: false}
 	srv, _ := newShiftServiceForLocation(recorder)
@@ -260,7 +260,7 @@ func TestShiftService_RecordLocationReportsDeclinedMove(t *testing.T) {
 	}
 }
 
-// Without an active shift there is nothing to report a position against.
+// Без активной смены позицию не с чем связать.
 func TestShiftService_RecordLocationRequiresActiveShift(t *testing.T) {
 	recorder := &fakeLocationRecorder{stored: true}
 	srv, _ := newShiftServiceForLocation(recorder)
@@ -273,8 +273,8 @@ func TestShiftService_RecordLocationRequiresActiveShift(t *testing.T) {
 	}
 }
 
-// A service assembled without a location store must say so rather than accept
-// positions and silently discard them.
+// Сервис, собранный без хранилища местоположений, обязан сказать об этом, а не
+// принимать позиции и молча их выбрасывать.
 func TestShiftService_RecordLocationWithoutStoreFails(t *testing.T) {
 	srv, _ := newShiftServiceForLocation(nil)
 
@@ -345,7 +345,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 		t.Fatalf("unexpected error ending shift early with order: %v", err)
 	}
 
-	// Double penalty (50 * 2) + order cost (300) = 400
+	// Двойной штраф (50 * 2) + стоимость заказа (300) = 400
 	expectedFine := money.FromRubles(400)
 	if ended.FineAmount != expectedFine {
 		t.Errorf("expected fine amount %s, got %s", expectedFine, ended.FineAmount)
@@ -354,7 +354,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 		t.Errorf("expected status PENALIZED, got %s", ended.Status)
 	}
 
-	// Assigned order should be unassigned (SEARCHING).
+	// Назначенный заказ должен стать неназначенным (SEARCHING).
 	updatedOrder, err := orderRepo.GetOrderByID(context.Background(), orderID)
 	if err != nil {
 		t.Fatalf("unexpected error fetching order: %v", err)

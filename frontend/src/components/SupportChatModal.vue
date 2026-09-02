@@ -1,7 +1,7 @@
 <template>
   <div v-if="show" class="support-modal-overlay" @click.self="closeModal">
     <div class="support-modal-card">
-      <!-- Modal Header -->
+      <!-- Шапка модального окна -->
       <div class="support-modal-header">
         <div class="header-title-group">
           <div class="headset-avatar">
@@ -19,7 +19,7 @@
         </button>
       </div>
 
-      <!-- Messages Scroll Container -->
+      <!-- Прокручиваемый контейнер сообщений -->
       <div ref="messagesContainerRef" class="support-messages-area">
         <div v-if="loading" class="support-loading">
           <i class="ph ph-spinner spinner"></i>
@@ -32,8 +32,8 @@
           <p>Напишите нам, если у вас возникли вопросы или нужна помощь. Администратор ответит в ближайшее время.</p>
         </div>
 
-        <!-- The server returns the most recent page, so older history is
-             reachable on request rather than loaded with every open. -->
+        <!-- Сервер возвращает самую свежую страницу, поэтому более старая история
+             доступна по запросу, а не грузится при каждом открытии. -->
         <div v-if="canLoadOlder" class="support-load-older">
           <button type="button" :disabled="loadingOlder" @click="loadOlderMessages">
             <i v-if="loadingOlder" class="ph ph-spinner spinner"></i>
@@ -47,7 +47,7 @@
           :class="['msg-bubble-wrap', isMyMessage(msg) ? 'outgoing' : 'incoming']"
         >
           <div class="msg-bubble-content">
-            <!-- Image attachment -->
+            <!-- Вложение-изображение -->
             <div v-if="isImageAttachment(msg)" class="msg-img-box mb-1">
               <img
                 :src="getImageSrc(msg)"
@@ -57,14 +57,14 @@
               />
             </div>
 
-            <!-- File attachment -->
+            <!-- Вложение-файл -->
             <div v-else-if="msg.file_url" class="msg-file-box mb-1">
               <a :href="resolveFileUrl(msg.file_url)" target="_blank" download class="file-link">
                 <i class="ph-fill ph-file-text me-1"></i> {{ msg.file_name || 'Скачать файл' }}
               </a>
             </div>
 
-            <!-- Text -->
+            <!-- Текст -->
             <div v-if="msg.text || msg.content" class="msg-text">
               {{ msg.text || msg.content }}
             </div>
@@ -76,7 +76,7 @@
         </div>
       </div>
 
-      <!-- Hidden file input for web attachment -->
+      <!-- Скрытый файловый input для веб-вложений -->
       <input
         ref="fileInputRef"
         type="file"
@@ -85,13 +85,13 @@
         @change="onFileSelected"
       />
 
-      <!-- Banned Notice Banner -->
+      <!-- Баннер уведомления о бане -->
       <div v-if="isBanned" class="support-banned-banner">
         <i class="ph-bold ph-prohibit icon-ban"></i>
         <span>{{ banNoticeText }}</span>
       </div>
 
-      <!-- Input Bar — single rounded pill, matching the order chat -->
+      <!-- Строка ввода — единая скруглённая «пилюля», как в чате заказа -->
       <div v-else class="support-input-bar">
         <form class="chat-pill" @submit.prevent="sendMessage">
           <button
@@ -124,7 +124,7 @@
       </div>
     </div>
 
-    <!-- Image Preview Modal -->
+    <!-- Модальное окно просмотра изображения -->
     <div v-if="showImageModal" class="img-preview-overlay" @click="showImageModal = false">
       <img :src="previewUrl" alt="Превью" class="img-preview-full" />
     </div>
@@ -175,8 +175,8 @@ export default defineComponent({
     const showImageModal = ref(false)
     const previewUrl = ref('')
 
-    // Mirrors repository.DefaultMessagePageSize: a full page back means there
-    // is probably more history above it.
+    // Повторяет repository.DefaultMessagePageSize: полная страница назад означает,
+    // что выше неё, вероятно, есть ещё история.
     const PAGE_SIZE = 100
     const hasOlder = ref(false)
     const loadingOlder = ref(false)
@@ -232,8 +232,8 @@ export default defineComponent({
     const readMessages = (res: any) =>
       Array.isArray(res.data) ? res.data : (res.data?.messages || [])
 
-    // Full read of the most recent page. Used when the chat is opened; the
-    // server decides how much "recent" is.
+    // Полное чтение самой свежей страницы. Используется при открытии чата;
+    // сколько именно «свежей», решает сервер.
     const fetchMessages = async () => {
       if (!chatId.value) return
       try {
@@ -241,8 +241,8 @@ export default defineComponent({
         const data = readMessages(res)
         const isChanged = data.length !== messages.value.length
         messages.value = data
-        // A short first page means the conversation is fully loaded; a full one
-        // means there may be more above it.
+        // Короткая первая страница означает, что переписка загружена целиком; полная —
+        // что выше может быть ещё.
         hasOlder.value = data.length >= PAGE_SIZE
         if (isChanged) scrollToBottom()
       } catch (err) {
@@ -250,8 +250,8 @@ export default defineComponent({
       }
     }
 
-    // Fetch the page above what is on screen and prepend it, keeping the view
-    // where the reader left it rather than jumping.
+    // Достаём страницу над тем, что на экране, и добавляем её сверху, оставляя вид
+    // там, где читатель его оставил, а не прыгая.
     const loadOlderMessages = async () => {
       if (!chatId.value || loadingOlder.value) return
       const oldest = messages.value[0]
@@ -281,9 +281,9 @@ export default defineComponent({
       }
     }
 
-    // What the timer calls: ask only for what arrived since the newest message
-    // already on screen. The poll used to re-download the entire conversation
-    // every few seconds, which grew with the length of the chat.
+    // То, что вызывает таймер: спрашиваем только то, что появилось после самого
+    // свежего сообщения на экране. Раньше опрос перекачивал всю переписку каждые
+    // несколько секунд, и это росло вместе с длиной чата.
     const fetchNewMessages = async () => {
       if (!chatId.value) return
       const newest = messages.value[messages.value.length - 1]
@@ -446,7 +446,7 @@ export default defineComponent({
     )
 
 
-    // Disable body scrolling while modal is open
+    // Отключаем прокрутку страницы, пока открыто модальное окно
     useScrollLock(() => props.show)
 
     onUnmounted(() => {
@@ -747,7 +747,7 @@ export default defineComponent({
   border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-/* Single rounded pill holding attach + input + send, like the order chat. */
+/* Единая скруглённая «пилюля» со скрепкой, полем ввода и отправкой, как в чате заказа. */
 .chat-pill {
   display: flex;
   align-items: center;

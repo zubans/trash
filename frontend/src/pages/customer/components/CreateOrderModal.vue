@@ -167,15 +167,15 @@ export default defineComponent({
   props: {
     modelValue: { type: Boolean, required: true },
     orderAddress: { type: String, default: '' },
-    // Declared nullable because that is what the dashboard passes: these are
-    // refs that start as null until a category is picked or the saved address's
-    // coordinates are applied. Typing them as plain String/Number made every
-    // binding a type error, which nothing was checking.
+    // Объявлены допускающими null, потому что именно это передаёт дашборд: это
+    // ref'ы, которые стартуют как null, пока не выбрана категория или пока не
+    // применены координаты сохранённого адреса. Типизация их как обычных
+    // String/Number делала каждое связывание ошибкой типа, которую никто не проверял.
     orderLat: { type: Number as PropType<number | null>, default: null },
     orderLon: { type: Number as PropType<number | null>, default: null },
     selectedVariantId: { type: String as PropType<string | null>, default: null },
-    // One level of the catalog: categories and services mixed, in the order the
-    // backend returns them. catalogPath is the breadcrumb of opened categories.
+    // Один уровень каталога: категории и услуги вперемешку, в том порядке, в каком
+    // их возвращает бэкенд. catalogPath — хлебные крошки открытых категорий.
     catalogItems: { type: Array as () => any[], default: () => [] },
     catalogPath: { type: Array as () => any[], default: () => [] },
     catalogLoading: { type: Boolean, default: false },
@@ -190,8 +190,8 @@ export default defineComponent({
     'update:modelValue',
     'update:isUrgent',
     'update:orderComment',
-    // openNode: a category to descend into or a service to select.
-    // goLevel: index in catalogPath to jump back to (-1 = root).
+    // openNode: категория, в которую спускаться, или услуга, которую выбирают.
+    // goLevel: индекс в catalogPath, к которому вернуться (-1 — корень).
     'openNode',
     'goLevel',
     'submitOrder',
@@ -270,7 +270,7 @@ export default defineComponent({
   color: #0f172a;
 }
 
-/* --- Modal Container --- */
+/* --- Контейнер модального окна --- */
 .modal-card {
   background: #ffffff;
   border-radius: 24px;
@@ -291,7 +291,7 @@ export default defineComponent({
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* --- Header --- */
+/* --- Шапка --- */
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -325,7 +325,7 @@ export default defineComponent({
   color: #0f172a;
 }
 
-/* --- Address Block --- */
+/* --- Блок адреса --- */
 .address-box {
   background: #f8fafc;
   border: 1px solid rgba(0,0,0,0.04);
@@ -357,7 +357,7 @@ export default defineComponent({
   line-height: 1.3;
 }
 
-/* --- Form Sections --- */
+/* --- Разделы формы --- */
 .form-section {
   display: flex;
   flex-direction: column;
@@ -458,7 +458,7 @@ export default defineComponent({
   color: #ffffff;
 }
 
-/* Speed options group */
+/* Группа вариантов скорости */
 .speed-options-group {
   display: flex;
   gap: 8px;
@@ -711,7 +711,7 @@ export default defineComponent({
   animation: spin 0.8s linear infinite;
 }
 
-/* --- Footer (Action Bar) --- */
+/* --- Подвал (панель действий) --- */
 .modal-footer {
   margin-top: 8px;
   display: flex;
@@ -734,7 +734,7 @@ export default defineComponent({
   background: #f1f5f9;
 }
 
-/* Combined Submit + Price Button */
+/* Совмещённая кнопка «Отправить + цена» */
 .btn-submit {
   flex: 1;
   background: #5c60f5;

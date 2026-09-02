@@ -24,8 +24,8 @@ export async function submitOrderReview(orderId: string, payload: { rating: numb
   return response.data
 }
 
-// sendOrderTip charges a tip to the executor of a completed order. The amount
-// is in rubles; the backend moves it from the customer's balance.
+// sendOrderTip списывает чаевые исполнителю завершённого заказа. Сумма в
+// рублях; бэкенд снимает её с баланса заказчика.
 export async function sendOrderTip(orderId: string, amount: number): Promise<void> {
   await api.post(`/customer/orders/${orderId}/tip`, { amount })
 }

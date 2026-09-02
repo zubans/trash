@@ -49,8 +49,8 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Observability. The pool counters are registered before anything starts
-	// using the pool, so a saturated pool at startup is visible too.
+	// Наблюдаемость. Счётчики пула регистрируются до того, как им начнут
+	// пользоваться, чтобы забитый пул был виден и на старте.
 	metrics.RegisterDB(db, "main")
 	metrics.SetBuildInfo(getEnv("APP_VERSION", "dev"), getEnv("GIT_COMMIT", "unknown"))
 
@@ -59,21 +59,21 @@ func main() {
 		log.Fatalf("JWT_SECRET environment variable is required")
 	}
 
-	// Schema first: the process must not start against a half-built schema.
-	// Set SKIP_MIGRATIONS=1 when migrations are applied by a separate step.
+	// Сначала схема: процесс не должен стартовать на недостроенной схеме.
+	// Ставьте SKIP_MIGRATIONS=1, когда миграции применяются отдельным шагом.
 	if getEnv("SKIP_MIGRATIONS", "") == "" {
 		if err := repository.Migrate(db, getEnv("MIGRATIONS_DIR", "migrations")); err != nil {
 			log.Fatalf("Failed to apply migrations: %v", err)
 		}
 	}
 
-	// Repositories
+	// Репозитории
 	userRepo := repository.New(db)
 	adminRepo := repository.NewAdminRepository(db)
-	// system_settings is a handful of rows read on the pricing, eligibility and
-	// matching paths — several times per request, and inside worker loops. The
-	// cache is written through, so an admin's change still applies to the next
-	// order; the TTL only bounds staleness from writes this process did not make.
+	// system_settings — несколько строк, читаемых на путях ценообразования,
+	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
+	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
+	// TTL лишь ограничивает устаревание от записей, сделанных не этим процессом.
 	settingsRepo := repository.NewCachedSettingsRepository(
 		repository.NewSettingsRepository(db),
 		time.Duration(getEnvInt("SETTINGS_CACHE_TTL_SEC", 10))*time.Second,
@@ -84,10 +84,10 @@ func main() {
 	transactionRepo := repository.NewTransactionRepository(db)
 	bidRepo := repository.NewBidRepository(db)
 	chatRepo := repository.NewChatRepository(db)
-	// Every order rendered in a list resolves its service variant, and the
-	// eligibility predicate reads that variant's flags for every order it judges.
-	// The catalog itself changes only when an admin edits it, and those edits go
-	// through this same repository and flush the cache.
+	// Каждый заказ в списке разрешает свой вариант услуги, а предикат допуска
+	// читает флаги этого варианта для каждого оцениваемого заказа. Сам каталог
+	// меняется, только когда его правит админ, и эти правки идут через тот же
+	// репозиторий и сбрасывают кэш.
 	catalogRepo := repository.NewCachedServiceCatalogRepository(
 		repository.NewServiceCatalogRepository(db),
 		time.Duration(getEnvInt("CATALOG_CACHE_TTL_SEC", 60))*time.Second,
@@ -99,25 +99,25 @@ func main() {
 	addressRepo := repository.NewAddressRepository(db)
 	reconcileRepo := repository.NewReconciliationRepository(db)
 	systemAccountRepo := repository.NewSystemAccountRepository(db)
-	// Scripted services: the outbox the behaviour dispatcher reads, and the
-	// claims that make a once-per-user service once per user.
+	// Скриптовые услуги: outbox, который читает диспетчер поведений, и claim'ы,
+	// делающие услугу «один раз на пользователя» действительно однократной.
 	eventRepo := repository.NewEventRepository(db)
 	serviceClaimRepo := repository.NewServiceClaimRepository(db)
-	// Data an executor submits for checking, and the cases a behaviour hands to
-	// an administrator when it does not match.
+	// Данные, отправляемые исполнителем на проверку, и случаи, которые поведение
+	// передаёт администратору при несовпадении.
 	submissionRepo := repository.NewSubmissionRepository(db)
 
-	// Services
-	// Every movement of money goes through the ledger, which always touches both
-	// a user balance and a system account.
+	// Сервисы
+	// Любое движение денег идёт через реестр, который всегда затрагивает и баланс
+	// пользователя, и системный счёт.
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
 
-	// Behaviour scripts carry the rules of the services whose conditions do not
-	// fit the catalog's flags (see doc/service_behaviors.md). The copies
-	// embedded in the binary load first; a directory on top of them lets a rule
-	// be corrected on a running deployment without a rebuild. A script that
-	// fails to compile is logged and skipped — the nodes that name it then fail
-	// closed, which is the safe direction and a loud one.
+	// Скрипты поведений несут правила услуг, чьи условия не укладываются во флаги
+	// каталога (см. doc/service_behaviors.md). Первыми загружаются копии,
+	// встроенные в бинарник; каталог поверх них позволяет поправить правило на
+	// работающем деплое без пересборки. Скрипт, который не скомпилировался,
+	// логируется и пропускается — узлы, называющие его, тогда отказывают в
+	// безопасную сторону, и делают это громко.
 	behaviorEngine := behavior.New(behavior.DefaultLimits)
 	if err := behaviorEngine.Load(behaviors.FS, "embedded"); err != nil {
 		log.Printf("[behavior] WARNING: %v", err)
@@ -129,31 +129,31 @@ func main() {
 	}
 	serviceBehaviors := service.NewBehaviors(behaviorEngine, serviceClaimRepo).
 		WithCatalog(catalogRepo)
-	// Special services carry their own script, written in the admin panel. They
-	// are compiled before the first request: a node whose script is not loaded
-	// fails its gates closed, and doing that during startup is quieter than
-	// doing it to a customer.
+	// Особые услуги несут собственный скрипт, написанный в админ-панели. Они
+	// компилируются до первого запроса: узел, чей скрипт не загружен, закрывает
+	// свои проверки в безопасную сторону, и сделать это при старте тише, чем
+	// сделать это заказчику.
 	if err := serviceBehaviors.SyncAll(context.Background()); err != nil {
 		log.Printf("[behavior] WARNING: %v", err)
 	}
 
-	// DaData is the only source of address data — suggestions and coordinate
-	// resolution alike. There is deliberately no fallback: the alternative had
-	// no apartment data and rejected ordinary house numbers, and silently
-	// serving that again would hide the misconfiguration behind an address entry
-	// that half works. The cache spares the provider repeated resolves of the
-	// same address on the fallback path.
+	// DaData — единственный источник адресных данных: и подсказок, и разрешения
+	// координат. Запасного варианта намеренно нет: у альтернативы не было данных о
+	// квартирах и она отвергала обычные номера домов, а молчаливое возвращение к
+	// ней спрятало бы ошибку конфигурации за наполовину работающим вводом адреса.
+	// Кэш избавляет провайдера от повторных разрешений одного и того же адреса на
+	// запасном пути.
 	addressSuggester := service.NewAddressSuggester(service.NewDaData(), repository.NewGeocodeCacheRepository(db))
 	if addressSuggester.Configured() {
 		log.Printf("[address] suggestions served by DaData")
 	} else {
-		// Not fatal: a missing key must not take down orders, chat and payments
-		// along with it. Address entry reports 503 until the key is set.
+		// Не фатально: отсутствующий ключ не должен утаскивать за собой заказы, чат и
+		// платежи. Ввод адреса отдаёт 503, пока ключ не задан.
 		log.Printf("[address] WARNING: DADATA_API_KEY is not set — address suggestions will return 503 and registration cannot complete")
 	}
 	mailer := service.NewSmtpMailSender()
-	// AuthService owns everything session related: issuing access tokens,
-	// rotating refresh tokens and blacklisting revoked access tokens.
+	// AuthService владеет всем, что связано с сессиями: выдачей access-токенов,
+	// ротацией refresh-токенов и занесением отозванных access-токенов в чёрный список.
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, addressSuggester, mailer).
 		WithAddresses(addressRepo).
 		WithExecutorGeo(executorGeoRepo).
@@ -170,12 +170,12 @@ func main() {
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors)
-	// Shift location reports are written through the geo service, so the stored
-	// executor position has a single writer and one set of rules.
+	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
+	// сохранённой позиции исполнителя один писатель и один набор правил.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
 		WithExecutorLocation(executorGeoService)
-	// Automatic matching is bounded by distance, which needs the executor's
-	// stored position and the configured radius.
+	// Автоматический подбор ограничен расстоянием, для чего нужны сохранённая
+	// позиция исполнителя и настроенный радиус.
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
 		WithGeo(executorGeoRepo, settingsRepo).
 		WithBehaviors(serviceBehaviors)
@@ -184,17 +184,17 @@ func main() {
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 
-	// Every periodic job below changes state that must change once — a refund, a
-	// penalty, an assignment. The leader guard makes each tick run on a single
-	// process, so a second replica skips it rather than doing the work twice.
-	// With one process it costs one advisory lock per tick and nothing else.
+	// Каждая периодическая задача ниже меняет состояние, которое должно измениться
+	// один раз: возврат, штраф, назначение. Защита лидером заставляет каждый тик
+	// выполняться на одном процессе, поэтому вторая реплика его пропускает, а не
+	// делает работу дважды. С одним процессом это стоит одной advisory-блокировки на тик и больше ничего.
 	leader := worker.NewLeader(db)
 
-	// Start background order matcher
+	// Запускаем фоновый подборщик заказов
 	matchingService.WithLeaderGuard(leader.Guard("matching"))
 	matchingService.StartMatchingWorker(context.Background(), 5*time.Second)
 
-	// Start background workers
+	// Запускаем фоновые воркеры
 	slaWorker := worker.NewSLAWorker(db, orderService, chatService, ledger).
 		WithLeader(leader, "sla")
 	slaWorker.Start(30 * time.Second)
@@ -203,23 +203,23 @@ func main() {
 		WithLeader(leader, "auction")
 	auctionWorker.Start(1 * time.Minute)
 
-	// Orders that carry no pickup coordinates — an older client that sent none
-	// and whose address could not be resolved at creation, or orders that
-	// predate coordinate capture — are invisible on the executor map. This
-	// backfills them through the address resolver, off the request path.
+	// Заказы без координат подачи — от старого клиента, который их не прислал и
+	// чей адрес не удалось разрешить при создании, или заказы, появившиеся до
+	// захвата координат, — не видны на карте исполнителя. Здесь они дозаполняются
+	// через разрешатель адресов, вне пути запроса.
 	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, addressSuggester).
 		WithLeader(leader, "geocode_backfill")
 	geocodeWorker.Start(1 * time.Minute)
 
-	// The only thing that closes an expired shift: one periodic scan, which also
-	// picks up shifts that were running when the process restarted.
+	// Единственное, что закрывает истёкшую смену: один периодический проход, он же
+	// подбирает смены, которые шли в момент перезапуска процесса.
 	shiftWorker := worker.NewShiftWorker(shiftService).
 		WithLeader(leader, "shift_autoclose")
 	shiftWorker.Start(1 * time.Minute)
 
-	// Domain events reach their behaviours here: an order that closes itself
-	// once its customer is verified, and the reward that goes with it. Short
-	// interval, because somebody is waiting for both.
+	// Здесь доменные события доходят до своих поведений: заказ, закрывающий себя
+	// сам, когда его заказчик верифицирован, и идущее с этим вознаграждение.
+	// Интервал короткий, потому что и того и другого кто-то ждёт.
 	behaviorDispatcher := service.NewBehaviorDispatcher(
 		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
 		settingsRepo, ledger, serviceBehaviors, orderService,
@@ -228,18 +228,18 @@ func main() {
 		WithLeader(leader, "behavior_dispatch").
 		WithScriptSync(serviceBehaviors)
 	behaviorWorker.Start(5 * time.Second)
-	// Scripts edited on another process, or straight in the database, reach this
-	// one within a minute.
+	// Скрипты, отредактированные на другом процессе или прямо в базе, доходят до
+	// этого в течение минуты.
 	behaviorWorker.StartScriptSync(1 * time.Minute)
 
-	// Nightly books check. It reports and never repairs: a balance that drifted
-	// away from its ledger is a bug worth seeing, not a number to overwrite.
+	// Ночная проверка книг. Она только сообщает и никогда не чинит: баланс,
+	// разошедшийся со своим реестром, — это баг, который надо видеть, а не число, которое надо переписать.
 	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
 		WithLeader(leader, "reconcile")
 	reconcileWorker.Start(24 * time.Hour)
 
-	// Expired refresh tokens are dropped daily; used ones are kept until they
-	// expire because replay detection needs to recognise them.
+	// Истёкшие refresh-токены удаляются ежедневно; использованные хранятся до
+	// истечения срока, потому что обнаружение повторов должно их узнавать.
 	go func() {
 		authService.CleanupExpiredRefreshTokens(context.Background())
 		for range time.Tick(24 * time.Hour) {
@@ -250,7 +250,7 @@ func main() {
 	// Middleware
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret)
 
-	// Handlers
+	// Обработчики
 	ph := handler.NewPublicHandler(authService)
 	ah := handler.NewAdminHandler(adminService)
 	oh := handler.NewOrderHandler(orderService)
@@ -264,48 +264,48 @@ func main() {
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
 
-	// Rate limiters for the endpoints that are worth brute forcing.
+	// Ограничители частоты для эндпоинтов, которые есть смысл перебирать.
 	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
 	passwordResetLimiter := middleware.NewRateLimiter(5, 15*time.Minute)
 	registerLimiter := middleware.NewRateLimiter(5, time.Hour)
 	geoLimiter := middleware.NewRateLimiter(30, time.Minute)
 
 	r := chi.NewRouter()
-	// StripQueryToken runs before the logger so credentials passed as a query
-	// parameter never reach the access log.
+	// StripQueryToken выполняется до логгера, чтобы учётные данные, переданные
+	// параметром запроса, никогда не попадали в лог доступа.
 	r.Use(middleware.StripQueryToken)
 	r.Use(corsMiddleware)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(chiMiddleware.Recoverer)
-	// Inside Recoverer so a panic is counted as the 500 the client actually
-	// received, rather than vanishing from the request counters entirely.
+	// Внутри Recoverer, чтобы паника считалась той самой 500, которую клиент
+	// действительно получил, а не пропадала из счётчиков запросов целиком.
 	r.Use(metrics.Middleware)
 	r.Use(chiMiddleware.Logger)
 	r.Use(middleware.MaxBodyBytes(1 << 20))
 
-	// registerAPIRoutes wires every handler onto the given chi.Router. It is
-	// mounted under /api/* and, while LEGACY_ROOT_ROUTES is enabled, also at the
-	// root for mobile builds that predate the /api prefix. Both mounts carry the
-	// same authentication and authorization middleware.
+	// registerAPIRoutes навешивает каждый обработчик на переданный chi.Router. Он
+	// монтируется под /api/*, а пока включён LEGACY_ROOT_ROUTES — ещё и в корне,
+	// для мобильных сборок, появившихся раньше префикса /api. Оба монтирования
+	// несут одни и те же middleware аутентификации и авторизации.
 	registerAPIRoutes := func(r chi.Router) {
 		r.Get("/health", ph.HealthHandler)
 		r.With(registerLimiter.Middleware).Post("/register", ph.RegisterHandler)
 		r.With(loginLimiter.Middleware).Post("/login", ph.LoginHandler)
-		// Refreshing is unauthenticated by design: the access token is expired
-		// by the time a client needs this. The refresh token is the credential,
-		// so the endpoint is rate limited like the other credential endpoints.
+		// Обновление намеренно без аутентификации: к моменту, когда клиенту это нужно,
+		// access-токен уже истёк. Учётными данными служит refresh-токен, поэтому
+		// эндпоинт ограничен по частоте, как и прочие эндпоинты с учётными данными.
 		r.With(loginLimiter.Middleware).Post("/auth/refresh", ph.RefreshHandler)
 		r.Get("/auth/verify-email", ph.VerifyEmailHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/forgot-password", ph.ForgotPasswordHandler)
 		r.With(passwordResetLimiter.Middleware).Post("/auth/reset-password", ph.ResetPasswordHandler)
-		// The address provider is a paid, shared upstream: unbounded anonymous
-		// access to it burns quota and slows address entry for everyone.
+		// Провайдер адресов — платный общий внешний сервис: неограниченный анонимный
+		// доступ к нему жжёт квоту и замедляет ввод адреса для всех.
 		r.With(geoLimiter.Middleware).Get("/geo/geocode", gh.Geocode)
 		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
 		r.With(geoLimiter.Middleware).Get("/geo/suggest", gh.Suggest)
 		r.Get("/settings", ah.GetPublicSettingsHandler)
-		// OptionalAuth so the catalog can hide verification-only services from
-		// unverified customers while staying reachable to anonymous visitors.
+		// OptionalAuth, чтобы каталог мог прятать услуги «только для верифицированных»
+		// от неверифицированных заказчиков, оставаясь доступным анонимным посетителям.
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.OptionalAuth)
 			r.Get("/service-categories", sch.ListRootCategories)
@@ -318,8 +318,8 @@ func main() {
 		r.Get("/users/{id}/reviews", rh.GetUserReviews)
 		r.Get("/users/{id}/rating", rh.GetUserRating)
 
-		// Authenticated customer routes. ADMIN is included so support staff can
-		// act on behalf of a customer from the admin panel.
+		// Аутентифицированные маршруты заказчика. ADMIN включён, чтобы поддержка могла
+		// действовать от имени заказчика из админ-панели.
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "ADMIN"))
@@ -333,17 +333,17 @@ func main() {
 			r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
 		})
 
-		// Authenticated shared routes (customer + executor + admin)
+		// Аутентифицированные общие маршруты (заказчик + исполнитель + админ)
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
 			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/user/profile", ah.GetProfileHandler)
-			// Both paths return the caller's own profile. /customer/profile is
-			// kept here rather than in the customer group because the executor
-			// app also calls it.
+			// Оба пути возвращают собственный профиль вызывающего. /customer/profile
+			// оставлен здесь, а не в группе заказчика, потому что приложение
+			// исполнителя тоже его вызывает.
 			r.Get("/customer/profile", ah.GetProfileHandler)
-			// Executors need top-ups too: fines can take a balance negative.
+			// Исполнителям тоже нужны пополнения: штрафы могут увести баланс в минус.
 			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
@@ -369,7 +369,7 @@ func main() {
 			r.Post("/logout", ph.LogoutHandler)
 		})
 
-		// Authenticated executor routes
+		// Аутентифицированные маршруты исполнителя
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("EXECUTOR", "MODERATOR", "ADMIN"))
@@ -378,7 +378,7 @@ func main() {
 			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
 			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
 			r.Post("/executor/set-location", egh.SetLocation)
-			// Resumes automatic positioning after a manual pick.
+			// Возобновляет автоматическое позиционирование после ручного выбора.
 			r.Post("/executor/follow-device", egh.FollowDevice)
 			r.Get("/executor/location", egh.GetLocation)
 			r.Get("/executor/map-orders", egh.GetMapOrders)
@@ -390,13 +390,13 @@ func main() {
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
 			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
-			// Data the executor submits for checking on a scripted service —
-			// the identity check on a verification order.
+			// Данные, которые исполнитель отправляет на проверку по скриптовой услуге, —
+			// проверка личности в заказе верификации.
 			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
 		})
 
-		// Authenticated admin routes
+		// Аутентифицированные маршруты админа
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(authMiddleware.RequireAdmin)
@@ -443,22 +443,22 @@ func main() {
 		})
 	}
 
-	// Primary mount: /api/* (web via nginx + rebuilt mobile app).
+	// Основное монтирование: /api/* (веб через nginx + пересобранное мобильное приложение).
 	r.Route("/api", registerAPIRoutes)
 
-	// Legacy mount: the same API at the root, for installed APKs that predate the
-	// /api prefix. Off by default — nothing outside can reach these paths anyway:
-	// nginx proxies only /api/, /health, /releases/ and /uploads/, and the plain
-	// HTTP port they used to talk to is no longer published. Set
-	// LEGACY_ROOT_ROUTES=1 only if an old client is put back on the network.
+	// Легаси-монтирование: тот же API в корне, для установленных APK, появившихся
+	// раньше префикса /api. По умолчанию выключено — снаружи до этих путей всё
+	// равно не дотянуться: nginx проксирует только /api/, /health, /releases/ и
+	// /uploads/, а обычный HTTP-порт, с которым они общались, больше не
+	// публикуется. Ставьте LEGACY_ROOT_ROUTES=1 только если старого клиента снова пустили в сеть.
 	if getEnv("LEGACY_ROOT_ROUTES", "0") == "1" {
 		log.Println("LEGACY_ROOT_ROUTES enabled: the API is also served without the /api prefix, doubling the exposed surface.")
 		registerAPIRoutes(r)
 	}
 
-	// Release APKs are public by design. Uploaded chat attachments are not:
-	// they are served by an authenticated handler that verifies the caller
-	// participates in the conversation the file belongs to.
+	// APK релизов публичны по замыслу. Загруженные вложения чата — нет:
+	// их отдаёт аутентифицированный обработчик, проверяющий, что вызывающий
+	// участвует в переписке, которой принадлежит файл.
 	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir(getEnv("RELEASES_DIR", "releases")))).ServeHTTP)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware.RequireAuth)
@@ -466,19 +466,19 @@ func main() {
 		r.Get("/api/uploads/*", ch.ServeAttachmentHandler)
 	})
 
-	// Prometheus scrape target. Bound to the compose network only: nginx never
-	// proxies it and the port is not published to the host. Set METRICS_ADDR to
-	// an empty value to turn the listener off.
+	// Цель сбора для Prometheus. Привязана только к сети compose: nginx её не
+	// проксирует, а порт не публикуется на хост. Пустое значение METRICS_ADDR
+	// выключает слушатель.
 	metrics.Serve(getEnv("METRICS_ADDR", ":9091"), metrics.OpsHandlers{
-		// Shared with the ops bot, which is the only thing that calls this.
-		// Unset means the routes are not registered at all.
+		// Общий с ops-ботом, который единственный это вызывает.
+		// Незаданное значение означает, что маршруты вообще не регистрируются.
 		Secret: os.Getenv("OPS_KEY"),
 		Reconcile: func() (any, error) {
 			return adminService.Reconcile(context.Background(), money.FromRubles(0.01))
 		},
 	})
 
-	// Register pprof handlers for debugging (only exposed locally)
+	// Регистрируем обработчики pprof для отладки (доступны только локально)
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
@@ -502,8 +502,8 @@ func main() {
 		}()
 	}
 
-	// Optional plain HTTP server for mobile/debug clients on the same network.
-	// Set MOBILE_HTTP_ADDR (e.g. :8081) to enable. Disabled by default.
+	// Необязательный обычный HTTP-сервер для мобильных/отладочных клиентов в той же сети.
+	// Задайте MOBILE_HTTP_ADDR (например, :8081), чтобы включить. По умолчанию выключен.
 	if mobileAddr := getEnv("MOBILE_HTTP_ADDR", ""); mobileAddr != "" {
 		go func() {
 			log.Printf("Starting mobile HTTP server on %s", mobileAddr)
@@ -514,10 +514,10 @@ func main() {
 	log.Fatalf("Server error: %v", <-errChan)
 }
 
-// newServer builds an http.Server with explicit timeouts. The zero-value
-// server has none, which leaves the process open to slow-client exhaustion.
-// WriteTimeout is deliberately absent: the chat WebSocket lives on the same
-// router and a write deadline would tear long-lived sockets down.
+// newServer собирает http.Server с явными таймаутами. У сервера с нулевыми
+// значениями их нет, что оставляет процесс открытым для истощения медленными клиентами.
+// WriteTimeout намеренно отсутствует: WebSocket чата живёт на том же роутере,
+// и дедлайн записи рвал бы долгоживущие сокеты.
 func newServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -528,33 +528,33 @@ func newServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-// configurePool bounds the connection pool.
+// configurePool ограничивает пул соединений.
 //
-// The point is the bound, not the size. An unconfigured pool has no limit on
-// open connections, so a client surge opens them until Postgres refuses with
-// "sorry, too many connections" — an outage rather than a queue. With a limit
-// the queue forms inside the process, where it is visible (the pool gauges
-// registered by metrics.RegisterDB report WaitCount and WaitDuration) and where
-// waiting requests still hold their place in line.
+// Смысл в границе, а не в размере. У ненастроенного пула нет предела на
+// открытые соединения, поэтому всплеск клиентов открывает их, пока Postgres не
+// откажет «sorry, too many connections» — это авария, а не очередь. С пределом
+// очередь образуется внутри процесса, где она видна (датчики пула,
+// зарегистрированные metrics.RegisterDB, отдают WaitCount и WaitDuration) и где
+// ждущие запросы сохраняют своё место в очереди.
 //
-// Idle is kept equal to open on purpose: the default of two idle connections
-// means every surge above two pays connection setup again, which is the cost
-// this is meant to avoid. The default of 25 leaves room under a stock
-// max_connections=100 for the workers' own traffic, a migration run and a psql
-// session, and is overridable for a host tuned differently.
+// Idle намеренно держится равным open: умолчание в два простаивающих
+// соединения означает, что каждый всплеск сверх двух снова платит за
+// установку соединения, а именно этой платы всё и должно избежать. Умолчание
+// в 25 оставляет под штатным max_connections=100 место для трафика воркеров,
+// прогона миграций и сессии psql, и переопределяется для иначе настроенного хоста.
 func configurePool(db *sql.DB) {
 	maxOpen := getEnvInt("DB_MAX_OPEN_CONNS", 25)
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxOpen)
-	// Recycle idle connections so a pool that ballooned during a spike returns
-	// to a small steady state, and cap total lifetime so a long-lived process
-	// picks up server-side changes (a restarted database, a rotated password).
+	// Перерабатываем простаивающие соединения, чтобы пул, раздувшийся на пике,
+	// вернулся к небольшому устойчивому состоянию, и ограничиваем общее время жизни,
+	// чтобы долгий процесс подхватывал изменения на сервере (перезапуск базы, смену пароля).
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	log.Printf("[db] pool limited to %d open connections", maxOpen)
 }
 
-// waitForDB retries db.Ping with a short backoff until the database is ready.
+// waitForDB повторяет db.Ping с короткой паузой, пока база не будет готова.
 func waitForDB(db *sql.DB) error {
 	var err error
 	for i := 0; i < 10; i++ {
@@ -569,7 +569,7 @@ func waitForDB(db *sql.DB) error {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
-	// Shared with the WebSocket origin check so both stay in sync.
+	// Общий с проверкой Origin у WebSocket, чтобы оба оставались согласованными.
 	allowedOrigins := service.AllowedOrigins()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -595,9 +595,9 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// getEnvInt reads a positive integer setting, falling back when it is unset or
-// unparseable. A malformed value takes the default rather than the process:
-// tuning knobs must not be able to stop the service from starting.
+// getEnvInt читает положительную целочисленную настройку, откатываясь к
+// умолчанию, если она не задана или не разбирается. Кривое значение забирает
+// умолчание, а не процесс: ручки настройки не должны мешать сервису стартовать.
 func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

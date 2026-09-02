@@ -27,14 +27,14 @@ public class NativeWebSocketPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
-        // Configure OkHttpClient to accept self-signed certificates or plain WS
+        // Настраиваем OkHttpClient на приём самоподписанных сертификатов или обычного WS
         OkHttpClient.Builder builder = new OkHttpClient.Builder();
         builder.readTimeout(0, TimeUnit.MILLISECONDS);
         builder.connectTimeout(10, TimeUnit.SECONDS);
-        builder.pingInterval(15, TimeUnit.SECONDS); // Automatic Ping/Pong Keep-Alive
+        builder.pingInterval(15, TimeUnit.SECONDS); // Автоматический Ping/Pong для поддержания соединения
 
         try {
-            // Trust all certificates (Self-signed TLS support)
+            // Доверяем всем сертификатам (поддержка самоподписанного TLS)
             javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
                 new javax.net.ssl.X509TrustManager() {
                     public java.security.cert.X509Certificate[] getAcceptedIssuers() {

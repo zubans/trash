@@ -1,13 +1,13 @@
 import { onUnmounted, watch, type Ref } from 'vue'
 
-// Page scrolling is a single global, and several things want to freeze it at
-// once: a dashboard tracks "is any modal open" while the modals themselves also
-// lock. When each of them wrote document.body.style.overflow directly, whichever
-// released last won — a child closing would unfreeze the page under a parent
-// that was still open, and, worse, a modal torn down without closing (an error
-// during render unmounts it) left the page frozen with no way to recover.
+// Прокрутка страницы — единственный глобал, и заморозить её одновременно хотят
+// несколько мест: дашборд следит за тем, «открыта ли хоть одна модалка», а сами
+// модалки тоже блокируют. Когда каждый писал document.body.style.overflow
+// напрямую, выигрывал отпустивший последним: закрытие потомка размораживало
+// страницу под ещё открытым родителем, а хуже того — модалка, снесённая без
+// закрытия (ошибка при отрисовке размонтирует её), оставляла страницу замороженной.
 //
-// So the style has exactly one owner here, and callers only add and drop claims.
+// Поэтому у стиля здесь ровно один владелец, а вызывающие лишь добавляют и снимают заявки.
 let claims = 0
 let restoreTo: string | null = null
 
@@ -29,10 +29,10 @@ function release() {
 }
 
 /**
- * Freezes page scrolling while `active` is true.
+ * Замораживает прокрутку страницы, пока `active` истинно.
  *
- * The claim is released when the component unmounts, so a modal that goes away
- * without closing cleanly cannot leave the page stuck.
+ * Заявка снимается при размонтировании компонента, поэтому модалка, исчезнувшая
+ * без аккуратного закрытия, не может оставить страницу застрявшей.
  */
 export function useScrollLock(active: Ref<boolean> | (() => boolean)) {
   let held = false

@@ -66,7 +66,7 @@ func main() {
 		resolvedVersionCode = parsedCode
 	}
 
-	// Skip registration if this version is already in the database.
+	// Пропускаем регистрацию, если эта версия уже есть в базе.
 	if existing, err := releaseRepo.GetReleaseByVersionCode(context.Background(), *platform, resolvedVersionCode); err != nil {
 		log.Fatalf("failed to check existing release: %v", err)
 	} else if existing != nil {

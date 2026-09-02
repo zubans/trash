@@ -1,16 +1,16 @@
-// Package metrics is the single place where the process describes itself to
+// Package metrics — единственное место, где процесс описывает себя для
 // Prometheus.
 //
-// Everything lives on a private registry rather than the default one: the
-// default registry is global mutable state that any imported library can write
-// to, and /metrics is a public-ish surface we would rather keep predictable.
-// The registry is exposed only on the dedicated listener started by Serve, so
-// scraping never shares a port, a middleware chain or a rate limiter with the
-// API.
+// Всё живёт в приватном реестре, а не в дефолтном: дефолтный реестр — это
+// глобальное изменяемое состояние, в которое может писать любая подключённая
+// библиотека, а /metrics — почти публичная поверхность, которую хочется
+// держать предсказуемой. Реестр открыт только на выделенном слушателе,
+// который запускает Serve, поэтому сбор метрик никогда не делит порт, цепочку
+// middleware или ограничитель частоты с API.
 //
-// The package deliberately takes only primitives (strings, floats, bools) so
-// that every layer — handlers, services, workers, repositories — can import it
-// without dragging a dependency cycle behind.
+// Пакет намеренно принимает только примитивы (строки, float, bool), чтобы
+// каждый слой — обработчики, сервисы, воркеры, репозитории — мог импортировать
+// его, не таща за собой цикл зависимостей.
 package metrics
 
 import (
@@ -23,16 +23,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
-// Namespace prefixes every metric so the series are easy to select apart from
-// the exporters that scrape the same Prometheus.
+// Namespace предваряет каждую метрику, чтобы ряды легко отделялись от
+// экспортеров, которые собирает тот же Prometheus.
 const Namespace = "healthlogin"
 
-// Registry holds every collector this process exports.
+// Registry хранит все коллекторы, которые экспортирует этот процесс.
 var Registry = prometheus.NewRegistry()
 
-// Buckets tuned for an API that answers in milliseconds but occasionally waits
-// on DaData or on the database. The default client buckets stop at 10s, which
-// hides exactly the tail we care about.
+// Бакеты подобраны под API, отвечающий за миллисекунды, но иногда ждущий
+// DaData или базу. Дефолтные клиентские бакеты заканчиваются на 10 с, что
+// скрывает ровно тот хвост, который нам интересен.
 var latencyBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
 
 var (
@@ -57,7 +57,7 @@ var (
 		Help:      "HTTP requests currently being served.",
 	})
 
-	// ---- Authentication --------------------------------------------------
+	// ---- Аутентификация --------------------------------------------------
 
 	authEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
@@ -65,7 +65,7 @@ var (
 		Help:      "Authentication events by kind and outcome (login, register, refresh, password reset).",
 	}, []string{"event", "result"})
 
-	// ---- Business --------------------------------------------------------
+	// ---- Бизнес ----------------------------------------------------------
 
 	orderEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
@@ -91,20 +91,20 @@ var (
 		Help:      "Assignment attempts by the background matcher, by outcome.",
 	}, []string{"result"})
 
-	// Free services are supported, and an order for one moves no money at all:
-	// no hold, no ledger entry, nothing in the amount counters. Without a count
-	// of its own such an order is invisible, and "no revenue today" becomes
-	// indistinguishable from "every order today was free" — which is the
-	// difference between a quiet day and a mispriced service.
+	// Бесплатные услуги поддерживаются, и заказ такой услуги вообще не двигает
+	// денег: ни удержания, ни проводки, ничего в счётчиках сумм. Без собственного
+	// счётчика такой заказ невидим, и «сегодня нет выручки» становится неотличимо
+	// от «сегодня все заказы были бесплатными» — а это разница между тихим днём и
+	// неверно назначенной ценой.
 	ordersFree = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: Namespace,
 		Name:      "orders_free_created_total",
 		Help:      "Orders created for a service that costs nothing, so no money was held.",
 	})
 
-	// Marketplace depth, refreshed by the matcher on every pass. Orders queued
-	// with nobody on shift is the failure mode that looks fine in the request
-	// counters: everything answers 200 and no work gets done.
+	// Глубина маркетплейса, обновляемая подборщиком на каждом проходе. Заказы в
+	// очереди при отсутствии людей на смене — тот режим отказа, который в счётчиках
+	// запросов выглядит нормально: всё отвечает 200, а работа не делается.
 	ordersSearching = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: Namespace,
 		Name:      "orders_searching",
@@ -117,11 +117,11 @@ var (
 		Help:      "Executors currently on shift.",
 	})
 
-	// ---- Money -----------------------------------------------------------
+	// ---- Деньги ----------------------------------------------------------
 	//
-	// Amounts are counted in rubles rather than kopecks so a dashboard can show
-	// them without dividing, and they are counters because every ledger entry is
-	// an absolute movement: the direction is already encoded in the type.
+	// Суммы считаются в рублях, а не в копейках, чтобы дашборд показывал их без
+	// деления, и это счётчики, потому что каждая проводка — абсолютное движение:
+	// направление уже закодировано в типе.
 
 	ledgerEntries = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
@@ -141,10 +141,10 @@ var (
 		Help:      "Ledger operations that failed, by operation.",
 	}, []string{"op"})
 
-	// ---- Reconciliation --------------------------------------------------
+	// ---- Сверка ----------------------------------------------------------
 	//
-	// The nightly books check already logs loudly; these gauges make the same
-	// facts alertable instead of grep-able.
+	// Ночная проверка книг и так громко пишет в лог; эти датчики делают те же
+	// факты пригодными для алертов, а не только для grep.
 
 	reconcileOK = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: Namespace,
@@ -176,7 +176,7 @@ var (
 		Help:      "Reconciliation passes that could not complete.",
 	})
 
-	// ---- Background workers ----------------------------------------------
+	// ---- Фоновые воркеры -------------------------------------------------
 
 	workerRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
@@ -197,7 +197,7 @@ var (
 		Help:      "Unix time of the last successful pass of a background worker.",
 	}, []string{"worker"})
 
-	// ---- Outbound dependencies -------------------------------------------
+	// ---- Внешние зависимости ---------------------------------------------
 
 	upstreamRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
@@ -225,7 +225,7 @@ var (
 		Buckets:   latencyBuckets,
 	}, []string{"kind"})
 
-	// ---- Chat -------------------------------------------------------------
+	// ---- Чат --------------------------------------------------------------
 
 	chatConnections = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: Namespace,
@@ -239,7 +239,7 @@ var (
 		Help:      "Chat messages accepted by the server, by conversation kind.",
 	}, []string{"kind"})
 
-	// ---- Service behaviours ------------------------------------------------
+	// ---- Поведения услуг ---------------------------------------------------
 
 	behaviorHookErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
@@ -267,13 +267,13 @@ var (
 )
 
 func init() {
-	// A gauge starts at zero, and for reconcile_ok zero is a specific, loud
-	// claim: the books do not balance. Until a pass has actually completed
-	// there is no such evidence — a pass that failed to run proves nothing —
-	// so the starting value is NaN, which no comparison matches. Without this,
-	// a reconciliation that errored on its first attempt paged somebody about
-	// missing money that was never missing, and an alert channel that cries
-	// wolf about money is worse than no alert channel at all.
+	// Датчик стартует с нуля, а для reconcile_ok ноль — это конкретное громкое
+	// утверждение: книги не сходятся. Пока проход по-настоящему не завершился,
+	// такого свидетельства нет — проход, который не смог выполниться, ничего не
+	// доказывает, — поэтому стартовое значение NaN, с которым не совпадает ни одно
+	// сравнение. Без этого сверка, упавшая с первой попытки, будила человека из-за
+	// пропавших денег, которые никуда не пропадали, а канал алертов, кричащий
+	// «волки» про деньги, хуже, чем полное его отсутствие.
 	reconcileOK.Set(math.NaN())
 
 	Registry.MustRegister(
@@ -293,26 +293,26 @@ func init() {
 	)
 }
 
-// BehaviorHookError counts a hook that could not be evaluated. The gate it
-// guards has failed closed, so this is a service outage for that node, not a
-// diagnostic detail.
+// BehaviorHookError считает хук, который не удалось вычислить. Проверка,
+// которую он охраняет, закрылась, поэтому это авария услуги на этом узле, а не
+// диагностическая мелочь.
 func BehaviorHookError(behavior, hook string) {
 	behaviorHookErrors.WithLabelValues(behavior, hook).Inc()
 }
 
-// BehaviorEvent counts one dispatched domain event: "processed", "failed" or
-// "skipped" (no behaviour cared about it).
+// BehaviorEvent считает одно отправленное доменное событие: «processed»,
+// «failed» или «skipped» (ни одному поведению оно не было интересно).
 func BehaviorEvent(event, result string) { behaviorEvents.WithLabelValues(event, result).Inc() }
 
-// BehaviorEffect counts one effect: "applied", "duplicate" (an idempotency key
-// that was already used) or "refused" (a guard in the core said no).
+// BehaviorEffect считает один эффект: «applied», «duplicate» (ключ
+// идемпотентности уже использован) или «refused» (проверка в ядре отказала).
 func BehaviorEffect(kind, result string) { behaviorEffects.WithLabelValues(kind, result).Inc() }
 
-// SetBehaviorBacklog publishes the number of unprocessed domain events.
+// SetBehaviorBacklog публикует число необработанных доменных событий.
 func SetBehaviorBacklog(pending int) { behaviorBacklog.Set(float64(pending)) }
 
-// SetBuildInfo publishes the running version as a constant 1-valued gauge, the
-// usual way to make "which build is this?" answerable from a dashboard.
+// SetBuildInfo публикует работающую версию как датчик с константным значением 1
+// — привычный способ сделать вопрос «что за сборка?» решаемым с дашборда.
 func SetBuildInfo(version, commit string) {
 	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: Namespace,
@@ -325,59 +325,59 @@ func SetBuildInfo(version, commit string) {
 	g.WithLabelValues(version, commit).Set(1)
 }
 
-// RegisterDB exports the connection pool counters. A pool that is permanently
-// at MaxOpenConnections with requests queueing behind it looks, from the
-// outside, exactly like a slow database.
+// RegisterDB экспортирует счётчики пула соединений. Пул, постоянно упирающийся
+// в MaxOpenConnections с очередью запросов позади, снаружи выглядит ровно как
+// медленная база.
 func RegisterDB(db *sql.DB, name string) {
 	_ = Registry.Register(collectors.NewDBStatsCollector(db, name))
 }
 
-// ---- Recording helpers -------------------------------------------------
+// ---- Помощники записи --------------------------------------------------
 //
-// Each helper is a no-op-safe call site: instrumentation must never be the
-// reason a request fails, so nothing here returns an error.
+// Каждый помощник безопасен как no-op: инструментирование никогда не должно
+// быть причиной падения запроса, поэтому ничего здесь не возвращает ошибку.
 
-// ObserveHTTP records one served request. route is the chi route pattern, not
-// the raw path, so per-user URLs cannot explode the label cardinality.
+// ObserveHTTP записывает один обслуженный запрос. route — это шаблон маршрута
+// chi, а не сырой путь, чтобы персональные URL не взрывали кардинальность лейблов.
 func ObserveHTTP(method, route string, status int, d time.Duration) {
 	code := strconv.Itoa(status)
 	httpRequests.WithLabelValues(method, route, code).Inc()
 	httpDuration.WithLabelValues(method, route).Observe(d.Seconds())
 }
 
-// IncInFlight and DecInFlight bracket a request.
+// IncInFlight и DecInFlight обрамляют запрос.
 func IncInFlight() { httpInFlight.Inc() }
 func DecInFlight() { httpInFlight.Dec() }
 
-// AuthEvent records an authentication attempt. result is "ok" or "denied".
+// AuthEvent записывает попытку аутентификации. result — «ok» или «denied».
 func AuthEvent(event, result string) { authEvents.WithLabelValues(event, result).Inc() }
 
-// OrderEvent records an order lifecycle transition.
+// OrderEvent записывает переход в жизненном цикле заказа.
 func OrderEvent(event string) { orderEvents.WithLabelValues(event).Inc() }
 
-// OrderCreatedFree records an order that held nothing because the service is
-// free. It is counted in addition to the ordinary "created" event, not instead
-// of it: the order is a real order, it just moves no money.
+// OrderCreatedFree записывает заказ, ничего не удержавший, потому что услуга
+// бесплатна. Он считается в дополнение к обычному событию «created», а не
+// вместо него: заказ настоящий, просто он не двигает денег.
 func OrderCreatedFree() { ordersFree.Inc() }
 
-// BidEvent records an auction event.
+// BidEvent записывает событие аукциона.
 func BidEvent(event string) { bidEvents.WithLabelValues(event).Inc() }
 
-// ShiftEvent records a shift event.
+// ShiftEvent записывает событие смены.
 func ShiftEvent(event string) { shiftEvents.WithLabelValues(event).Inc() }
 
-// MatchingAssignment records one assignment attempt by the matcher.
-// result is "assigned" or "error".
+// MatchingAssignment записывает одну попытку назначения подборщиком.
+// result — «assigned» или «error».
 func MatchingAssignment(result string) { matchingAssignments.WithLabelValues(result).Inc() }
 
-// SetMarketplaceDepth publishes the queue and supply side as seen by the last
-// matcher pass.
+// SetMarketplaceDepth публикует сторону спроса и предложения такой, какой её
+// увидел последний проход подборщика.
 func SetMarketplaceDepth(searchingOrders, activeShifts int) {
 	ordersSearching.Set(float64(searchingOrders))
 	shiftsActive.Set(float64(activeShifts))
 }
 
-// LedgerEntry records one written ledger entry. rubles is the absolute amount.
+// LedgerEntry записывает одну сделанную проводку. rubles — абсолютная сумма.
 func LedgerEntry(kind, account string, rubles float64) {
 	ledgerEntries.WithLabelValues(kind, account).Inc()
 	if rubles < 0 {
@@ -386,10 +386,10 @@ func LedgerEntry(kind, account string, rubles float64) {
 	ledgerAmount.WithLabelValues(kind, account).Add(rubles)
 }
 
-// LedgerError records a failed ledger operation.
+// LedgerError записывает неудавшуюся операцию реестра.
 func LedgerError(op string) { ledgerErrors.WithLabelValues(op).Inc() }
 
-// ReconcileReport publishes the outcome of a reconciliation pass.
+// ReconcileReport публикует исход прохода сверки.
 func ReconcileReport(ok bool, discrepancies, holdAnomalies, unknownTypes int, booksDiffRubles, escrowDriftRubles float64) {
 	if ok {
 		reconcileOK.Set(1)
@@ -404,13 +404,13 @@ func ReconcileReport(ok bool, discrepancies, holdAnomalies, unknownTypes int, bo
 	reconcileLastRun.SetToCurrentTime()
 }
 
-// ReconcileFailed records a pass that could not complete. The gauges keep their
-// previous values on purpose: a failed pass is not evidence that the books are
-// fine, and zeroing them would read as exactly that.
+// ReconcileFailed записывает проход, который не смог завершиться. Датчики
+// намеренно сохраняют прежние значения: неудавшийся проход не доказывает, что с
+// книгами всё хорошо, а обнуление читалось бы ровно так.
 func ReconcileFailed() { reconcileFailures.Inc() }
 
-// WorkerRun records one background pass. Call it deferred, with the error the
-// pass returned.
+// WorkerRun записывает один фоновый проход. Вызывайте его через defer, с
+// ошибкой, которую вернул проход.
 func WorkerRun(worker string, d time.Duration, err error) {
 	result := "ok"
 	if err != nil {
@@ -422,7 +422,7 @@ func WorkerRun(worker string, d time.Duration, err error) {
 	workerDuration.WithLabelValues(worker).Observe(d.Seconds())
 }
 
-// UpstreamCall records a call to an external dependency.
+// UpstreamCall записывает вызов внешней зависимости.
 func UpstreamCall(upstream, operation string, d time.Duration, err error) {
 	result := "ok"
 	if err != nil {
@@ -432,14 +432,14 @@ func UpstreamCall(upstream, operation string, d time.Duration, err error) {
 	upstreamDuration.WithLabelValues(upstream, operation).Observe(d.Seconds())
 }
 
-// UpstreamResult records a call whose outcome is finer grained than ok/error,
-// such as a cache hit or a quota rejection.
+// UpstreamResult записывает вызов, исход которого детальнее, чем ok/error, —
+// например попадание в кэш или отказ по квоте.
 func UpstreamResult(upstream, operation, result string, d time.Duration) {
 	upstreamRequests.WithLabelValues(upstream, operation, result).Inc()
 	upstreamDuration.WithLabelValues(upstream, operation).Observe(d.Seconds())
 }
 
-// MailSend records one submission attempt.
+// MailSend записывает одну попытку отправки.
 func MailSend(kind string, d time.Duration, err error) {
 	result := "ok"
 	if err != nil {
@@ -449,15 +449,15 @@ func MailSend(kind string, d time.Duration, err error) {
 	mailDuration.WithLabelValues(kind).Observe(d.Seconds())
 }
 
-// ChatConnected and ChatDisconnected bracket a WebSocket session.
+// ChatConnected и ChatDisconnected обрамляют сессию WebSocket.
 func ChatConnected(kind string)    { chatConnections.WithLabelValues(kind).Inc() }
 func ChatDisconnected(kind string) { chatConnections.WithLabelValues(kind).Dec() }
 
-// ChatMessage records an accepted message.
+// ChatMessage записывает принятое сообщение.
 func ChatMessage(kind string) { chatMessages.WithLabelValues(kind).Inc() }
 
-// TrackWorker runs one worker pass and records its duration and outcome. It
-// returns the pass's own error untouched, so a loop reads the same as before:
+// TrackWorker выполняет один проход воркера и записывает его длительность и
+// исход. Ошибка прохода возвращается нетронутой, поэтому цикл читается как прежде:
 //
 //	if err := metrics.TrackWorker("auction", w.CheckExpiredAuctions); err != nil {
 func TrackWorker(worker string, fn func() error) error {

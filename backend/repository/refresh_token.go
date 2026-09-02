@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// RefreshToken is a stored refresh-token record. The token value itself is
-// never persisted, only its hash.
+// RefreshToken — сохранённая запись refresh-токена. Само значение токена
+// никогда не сохраняется, только его хеш.
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -20,23 +20,23 @@ type RefreshToken struct {
 	RevokedAt *time.Time
 }
 
-// IsUsable reports whether the record may still be exchanged.
+// IsUsable сообщает, можно ли ещё обменять эту запись.
 func (t *RefreshToken) IsUsable(now time.Time) bool {
 	return t.UsedAt == nil && t.RevokedAt == nil && t.ExpiresAt.After(now)
 }
 
-// ErrRefreshTokenNotFound is returned when a presented token has no record.
+// ErrRefreshTokenNotFound возвращается, когда предъявленному токену нет записи.
 var ErrRefreshTokenNotFound = errors.New("refresh token not found")
 
-// RefreshTokenRepository stores refresh tokens.
+// RefreshTokenRepository хранит refresh-токены.
 type RefreshTokenRepository interface {
 	Create(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error
 	FindByHash(ctx context.Context, tokenHash string) (*RefreshToken, error)
-	// MarkUsed consumes a token. It reports ErrConflict when the token was
-	// already used or revoked, which is how a replay is detected.
+	// MarkUsed расходует токен. Он сообщает ErrConflict, когда токен уже
+	// использован или отозван, — так обнаруживается повтор.
 	MarkUsed(ctx context.Context, tokenHash string) error
-	// RevokeAllForUser ends every session of a user: used on logout-everywhere,
-	// on a detected replay, and when an account is banned.
+	// RevokeAllForUser завершает все сессии пользователя: применяется при выходе
+	// отовсюду, при обнаруженном повторе и при бане учётной записи.
 	RevokeAllForUser(ctx context.Context, userID uuid.UUID) error
 	Revoke(ctx context.Context, tokenHash string) error
 	DeleteExpired(ctx context.Context) (int64, error)
@@ -46,7 +46,7 @@ type refreshTokenRepo struct {
 	db *sql.DB
 }
 
-// NewRefreshTokenRepository creates a RefreshTokenRepository.
+// NewRefreshTokenRepository создаёт RefreshTokenRepository.
 func NewRefreshTokenRepository(db *sql.DB) RefreshTokenRepository {
 	return &refreshTokenRepo{db: db}
 }
@@ -75,8 +75,8 @@ func (r *refreshTokenRepo) FindByHash(ctx context.Context, tokenHash string) (*R
 	return &t, nil
 }
 
-// MarkUsed consumes the token in one guarded statement, so two parallel refresh
-// requests with the same token cannot both succeed.
+// MarkUsed расходует токен одним охраняемым оператором, поэтому два
+// параллельных запроса обновления с одним токеном не могут удаться оба.
 func (r *refreshTokenRepo) MarkUsed(ctx context.Context, tokenHash string) error {
 	return execExpectingOne(ctx, r.db,
 		`UPDATE refresh_tokens SET used_at = now()
@@ -100,8 +100,8 @@ func (r *refreshTokenRepo) Revoke(ctx context.Context, tokenHash string) error {
 	return err
 }
 
-// DeleteExpired drops rows that can no longer be exchanged. Used tokens are kept
-// until they expire, because replay detection needs to recognise them.
+// DeleteExpired удаляет строки, которые уже нельзя обменять. Использованные
+// токены хранятся до истечения срока, потому что обнаружение повторов должно их узнавать.
 func (r *refreshTokenRepo) DeleteExpired(ctx context.Context) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE expires_at < now()`)
 	if err != nil {

@@ -1,6 +1,6 @@
 <template>
   <div class="system-settings-page">
-    <!-- Header -->
+    <!-- Шапка -->
     <div class="settings-page-header mb-4">
       <h1 class="page-title">
         <i class="ph-fill ph-gear" style="color: #5c60f5;"></i>
@@ -8,7 +8,7 @@
       </h1>
     </div>
 
-    <!-- Alert Messages -->
+    <!-- Уведомления -->
     <div v-if="successMsg" class="settings-alert alert-success mb-4">
       <i class="ph-bold ph-check-circle alert-icon"></i>
       <span>{{ successMsg }}</span>
@@ -21,10 +21,10 @@
       <button type="button" class="btn-dismiss" @click="errorMsg = ''"><i class="ph ph-x"></i></button>
     </div>
 
-    <!-- Form Container -->
+    <!-- Контейнер формы -->
     <form @submit.prevent="saveSettings">
       <div class="settings-cards-stack">
-        <!-- Card 1: Тарификация -->
+        <!-- Карточка 1: Тарификация -->
         <div class="settings-card">
           <div class="section-header">
             <div class="section-icon">
@@ -123,7 +123,7 @@
           </div>
         </div>
 
-        <!-- Card 2: SLA и Лимиты (Исправлено выравнивание инпутов!) -->
+        <!-- Карточка 2: SLA и Лимиты (Исправлено выравнивание инпутов!) -->
         <div class="settings-card">
           <div class="section-header">
             <div class="section-icon icon-warning">
@@ -173,7 +173,7 @@
           </div>
         </div>
 
-        <!-- Card 3: Технические параметры -->
+        <!-- Карточка 3: Технические параметры -->
         <div class="settings-card">
           <div class="section-header">
             <div class="section-icon icon-neutral">
@@ -238,7 +238,7 @@
         </div>
       </div>
 
-      <!-- Sticky Action Bar -->
+      <!-- Липкая панель действий -->
       <div class="action-bar">
         <div v-if="hasUnsavedChanges" class="unsaved-warning">
           <i class="ph-fill ph-info"></i> У вас есть несохраненные изменения
@@ -276,9 +276,9 @@ export default defineComponent({
   setup() {
     const { t } = useI18n()
 
-    // Not Record<string, string>: Vue casts `<input type="number">` back to a
-    // number, so an edited field genuinely holds one until it is normalised on
-    // the way out.
+    // Не Record<string, string>: Vue приводит `<input type="number">` обратно к
+    // числу, поэтому отредактированное поле действительно держит число, пока его не
+    // нормализуют на выходе.
     const values = ref<Record<string, string | number>>({
       standard_tariff_coeff: '1.0',
       increased_tariff_coeff: '2.0',
@@ -341,8 +341,8 @@ export default defineComponent({
       try {
         const payload = toSettingsPayload(values.value)
         await api.post('/admin/settings', payload)
-        // Adopt the normalised values, so the unsaved-changes indicator compares
-        // like with like instead of 15 against "15".
+        // Принимаем нормализованные значения, чтобы индикатор несохранённых изменений
+        // сравнивал подобное с подобным, а не 15 с «15».
         values.value = payload
         initialValues.value = { ...payload }
         successMsg.value = t('settings.saveSuccess')
@@ -404,7 +404,7 @@ export default defineComponent({
   margin-bottom: 32px;
 }
 
-/* Settings Card */
+/* Карточка настроек */
 .settings-card {
   background: #ffffff;
   border-radius: 24px;
@@ -466,14 +466,14 @@ export default defineComponent({
   max-width: 650px;
 }
 
-/* Form Grid & Alignment Fix */
+/* Сетка формы и правка выравнивания */
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
 }
 
-/* Toggle row (boolean setting) */
+/* Строка переключателя (булева настройка) */
 .toggle-row {
   display: flex;
   align-items: center;
@@ -531,7 +531,7 @@ export default defineComponent({
   flex-direction: column;
 }
 
-/* Fix for Card 2 alignment: min-height on input-header ensures inputs align at the bottom */
+/* Правка выравнивания для карточки 2: min-height на input-header выравнивает инпуты по нижнему краю */
 .input-header {
   min-height: 38px;
   display: flex;
@@ -552,7 +552,7 @@ export default defineComponent({
   margin-top: 2px;
 }
 
-/* Modern Input Wrapper */
+/* Современная обёртка инпута */
 .input-wrapper {
   position: relative;
   display: flex;
@@ -607,7 +607,7 @@ export default defineComponent({
   padding-right: 48px;
 }
 
-/* Custom Select */
+/* Кастомный select */
 .custom-select {
   appearance: none;
   -webkit-appearance: none;
@@ -619,7 +619,7 @@ export default defineComponent({
   cursor: pointer;
 }
 
-/* Sticky Action Bar */
+/* Липкая панель действий */
 .action-bar {
   position: sticky;
   bottom: -28px;
@@ -688,7 +688,7 @@ export default defineComponent({
   font-weight: 600;
 }
 
-/* Alert Messages */
+/* Уведомления */
 .settings-alert {
   display: flex;
   align-items: center;

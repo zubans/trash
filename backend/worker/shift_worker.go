@@ -9,18 +9,18 @@ import (
 	"healthlogin/backend/service"
 )
 
-// ShiftWorker periodically checks for and auto-closes expired shifts.
+// ShiftWorker периодически ищет и автоматически закрывает истёкшие смены.
 type ShiftWorker struct {
 	shiftService *service.ShiftService
 	guard        func(func() error) error
 }
 
-// NewShiftWorker creates a new ShiftWorker.
+// NewShiftWorker создаёт новый ShiftWorker.
 func NewShiftWorker(shiftService *service.ShiftService) *ShiftWorker {
 	return &ShiftWorker{shiftService: shiftService}
 }
 
-// Start runs the shift auto-completion background loop.
+// Start выполняет фоновый цикл автозавершения смен.
 func (w *ShiftWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -38,9 +38,9 @@ func (w *ShiftWorker) Start(interval time.Duration) {
 	log.Printf("[ShiftWorker] Background worker started every %v", interval)
 }
 
-// runGuarded runs one tick under the job's advisory lock when a Leader is
-// wired. Closing a shift charges an early-exit penalty, so it must happen once
-// no matter how many processes are running.
+// runGuarded выполняет один тик под advisory-блокировкой задачи, когда
+// подключён Leader. Закрытие смены списывает штраф за ранний уход, поэтому оно
+// обязано произойти один раз, сколько бы процессов ни работало.
 func (w *ShiftWorker) runGuarded(job func() error) error {
 	if w.guard == nil {
 		return job()
@@ -48,7 +48,7 @@ func (w *ShiftWorker) runGuarded(job func() error) error {
 	return w.guard(job)
 }
 
-// WithLeader makes this worker run at most once across every process.
+// WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.
 func (w *ShiftWorker) WithLeader(leader *Leader, name string) *ShiftWorker {
 	w.guard = leader.Guard(name)
 	return w

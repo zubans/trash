@@ -13,10 +13,10 @@ import (
 	"healthlogin/backend/money"
 )
 
-// allTransactionTypes is the complete set of values the transaction_type enum
-// can hold. Adding a constant without adding it here fails the test below,
-// which is the point: an uncovered type silently drops out of every balance
-// sum and makes reconciliation quietly wrong.
+// allTransactionTypes — полный набор значений, которые может принимать enum
+// transaction_type. Добавление константы без добавления её сюда роняет тест
+// ниже, и в этом смысл: непокрытый тип молча выпадает из каждой суммы баланса
+// и делает сверку тихо неверной.
 var allTransactionTypes = []TransactionType{
 	TransactionTypeTopUp,
 	TransactionTypeHold,
@@ -46,28 +46,28 @@ func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
 	}
 }
 
-// TestLedgerSignsMatchTheServiceBehaviour pins the direction of each type
-// against what the services actually do to the balance.
+// TestLedgerSignsMatchTheServiceBehaviour фиксирует направление каждого типа
+// против того, что сервисы на самом деле делают с балансом.
 func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 	cases := map[TransactionType]int{
-		// Money arriving.
+		// Деньги приходят.
 		TransactionTypeTopUp:     +1,
 		TransactionTypeReward:    +1,
 		TransactionTypeRefund:    +1,
 		TransactionTypeTipReward: +1,
 		TransactionTypeBonus:     +1,
-		// Money leaving.
+		// Деньги уходят.
 		TransactionTypeHold:           -1,
 		TransactionTypeFine:           -1,
 		TransactionTypeWithdrawal:     -1,
 		TransactionTypeWithdrawalHold: -1,
 		TransactionTypeTip:            -1,
-		// Recorded, but moves nothing: the customer's money already left the
-		// balance when the hold was taken, and PAYMENT marks that hold as spent.
+		// Записывается, но ничего не двигает: деньги заказчика ушли с баланса ещё
+		// когда бралось удержание, а PAYMENT помечает это удержание израсходованным.
 		TransactionTypePayment:        0,
 		TransactionTypeWithdrawalPaid: 0,
-		// Commission moves between two system accounts, so neither side of it
-		// touches the balance of the user it is recorded against.
+		// Комиссия перемещается между двумя системными счетами, поэтому ни одна её
+		// сторона не трогает баланс пользователя, против которого она записана.
 		TransactionTypeCommission:       0,
 		TransactionTypeCommissionPayout: 0,
 	}
@@ -84,9 +84,9 @@ func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 	}
 }
 
-// TestLedgerSumExprCoversEveryType guards the generated SQL: the expression is
-// built from the same map, so a type can never be in the convention but missing
-// from the query.
+// TestLedgerSumExprCoversEveryType охраняет сгенерированный SQL: выражение
+// строится из той же карты, поэтому тип не может быть в соглашении и при этом
+// отсутствовать в запросе.
 func TestLedgerSumExprCoversEveryType(t *testing.T) {
 	expr := ledgerSumExpr("t")
 
@@ -126,8 +126,8 @@ func TestReportOKAndSummary(t *testing.T) {
 	}
 }
 
-// TestReconcileAgainstDatabase runs the real query. It is skipped unless
-// RECONCILE_TEST_DSN points at a database with the schema applied, e.g.
+// TestReconcileAgainstDatabase выполняет настоящий запрос. Он пропускается,
+// если RECONCILE_TEST_DSN не указывает на базу с применённой схемой, например
 //
 //	RECONCILE_TEST_DSN="postgres://postgres:x@localhost:55432/healthlogin?sslmode=disable" go test ./repository/ -run Database
 func TestReconcileAgainstDatabase(t *testing.T) {
@@ -166,14 +166,14 @@ func TestReconcileAgainstDatabase(t *testing.T) {
 		}
 	}
 
-	// 1000 in, 300 held, 300 of that hold spent: balance 700, and PAYMENT must
-	// not be counted a second time.
+	// 1000 пришло, 300 удержано, 300 из этого удержания израсходовано: баланс 700,
+	// и PAYMENT не должен считаться второй раз.
 	seed(matching, "+7999"+matching.String()[:7], money.FromRubles(700))
 	entry(matching, TransactionTypeTopUp, money.FromRubles(1000))
 	entry(matching, TransactionTypeHold, money.FromRubles(300))
 	entry(matching, TransactionTypePayment, money.FromRubles(300))
 
-	// Same ledger, but the balance says 1000 — a refund that ran twice.
+	// Тот же реестр, но баланс говорит 1000 — возврат, выполнившийся дважды.
 	seed(drifted, "+7998"+drifted.String()[:7], money.FromRubles(1000))
 	entry(drifted, TransactionTypeTopUp, money.FromRubles(1000))
 	entry(drifted, TransactionTypeHold, money.FromRubles(300))

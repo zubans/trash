@@ -44,7 +44,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Repositories
+	// Репозитории
 	userRepo := repository.New(db)
 	orderRepo := repository.NewOrderRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
@@ -67,14 +67,14 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo)
 
-	// Wired exactly as main.go does it: shift location reports are written
-	// through the geo service, which is what makes the position the map and
-	// matching read the same one the executor's app reported.
+	// Подключено ровно так же, как в main.go: отчёты о местоположении в смене
+	// пишутся через гео-сервис — именно это делает позицию, которую читают карта и
+	// подбор, той же, что сообщило приложение исполнителя.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
 		WithExecutorLocation(executorGeoService)
 
-	// A priced, active variant to order. The catalog stores names as JSONB and
-	// requires a price on a VARIANT, so the row is built to satisfy both.
+	// Активный вариант с ценой, который можно заказать. Каталог хранит названия
+	// как JSONB и требует цену у VARIANT, поэтому строка собрана под оба условия.
 	variantID := uuid.New()
 	_, err := db.Exec(
 		`INSERT INTO service_nodes (id, code, name, node_type, base_price, is_active)
@@ -87,7 +87,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Fatalf("failed to insert test service variant: %v", err)
 	}
 
-	// 1. Register Customer with Address
+	// 1. Регистрируем заказчика с адресом
 	custPhone := "+7999" + uuid.New().String()[:7]
 	custEmail := "cust_" + uuid.New().String()[:8] + "@test.com"
 	custAddress := "Россия, г. Москва, ул. Арбат, д. 10"
@@ -102,7 +102,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Fatalf("Customer registration failed: %v", err)
 	}
 
-	// Verify Customer address is in unified `addresses` table
+	// Проверяем, что адрес заказчика лежит в единой таблице `addresses`
 	custAddrs, err := addressRepo.List(ctx, customer.ID)
 	if err != nil || len(custAddrs) == 0 {
 		t.Fatalf("Customer address was not saved in addresses table: %v", err)
@@ -114,11 +114,11 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("Customer address coordinates mismatch")
 	}
 
-	// Top up customer balance so hold succeeds
+	// Пополняем баланс заказчика, чтобы удержание прошло
 	_ = userRepo.UpdateBalance(ctx, customer.ID, money.FromRubles(5000))
 	_ = userRepo.UpdateVerified(ctx, customer.ID, true)
 
-	// 2. Customer creates an order using their address
+	// 2. Заказчик создаёт заказ со своим адресом
 	order, err := orderService.CreateOrder(
 		ctx, customer.ID, variantID, false, false,
 		custAddress, &custLat, &custLon,
@@ -130,7 +130,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("expected order status SEARCHING, got %s", order.Status)
 	}
 
-	// 3. Register Executor with Address in proximity (~150 meters away)
+	// 3. Регистрируем исполнителя с адресом поблизости (~150 метров)
 	execPhone := "+7999" + uuid.New().String()[:7]
 	execEmail := "exec_" + uuid.New().String()[:8] + "@test.com"
 	execAddress := "Россия, г. Москва, ул. Новый Арбат, д. 2"
@@ -145,7 +145,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Fatalf("Executor registration failed: %v", err)
 	}
 
-	// Verify Executor address is in unified `addresses` table
+	// Проверяем, что адрес исполнителя лежит в единой таблице `addresses`
 	execAddrs, err := addressRepo.List(ctx, executor.ID)
 	if err != nil || len(execAddrs) == 0 {
 		t.Fatalf("Executor address was not saved in addresses table: %v", err)
@@ -154,7 +154,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	birthDate := time.Now().AddDate(-25, 0, 0)
 	_ = userRepo.UpdateUserBirthDate(ctx, executor.ID, birthDate)
 
-	// 4. Executor starts active shift
+	// 4. Исполнитель открывает активную смену
 	shift, err := shiftService.StartShift(ctx, executor.ID, 3)
 	if err != nil {
 		t.Fatalf("Executor start shift failed: %v", err)
@@ -163,15 +163,15 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("expected shift status ACTIVE, got %s", shift.Status)
 	}
 
-	// The executor's app reports its position through the shift endpoint. This
-	// is the path that used to accept coordinates and discard them, so the test
-	// goes through it rather than writing to the repository directly.
+	// Приложение исполнителя сообщает свою позицию через эндпоинт смены. Это тот
+	// самый путь, который раньше принимал координаты и выбрасывал их, поэтому
+	// тест идёт через него, а не пишет в репозиторий напрямую.
 	//
-	// The reported point is deliberately NOT the one registration stored: if the
-	// report were dropped, the position would still read back as the
-	// registration fix and the check would pass while the feature was broken.
-	// The move is ~55 m, inside the accept radius, so it is an ordinary
-	// position update rather than a district change.
+	// Сообщаемая точка намеренно НЕ та, что сохранила регистрация: если бы отчёт
+	// отбрасывался, позиция всё равно читалась бы как координата регистрации, и
+	// проверка прошла бы при сломанной фиче.
+	// Перемещение около 55 м, внутри радиуса допуска, поэтому это обычное
+	// обновление позиции, а не смена района.
 	movedLat, movedLon := execLat+0.0005, execLon
 	stored, err := shiftService.RecordLocation(ctx, executor.ID, movedLat, movedLon)
 	if err != nil {
@@ -181,8 +181,8 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Fatal("the reported position was not stored")
 	}
 
-	// It must read back as the executor's authoritative position — the reported
-	// point, not the one registration left behind.
+	// Она обязана прочитаться как авторитетная позиция исполнителя — сообщённая
+	// точка, а не та, что оставила после себя регистрация.
 	gotLat, gotLon, _, err := executorGeoRepo.GetExecutorLocation(ctx, executor.ID)
 	if err != nil {
 		t.Fatalf("failed to read executor location: %v", err)
@@ -194,10 +194,10 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("stored position (%f, %f) is not the reported one (%f, %f) — the report was dropped",
 			*gotLat, *gotLon, movedLat, movedLon)
 	}
-	// From here on the executor is at the position they reported.
+	// Дальше исполнитель находится в позиции, которую он сообщил.
 	execLat, execLon = movedLat, movedLon
 
-	// 5. Executor queries available orders on map
+	// 5. Исполнитель запрашивает доступные заказы на карте
 	mapOrders, err := executorGeoService.GetMapOrders(ctx, executor.ID)
 	if err != nil {
 		t.Fatalf("GetMapOrders failed: %v", err)
@@ -206,8 +206,8 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Fatalf("expected to find customer's order on the map, got 0 orders")
 	}
 
-	// The order must appear at the distance the two coordinate pairs actually
-	// imply — that is what "sees it in the right place" means.
+	// Заказ обязан появиться на том расстоянии, которое реально следует из двух
+	// пар координат, — вот что значит «видит его в правильном месте».
 	wantKM := service.HaversineDistanceKM(execLat, execLon, custLat, custLon)
 	found := false
 	for _, o := range mapOrders {
@@ -233,10 +233,10 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("created order %s was not found in map orders for executor", order.ID)
 	}
 
-	// An executor in another city must not see it at all: the same radius rule
-	// that puts the order on this map keeps it off everyone else's. Registering
-	// them is read-only for this flow — they never take the order.
-	distantLat, distantLon := 59.9311, 30.3609 // Saint Petersburg, ~630 km away
+	// Исполнитель в другом городе не должен видеть его вовсе: то же правило
+	// радиуса, что кладёт заказ на эту карту, держит его вне чужих. Его
+	// регистрация в этом потоке только для чтения — заказ он никогда не берёт.
+	distantLat, distantLon := 59.9311, 30.3609 // Санкт-Петербург, ~630 км
 	distant, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "far_"+uuid.New().String()[:8]+"@test.com",
 		"Password123!", "Сидоров", "Сидор", "Сидорович",
@@ -256,7 +256,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		}
 	}
 
-	// 6. Executor accepts the order
+	// 6. Исполнитель принимает заказ
 	err = orderService.Accept(ctx, order.ID, executor.ID)
 	if err != nil {
 		t.Fatalf("Executor failed to accept order: %v", err)
@@ -269,7 +269,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("expected accepted order status ASSIGNED, got %s", acceptedOrder.Status)
 	}
 
-	// 7. Executor executes and confirms the order
+	// 7. Исполнитель выполняет и подтверждает заказ
 	err = orderService.ExecuteOrder(ctx, order.ID, executor.ID)
 	if err != nil {
 		t.Fatalf("Executor failed to execute order: %v", err)
@@ -287,7 +287,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("expected completed order status COMPLETED, got %s", completedOrder.Status)
 	}
 
-	// Verify executor balance was credited
+	// Проверяем, что баланс исполнителя пополнен
 	execUser, err := userRepo.FindByID(ctx, executor.ID)
 	if err != nil {
 		t.Fatalf("failed to fetch executor user: %v", err)
@@ -297,10 +297,10 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	}
 }
 
-// Automatic assignment is bounded by the same geography as the map. An executor
-// in another city is on shift, verified and eligible, so distance is the only
-// thing that can keep the order out of their hands — which is exactly what the
-// worker used to get wrong when it could not read a position.
+// Автоматическое назначение ограничено той же географией, что и карта.
+// Исполнитель в другом городе на смене, верифицирован и допущен, поэтому
+// расстояние — единственное, что может удержать заказ вне его рук; ровно в этом
+// воркер и ошибался, когда не мог прочитать позицию.
 func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -337,7 +337,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		t.Fatalf("failed to insert test service variant: %v", err)
 	}
 
-	// A customer in Moscow with a funded, verified account.
+	// Заказчик в Москве с пополненной верифицированной учёткой.
 	custLat, custLon := 55.7512, 37.6000
 	customer, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "cust_"+uuid.New().String()[:8]+"@test.com",
@@ -361,14 +361,14 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		t.Fatalf("order creation failed: %v", err)
 	}
 
-	// The distant executor has to be the only candidate for the assertion below
-	// to mean anything, and the test database is shared with the other e2e
-	// cases, which leave executors on shift behind them.
+	// Дальний исполнитель обязан быть единственным кандидатом, иначе проверка ниже
+	// ничего не значит, а тестовая база общая с прочими e2e-случаями, которые
+	// оставляют исполнителей на смене после себя.
 	if _, err := db.Exec(`UPDATE shifts SET status = 'COMPLETED' WHERE status = 'ACTIVE'`); err != nil {
 		t.Fatalf("failed to close pre-existing shifts: %v", err)
 	}
 
-	// The only executor on shift is 630 km away.
+	// Единственный исполнитель на смене — в 630 км.
 	distantLat, distantLon := 59.9311, 30.3609
 	distant, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "far_"+uuid.New().String()[:8]+"@test.com",
@@ -389,11 +389,11 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		t.Fatalf("distant executor failed to start a shift: %v", err)
 	}
 
-	// A second candidate whose position is unknown: registered without
-	// coordinates and with no resolver, so nothing was ever stored for them.
-	// This is the case that used to slip through — the distance check was
-	// skipped whenever it could not read a position, and the order went out to
-	// whoever happened to be on shift.
+	// Второй кандидат с неизвестной позицией: зарегистрирован без координат и без
+	// разрешателя, поэтому для него ничего никогда не сохранялось.
+	// Это тот случай, который раньше проскакивал: проверка расстояния
+	// пропускалась всякий раз, когда позицию не удавалось прочитать, и заказ
+	// уходил тому, кто просто оказался на смене.
 	unlocated, err := authService.RegisterWithCoordinates(
 		ctx, "+7999"+uuid.New().String()[:7], "nowhere_"+uuid.New().String()[:8]+"@test.com",
 		"Password123!", "Незнамов", "Никита", "Никитич",
@@ -420,8 +420,8 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		t.Fatalf("this executor must have no stored position for the test to mean anything, got (%v, %v)", lat, lon)
 	}
 
-	// Automatic matching is off by default; turn it on so this test exercises the
-	// geography filtering rather than passing because the worker did nothing.
+	// Автоподбор по умолчанию выключен; включаем его, чтобы этот тест проверял
+	// фильтрацию по географии, а не проходил потому, что воркер ничего не сделал.
 	if err := settingsRepo.UpdateSettings(ctx, map[string]string{"auto_matching_enabled": "1"}); err != nil {
 		t.Fatalf("failed to enable auto matching: %v", err)
 	}

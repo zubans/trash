@@ -1,6 +1,6 @@
-// Command migrate applies pending database migrations and exits. The server
-// applies them on start as well; this binary exists for deploy pipelines that
-// prefer migrating as a separate, explicit step.
+// Command migrate применяет непринятые миграции базы и завершается. Сервер
+// применяет их и при старте; этот бинарник существует для деплой-конвейеров,
+// которым удобнее миграция отдельным явным шагом.
 package main
 
 import (

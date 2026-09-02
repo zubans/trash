@@ -1,19 +1,19 @@
-// A tiny in-app request log + debug console gate.
+// Крошечный журнал запросов внутри приложения и переключатель отладочной консоли.
 //
-// Mobile WebViews give no access to the browser console, so when something like
-// "the user list never loads" has to be diagnosed on a real device, there is no
-// way to see the HTTP traffic. This store records every API request/response and
-// an on-screen console (DebugConsole.vue) renders it — but only when debug mode
-// is on, so nothing shows for ordinary users.
+// Мобильные WebView не дают доступа к консоли браузера, поэтому, когда что-то
+// вроде «список пользователей не грузится» надо диагностировать на настоящем
+// устройстве, увидеть HTTP-трафик неоткуда. Это хранилище записывает каждый
+// запрос и ответ API, а экранная консоль (DebugConsole.vue) их рисует — но
+// только при включённом режиме отладки, поэтому обычным пользователям ничего не видно.
 //
-// Debug mode is on when EITHER the build sets VITE_DEBUG=true, OR it is switched
-// on at runtime (persisted in localStorage) via the hidden gesture in the
-// version footer — the latter lets an already-installed production build be put
-// into debug mode without a rebuild.
+// Режим отладки включён, если ЛИБО сборка задала VITE_DEBUG=true, ЛИБО его
+// включили во время работы (сохраняется в localStorage) скрытым жестом в
+// футере с версией — последнее позволяет перевести уже установленную продовую
+// сборку в режим отладки без пересборки.
 import { ref } from 'vue'
 
-// Read the env directly (not from api.ts) to avoid an import cycle: api.ts
-// imports this module for its interceptors.
+// Читаем окружение напрямую (а не из api.ts), чтобы избежать цикла импортов:
+// api.ts импортирует этот модуль ради своих перехватчиков.
 const buildDebug = import.meta.env.VITE_DEBUG === 'true'
 
 const RUNTIME_KEY = 'debug_console_enabled'
@@ -45,12 +45,12 @@ export const debugLogs = ref<DebugLogEntry[]>([])
 
 let seq = 0
 
-// setDebugConsole toggles the runtime flag. VITE_DEBUG builds stay on regardless.
+// setDebugConsole переключает флаг времени выполнения. Сборки с VITE_DEBUG включены в любом случае.
 export function setDebugConsole(on: boolean) {
   try {
     localStorage.setItem(RUNTIME_KEY, on ? '1' : '0')
   } catch {
-    // localStorage may be unavailable; the in-memory flag still applies.
+    // localStorage может быть недоступен; флаг в памяти всё равно действует.
   }
   debugConsoleEnabled.value = buildDebug || on
 }
@@ -63,8 +63,8 @@ export function clearDebugLogs() {
   debugLogs.value = []
 }
 
-// pushLog appends a pending request entry and returns its id so the response
-// interceptor can fill in the outcome.
+// pushLog добавляет запись об ожидающем запросе и возвращает её id, чтобы
+// перехватчик ответа мог вписать исход.
 export function pushLog(entry: Omit<DebugLogEntry, 'id'>): number {
   const id = ++seq
   debugLogs.value.push({ id, ...entry })
@@ -79,9 +79,9 @@ export function updateLog(id: number, patch: Partial<DebugLogEntry>) {
   if (entry) Object.assign(entry, patch)
 }
 
-// logWsEvent records a WebSocket lifecycle/diagnostic line in the same console
-// as HTTP requests. method 'WS' makes the console render OK/ERR instead of an
-// HTTP status. Used to study why native chat sends go missing.
+// logWsEvent записывает строку жизненного цикла/диагностики WebSocket в ту же
+// консоль, что и HTTP-запросы. Метод 'WS' заставляет консоль рисовать OK/ERR
+// вместо HTTP-статуса. Используется, чтобы изучать пропажу нативных отправок в чат.
 export function logWsEvent(label: string, opts?: { ok?: boolean; error?: string; detail?: string }) {
   if (!debugConsoleEnabled.value) return
   pushLog({
@@ -94,7 +94,7 @@ export function logWsEvent(label: string, opts?: { ok?: boolean; error?: string;
   })
 }
 
-// snippet renders a short, safe preview of a response/error body for the console.
+// snippet отдаёт короткий безопасный предпросмотр тела ответа или ошибки для консоли.
 export function snippet(data: unknown, max = 400): string {
   if (data == null) return ''
   let text: string

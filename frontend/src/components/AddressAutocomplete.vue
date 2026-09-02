@@ -34,9 +34,9 @@
       </button>
     </div>
 
-    <!-- The apartment lives in the same field: picking a building leaves the
-         address one step short, and this finishes it in place rather than
-         sending the person to a second box somewhere else on the form. -->
+    <!-- Квартира живёт в том же поле: выбор здания оставляет адрес на шаг
+         недоделанным, и это доводит его на месте, а не отправляет человека
+         во вторую ячейку где-то ещё в форме. -->
     <div v-if="isChosen && !hasFlat && needsFlat" class="flat-row">
       <span class="flat-prefix">кв./офис</span>
       <input
@@ -74,7 +74,7 @@
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, PropType } from 'vue'
 import api from '../services/api'
 
-/** A postal address kept as its parts, exactly as the backend stores it. */
+/** Почтовый адрес, хранимый частями, ровно так, как его хранит бэкенд. */
 export interface StructuredAddress {
   value: string
   region?: string
@@ -89,14 +89,13 @@ export interface StructuredAddress {
 }
 
 /**
- * A single address field backed by the address register.
+ * Единое поле адреса, опирающееся на адресный реестр.
  *
- * It replaces the previous arrangement, where the address was typed into a
- * plain box, matched against a fixed spelling, and the flat was a separate
- * input somewhere else on the form. The parts come back from the provider and
- * are passed on as parts, so a building like "12 к. 1" is data rather than a
- * format error, and the coordinates arrive with the pick instead of needing a
- * second lookup.
+ * Оно заменяет прежнюю схему, где адрес набирали в обычной ячейке, сверяли с
+ * фиксированным написанием, а квартира была отдельным полем где-то ещё в форме.
+ * Части приходят от провайдера и передаются дальше частями, поэтому дом вроде
+ * «12 к. 1» — это данные, а не ошибка формата, а координаты приходят вместе с
+ * выбором и не требуют второго запроса.
  */
 export default defineComponent({
   name: 'AddressAutocomplete',
@@ -107,7 +106,7 @@ export default defineComponent({
     hint: { type: String, default: '' },
     flatPlaceholder: { type: String, default: '101' },
     disabled: { type: Boolean, default: false },
-    /** Ask for the apartment once a building has been chosen. */
+    /** Спрашиваем квартиру, как только выбрано здание. */
     needsFlat: { type: Boolean, default: true },
   },
   emits: ['update:modelValue'],
@@ -130,7 +129,7 @@ export default defineComponent({
     const isChosen = computed(() => chosen.value !== null)
     const hasFlat = computed(() => !!chosen.value?.flat)
 
-    /** Rebuilds the one-line form so the field shows what will be submitted. */
+    /** Пересобирает однострочную форму, чтобы поле показывало то, что будет отправлено. */
     const compose = (addr: StructuredAddress, withFlat: string): string => {
       const parts = [addr.city, addr.street].filter((p) => p && p.trim())
       if (addr.house && addr.house.trim()) parts.push(`д. ${addr.house.trim()}`)
@@ -157,7 +156,7 @@ export default defineComponent({
       errorText.value = ''
       try {
         const res = await api.get('/geo/suggest', { params: { q: text, count: 7 } })
-        // A slower earlier request must not overwrite a newer answer.
+        // Более медленный ранний запрос не должен перезаписать более свежий ответ.
         if (mine !== sequence) return
         suggestions.value = res.data || []
         open.value = suggestions.value.length > 0
@@ -166,8 +165,8 @@ export default defineComponent({
         if (mine !== sequence) return
         suggestions.value = []
         open.value = false
-        // Say what happened. The previous version logged this to the console
-        // and left an empty dropdown, which reads as "your street is unknown".
+        // Говорим, что случилось. Прежняя версия писала это в консоль
+        // и оставляла пустой список, что читается как «вашей улицы не существует».
         const status = err?.response?.status
         if (status === 503) {
           errorText.value = 'Подсказки адресов сейчас недоступны. Сообщите в поддержку.'
@@ -183,8 +182,8 @@ export default defineComponent({
 
     const onInput = (event: Event) => {
       query.value = (event.target as HTMLInputElement).value
-      // Editing the text invalidates the pick: what is in the box is no longer
-      // the address that was chosen from the register.
+      // Правка текста отменяет выбор: то, что в поле, больше не тот адрес,
+      // который выбрали из реестра.
       chosen.value = null
       flat.value = ''
       emit('update:modelValue', null)
@@ -261,11 +260,11 @@ export default defineComponent({
       clearTimeout(debounce)
     })
 
-    // Keep the field in step with the bound value when the parent drives it:
-    // clearing it resets the box, and seeding a saved address (e.g. when editing
-    // an existing one) fills the box so it can be adjusted in place. Composed
-    // values echoed back by our own publish() match the current query and are
-    // ignored, so this never loops.
+    // Держим поле в такт со связанным значением, когда им управляет родитель:
+    // очистка сбрасывает ячейку, а подстановка сохранённого адреса (например, при
+    // редактировании существующего) заполняет её, чтобы адрес можно было поправить
+    // на месте. Составленные значения, которые возвращает наш собственный publish(),
+    // совпадают с текущим запросом и игнорируются, поэтому цикла тут не бывает.
     watch(
       () => props.modelValue,
       (next) => {
@@ -346,8 +345,8 @@ export default defineComponent({
   box-shadow: 0 0 0 3px rgba(92, 96, 245, 0.12);
 }
 
-/* A chosen address is a different state from typed text: it is the one that
-   will actually be submitted. */
+/* Выбранный адрес — это иное состояние, чем набранный текст: именно он и
+   будет отправлен. */
 .address-input.is-chosen {
   border-color: #16a34a;
 }

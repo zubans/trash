@@ -12,58 +12,58 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Ledger is the only way money moves.
+// Ledger — единственный способ двигать деньги.
 //
-// Every operation below touches two sides: a user balance and a system account,
-// or two system accounts. That is the point — before this type existed, a fine
-// left an executor's balance and simply stopped existing, a hold left the
-// customer and lived only as a number on the order, and a top-up appeared from
-// nowhere. Services no longer have a raw balance mutator to reach for, so a
-// one-sided movement cannot be written by accident.
+// Каждая операция ниже трогает две стороны: баланс пользователя и системный
+// счёт или два системных счёта. В этом и смысл: до появления этого типа штраф
+// уходил с баланса исполнителя и просто переставал существовать, удержание
+// уходило от заказчика и жило лишь числом на заказе, а пополнение возникало из
+// ниоткуда. У сервисов больше нет сырого мутатора баланса под рукой, поэтому
+// одностороннее движение нельзя записать по случайности.
 //
-// The invariant this buys: the sum of every user balance plus the sum of every
-// system account balance is zero. ReconciliationRepository checks it.
+// Инвариант, который это даёт: сумма всех балансов пользователей плюс сумма
+// всех балансов системных счетов равна нулю. ReconciliationRepository это проверяет.
 type Ledger struct {
 	transactions repository.TransactionRepository
 	accounts     repository.SystemAccountRepository
 }
 
-// NewLedger creates a Ledger over the balance and account stores.
+// NewLedger создаёт Ledger поверх хранилищ баланса и счетов.
 func NewLedger(transactions repository.TransactionRepository, accounts repository.SystemAccountRepository) *Ledger {
 	return &Ledger{transactions: transactions, accounts: accounts}
 }
 
-// RunInTx runs fn in a database transaction. Every paired operation below must
-// be called inside one.
+// RunInTx выполняет fn в транзакции базы. Каждая парная операция ниже обязана
+// вызываться внутри неё.
 func (l *Ledger) RunInTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return l.transactions.RunInTx(ctx, fn)
 }
 
-// GetBalance reads a user's balance.
+// GetBalance читает баланс пользователя.
 func (l *Ledger) GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error) {
 	return l.transactions.GetBalance(ctx, userID)
 }
 
-// AccountBalance reads a system account. Admin surfaces show the commission
-// account this way; services never need it to move money, because every
-// movement already names the account it faces.
+// AccountBalance читает системный счёт. Админские экраны показывают так счёт
+// комиссии; сервисам он для движения денег не нужен, потому что каждое движение
+// и так называет счёт, на который смотрит.
 func (l *Ledger) AccountBalance(ctx context.Context, code string) (*repository.SystemAccount, error) {
 	return l.accounts.Get(ctx, code)
 }
 
-// History returns a user's most recent ledger entries, capped at limit (zero
-// means the repository's default page size).
+// History возвращает самые свежие проводки пользователя, не более limit (ноль
+// означает размер страницы по умолчанию из репозитория).
 func (l *Ledger) History(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Transaction, error) {
 	return l.transactions.GetTransactionsByUserID(ctx, userID, limit)
 }
 
-// HasTip reports whether an order was already tipped. Called inside the tip
-// transaction so the guard and the charge commit together.
+// HasTip сообщает, давали ли уже чаевые по заказу. Вызывается внутри транзакции
+// чаевых, чтобы охрана и списание закоммитились вместе.
 func (l *Ledger) HasTip(ctx context.Context, tx *sql.Tx, orderID uuid.UUID) (bool, error) {
 	return l.transactions.HasTip(ctx, tx, orderID)
 }
 
-// entry describes one side of a movement as it is recorded in the log.
+// entry описывает одну сторону движения в том виде, как она пишется в журнал.
 type entry struct {
 	UserID  uuid.UUID
 	OrderID *uuid.UUID
@@ -82,10 +82,10 @@ func (l *Ledger) record(ctx context.Context, tx *sql.Tx, e entry) error {
 		Amount:       e.Amount,
 		Counterparty: e.Account,
 	})
-	// Counted here rather than at each call site: this is the one funnel every
-	// movement passes through, so the totals cannot drift from the log. The
-	// entry may still be rolled back with its transaction, which is why the
-	// authoritative number stays the reconciliation pass and this is a rate.
+	// Считается здесь, а не в каждом месте вызова: это единственная воронка, через
+	// которую проходит любое движение, поэтому итоги не могут разойтись с журналом.
+	// Проводку всё ещё может откатить её транзакция, поэтому авторитетным числом
+	// остаётся проход сверки, а это — оценка частоты.
 	if err != nil {
 		metrics.LedgerError(string(e.Type))
 		return err
@@ -94,11 +94,11 @@ func (l *Ledger) record(ctx context.Context, tx *sql.Tx, e entry) error {
 	return nil
 }
 
-// Reserve moves money from a user to a system account, but only if the balance
-// covers it. Used for order holds and withdrawal reservations, where spending
-// money the user does not have is never acceptable.
+// Reserve переносит деньги от пользователя на системный счёт, но только если
+// баланс это покрывает. Используется для удержаний по заказам и резервов
+// вывода, где тратить деньги, которых у пользователя нет, недопустимо.
 //
-// Returns repository.ErrInsufficientFunds when the balance is too small.
+// Возвращает repository.ErrInsufficientFunds, когда баланса слишком мало.
 func (l *Ledger) Reserve(ctx context.Context, tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil
@@ -112,9 +112,9 @@ func (l *Ledger) Reserve(ctx context.Context, tx *sql.Tx, userID uuid.UUID, acco
 	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
 }
 
-// Charge moves money from a user to a system account without checking the
-// balance. Used for penalties: an executor's balance is allowed to go negative,
-// which is what min_balance_limit is for.
+// Charge переносит деньги от пользователя на системный счёт без проверки
+// баланса. Используется для штрафов: балансу исполнителя позволено уходить в
+// минус, для чего и существует min_balance_limit.
 func (l *Ledger) Charge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil
@@ -128,8 +128,8 @@ func (l *Ledger) Charge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, accou
 	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
 }
 
-// Release moves money from a system account to a user: a refund out of escrow,
-// an executor's reward, a returned withdrawal reservation.
+// Release переносит деньги с системного счёта пользователю: возврат из эскроу,
+// вознаграждение исполнителя, возвращённый резерв вывода.
 func (l *Ledger) Release(ctx context.Context, tx *sql.Tx, account string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, orderID, adminID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil
@@ -143,15 +143,15 @@ func (l *Ledger) Release(ctx context.Context, tx *sql.Tx, account string, userID
 	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, AdminID: adminID, Type: kind, Account: account, Amount: amount})
 }
 
-// Deposit brings money in from outside: an approved top-up. DEPOSITS goes
-// negative by the same amount, which is how an external source is represented.
+// Deposit вводит деньги извне: одобренное пополнение. DEPOSITS уходит в минус
+// на ту же сумму — так представляется внешний источник.
 func (l *Ledger) Deposit(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount, adminID *uuid.UUID) error {
 	return l.Release(ctx, tx, repository.AccountDeposits, userID, amount, repository.TransactionTypeTopUp, nil, adminID)
 }
 
-// Settle moves money between two system accounts, recording the entry against
-// the user it concerns. Used when a payout leaves the system: the reservation
-// goes out through DEPOSITS, the account that represents the outside world.
+// Settle переносит деньги между двумя системными счетами, записывая проводку
+// против пользователя, которого она касается. Используется, когда выплата
+// покидает систему: резерв уходит через DEPOSITS — счёт, представляющий внешний мир.
 func (l *Ledger) Settle(ctx context.Context, tx *sql.Tx, from, to string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, adminID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil
@@ -165,12 +165,12 @@ func (l *Ledger) Settle(ctx context.Context, tx *sql.Tx, from, to string, userID
 	return l.record(ctx, tx, entry{UserID: userID, AdminID: adminID, Type: kind, Account: from, Amount: amount})
 }
 
-// Commission moves the platform's share of a completed order from escrow to the
-// commission account, inside the confirmation transaction. It is recorded
-// against the executor and the order, so the entry can be traced back to the
-// payout it was taken out of. Escrow is debited unguarded like every other
-// order movement: the money is already held for this order, and the caller
-// splits exactly what it holds between the executor and this account.
+// Commission переносит долю платформы с завершённого заказа из эскроу на счёт
+// комиссии, внутри транзакции подтверждения. Она записывается против
+// исполнителя и заказа, чтобы проводку можно было проследить до выплаты, из
+// которой её взяли. С эскроу списывается без охраны, как и при любом другом
+// движении по заказу: деньги уже удержаны под этот заказ, и вызывающий делит
+// ровно то, что удержано, между исполнителем и этим счётом.
 func (l *Ledger) Commission(ctx context.Context, tx *sql.Tx, executorID uuid.UUID, amount money.Amount, orderID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil
@@ -190,13 +190,13 @@ func (l *Ledger) Commission(ctx context.Context, tx *sql.Tx, executorID uuid.UUI
 	})
 }
 
-// Payout sends money out of a system account to the outside world, but only if
-// the account actually holds it. Settle is the unguarded version, used where
-// the money was reserved earlier and is known to be there; this one is for
-// paying out an account on request, where the amount is whatever the caller
-// asked for and an unguarded debit would let the account go negative.
+// Payout отправляет деньги с системного счёта во внешний мир, но только если
+// счёт ими действительно располагает. Settle — неохраняемая версия, для случаев,
+// когда деньги были зарезервированы раньше и заведомо на месте; эта — для
+// выплаты со счёта по запросу, где сумму задаёт вызывающий и неохраняемое
+// списание позволило бы счёту уйти в минус.
 //
-// Returns repository.ErrInsufficientFunds when the account holds less.
+// Возвращает repository.ErrInsufficientFunds, когда на счёте меньше.
 func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, adminID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil
@@ -210,25 +210,25 @@ func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uui
 	return l.record(ctx, tx, entry{UserID: userID, AdminID: adminID, Type: kind, Account: from, Amount: amount})
 }
 
-// Bonus pays a user out of the platform's own pocket: a reward a behaviour
-// script awarded for work no customer paid for, such as verifying somebody's
-// identity. The money comes from BONUSES, which goes negative by the amount
-// paid — that balance is the running cost of those rewards, and the books still
-// close because the user's credit and the account's debit are one movement.
+// Bonus платит пользователю из собственного кармана платформы: вознаграждение,
+// присуждённое скриптом поведения за работу, которую не оплачивал ни один
+// заказчик, например за подтверждение чьей-то личности. Деньги приходят с
+// BONUSES, который уходит в минус на выплаченную сумму, — этот баланс и есть
+// текущая стоимость таких вознаграждений, а книги сходятся, потому что зачисление и списание — одно движение.
 //
-// commission is normally zero. The platform's share exists to be taken out of
-// what a customer paid, and nobody paid for a free service; withholding it from
-// a reward would only move the platform's money from BONUSES to COMMISSION. A
-// behaviour that wants its rewards treated as ordinary earnings asks for it
-// explicitly, and then the gross still splits exactly:
+// commission обычно равна нулю. Доля платформы существует, чтобы браться из
+// уплаченного заказчиком, а за бесплатную услугу никто не платил; её удержание
+// из вознаграждения лишь переложило бы деньги платформы с BONUSES на
+// COMMISSION. Поведение, желающее считать свои вознаграждения обычным
+// заработком, просит об этом явно, и тогда брутто всё равно делится ровно:
 //
 //	BONUSES -gross = user +(gross - commission) + COMMISSION +commission
 //
-// The debit is unguarded on purpose. BONUSES is an expense account, not a
-// wallet: refusing a reward because "the account is empty" would mean the first
-// reward could never be paid. The ceiling on what a script may award lives in
-// the applier (behavior_max_bonus), where it can be read and changed by an
-// admin.
+// Списание намеренно не охраняется. BONUSES — счёт расходов, а не кошелёк:
+// отказ в вознаграждении из-за того, что «счёт пуст», означал бы, что первое
+// вознаграждение нельзя выплатить никогда. Потолок того, что может присудить
+// скрипт, живёт в применителе (behavior_max_bonus), где админ может его
+// прочитать и изменить.
 func (l *Ledger) Bonus(ctx context.Context, tx *sql.Tx, userID uuid.UUID, gross, commission money.Amount, orderID *uuid.UUID) error {
 	if !gross.IsPositive() {
 		return nil
@@ -259,18 +259,18 @@ func (l *Ledger) Bonus(ctx context.Context, tx *sql.Tx, userID uuid.UUID, gross,
 	return l.Release(ctx, tx, repository.AccountBonuses, userID, gross.Sub(commission), repository.TransactionTypeBonus, orderID, nil)
 }
 
-// Note records an entry that moves no money, for a step that is worth seeing in
-// the log: PAYMENT marks a hold being spent, and the balance already changed
-// when the hold was taken.
+// Note записывает проводку, которая не двигает денег, — для шага, который стоит
+// видеть в журнале: PAYMENT отмечает расход удержания, а баланс изменился ещё
+// когда удержание бралось.
 func (l *Ledger) Note(ctx context.Context, tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
 	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
 }
 
-// Tip moves a tip from a customer to an executor. The money passes through
-// ESCROW in the caller's transaction — debited from the customer only if the
-// balance covers it, then released to the executor — so it never exists outside
-// an account and reconciliation stays balanced. Returns
-// repository.ErrInsufficientFunds when the customer cannot cover the tip.
+// Tip переносит чаевые от заказчика исполнителю. Деньги проходят через ESCROW в
+// транзакции вызывающего — списываются с заказчика, только если баланс это
+// покрывает, затем отпускаются исполнителю, — поэтому они никогда не существуют
+// вне счёта, и сверка остаётся сбалансированной. Возвращает
+// repository.ErrInsufficientFunds, когда заказчик не может покрыть чаевые.
 func (l *Ledger) Tip(ctx context.Context, tx *sql.Tx, customerID, executorID uuid.UUID, amount money.Amount, orderID *uuid.UUID) error {
 	if !amount.IsPositive() {
 		return nil

@@ -10,15 +10,15 @@ import (
 	"healthlogin/backend/service"
 )
 
-// GeocodeBackfillWorker fills pickup coordinates for searching orders that were
-// stored without them — an older client that sent no coordinates and whose
-// address could not be resolved at creation, or an order that predates
-// coordinate capture.
+// GeocodeBackfillWorker заполняет координаты подачи у заказов в поиске, которые
+// сохранились без них: от старого клиента, не приславшего координат и чей адрес
+// не удалось разрешить при создании, или от заказа, появившегося раньше захвата
+// координат.
 //
-// The executor map only plots orders that already carry coordinates
-// (mapOrdersAround skips the rest), so this worker is where the deferred
-// resolution happens: off the request path, in bounded batches, through the same
-// address resolver (DaData) as everything else, with its cache absorbing repeats.
+// Карта исполнителя рисует только заказы, уже несущие координаты
+// (mapOrdersAround остальные пропускает), поэтому отложенное разрешение
+// происходит именно в этом воркере: вне пути запроса, ограниченными пачками,
+// через тот же разрешатель адресов (DaData), чей кэш поглощает повторы.
 type GeocodeBackfillWorker struct {
 	orderRepo repository.OrderRepository
 	resolver  service.AddressResolver
@@ -26,12 +26,12 @@ type GeocodeBackfillWorker struct {
 	guard func(func() error) error
 }
 
-// NewGeocodeBackfillWorker creates a GeocodeBackfillWorker.
+// NewGeocodeBackfillWorker создаёт GeocodeBackfillWorker.
 func NewGeocodeBackfillWorker(orderRepo repository.OrderRepository, resolver service.AddressResolver) *GeocodeBackfillWorker {
 	return &GeocodeBackfillWorker{orderRepo: orderRepo, resolver: resolver, batchSize: 10}
 }
 
-// Start runs the worker loop periodically.
+// Start периодически выполняет цикл воркера.
 func (w *GeocodeBackfillWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -44,7 +44,7 @@ func (w *GeocodeBackfillWorker) Start(interval time.Duration) {
 	log.Printf("[GeocodeBackfillWorker] Background worker started every %v", interval)
 }
 
-// Run resolves one batch of coordinate-less orders and persists the results.
+// Run разрешает одну пачку заказов без координат и сохраняет результаты.
 func (w *GeocodeBackfillWorker) Run() error {
 	if w.resolver == nil {
 		return nil
@@ -60,14 +60,14 @@ func (w *GeocodeBackfillWorker) Run() error {
 			continue
 		}
 
-		// Background work, so the root is context.Background(); a per-order
-		// deadline still bounds each resolve independently of the batch.
+		// Фоновая работа, поэтому корень — context.Background(); дедлайн на заказ
+		// всё равно ограничивает каждое разрешение независимо от пачки.
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		geo, err := w.resolver.Resolve(ctx, *o.Address)
 		cancel()
 		if err != nil {
-			// Provider busy, address not found or upstream error: leave the order
-			// for a later tick. Only coordinates are updated, so a retry is safe.
+			// Провайдер занят, адрес не найден или ошибка внешнего сервиса: оставляем
+			// заказ на следующий тик. Обновляются только координаты, поэтому повтор безопасен.
 			log.Printf("[GeocodeBackfillWorker] resolve failed for order %s: %v", o.ID, err)
 			continue
 		}
@@ -80,9 +80,9 @@ func (w *GeocodeBackfillWorker) Run() error {
 	return nil
 }
 
-// guard runs one tick under the job's advisory lock when a Leader is wired, so
-// a second replica skips the tick instead of duplicating it. Unset means run
-// directly, which is what a single-process deployment and the tests do.
+// guard выполняет один тик под advisory-блокировкой задачи, когда подключён
+// Leader, чтобы вторая реплика пропустила тик, а не продублировала его. Без
+// него выполняется напрямую — так и делают однопроцессный деплой и тесты.
 func (w *GeocodeBackfillWorker) runGuarded(job func() error) error {
 	if w.guard == nil {
 		return job()
@@ -90,7 +90,7 @@ func (w *GeocodeBackfillWorker) runGuarded(job func() error) error {
 	return w.guard(job)
 }
 
-// WithLeader makes this worker run at most once across every process.
+// WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.
 func (w *GeocodeBackfillWorker) WithLeader(leader *Leader, name string) *GeocodeBackfillWorker {
 	w.guard = leader.Guard(name)
 	return w

@@ -11,8 +11,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// newMoneyTestService wires an OrderService with in-memory repositories and a
-// balance-tracking transaction repository.
+// newMoneyTestService собирает OrderService с репозиториями в памяти и
+// репозиторием транзакций, отслеживающим баланс.
 func newMoneyTestService() (*OrderService, *mockOrderRepo, *mockTransactionRepo) {
 	orderRepo := &mockOrderRepo{}
 	txRepo := &mockTransactionRepo{}
@@ -21,9 +21,9 @@ func newMoneyTestService() (*OrderService, *mockOrderRepo, *mockTransactionRepo)
 	return srv, orderRepo, txRepo
 }
 
-// TestCancelAssignedOrderRefundsOnce covers the duplicate-refund bug: cancelling
-// an order that an executor had already accepted refunded the hold on every
-// call, because the guarded UPDATE matched no rows but the refund still ran.
+// TestCancelAssignedOrderRefundsOnce покрывает баг двойного возврата: отмена
+// заказа, который исполнитель уже принял, возвращала удержание на каждом
+// вызове, потому что охраняемый UPDATE не задевал строк, а возврат всё равно шёл.
 func TestCancelAssignedOrderRefundsOnce(t *testing.T) {
 	srv, orderRepo, txRepo := newMoneyTestService()
 
@@ -39,7 +39,7 @@ func TestCancelAssignedOrderRefundsOnce(t *testing.T) {
 		t.Fatalf("expected hold of %s, balance is %s", order.HoldAmount, afterHold)
 	}
 
-	// An executor takes the order.
+	// Исполнитель берёт заказ.
 	if err := orderRepo.AssignOrder(context.Background(), order.ID, uuid.New()); err != nil {
 		t.Fatalf("failed to assign order: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestCancelAssignedOrderRefundsOnce(t *testing.T) {
 		t.Fatalf("first cancel should succeed: %v", err)
 	}
 
-	// Every further cancel must be refused, not silently refunded again.
+	// Любая дальнейшая отмена должна отклоняться, а не молча возвращать снова.
 	for i := 0; i < 3; i++ {
 		if err := srv.Cancel(context.Background(), customerID, order.ID); err == nil {
 			t.Fatalf("repeat cancel #%d was accepted", i+1)
@@ -61,8 +61,8 @@ func TestCancelAssignedOrderRefundsOnce(t *testing.T) {
 	}
 }
 
-// TestConfirmOrderPaysExecutorOnce ensures a second confirmation is refused
-// instead of rewarding the executor twice.
+// TestConfirmOrderPaysExecutorOnce проверяет, что второе подтверждение
+// отклоняется, а не награждает исполнителя дважды.
 func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 	srv, orderRepo, txRepo := newMoneyTestService()
 
@@ -74,7 +74,7 @@ func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 		t.Fatalf("unexpected error creating order: %v", err)
 	}
 
-	// Capture the hold before confirmation: confirming zeroes it.
+	// Запоминаем удержание до подтверждения: подтверждение его обнуляет.
 	holdAmount := order.HoldAmount
 
 	if err := orderRepo.AssignOrder(context.Background(), order.ID, executorID); err != nil {
@@ -98,10 +98,10 @@ func TestConfirmOrderPaysExecutorOnce(t *testing.T) {
 	}
 }
 
-// TestConfirmAssignedOrderPaysExecutor covers early approval: a customer may
-// confirm while the order is still ASSIGNED (the executor never pressed
-// "Исполнил"), and doing so must pay the executor the held amount exactly as the
-// EXECUTED path does — no more, no less.
+// TestConfirmAssignedOrderPaysExecutor покрывает раннее одобрение: заказчик
+// может подтвердить, пока заказ ещё ASSIGNED (исполнитель не нажимал
+// «Исполнил»), и это обязано выплатить исполнителю удержанную сумму ровно так
+// же, как это делает путь EXECUTED, — не больше и не меньше.
 func TestConfirmAssignedOrderPaysExecutor(t *testing.T) {
 	srv, orderRepo, txRepo := newMoneyTestService()
 
@@ -118,11 +118,11 @@ func TestConfirmAssignedOrderPaysExecutor(t *testing.T) {
 		t.Fatalf("failed to assign order: %v", err)
 	}
 
-	// Deliberately skip ExecuteOrder: confirm straight from ASSIGNED.
+	// Намеренно пропускаем ExecuteOrder: подтверждаем прямо из ASSIGNED.
 	if err := srv.Confirm(context.Background(), customerID, order.ID); err != nil {
 		t.Fatalf("early confirm from ASSIGNED should succeed: %v", err)
 	}
-	// A second confirm must still be refused (order is now COMPLETED).
+	// Второе подтверждение всё равно обязано отклоняться (заказ уже COMPLETED).
 	if err := srv.Confirm(context.Background(), customerID, order.ID); err == nil {
 		t.Fatal("second confirm was accepted")
 	}
@@ -134,30 +134,30 @@ func TestConfirmAssignedOrderPaysExecutor(t *testing.T) {
 	}
 }
 
-// TestCreateOrderRejectsOverdraft checks that the balance is debited atomically,
-// so a check-then-write race cannot spend money the customer does not have.
+// TestCreateOrderRejectsOverdraft проверяет, что баланс списывается атомарно,
+// поэтому гонка «проверил-записал» не потратит деньги, которых у заказчика нет.
 func TestCreateOrderRejectsOverdraft(t *testing.T) {
 	srv, _, txRepo := newMoneyTestService()
 
 	customerID := uuid.New()
-	txRepo.balances = map[uuid.UUID]money.Amount{customerID: money.FromRubles(50.0)} // variant costs 100
+	txRepo.balances = map[uuid.UUID]money.Amount{customerID: money.FromRubles(50.0)} // вариант стоит 100
 
 	lat, lon := 55.75, 37.61
 	if _, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon); err == nil {
 		t.Fatal("expected order creation to fail on insufficient balance")
 	}
 
-	// Whether the order row survives is a property of the database transaction
-	// the two statements share, which mocks do not model; that is asserted
-	// against a real Postgres in TestCreateOrderRollsBackOnInsufficientFunds.
+	// Выживет ли строка заказа — свойство транзакции базы, которую делят два
+	// оператора, а моки его не моделируют; это проверяется на настоящем Postgres
+	// в TestCreateOrderRollsBackOnInsufficientFunds.
 	balance, _ := txRepo.GetBalance(context.Background(), customerID)
 	if balance != money.FromRubles(50) {
 		t.Errorf("balance must be untouched, got %s", balance)
 	}
 }
 
-// TestAcceptRejectsIneligibleExecutor verifies that the age and verification
-// rules are enforced when an order is taken, not only when it is listed.
+// TestAcceptRejectsIneligibleExecutor проверяет, что правила возраста и
+// верификации применяются при взятии заказа, а не только при показе в списке.
 func TestAcceptRejectsIneligibleExecutor(t *testing.T) {
 	minor := &repository.User{ID: uuid.New(), Role: "EXECUTOR", Status: "ACTIVE", Verified: true}
 	birth := time.Now().AddDate(-16, 0, 0)
@@ -186,8 +186,8 @@ func TestAcceptRejectsIneligibleExecutor(t *testing.T) {
 	}
 }
 
-// TestEndShiftEarlyChargesPenalty covers the bypass where calling /shifts/end
-// instead of /shifts/early-end skipped the penalty entirely.
+// TestEndShiftEarlyChargesPenalty покрывает обход, при котором вызов
+// /shifts/end вместо /shifts/early-end полностью пропускал штраф.
 func TestEndShiftEarlyChargesPenalty(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
@@ -214,10 +214,10 @@ func TestEndShiftEarlyChargesPenalty(t *testing.T) {
 	}
 }
 
-// TestAcceptBidChecksExecutorAtAcceptTime covers the rules that were missing
-// while the whole accept flow lived in the repository: an executor had to be
-// eligible when the bid was placed, but nothing was re-checked when the
-// customer accepted it.
+// TestAcceptBidChecksExecutorAtAcceptTime покрывает правила, которых не хватало,
+// пока весь поток принятия жил в репозитории: исполнитель должен был быть
+// допущен в момент подачи ставки, но ничего не перепроверялось, когда заказчик
+// её принимал.
 func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	orderRepo := &mockOrderRepo{}
@@ -240,7 +240,7 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 		t.Fatalf("failed to seed bid: %v", err)
 	}
 
-	// The executor placed the bid but is no longer on shift.
+	// Исполнитель подал ставку, но больше не на смене.
 	if err := srv.AcceptBid(context.Background(), bid.ID, customerID); err == nil {
 		t.Error("expected accept to fail while the executor has no active shift")
 	}
@@ -248,7 +248,7 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 		t.Errorf("bid must stay pending after a failed accept, got %s", bid.Status)
 	}
 
-	// Back on shift: the bid can be accepted, and the hold is taken.
+	// Снова на смене: ставку можно принять, и удержание берётся.
 	shiftRepo.shifts = append(shiftRepo.shifts, &repository.Shift{
 		ID:           uuid.New(),
 		ExecutorID:   executorID,
@@ -265,7 +265,7 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 		t.Errorf("expected the order assigned at 350.00, got %s / %s", order.Status, order.HoldAmount)
 	}
 
-	// A second accept must not double-charge.
+	// Второе принятие не должно списать дважды.
 	if err := srv.AcceptBid(context.Background(), bid.ID, customerID); err == nil {
 		t.Error("expected a repeated accept to be refused")
 	}
@@ -274,8 +274,8 @@ func TestAcceptBidChecksExecutorAtAcceptTime(t *testing.T) {
 	}
 }
 
-// TestAcceptBidRejectsForeignCustomer keeps ownership enforcement in place after
-// the move out of the repository.
+// TestAcceptBidRejectsForeignCustomer сохраняет проверку владения на месте
+// после переезда из репозитория.
 func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 	bidRepo := &mockBidRepo{}
 	orderRepo := &mockOrderRepo{}
@@ -296,7 +296,7 @@ func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 	}
 }
 
-// newWithdrawalTestService wires AdminService with a balance-tracking ledger.
+// newWithdrawalTestService собирает AdminService с реестром, отслеживающим баланс.
 func newWithdrawalTestService() (*AdminService, *mockAdminRepo, *mockRepo, *mockTransactionRepo) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{
@@ -309,8 +309,8 @@ func newWithdrawalTestService() (*AdminService, *mockAdminRepo, *mockRepo, *mock
 	return svc, adminRepo, userRepo, txRepo
 }
 
-// TestWithdrawalReservesFunds covers M-06: a request used to only look at the
-// balance and leave the money spendable.
+// TestWithdrawalReservesFunds покрывает M-06: заявка раньше лишь смотрела на
+// баланс и оставляла деньги тратимыми.
 func TestWithdrawalReservesFunds(t *testing.T) {
 	svc, _, userRepo, txRepo := newWithdrawalTestService()
 
@@ -337,8 +337,8 @@ func TestWithdrawalReservesFunds(t *testing.T) {
 	}
 }
 
-// TestWithdrawalCannotExceedBalance checks the guarded debit rather than a
-// check-then-write on a stale read.
+// TestWithdrawalCannotExceedBalance проверяет охраняемое списание, а не
+// «проверил-записал» по устаревшему чтению.
 func TestWithdrawalCannotExceedBalance(t *testing.T) {
 	svc, _, userRepo, txRepo := newWithdrawalTestService()
 
@@ -354,8 +354,8 @@ func TestWithdrawalCannotExceedBalance(t *testing.T) {
 	}
 }
 
-// TestRejectedWithdrawalReturnsTheMoney makes sure a refusal is not a quiet
-// confiscation now that funds leave the balance up front.
+// TestRejectedWithdrawalReturnsTheMoney убеждается, что отказ не превращается в
+// тихую конфискацию теперь, когда средства уходят с баланса заранее.
 func TestRejectedWithdrawalReturnsTheMoney(t *testing.T) {
 	svc, _, userRepo, txRepo := newWithdrawalTestService()
 
@@ -374,7 +374,7 @@ func TestRejectedWithdrawalReturnsTheMoney(t *testing.T) {
 		t.Errorf("rejecting must return the reserved money, balance is %s", balance)
 	}
 
-	// A second decision on the same request must not double-refund.
+	// Второе решение по той же заявке не должно вернуть деньги дважды.
 	if err := svc.RejectWithdrawalRequest(context.Background(), req.ID, uuid.New()); err == nil {
 		t.Error("expected a second decision to be refused")
 	}
@@ -383,8 +383,8 @@ func TestRejectedWithdrawalReturnsTheMoney(t *testing.T) {
 	}
 }
 
-// TestApprovedWithdrawalDoesNotDebitTwice: the money already left the balance
-// when the request was created, so approval must move nothing.
+// TestApprovedWithdrawalDoesNotDebitTwice: деньги ушли с баланса ещё при
+// создании заявки, поэтому одобрение не должно ничего двигать.
 func TestApprovedWithdrawalDoesNotDebitTwice(t *testing.T) {
 	svc, _, userRepo, txRepo := newWithdrawalTestService()
 
@@ -407,10 +407,10 @@ func TestApprovedWithdrawalDoesNotDebitTwice(t *testing.T) {
 	}
 }
 
-// TestMoneyIsNeverCreatedOrDestroyed is the point of system accounts: every
-// movement touches two sides, so the sum of user balances and platform accounts
-// stays where it started. Before the ledger existed a fine simply left the
-// executor's balance and stopped existing.
+// TestMoneyIsNeverCreatedOrDestroyed — смысл системных счетов: каждое движение
+// трогает две стороны, поэтому сумма балансов пользователей и счетов платформы
+// остаётся там, где была. До появления реестра штраф просто уходил с баланса
+// исполнителя и переставал существовать.
 func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 	txRepo := &mockTransactionRepo{}
 	accounts := newMockAccounts()
@@ -434,7 +434,7 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 		return sum
 	}
 
-	// Give both participants a starting balance the way the world does.
+	// Даём обоим участникам стартовый баланс, как это бывает в жизни.
 	customerStart, _ := txRepo.GetBalance(context.Background(), customerID)
 	executorStart, _ := txRepo.GetBalance(context.Background(), executorID)
 	opening := customerStart.Add(executorStart)
@@ -454,7 +454,7 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 		t.Errorf("holding money changed the total: %s, expected %s", got, opening)
 	}
 
-	// Run the order to completion: escrow drains into the executor.
+	// Доводим заказ до конца: эскроу перетекает исполнителю.
 	if err := orderRepo.AssignOrder(context.Background(), order.ID, executorID); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestMoneyIsNeverCreatedOrDestroyed(t *testing.T) {
 		t.Errorf("completing the order changed the total: %s, expected %s", got, opening)
 	}
 
-	// A fine is collected, not destroyed.
+	// Штраф собирают, а не уничтожают.
 	second, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 2", &lat, &lon)
 	if err != nil {
 		t.Fatalf("create second order: %v", err)

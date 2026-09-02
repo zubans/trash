@@ -9,23 +9,23 @@ import (
 	"healthlogin/backend/service"
 )
 
-// StartShiftRequest contains the payload for starting a shift.
+// StartShiftRequest содержит полезную нагрузку для начала смены.
 type StartShiftRequest struct {
 	DurationHours int `json:"duration_hours"`
 }
 
-// LocationRequest contains a GPS coordinate.
+// LocationRequest содержит GPS-координату.
 type LocationRequest struct {
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 }
 
-// ShiftHandler handles shift-related HTTP endpoints.
+// ShiftHandler обслуживает HTTP-эндпоинты смен.
 type ShiftHandler struct {
 	shiftService *service.ShiftService
 }
 
-// NewShiftHandler creates a ShiftHandler.
+// NewShiftHandler создаёт ShiftHandler.
 func NewShiftHandler(shiftService *service.ShiftService) *ShiftHandler {
 	return &ShiftHandler{shiftService: shiftService}
 }
@@ -38,7 +38,7 @@ func shiftUserFromContext(r *http.Request) *repository.User {
 	return user
 }
 
-// StartShift handles POST /executor/shifts.
+// StartShift обслуживает POST /executor/shifts.
 func (h *ShiftHandler) StartShift(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
 	if user == nil {
@@ -63,7 +63,7 @@ func (h *ShiftHandler) StartShift(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(shift)
 }
 
-// EndShift handles POST /executor/shifts/end.
+// EndShift обслуживает POST /executor/shifts/end.
 func (h *ShiftHandler) EndShift(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
 	if user == nil {
@@ -79,8 +79,8 @@ func (h *ShiftHandler) EndShift(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// EarlyEndShift handles POST /executor/shifts/early-end.
-// It ends the active shift before its planned time and charges a penalty.
+// EarlyEndShift обслуживает POST /executor/shifts/early-end.
+// Он завершает активную смену раньше запланированного времени и списывает штраф.
 func (h *ShiftHandler) EarlyEndShift(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
 	if user == nil {
@@ -98,7 +98,7 @@ func (h *ShiftHandler) EarlyEndShift(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(shift)
 }
 
-// RecordLocation handles POST /executor/shifts/location.
+// RecordLocation обслуживает POST /executor/shifts/location.
 func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
 	if user == nil {
@@ -112,9 +112,9 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// "stored" reports whether the position was actually taken; the location
-	// rules may decline a move that looks like a district change inside its
-	// cooldown. The old "is_inside" flag went with the geofence it described.
+	// «stored» сообщает, была ли позиция действительно принята; правила
+	// местоположения могут отклонить перемещение, похожее на смену района, пока
+	// идёт их пауза. Старый флаг «is_inside» ушёл вместе с геозоной, которую описывал.
 	stored, err := h.shiftService.RecordLocation(r.Context(), user.ID, req.Latitude, req.Longitude)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -126,7 +126,7 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"stored": stored})
 }
 
-// GetActiveShiftHandler handles GET /executor/shifts/active.
+// GetActiveShiftHandler обслуживает GET /executor/shifts/active.
 func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
 	if user == nil {
@@ -144,7 +144,7 @@ func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(shift)
 }
 
-// GetExecutorHistoryHandler handles GET /executor/history.
+// GetExecutorHistoryHandler обслуживает GET /executor/history.
 func (h *ShiftHandler) GetExecutorHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	user := shiftUserFromContext(r)
 	if user == nil {
@@ -162,7 +162,7 @@ func (h *ShiftHandler) GetExecutorHistoryHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(history)
 }
 
-// Alias method names expected by main.go.
+// Псевдонимы имён методов, которых ожидает main.go.
 func (h *ShiftHandler) StartShiftHandler(w http.ResponseWriter, r *http.Request) { h.StartShift(w, r) }
 func (h *ShiftHandler) EndShiftHandler(w http.ResponseWriter, r *http.Request)   { h.EndShift(w, r) }
 func (h *ShiftHandler) EarlyEndShiftHandler(w http.ResponseWriter, r *http.Request) {

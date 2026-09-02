@@ -11,24 +11,24 @@ import (
 	"healthlogin/backend/service"
 )
 
-// BehaviorHandler serves the two endpoints scripted services need beyond the
-// ordinary order flow: an executor submitting data for a check, and an
-// administrator working through the cases a behaviour handed over.
+// BehaviorHandler обслуживает два эндпоинта, которые нужны скриптовым услугам
+// сверх обычного потока заказа: отправку данных на проверку исполнителем и
+// разбор администратором случаев, переданных поведением.
 type BehaviorHandler struct {
 	dispatcher  *service.BehaviorDispatcher
 	submissions repository.SubmissionRepository
 }
 
-// NewBehaviorHandler creates a BehaviorHandler.
+// NewBehaviorHandler создаёт BehaviorHandler.
 func NewBehaviorHandler(dispatcher *service.BehaviorDispatcher, submissions repository.SubmissionRepository) *BehaviorHandler {
 	return &BehaviorHandler{dispatcher: dispatcher, submissions: submissions}
 }
 
-// SubmitOrderData handles POST /executor/orders/{id}/submission.
+// SubmitOrderData обслуживает POST /executor/orders/{id}/submission.
 //
-// The body carries only what the executor typed. The values it is compared
-// against stay on the server: this endpoint answers "did it match", never "what
-// should it have been", so a wrong guess teaches the submitter nothing.
+// Тело несёт только то, что набрал исполнитель. Значения, с которыми
+// сравнивают, остаются на сервере: этот эндпоинт отвечает «совпало ли», но
+// никогда «как должно было быть», поэтому неверная догадка ничему не учит.
 func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request) {
 	orderID, err := parseUUIDParam(r, "id")
 	if err != nil {
@@ -62,9 +62,9 @@ func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request
 	writeJSON(w, result)
 }
 
-// ListEscalations handles GET /admin/escalations. Open cases by default; the
-// submitted attempts come with them, because comparing what the moderator read
-// off the document with the account is the whole task on that screen.
+// ListEscalations обслуживает GET /admin/escalations. По умолчанию открытые
+// случаи; попытки отправки идут вместе с ними, потому что сравнить прочитанное
+// модератором в документе с учётной записью — вся задача того экрана.
 func (h *BehaviorHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	escalations, err := h.submissions.ListEscalations(r.Context(), status, 0)
@@ -75,9 +75,9 @@ func (h *BehaviorHandler) ListEscalations(w http.ResponseWriter, r *http.Request
 	writeJSON(w, escalations)
 }
 
-// ResolveEscalation handles POST /admin/escalations/{id}/resolve. It closes the
-// case and nothing else: verifying the customer, or cancelling the order, are
-// the administrator's own decisions and have their own endpoints.
+// ResolveEscalation обслуживает POST /admin/escalations/{id}/resolve. Он
+// закрывает случай и только: верифицировать заказчика или отменить заказ —
+// собственные решения администратора со своими эндпоинтами.
 func (h *BehaviorHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {

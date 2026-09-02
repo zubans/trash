@@ -160,7 +160,7 @@ export default defineComponent({
       set: (val) => emit('update:modelValue', val),
     })
 
-    // Overflow handled by parent views
+    // Переполнение обрабатывают родительские представления
 
     const hasReviewed = ref(false)
     const existingReview = ref<OrderReview | null>(null)
@@ -240,7 +240,7 @@ export default defineComponent({
     }
 
     onMounted(() => {
-      // Phosphor icons loaded globally
+      // Иконки Phosphor загружены глобально
     })
 
     return {
@@ -442,7 +442,7 @@ export default defineComponent({
 .exec-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;}
 .exec-name { font-size: 15px; font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Review Display Box */
+/* Блок отображения отзыва */
 .review-display-box {
   background: #f8fafc;
   border: 1px solid rgba(99, 102, 241, 0.15);

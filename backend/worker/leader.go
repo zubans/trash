@@ -7,31 +7,31 @@ import (
 	"log"
 )
 
-// Leader hands out per-job guards backed by PostgreSQL advisory locks, so that
-// a periodic job runs on one process at a time.
+// Leader выдаёт защиту по задачам поверх advisory-блокировок PostgreSQL, чтобы
+// периодическая задача выполнялась на одном процессе за раз.
 //
-// Every background job here changes state that must happen once: the SLA worker
-// refunds part of a hold, the shift worker closes shifts and charges early-exit
-// penalties, the matching worker assigns orders. Two processes running the same
-// tick would do each of those twice — two refunds, two penalties — which is why
-// the service cannot currently be run with more than one replica. A guard makes
-// the second process skip the tick instead.
+// Каждая фоновая задача здесь меняет состояние, которое должно измениться один
+// раз: воркер SLA возвращает часть удержания, воркер смен закрывает смены и
+// списывает штрафы за ранний уход, воркер подбора назначает заказы. Два
+// процесса, выполняющие один тик, сделали бы каждое из этого дважды — два
+// возврата, два штрафа, — из-за чего сервис сейчас нельзя запускать более чем в
+// одной реплике. Защита заставляет второй процесс тик пропустить.
 //
-// A skipped tick is not an error and not a retry: the job runs on a timer, and
-// whichever process holds the lock has just done the work.
+// Пропущенный тик — не ошибка и не повтор: задача идёт по таймеру, а процесс,
+// держащий блокировку, только что сделал работу.
 type Leader struct {
 	db *sql.DB
 }
 
-// NewLeader creates a Leader over the given database. A nil database yields a
-// Leader whose guards simply run their job, which is what the tests and any
-// single-process deployment want.
+// NewLeader создаёт Leader поверх заданной базы. Nil-база даёт Leader, чьи
+// защиты просто выполняют свою задачу, — именно этого хотят тесты и любой
+// однопроцессный деплой.
 func NewLeader(db *sql.DB) *Leader {
 	return &Leader{db: db}
 }
 
-// Guard returns a function that runs a job while holding the advisory lock for
-// name, and skips it when another process holds it.
+// Guard возвращает функцию, которая выполняет задачу, держа advisory-блокировку
+// для name, и пропускает её, когда блокировку держит другой процесс.
 func (l *Leader) Guard(name string) func(func() error) error {
 	if l == nil || l.db == nil {
 		return func(job func() error) error { return job() }
@@ -45,15 +45,15 @@ func (l *Leader) Guard(name string) func(func() error) error {
 func (l *Leader) run(name string, key int64, job func() error) error {
 	ctx := context.Background()
 
-	// The lock is held by a session, so the connection must be pinned for its
-	// whole life: taken and released on a pooled connection at random, the
-	// unlock could land on a different session than the lock did and leave the
-	// job blocked for every process, forever.
+	// Блокировку держит сессия, поэтому соединение надо закрепить на всю её
+	// жизнь: взятые и отпущенные на случайном соединении из пула, разблокировка
+	// могла бы попасть не в ту сессию, что и блокировка, и оставить задачу
+	// заблокированной для всех процессов навсегда.
 	conn, err := l.db.Conn(ctx)
 	if err != nil {
-		// Without a connection there is no way to tell whether another process
-		// is running this job, and running it unguarded is exactly the risk the
-		// lock exists to remove.
+		// Без соединения невозможно понять, выполняет ли эту задачу другой процесс,
+		// а выполнение без защиты — ровно тот риск, ради устранения которого
+		// блокировка и существует.
 		log.Printf("[leader] %s: cannot acquire a connection, skipping this tick: %v", name, err)
 		return nil
 	}
@@ -65,14 +65,14 @@ func (l *Leader) run(name string, key int64, job func() error) error {
 		return nil
 	}
 	if !acquired {
-		// Another process is running this job right now. Normal, and silent by
-		// design: with several replicas this would otherwise log every tick.
+		// Прямо сейчас эту задачу выполняет другой процесс. Это нормально и
+		// намеренно молча: с несколькими репликами иначе логировался бы каждый тик.
 		return nil
 	}
 	defer func() {
 		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, key); err != nil {
-			// Closing the connection ends the session and releases the lock, so
-			// this is a report, not a leak.
+			// Закрытие соединения завершает сессию и отпускает блокировку, поэтому
+			// это отчёт, а не утечка.
 			log.Printf("[leader] %s: failed to release the lock: %v", name, err)
 		}
 	}()
@@ -80,13 +80,13 @@ func (l *Leader) run(name string, key int64, job func() error) error {
 	return job()
 }
 
-// lockKey derives the advisory lock key from the job name, so the keys cannot
-// drift apart from the jobs they protect the way a hand-maintained list of
-// magic numbers would.
+// lockKey выводит ключ advisory-блокировки из имени задачи, чтобы ключи не
+// могли разъехаться с задачами, которые они защищают, как разъехался бы
+// поддерживаемый вручную список магических чисел.
 func lockKey(name string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("healthlogin.worker." + name))
-	// Advisory lock keys are signed 64-bit; the sign of the hash is irrelevant
-	// as long as one name always maps to one key.
+	// Ключи advisory-блокировок — знаковые 64-битные; знак хеша не важен,
+	// пока одно имя всегда отображается в один ключ.
 	return int64(h.Sum64())
 }

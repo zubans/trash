@@ -33,10 +33,10 @@ export default defineComponent({
 
     const checkHealth = async () => {
       try {
-        // Web builds use a relative URL so the request goes to the same origin
-        // the page was served from. Native builds must hit the real backend
-        // (VITE_MOBILE_API_URL / VITE_API_URL) because the app is served from
-        // https://localhost and /health would point to itself.
+        // Веб-сборки используют относительный URL, чтобы запрос уходил на тот же
+        // источник, откуда отдана страница. Нативные сборки обязаны ходить в настоящий
+        // бэкенд (VITE_MOBILE_API_URL / VITE_API_URL), потому что приложение отдаётся с
+        // https://localhost и /health указывал бы сам на себя.
         const healthUrl = Capacitor.isNativePlatform()
           ? `${apiUrl.replace(/\/$/, '')}/health`
           : '/health'

@@ -18,26 +18,26 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// SettingBehaviorMaxBonus caps a single scripted payout, in rubles. The script
-// decides the amount; this decides how wrong a script is allowed to be.
+// SettingBehaviorMaxBonus ограничивает одну скриптовую выплату, в рублях. Сумму
+// решает скрипт; это решает, насколько сильно скрипту позволено ошибиться.
 const SettingBehaviorMaxBonus = "behavior_max_bonus"
 
 const defaultBehaviorMaxBonus = 5000.0
 
-// ConfigVerifierRole is the configuration key naming the role that may perform a
-// service. The core reads it for the verify_user guard; a behaviour that uses
-// verify_user has to declare it (see behaviors/verification/config.star).
+// ConfigVerifierRole — ключ конфигурации, называющий роль, которая может
+// выполнять услугу. Ядро читает его для проверки verify_user; поведение,
+// использующее verify_user, обязано его объявить (см. behaviors/verification/config.star).
 const ConfigVerifierRole = "verifier_role"
 
-// BehaviorDispatcher delivers domain events to the behaviour scripts and
-// applies the effects they ask for.
+// BehaviorDispatcher доставляет доменные события скриптам поведений и применяет
+// эффекты, которые они просят.
 //
-// The split it enforces is the point of the whole design. A script decides
-// *what* should happen and says so in effects; this type decides whether the
-// asker was entitled to it and performs it through the ordinary services — the
-// ledger, the order lifecycle, the verification flag. A script can therefore be
-// wrong about a decision, but it cannot pay a stranger, verify an arbitrary
-// user, or write an unbalanced pair of ledger entries.
+// Разделение, которое он обеспечивает, — смысл всего замысла. Скрипт решает,
+// *что* должно произойти, и говорит это эффектами; этот тип решает, был ли
+// просящий на это вправе, и выполняет через обычные сервисы — реестр,
+// жизненный цикл заказа, флаг верификации. Поэтому скрипт может ошибиться в
+// решении, но не может заплатить постороннему, верифицировать произвольного
+// пользователя или записать несбалансированную пару проводок.
 type BehaviorDispatcher struct {
 	events      repository.EventRepository
 	orders      repository.OrderRepository
@@ -51,24 +51,24 @@ type BehaviorDispatcher struct {
 	behaviors   *Behaviors
 	orderSvc    *OrderService
 
-	// batchSize bounds one tick; maxAttempts bounds one event's lifetime, so a
-	// permanently failing event stops consuming the batch instead of blocking
-	// every event behind it forever.
+	// batchSize ограничивает один тик; maxAttempts ограничивает жизнь одного
+	// события, чтобы постоянно падающее событие перестало занимать пачку, а не
+	// блокировало навсегда все события за собой.
 	batchSize   int
 	maxAttempts int
 
-	// Processed events are kept as history for this long, and swept no more
-	// often than purgeEvery. The window is far longer than any redelivery, so
-	// an idempotency key never disappears while its event could still come back.
+	// Обработанные события хранятся как история столько времени и подметаются не
+	// чаще, чем purgeEvery. Окно намного длиннее любой переотправки, поэтому ключ
+	// идемпотентности не исчезает, пока его событие ещё может вернуться.
 	retention  time.Duration
 	purgeEvery time.Duration
 	mu         sync.Mutex
 	lastPurge  time.Time
 }
 
-// NewBehaviorDispatcher wires the dispatcher. It needs the order service
-// because completing and cancelling an order must go through exactly the same
-// code a customer's own confirmation does.
+// NewBehaviorDispatcher собирает диспетчер. Ему нужен сервис заказов, потому что
+// завершение и отмена заказа обязаны идти ровно тем же кодом, каким идёт
+// собственное подтверждение заказчика.
 func NewBehaviorDispatcher(
 	events repository.EventRepository,
 	orders repository.OrderRepository,
@@ -90,15 +90,15 @@ func NewBehaviorDispatcher(
 	}
 }
 
-// WithSubmissions wires the store behind data checks and escalations. Without
-// it a behaviour that declares check_fields simply takes no submissions.
+// WithSubmissions подключает хранилище за проверками данных и эскалациями. Без
+// него поведение, объявившее check_fields, просто не принимает отправок.
 func (d *BehaviorDispatcher) WithSubmissions(submissions repository.SubmissionRepository) *BehaviorDispatcher {
 	d.submissions = submissions
 	return d
 }
 
-// Tick processes one batch of pending events. It is called on a timer by the
-// behaviour worker, under the leader guard.
+// Tick обрабатывает одну пачку ожидающих событий. Вызывается по таймеру воркером
+// поведений, под защитой лидера.
 func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
 	if d == nil || d.events == nil || d.behaviors == nil {
 		return nil
@@ -111,9 +111,9 @@ func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
 		if _, err := d.dispatch(ctx, event); err != nil {
 			metrics.BehaviorEvent(event.Type, "failed")
 			log.Printf("[behavior] event %s (%s) failed: %v", event.ID, event.Type, err)
-			// Left unprocessed on purpose: the next tick retries it, up to
-			// maxAttempts. The reason is stored so it can be read without
-			// digging through logs.
+			// Намеренно оставлено необработанным: следующий тик повторит, вплоть до
+			// maxAttempts. Причина сохраняется, чтобы её можно было прочитать, не
+			// копаясь в логах.
 			_ = d.events.MarkFailed(ctx, event.ID, err.Error())
 			continue
 		}
@@ -129,9 +129,9 @@ func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
 	return nil
 }
 
-// purge trims processed history, at most once per purgeEvery. A failure is
-// logged and nothing else: the table growing slowly is not a reason to stop
-// dispatching.
+// purge подрезает обработанную историю, не чаще раза в purgeEvery. Сбой
+// логируется, и больше ничего: медленно растущая таблица — не повод прекращать
+// диспетчеризацию.
 func (d *BehaviorDispatcher) purge(ctx context.Context) {
 	d.mu.Lock()
 	due := time.Since(d.lastPurge) >= d.purgeEvery
@@ -149,15 +149,15 @@ func (d *BehaviorDispatcher) purge(ctx context.Context) {
 	}
 }
 
-// target is one order a behaviour may act on in response to an event.
+// target — один заказ, на который поведение может подействовать в ответ на событие.
 type target struct {
 	order   *repository.Order
 	variant *repository.ServiceNode
 }
 
-// dispatch resolves who the event concerns and runs their behaviours. It
-// returns the messages the behaviours posted, for the caller that is waiting on
-// the outcome — an executor who has just submitted data for checking.
+// dispatch определяет, кого касается событие, и запускает их поведения. Он
+// возвращает сообщения, опубликованные поведениями, — для вызывающего, который
+// ждёт исхода: исполнителя, только что отправившего данные на проверку.
 func (d *BehaviorDispatcher) dispatch(ctx context.Context, event *repository.DomainEvent) ([]string, error) {
 	targets, err := d.targets(ctx, event)
 	if err != nil {
@@ -190,12 +190,12 @@ func (d *BehaviorDispatcher) dispatch(ctx context.Context, event *repository.Dom
 	return messages, nil
 }
 
-// targets answers "which running orders can this event change".
+// targets отвечает на вопрос «какие выполняющиеся заказы это событие может изменить».
 //
-//   - An order event concerns its own order and nothing else.
-//   - A user event concerns every order that user still has running. That is
-//     what lets "this customer is now verified" close the verification order
-//     they had open, without the admin action knowing anything about services.
+//   - Событие заказа касается своего заказа и ничего больше.
+//   - Событие пользователя касается каждого его ещё выполняющегося заказа.
+//     Именно это позволяет «этот заказчик теперь верифицирован» закрыть открытый
+//     у него заказ верификации, притом что действие админа ничего не знает об услугах.
 func (d *BehaviorDispatcher) targets(ctx context.Context, event *repository.DomainEvent) ([]target, error) {
 	var orders []*repository.Order
 	switch event.SubjectType {
@@ -267,9 +267,9 @@ func (d *BehaviorDispatcher) facts(ctx context.Context, event *repository.Domain
 	return facts, nil
 }
 
-// apply performs the effects of one behaviour in a single transaction: either
-// the customer is verified, the order is closed and the reward is paid, or none
-// of it happened and the event is retried.
+// apply выполняет эффекты одного поведения в одной транзакции: либо заказчик
+// верифицирован, заказ закрыт и вознаграждение выплачено, либо ничего этого не
+// произошло и событие будет повторено.
 func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.DomainEvent, t target, effects []behavior.Effect) ([]string, error) {
 	maxBonus := money.FromRubles(settingFloat(ctx, d.settings, SettingBehaviorMaxBonus, defaultBehaviorMaxBonus))
 
@@ -277,9 +277,9 @@ func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.Domain
 	err := d.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		for i, effect := range effects {
 			if effect.Kind == behavior.EffectSystemMessage {
-				// Chat is not part of the money transaction: a failed message
-				// must not roll back a payment, and a rolled back payment must
-				// not have announced itself.
+				// Чат не входит в денежную транзакцию: неудавшееся сообщение не
+				// должно откатывать платёж, а откаченный платёж не должен был
+				// о себе объявлять.
 				messages = append(messages, effect)
 				continue
 			}
@@ -287,8 +287,8 @@ func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.Domain
 			if key == "" {
 				key = fmt.Sprintf("%s:%d:%s", event.ID, i, effect.Kind)
 			}
-			// Claiming the key first is what makes redelivery safe: the second
-			// attempt to pay the same reward finds the row taken and stops.
+			// Занять ключ первым — вот что делает переотправку безопасной: вторая
+			// попытка выплатить то же вознаграждение находит строку занятой и останавливается.
 			err := d.events.RecordEffect(ctx, tx, key, event.ID, d.behaviors.Code(t.variant), string(effect.Kind), map[string]interface{}{
 				"order_id": effect.OrderID,
 				"user_id":  effect.UserID,
@@ -322,9 +322,9 @@ func (d *BehaviorDispatcher) apply(ctx context.Context, event *repository.Domain
 	return posted, nil
 }
 
-// applyOne performs one effect, after checking that the behaviour was entitled
-// to ask for it. Every guard here answers the same question: could this effect
-// reach somebody or something outside the order the event was about?
+// applyOne выполняет один эффект после проверки того, что поведение было вправе
+// его просить. Каждая проверка здесь отвечает на один и тот же вопрос: может ли
+// этот эффект дотянуться до кого-то или чего-то вне заказа, о котором было событие?
 func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target, effect behavior.Effect, maxBonus money.Amount) error {
 	switch effect.Kind {
 	case behavior.EffectCompleteOrder:
@@ -334,7 +334,7 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err := d.orderSvc.confirmTx(ctx, tx, t.order.ID); err != nil {
 			return err
 		}
-		// A closed order has nothing left for an administrator to decide.
+		// У закрытого заказа администратору решать уже нечего.
 		if d.submissions != nil {
 			return d.submissions.ResolveByOrder(ctx, tx, t.order.ID, nil)
 		}
@@ -352,8 +352,8 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err != nil {
 			return fmt.Errorf("pay_bonus: invalid recipient %q", effect.UserID)
 		}
-		// Only somebody involved in this order may be paid for it. Without this
-		// a script could name any user id in the system.
+		// Оплатить по заказу можно только тому, кто в нём участвует. Без этого скрипт
+		// мог бы назвать любой идентификатор пользователя в системе.
 		if recipient != t.order.CustomerID && (t.order.ExecutorID == nil || recipient != *t.order.ExecutorID) {
 			return fmt.Errorf("pay_bonus: %s is not a party to order %s", recipient, t.order.ID)
 		}
@@ -371,10 +371,10 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err != nil {
 			return fmt.Errorf("verify_user: invalid user %q", effect.UserID)
 		}
-		// The script may ask to verify only the customer of the order it is
-		// reacting to, and only when a moderator actually performed that order.
-		// This is the guard that keeps a scripted verification as trustworthy as
-		// the admin checkbox it stands in for.
+		// Скрипт может попросить верифицировать только заказчика того заказа, на
+		// который он реагирует, и только когда этот заказ действительно выполнял
+		// модератор. Именно эта проверка делает скриптовую верификацию столь же
+		// достоверной, как заменяемый ею админский чекбокс.
 		if subject != t.order.CustomerID {
 			return fmt.Errorf("verify_user: %s is not the customer of order %s", subject, t.order.ID)
 		}
@@ -385,8 +385,8 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 			return err
 		}
 		log.Printf("[AUDIT] behavior %s verified user %s through order %s", d.behaviors.Code(t.variant), subject, t.order.ID)
-		// Published like any other verification, so anything else that reacts to
-		// a user becoming verified sees this one too.
+		// Публикуется, как любая другая верификация, чтобы всё остальное, что реагирует
+		// на верификацию пользователя, увидело и эту.
 		return d.events.Publish(ctx, tx, &repository.DomainEvent{
 			Type:        repository.EventUserVerified,
 			SubjectType: repository.EventSubjectUser,
@@ -417,12 +417,12 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 	}
 }
 
-// commissionOnBonus works out the platform's share of a reward. Zero unless the
-// behaviour asked for it: a reward is money the platform pays out, not money a
-// customer paid, so the commission — which is a share of what a customer paid —
-// does not apply to it by default. When a behaviour does opt in, the rate is the
-// ordinary order_commission_percent, clamped by the same commissionOn used on
-// the order path, so there is one definition of the rate in the service.
+// commissionOnBonus вычисляет долю платформы с вознаграждения. Ноль, пока
+// поведение об этом не попросит: вознаграждение — это деньги, которые платит
+// платформа, а не деньги заказчика, поэтому комиссия — доля от уплаченного
+// заказчиком — к нему по умолчанию неприменима. Когда поведение соглашается,
+// ставка — обычный order_commission_percent, ужатый тем же commissionOn, что и
+// на пути заказа, поэтому определение ставки в сервисе одно.
 func (d *BehaviorDispatcher) commissionOnBonus(ctx context.Context, effect behavior.Effect, amount money.Amount) money.Amount {
 	if !effect.Commission {
 		return money.Zero
@@ -431,8 +431,8 @@ func (d *BehaviorDispatcher) commissionOnBonus(ctx context.Context, effect behav
 	return commissionOn(amount, map[string]float64{SettingOrderCommissionPercent: percent})
 }
 
-// requireOwnOrder refuses an effect aimed at any order other than the one the
-// event was about.
+// requireOwnOrder отклоняет эффект, направленный на любой заказ, кроме того, о
+// котором было событие.
 func (d *BehaviorDispatcher) requireOwnOrder(t target, orderID string) error {
 	if orderID != "" && !strings.EqualFold(orderID, t.order.ID.String()) {
 		return fmt.Errorf("effect targets order %s, but the event was about %s", orderID, t.order.ID)
@@ -440,8 +440,8 @@ func (d *BehaviorDispatcher) requireOwnOrder(t target, orderID string) error {
 	return nil
 }
 
-// requireModeratorExecutor checks that the order was performed by somebody the
-// behaviour's configuration trusts to perform it.
+// requireModeratorExecutor проверяет, что заказ выполнил кто-то, кому
+// конфигурация поведения доверяет его выполнять.
 func (d *BehaviorDispatcher) requireModeratorExecutor(ctx context.Context, t target) error {
 	if t.order.ExecutorID == nil {
 		return fmt.Errorf("order %s has no executor to vouch for it", t.order.ID)
@@ -453,9 +453,9 @@ func (d *BehaviorDispatcher) requireModeratorExecutor(ctx context.Context, t tar
 	if err != nil {
 		return err
 	}
-	// The role comes from the behaviour's own constants, overridden by the node:
-	// exactly what the script's can_view_or_take reads, so what the core demands
-	// of the verifier cannot drift from what the script let take the order.
+	// Роль берётся из собственных констант поведения, переопределённых узлом:
+	// ровно то, что читает can_view_or_take скрипта, поэтому требования ядра к
+	// проверяющему не могут разойтись с тем, кому скрипт позволил взять заказ.
 	required := d.behaviors.ConfigString(t.variant, ConfigVerifierRole, repository.RoleModerator)
 	if !executor.HasRole(required) {
 		return fmt.Errorf("executor %s does not hold %s", executor.ID, required)

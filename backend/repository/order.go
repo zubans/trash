@@ -11,7 +11,7 @@ import (
 	"healthlogin/backend/money"
 )
 
-// OrderStatus represents the lifecycle status of an order.
+// OrderStatus представляет статус заказа в его жизненном цикле.
 type OrderStatus string
 
 const (
@@ -22,7 +22,7 @@ const (
 	OrderStatusCanceled  OrderStatus = "CANCELED"
 )
 
-// Order represents a customer order.
+// Order представляет заказ клиента.
 type Order struct {
 	ID               uuid.UUID    `json:"id"`
 	CustomerID       uuid.UUID    `json:"customer_id"`
@@ -47,34 +47,34 @@ type Order struct {
 	DeadlineAt       *time.Time   `json:"deadline_at,omitempty"`
 	CompletedAt      *time.Time   `json:"completed_at,omitempty"`
 	CanceledAt       *time.Time   `json:"canceled_at,omitempty"`
-	// SubmitFields names the data the executor has to submit for checking before
-	// this order can be finished — the identity fields on a verification order.
-	// It is filled in when the order is rendered, from the service's behaviour;
-	// no column backs it, and it never carries the values themselves.
+	// SubmitFields называет данные, которые исполнитель обязан отправить на
+	// проверку до завершения этого заказа, — поля личности в заказе верификации.
+	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит
+	// колонки, и оно никогда не несёт сами значения.
 	SubmitFields []string `json:"submit_fields,omitempty"`
 }
 
-// OrderRepository defines storage operations for orders.
+// OrderRepository описывает операции хранения заказов.
 type OrderRepository interface {
 	Create(ctx context.Context, q Querier, order *Order) error
 	FindByID(ctx context.Context, id uuid.UUID) (*Order, error)
 	GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, error)
 	FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error)
-	// FindAllByExecutor returns an executor's orders, most recently finished
-	// first, capped at limit (see DefaultHistoryPageSize).
+	// FindAllByExecutor возвращает заказы исполнителя, сначала недавно
+	// завершённые, не более limit (см. DefaultHistoryPageSize).
 	FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]Order, error)
 	FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]Order, error)
 	GetPendingOrders(ctx context.Context) ([]*Order, error)
-	// GetOrdersMissingCoordinates returns searching orders that have an address
-	// but no pickup coordinates, so a background job can geocode them.
+	// GetOrdersMissingCoordinates возвращает заказы в поиске, у которых есть адрес,
+	// но нет координат подачи, чтобы фоновая задача могла их геокодировать.
 	GetOrdersMissingCoordinates(ctx context.Context, limit int) ([]*Order, error)
-	// SetPickupCoordinates fills in an order's pickup coordinates after a
-	// deferred geocode. It touches only the two columns and nothing else.
+	// SetPickupCoordinates заполняет координаты подачи заказа после отложенного
+	// геокодирования. Он трогает только две колонки и ничего больше.
 	SetPickupCoordinates(ctx context.Context, orderID uuid.UUID, lat, lon float64) error
 	FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*Order, error)
-	// Mutating operations take a Querier so the caller can run them inside its
-	// own transaction; pass nil to run on the connection pool. They return
-	// ErrConflict when the entity was not in the expected state.
+	// Изменяющие операции принимают Querier, чтобы вызывающий мог выполнить их
+	// внутри своей транзакции; передайте nil, чтобы работать на пуле соединений.
+	// Они возвращают ErrConflict, когда сущность была не в ожидаемом состоянии.
 	Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error
 	Execute(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
@@ -84,29 +84,29 @@ type OrderRepository interface {
 	SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error
 	AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error
 	CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
-	// CountActiveOrdersByExecutors answers the same question for a set of
-	// executors in one query. The matching worker asks it once per candidate
-	// per cycle; executors with no assigned order are absent from the result,
-	// which reads as a count of zero.
+	// CountActiveOrdersByExecutors отвечает на тот же вопрос для набора
+	// исполнителей одним запросом. Воркер подбора задаёт его раз на кандидата за
+	// цикл; исполнители без назначенного заказа в результате отсутствуют, что
+	// читается как нулевое количество.
 	CountActiveOrdersByExecutors(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]int, error)
 	CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
 
 	GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error)
 	GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
-	// FindOpenByCustomer returns the customer's orders that have not finished:
-	// the ones a domain event about that customer can still change. Bounded by
-	// status rather than by a page size, because "still running" is a small set
-	// however long the customer's history is.
+	// FindOpenByCustomer возвращает незавершённые заказы заказчика: те, которые
+	// доменное событие о нём ещё может изменить. Ограничено статусом, а не
+	// размером страницы, потому что «ещё выполняется» — небольшое множество, какой
+	// бы длинной ни была история заказчика.
 	FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
 	GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error)
 }
 
-// orderRepo implements OrderRepository using *sql.DB.
+// orderRepo реализует OrderRepository поверх *sql.DB.
 type orderRepo struct {
 	db *sql.DB
 }
 
-// NewOrderRepository creates a new OrderRepository.
+// NewOrderRepository создаёт новый OrderRepository.
 func NewOrderRepository(db *sql.DB) OrderRepository {
 	return &orderRepo{db: db}
 }
@@ -268,10 +268,10 @@ func (r *orderRepo) GetPendingOrders(ctx context.Context) ([]*Order, error) {
 	return orders, rows.Err()
 }
 
-// GetOrdersMissingCoordinates returns up to limit searching orders that have a
-// non-empty address but no stored pickup coordinates. The executor map only
-// plots orders that already carry coordinates, so these would otherwise stay
-// invisible until re-geocoded.
+// GetOrdersMissingCoordinates возвращает не более limit заказов в поиске, у
+// которых непустой адрес, но нет сохранённых координат подачи. Карта
+// исполнителя рисует только заказы с координатами, поэтому иначе эти остались
+// бы невидимыми до повторного геокодирования.
 func (r *orderRepo) GetOrdersMissingCoordinates(ctx context.Context, limit int) ([]*Order, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o
@@ -298,7 +298,7 @@ func (r *orderRepo) GetOrdersMissingCoordinates(ctx context.Context, limit int) 
 	return orders, rows.Err()
 }
 
-// SetPickupCoordinates writes just the pickup coordinates for an order.
+// SetPickupCoordinates записывает заказу только координаты подачи.
 func (r *orderRepo) SetPickupCoordinates(ctx context.Context, orderID uuid.UUID, lat, lon float64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE orders SET pickup_lat = $2, pickup_lon = $3 WHERE id = $1`,
@@ -307,11 +307,11 @@ func (r *orderRepo) SetPickupCoordinates(ctx context.Context, orderID uuid.UUID,
 	return err
 }
 
-// FindNearbyOrders returns searching orders with pickup coordinates within radiusMeters of (lat, lon).
-// Uses the Haversine formula approximation via the earth-distance cube operator is not available,
-// so we filter with a bounding box first and then compute exact distance in code.
+// FindNearbyOrders возвращает заказы в поиске с координатами подачи в пределах radiusMeters от (lat, lon).
+// Кубический оператор earth-distance недоступен, поэтому используется
+// приближение по формуле гаверсинуса: сперва фильтруем прямоугольником, затем считаем точное расстояние в коде.
 func (r *orderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*Order, error) {
-	// Approximate degrees for the bounding box: 1 degree lat ~ 111 km.
+	// Приблизительные градусы для ограничивающего прямоугольника: 1 градус широты ~ 111 км.
 	deltaLat := float64(radiusMeters) / 111000.0
 	deltaLon := float64(radiusMeters) / (111000.0 * math.Cos(lat*math.Pi/180.0))
 
@@ -345,10 +345,10 @@ func (r *orderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radi
 	return result, rows.Err()
 }
 
-// exec resolves the Querier to use: the caller's open transaction when one is
-// supplied, the pool otherwise. Every state transition below is guarded in SQL
-// and reports ErrConflict when the guard does not match, so a no-op update can
-// never be mistaken for success.
+// exec выбирает Querier: открытую транзакцию вызывающего, если она передана, и
+// пул в противном случае. Каждый переход состояния ниже охраняется в SQL и
+// сообщает ErrConflict, когда охрана не совпала, поэтому обновление вхолостую
+// никогда не будет принято за успех.
 func (r *orderRepo) exec(ctx context.Context, q Querier) Querier {
 	if q == nil {
 		return r.db
@@ -381,9 +381,9 @@ func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, f
 	)
 }
 
-// Cancel voids an order that has not been executed yet. Both SEARCHING and
-// ASSIGNED are accepted because the service layer refunds the hold for both;
-// the guard keeps a second concurrent cancel from refunding twice.
+// Cancel аннулирует ещё не выполненный заказ. Принимаются и SEARCHING, и
+// ASSIGNED, потому что слой сервисов возвращает удержание в обоих случаях;
+// охрана не даёт второй параллельной отмене вернуть деньги дважды.
 func (r *orderRepo) Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
@@ -398,9 +398,9 @@ func (r *orderRepo) Unassign(ctx context.Context, q Querier, orderID uuid.UUID) 
 	)
 }
 
-// AssignWithHold assigns an executor and records the agreed price in one
-// statement. Used when a customer accepts an auction bid, where the price is
-// only known at that moment.
+// AssignWithHold назначает исполнителя и записывает согласованную цену одним
+// оператором. Используется, когда заказчик принимает ставку аукциона, где цена
+// известна только в этот момент.
 func (r *orderRepo) AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now(),
@@ -410,9 +410,9 @@ func (r *orderRepo) AssignWithHold(ctx context.Context, q Querier, orderID, exec
 	)
 }
 
-// LockForUpdate reads an order inside a transaction taking a row lock, so that
-// concurrent confirm/cancel requests serialise instead of both seeing the same
-// pre-transition state.
+// LockForUpdate читает заказ внутри транзакции, беря блокировку строки, чтобы
+// параллельные запросы подтверждения/отмены сериализовались, а не увидели оба
+// одно и то же состояние до перехода.
 func (r *orderRepo) LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error) {
 	row := r.exec(ctx, q).QueryRowContext(ctx, `SELECT `+orderColumns+` FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID)
 	o, err := scanOrderRow(row)
@@ -422,9 +422,9 @@ func (r *orderRepo) LockForUpdate(ctx context.Context, q Querier, orderID uuid.U
 	return &o, nil
 }
 
-// SetHoldAmount adjusts the amount currently held from the customer. It must be
-// kept in step with every refund, otherwise the payout at confirmation time is
-// computed from a stale hold.
+// SetHoldAmount корректирует сумму, удерживаемую сейчас с заказчика. Её надо
+// держать в согласии с каждым возвратом, иначе выплата в момент подтверждения
+// считается по устаревшему удержанию.
 func (r *orderRepo) SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET hold_amount = $1 WHERE id = $2`,
@@ -432,7 +432,7 @@ func (r *orderRepo) SetHoldAmount(ctx context.Context, q Querier, orderID uuid.U
 	)
 }
 
-// GetExecutorAssignedOrders returns orders assigned to a specific executor.
+// GetExecutorAssignedOrders возвращает заказы, назначенные конкретному исполнителю.
 func (r *orderRepo) GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error) {
 	orders, err := r.FindAssignedByExecutor(ctx, executorID)
 	if err != nil {
@@ -445,7 +445,7 @@ func (r *orderRepo) GetExecutorAssignedOrders(ctx context.Context, executorID uu
 	return result, nil
 }
 
-// GetCustomerOrders returns orders created by a customer.
+// GetCustomerOrders возвращает заказы, созданные заказчиком.
 func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
 	orders, err := r.FindByCustomer(ctx, customerID)
 	if err != nil {
@@ -482,7 +482,7 @@ func (r *orderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID
 	return orders, rows.Err()
 }
 
-// GetAvailableAuctionOrders returns open auction orders.
+// GetAvailableAuctionOrders возвращает открытые аукционные заказы.
 func (r *orderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o

@@ -12,7 +12,7 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// mockAdminRepo mocks repository.AdminRepository.
+// mockAdminRepo подменяет repository.AdminRepository.
 type mockAdminRepo struct {
 	users        []*repository.User
 	requests     map[uuid.UUID]*repository.TopUpRequest
@@ -101,7 +101,7 @@ func (m *mockAdminRepo) CompletedOrderFacets(ctx context.Context) (repository.Co
 	return repository.CompletedOrderFacets{}, nil
 }
 
-// mockSettingsRepo mocks repository.SettingsRepository.
+// mockSettingsRepo подменяет repository.SettingsRepository.
 type mockSettingsRepo struct {
 	settings map[string]string
 }
@@ -117,7 +117,7 @@ func (m *mockSettingsRepo) UpdateSettings(ctx context.Context, settings map[stri
 	return nil
 }
 
-// mockTokenRepo mocks repository.TokenRepository.
+// mockTokenRepo подменяет repository.TokenRepository.
 type mockTokenRepo struct {
 	blacklisted map[string]time.Time
 }
@@ -155,7 +155,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 
 	adminID := uuid.New()
 
-	// Test ban
+	// Проверяем бан
 	err := svc.UpdateUserStatus(context.Background(), user.ID, adminID, "BANNED")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -169,7 +169,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 		t.Errorf("expected BANNED, got %s", updated.Status)
 	}
 
-	// Test invalid status
+	// Проверяем недопустимый статус
 	err = svc.UpdateUserStatus(context.Background(), user.ID, adminID, "INVALID")
 	if err == nil {
 		t.Error("expected error for invalid status")
@@ -191,7 +191,7 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	}
 	userRepo.users[user.Phone] = user
 
-	// 1. Create top up request
+	// 1. Создаём заявку на пополнение
 	req, err := svc.CreateTopUpRequest(context.Background(), user.ID, money.FromRubles(500.0))
 	if err != nil {
 		t.Fatalf("unexpected error creating top-up: %v", err)
@@ -200,7 +200,7 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 		t.Errorf("unexpected request data: %+v", req)
 	}
 
-	// 2. Approve request
+	// 2. Одобряем заявку
 	adminID := uuid.New()
 	err = svc.ApproveTopUpRequest(context.Background(), req.ID, adminID)
 	if err != nil {
@@ -215,7 +215,7 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 		t.Errorf("request was not approved correctly: %+v", approvedReq)
 	}
 
-	// 3. Try approving again (should fail)
+	// 3. Пробуем одобрить повторно (должно упасть)
 	err = svc.ApproveTopUpRequest(context.Background(), req.ID, adminID)
 	if err == nil {
 		t.Error("expected error trying to approve an already approved request")
@@ -251,18 +251,18 @@ func TestAdminService_Settings(t *testing.T) {
 	}
 }
 
-// CountAdmins reports how many administrators exist (used to protect the last one).
+// CountAdmins сообщает, сколько существует администраторов (нужно, чтобы защитить последнего).
 func (m *mockAdminRepo) CountAdmins(ctx context.Context) (int, error) {
 	return 2, nil
 }
 
-// HasPendingWithdrawal reports an existing open withdrawal request.
+// HasPendingWithdrawal сообщает о существующей открытой заявке на вывод.
 func (m *mockAdminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
 	return false, nil
 }
 
-// LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
-// that it lives in AdminService.
+// LockWithdrawalRequest и SetWithdrawalStatus обслуживают процесс вывода теперь,
+// когда он живёт в AdminService.
 func (m *mockAdminRepo) LockWithdrawalRequest(ctx context.Context, q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
 	if req, ok := m.withdrawals[requestID]; ok {
 		return req, nil

@@ -15,14 +15,14 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// AppReleaseHandler handles mobile app release HTTP endpoints.
+// AppReleaseHandler обслуживает HTTP-эндпоинты релизов мобильного приложения.
 type AppReleaseHandler struct {
 	releaseRepo repository.AppReleaseRepository
 	releasesDir string
 	baseURL     string
 }
 
-// NewAppReleaseHandler creates an AppReleaseHandler.
+// NewAppReleaseHandler создаёт AppReleaseHandler.
 func NewAppReleaseHandler(releaseRepo repository.AppReleaseRepository, releasesDir, baseURL string) *AppReleaseHandler {
 	if releasesDir == "" {
 		releasesDir = "releases"
@@ -30,7 +30,7 @@ func NewAppReleaseHandler(releaseRepo repository.AppReleaseRepository, releasesD
 	return &AppReleaseHandler{releaseRepo: releaseRepo, releasesDir: releasesDir, baseURL: baseURL}
 }
 
-// GetVersionHandler handles GET /app/version.
+// GetVersionHandler обслуживает GET /app/version.
 func (h *AppReleaseHandler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	platform := r.URL.Query().Get("platform")
 	if platform == "" {
@@ -62,18 +62,18 @@ func (h *AppReleaseHandler) GetVersionHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// allowedPlatforms limits the directory component of the stored path.
+// allowedPlatforms ограничивает каталожную часть сохраняемого пути.
 var allowedPlatforms = map[string]bool{"android": true}
 
-// versionNamePattern keeps the version out of the file name's control: without
-// it, "../../.." in platform or version_name wrote the uploaded file anywhere
-// on the file system.
+// versionNamePattern не даёт версии управлять именем файла: без него «../../..»
+// в platform или version_name записывал загруженный файл куда угодно в
+// файловой системе.
 var versionNamePattern = regexp.MustCompile(`^[0-9A-Za-z._\-]{1,64}$`)
 
-// maxReleaseBytes caps an uploaded APK.
+// maxReleaseBytes ограничивает размер загружаемого APK.
 const maxReleaseBytes = 300 << 20
 
-// UploadReleaseHandler handles POST /admin/app-releases.
+// UploadReleaseHandler обслуживает POST /admin/app-releases.
 func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxReleaseBytes)
 	platform := r.FormValue("platform")
@@ -110,7 +110,7 @@ func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.
 	filePath := filepath.Join("releases", platform, fileName)
 	fullPath := filepath.Join(h.releasesDir, filePath)
 
-	// Defence in depth: the resolved path must stay under the releases root.
+	// Эшелонированная защита: разрешённый путь обязан остаться внутри корня релизов.
 	base, err := filepath.Abs(h.releasesDir)
 	if err != nil {
 		http.Error(w, "invalid releases directory", http.StatusInternalServerError)
@@ -160,7 +160,7 @@ func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Keep only one active release per platform.
+	// Держим по одному активному релизу на платформу.
 	_ = h.releaseRepo.DeactivateOldReleases(r.Context(), platform, release.ID)
 
 	w.WriteHeader(http.StatusCreated)

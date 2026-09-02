@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// TestMigrationFilesAreOrderedByName guards the ordering the runner relies on.
-// Two migrations share the 010 prefix, so ordering has to come from the full
-// file name, not from a parsed number.
+// TestMigrationFilesAreOrderedByName охраняет порядок, на который опирается
+// раннер. Две миграции делят префикс 010, поэтому порядок обязан браться из
+// полного имени файла, а не из разобранного числа.
 func TestMigrationFilesAreOrderedByName(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{
@@ -44,9 +44,9 @@ func TestMigrationFilesAreOrderedByName(t *testing.T) {
 	}
 }
 
-// TestBaselineCutoff pins which migrations may be applied to a database that
-// already carries the schema: everything before the cutoff was applied by the
-// old init scripts or by the runtime DDL, and 001/002 are not idempotent.
+// TestBaselineCutoff фиксирует, какие миграции можно применять к базе, уже
+// несущей схему: всё до отсечки применили старые init-скрипты или DDL времени
+// выполнения, а 001/002 не идемпотентны.
 func TestBaselineCutoff(t *testing.T) {
 	cases := map[string]bool{
 		"001_create_enums.sql":               true,
@@ -61,8 +61,8 @@ func TestBaselineCutoff(t *testing.T) {
 	}
 }
 
-// TestRealMigrationsAreDiscoverable makes sure the shipped directory is what the
-// runner will read.
+// TestRealMigrationsAreDiscoverable убеждается, что поставляемый каталог — это
+// то, что раннер и прочитает.
 func TestRealMigrationsAreDiscoverable(t *testing.T) {
 	files, err := migrationFiles("../migrations")
 	if err != nil {

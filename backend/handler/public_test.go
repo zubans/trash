@@ -19,7 +19,7 @@ import (
 	"healthlogin/backend/service"
 )
 
-// mockUserRepo is an in-memory implementation of repository.UserRepository for tests.
+// mockUserRepo — реализация repository.UserRepository в памяти для тестов.
 type mockUserRepo struct {
 	users map[string]*repository.User
 }
@@ -85,8 +85,8 @@ func (m *mockUserRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string
 	return sql.ErrNoRows
 }
 
-// UpdateVerifiedTx runs the same write; the fake has no transactions, so the
-// querier is ignored.
+// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
+// querier игнорируется.
 func (m *mockUserRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	return m.UpdateVerified(ctx, id, verified)
 }
@@ -158,8 +158,8 @@ func (m *mockUserRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, las
 
 func newTestPublicHandler() *PublicHandler {
 	repo := newMockUserRepo()
-	// Sessions are part of the login path now, so the handler tests wire the
-	// same storage the server does.
+	// Сессии теперь часть пути входа, поэтому тесты обработчиков подключают то же
+	// хранилище, что и сервер.
 	auth := service.NewAuthService(repo, nil).
 		WithSessionStorage(newMockRefreshRepo(), newMockAccessTokenRepo())
 	return NewPublicHandler(auth)
@@ -284,7 +284,7 @@ func TestLoginHandlerInvalidCredentials(t *testing.T) {
 	}
 }
 
-// --- session storage doubles ---
+// --- дублёры хранилища сессий ---
 
 type mockRefreshRepo struct {
 	tokens map[string]*repository.RefreshToken

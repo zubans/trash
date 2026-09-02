@@ -11,12 +11,12 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// The stores behind scripted services, against real SQL. What is checked here is
-// what the Go-level tests cannot check: that the database itself enforces the
-// two rules the design leans on — one claim per user and service, one effect per
-// idempotency key.
+// Хранилища за скриптовыми услугами, на настоящем SQL. Здесь проверяется то,
+// что не могут проверить тесты уровня Go: что сама база обеспечивает два
+// правила, на которые опирается замысел, — один claim на пользователя и услугу
+// и один эффект на ключ идемпотентности.
 
-// seedBehaviorOrder creates the rows a claim and an event need to point at.
+// seedBehaviorOrder создаёт строки, на которые должны ссылаться claim и событие.
 func seedBehaviorOrder(t *testing.T, db *sql.DB) (customerID, variantID, orderID uuid.UUID) {
 	t.Helper()
 	customerID = createTestUser(t, db, "CUSTOMER")
@@ -54,8 +54,8 @@ func TestServiceClaimIsOncePerUserAndVariant(t *testing.T) {
 	if err := claims.Claim(ctx, nil, customerID, variantID, orderID); err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
-	// The second attempt is what two simultaneous order requests look like once
-	// they have both passed the "has he ordered it?" check.
+	// Вторая попытка — это то, как выглядят два одновременных запроса заказа,
+	// когда оба уже прошли проверку «а заказывал ли он это?».
 	err := claims.Claim(ctx, nil, customerID, variantID, orderID)
 	if !errors.Is(err, repository.ErrServiceAlreadyClaimed) {
 		t.Fatalf("second claim returned %v, want ErrServiceAlreadyClaimed", err)
@@ -69,7 +69,7 @@ func TestServiceClaimIsOncePerUserAndVariant(t *testing.T) {
 	if err := claims.ReleaseByOrder(ctx, nil, orderID); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	// A cancelled order gives the attempt back.
+	// Отменённый заказ возвращает попытку обратно.
 	if err := claims.Claim(ctx, nil, customerID, variantID, orderID); err != nil {
 		t.Fatalf("claim after release: %v", err)
 	}
@@ -104,8 +104,8 @@ func TestDomainEventsAreClaimedOnceAndEffectsAreIdempotent(t *testing.T) {
 	if err := events.RecordEffect(ctx, nil, key, event.ID, "verification", "pay_bonus", map[string]interface{}{"amount": 200}); err != nil {
 		t.Fatalf("record effect: %v", err)
 	}
-	// The same key again is a redelivered event asking for a payment that has
-	// already been made. It must be refused, not repeated.
+	// Тот же ключ снова — это переотправленное событие, просящее выплату, которая
+	// уже сделана. Он должен быть отвергнут, а не повторён.
 	err = events.RecordEffect(ctx, nil, key, event.ID, "verification", "pay_bonus", nil)
 	if !errors.Is(err, repository.ErrEffectAlreadyApplied) {
 		t.Fatalf("second effect returned %v, want ErrEffectAlreadyApplied", err)
@@ -123,8 +123,8 @@ func TestDomainEventsAreClaimedOnceAndEffectsAreIdempotent(t *testing.T) {
 	}
 }
 
-// An event that keeps failing must eventually stop consuming the batch, or it
-// blocks every event behind it forever.
+// Событие, которое продолжает падать, должно в итоге перестать занимать пачку,
+// иначе оно навсегда блокирует все события за собой.
 func TestFailingEventStopsAfterMaxAttempts(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
@@ -194,8 +194,8 @@ func TestSubmissionsNumberTheirAttempts(t *testing.T) {
 		if err := submissions.Record(ctx, nil, submission); err != nil {
 			t.Fatalf("record: %v", err)
 		}
-		// The number comes from the same statement that writes the row, so two
-		// submissions racing cannot both call themselves the same attempt.
+		// Номер приходит из того же оператора, что пишет строку, поэтому две
+		// гоняющиеся отправки не могут обе назваться одной и той же попыткой.
 		if submission.Attempt != want {
 			t.Errorf("attempt = %d, want %d", submission.Attempt, want)
 		}
@@ -231,7 +231,7 @@ func TestEscalationIsOpenedOncePerOrder(t *testing.T) {
 	if err := submissions.Escalate(ctx, nil, escalation); err != nil {
 		t.Fatalf("escalate: %v", err)
 	}
-	// A behaviour asking twice is describing the same case, not a second one.
+	// Поведение, спрашивающее дважды, описывает тот же случай, а не второй.
 	if err := submissions.Escalate(ctx, nil, &repository.BehaviorEscalation{
 		OrderID: orderID, BehaviorCode: "verification", Reason: "снова",
 	}); err != nil {
@@ -258,13 +258,13 @@ func TestEscalationIsOpenedOncePerOrder(t *testing.T) {
 	if has, _ := submissions.HasOpenEscalation(ctx, orderID); has {
 		t.Error("the escalation is still open after being resolved")
 	}
-	// Resolving twice is not a second resolution.
+	// Разрешить дважды — это не второе разрешение.
 	if err := submissions.ResolveEscalation(ctx, escalation.ID, adminID); !errors.Is(err, repository.ErrEscalationNotFound) {
 		t.Errorf("second resolve returned %v, want ErrEscalationNotFound", err)
 	}
 
-	// The order can be escalated again afterwards: the index only forbids two
-	// open ones at a time.
+	// Заказ можно эскалировать снова позднее: индекс запрещает лишь две открытые
+	// эскалации одновременно.
 	if err := submissions.Escalate(ctx, nil, &repository.BehaviorEscalation{
 		OrderID: orderID, BehaviorCode: "verification", Reason: "новый случай",
 	}); err != nil {

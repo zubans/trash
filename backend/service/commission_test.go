@@ -12,10 +12,10 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// confirmWithCommission runs one order end to end at the given rate and hands
-// back the books so a test can look at both sides of the split, along with the
-// books total from before the order — the mock balances do not start from zero,
-// so what matters is that a confirmation leaves the total exactly where it was.
+// confirmWithCommission прогоняет один заказ от начала до конца по заданной
+// ставке и отдаёт книги, чтобы тест мог посмотреть на обе стороны разделения,
+// вместе с итогом книг до заказа: моковые балансы стартуют не с нуля, поэтому
+// важно, что подтверждение оставляет итог ровно там, где он был.
 func confirmWithCommission(t *testing.T, percent string) (*mockTransactionRepo, *mockAccounts, uuid.UUID, money.Amount) {
 	t.Helper()
 
@@ -30,7 +30,7 @@ func confirmWithCommission(t *testing.T, percent string) (*mockTransactionRepo, 
 
 	ctx := context.Background()
 	customerID, executorID := uuid.New(), uuid.New()
-	// Touch both balances so the opening total covers everyone involved.
+	// Трогаем оба баланса, чтобы стартовый итог покрыл всех участников.
 	if _, err := txRepo.GetBalance(ctx, customerID); err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -56,9 +56,9 @@ func confirmWithCommission(t *testing.T, percent string) (*mockTransactionRepo, 
 	return txRepo, accounts, executorID, opening
 }
 
-// A completed order is the platform's only source of commission, and taking it
-// must not invent or destroy money: escrow holds exactly what the customer paid
-// and drains to zero across the executor's reward and the commission account.
+// Завершённый заказ — единственный источник комиссии для платформы, и её взятие
+// не должно ни выдумывать, ни уничтожать деньги: эскроу держит ровно то, что
+// заплатил заказчик, и обнуляется через вознаграждение исполнителя и счёт комиссии.
 func TestConfirmOrderSplitsPaymentBetweenExecutorAndCommission(t *testing.T) {
 	txRepo, accounts, executorID, opening := confirmWithCommission(t, "15")
 
@@ -75,15 +75,15 @@ func TestConfirmOrderSplitsPaymentBetweenExecutorAndCommission(t *testing.T) {
 	if got := txRepo.balances[executorID].Sub(mockDefaultBalance); got != reward {
 		t.Errorf("executor was rewarded %s, expected %s", got, reward)
 	}
-	// The customer paid the full price either way: the commission comes out of
-	// the executor's reward, not out of a second charge.
+	// Заказчик в любом случае заплатил полную цену: комиссия выходит из
+	// вознаграждения исполнителя, а не из второго списания.
 	if got := booksTotal(txRepo, accounts); got != opening {
 		t.Errorf("confirming changed the books total: %s, expected %s", got, opening)
 	}
 }
 
-// With no rate configured nothing is taken, so deploying the feature does not
-// quietly start shrinking payouts.
+// Когда ставка не настроена, ничего не берётся, поэтому выкатывание фичи не
+// начинает тихо ужимать выплаты.
 func TestConfirmOrderTakesNoCommissionWhenRateIsUnset(t *testing.T) {
 	txRepo, accounts, executorID, _ := confirmWithCommission(t, "")
 
@@ -95,8 +95,8 @@ func TestConfirmOrderTakesNoCommissionWhenRateIsUnset(t *testing.T) {
 	}
 }
 
-// A rate above 100% would otherwise pay a negative reward and take money escrow
-// is not holding. It is clamped, so the worst case is a zero reward.
+// Ставка выше 100% иначе выплачивала бы отрицательное вознаграждение и брала
+// деньги, которых эскроу не держит. Она ужимается, поэтому худший случай — ноль.
 func TestCommissionNeverExceedsThePayment(t *testing.T) {
 	txRepo, accounts, executorID, opening := confirmWithCommission(t, "150")
 
@@ -114,8 +114,8 @@ func TestCommissionNeverExceedsThePayment(t *testing.T) {
 	}
 }
 
-// A fractional share still lands on whole kopecks, and the rounding remainder
-// stays with the executor rather than disappearing.
+// Дробная доля всё равно ложится на целые копейки, а остаток округления
+// остаётся у исполнителя, а не исчезает.
 func TestCommissionRoundingLeavesNothingBehind(t *testing.T) {
 	txRepo, accounts, executorID, _ := confirmWithCommission(t, "3.333")
 
@@ -131,13 +131,13 @@ func TestCommissionRoundingLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-// newCommissionAdmin wires an admin service over books that already hold some
-// collected commission.
+// newCommissionAdmin собирает админский сервис поверх книг, где уже лежит
+// какая-то собранная комиссия.
 func newCommissionAdmin(collected money.Amount) (*AdminService, *mockTransactionRepo, *mockAccounts) {
 	txRepo := &mockTransactionRepo{}
 	accounts := newMockAccounts()
-	// Money collected as commission came in from outside at some point, which is
-	// what keeps the opening books closed.
+	// Деньги, собранные как комиссия, когда-то пришли извне — именно это держит
+	// стартовые книги сошедшимися.
 	accounts.balances[repository.AccountCommission] = collected
 	accounts.balances[repository.AccountDeposits] = collected.Neg()
 
@@ -167,8 +167,8 @@ func TestPayoutCommissionDrainsTheAccountAndKeepsBooksClosed(t *testing.T) {
 	}
 }
 
-// The account may not be overdrawn: a payout is bounded by what was actually
-// collected, checked in the same guarded statement that moves the money.
+// Счёт нельзя овердрафтить: выплата ограничена тем, что реально собрано, и
+// проверяется тем же охраняемым оператором, который двигает деньги.
 func TestPayoutCommissionRefusesMoreThanCollected(t *testing.T) {
 	collected := money.FromRubles(500)
 	srv, _, accounts := newCommissionAdmin(collected)
@@ -185,8 +185,8 @@ func TestPayoutCommissionRefusesMoreThanCollected(t *testing.T) {
 	}
 }
 
-// The settings screen is the only place the rate is set, so the bounds have to
-// hold there: a share over 100% would pay a negative reward.
+// Экран настроек — единственное место, где задаётся ставка, поэтому границы
+// обязаны держаться там: доля свыше 100% выплачивала бы отрицательное вознаграждение.
 func TestUpdateSettingsBoundsTheCommissionRate(t *testing.T) {
 	settings := &mockSettingsRepo{settings: map[string]string{}}
 	srv := NewAdminService(newMockUserRepo(), &mockAdminRepo{}, settings, "secret", nil)
@@ -205,9 +205,9 @@ func TestUpdateSettingsBoundsTheCommissionRate(t *testing.T) {
 	}
 }
 
-// Guard against the payout path being wired to the unguarded Settle by mistake:
-// the error a caller sees for an overdraw has to be the insufficient-funds one,
-// because that is what the handler turns into a 400 rather than a 500.
+// Страховка от того, что путь выплаты по ошибке подключат к неохраняемому
+// Settle: ошибка, которую видит вызывающий при овердрафте, обязана быть о
+// нехватке средств, потому что именно её обработчик превращает в 400, а не в 500.
 func TestPayoutCommissionOverdrawReportsInsufficientFunds(t *testing.T) {
 	txRepo := &mockTransactionRepo{}
 	accounts := newMockAccounts()

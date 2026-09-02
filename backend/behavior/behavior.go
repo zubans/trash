@@ -1,22 +1,22 @@
-// Package behavior evaluates the rules of a "special" service — one whose
-// conditions do not fit the catalog's flags — as a script kept outside the Go
-// code.
+// Package behavior вычисляет правила «особой» услуги — такой, чьи условия не
+// укладываются во флаги каталога, — в виде скрипта, который живёт вне
+// Go-кода.
 //
-// Why a script at all. Every unusual property a service ever needed used to
-// become a column plus an `if`: requires_verification (035), moderator_only
-// (040), min_age. The verification service needs four rules at once — visible
-// only to unverified customers, orderable once, free, and it pays the moderator
-// who performed it — and none of them is reusable as a flag. The next such
-// service would need four more.
+// Зачем вообще скрипт. Каждое необычное свойство, когда-либо понадобившееся
+// услуге, превращалось в колонку плюс `if`: requires_verification (035),
+// moderator_only (040), min_age. Услуге верификации нужны сразу четыре правила —
+// видна только неверифицированным заказчикам, заказывается один раз, бесплатна
+// и платит выполнившему её модератору, — и ни одно из них не переиспользуется
+// как флаг. Следующей такой услуге понадобилось бы ещё четыре.
 //
-// What a script may and may not do. A behaviour script is a pure function of
-// the facts it is handed: it reads no database, opens no socket, keeps no state
-// between calls, and never moves money itself. It answers questions ("may this
-// user see this?", "what does it cost?") and, for events, returns a list of
-// effects it wants applied. The core applies those effects, transactionally,
-// through the same ledger every other payment goes through. That boundary is
-// the whole design: a wrong script can produce a wrong decision, but it cannot
-// produce a one-sided money movement or an unbalanced set of books.
+// Что скрипту можно и что нельзя. Скрипт поведения — чистая функция от фактов,
+// которые ему передали: он не читает базу, не открывает сокетов, не хранит
+// состояния между вызовами и никогда сам не двигает деньги. Он отвечает на
+// вопросы («может ли этот пользователь это видеть?», «сколько это стоит?») и для
+// событий возвращает список эффектов, которые просит применить. Ядро применяет
+// их транзакционно, через тот же реестр, что и любой другой платёж. Эта граница
+// и есть весь замысел: ошибочный скрипт может принять неверное решение, но не
+// может породить одностороннее движение денег или несведённые книги.
 package behavior
 
 import (
@@ -24,61 +24,61 @@ import (
 	"time"
 )
 
-// EffectKind names one thing a behaviour can ask the core to do. The set is
-// deliberately closed: an effect is a Go function with its own guards, not an
-// escape hatch into arbitrary state changes.
+// EffectKind называет одно действие, которое поведение может попросить у ядра.
+// Набор намеренно закрыт: эффект — это Go-функция со своими проверками, а не
+// лазейка к произвольным изменениям состояния.
 type EffectKind string
 
 const (
-	// EffectCompleteOrder closes an order and pays out exactly as a customer's
-	// confirmation would.
+	// EffectCompleteOrder закрывает заказ и выплачивает ровно так же, как это
+	// сделало бы подтверждение заказчика.
 	EffectCompleteOrder EffectKind = "complete_order"
-	// EffectCancelOrder cancels an order and refunds whatever it still holds.
+	// EffectCancelOrder отменяет заказ и возвращает всё, что он ещё удерживает.
 	EffectCancelOrder EffectKind = "cancel_order"
-	// EffectPayBonus credits a user — the executor, the customer, or both in
-	// turn — from the platform's BONUSES account. It must carry an idempotency
-	// key, because unlike the others it has no state to check: paying twice
-	// looks exactly like paying once.
+	// EffectPayBonus начисляет пользователю — исполнителю, заказчику или обоим по
+	// очереди — со счёта платформы BONUSES. Он обязан нести ключ идемпотентности:
+	// в отличие от прочих, ему нечего проверить в состоянии — выплата дважды
+	// выглядит ровно как выплата один раз.
 	EffectPayBonus EffectKind = "pay_bonus"
-	// EffectVerifyUser sets the manual verification flag. The core refuses it
-	// unless the order it comes from was performed by a moderator (see
-	// service/behavior_dispatch.go) — the script asks, the core decides whether
-	// the asker was entitled to.
+	// EffectVerifyUser выставляет флаг ручной верификации. Ядро откажет, если заказ,
+	// из которого он пришёл, выполнял не модератор (см.
+	// service/behavior_dispatch.go): скрипт просит, а ядро решает, был ли просящий
+	// вправе просить.
 	EffectVerifyUser EffectKind = "verify_user"
-	// EffectSystemMessage posts a system message into the order's chat. Applied
-	// after the transaction commits, like every other chat notification.
+	// EffectSystemMessage публикует системное сообщение в чат заказа. Применяется
+	// после коммита транзакции, как и любое другое уведомление в чате.
 	EffectSystemMessage EffectKind = "system_message"
-	// EffectEscalate hands the order to an administrator: the executor cannot
-	// finish it any more, and it appears on the escalations screen with what
-	// they submitted. Used when a check has failed as often as the behaviour
-	// allows.
+	// EffectEscalate передаёт заказ администратору: исполнитель больше не может его
+	// завершить, и заказ появляется на экране эскалаций вместе с тем, что
+	// исполнитель отправил. Используется, когда проверка провалилась столько раз,
+	// сколько допускает поведение.
 	EffectEscalate EffectKind = "escalate"
 )
 
-// Effect is one requested change, as returned by a script.
+// Effect — одно запрошенное изменение в том виде, в каком его вернул скрипт.
 type Effect struct {
 	Kind EffectKind
-	// OrderID and UserID are the subjects, empty when the effect does not use
-	// them. They arrive as strings and are parsed by the applier: a script
-	// cannot be trusted to hand back a well-formed id.
+	// OrderID и UserID — субъекты эффекта, пустые, если эффект их не использует.
+	// Приходят строками и разбираются применителем: скрипту нельзя доверять
+	// возврат корректного идентификатора.
 	OrderID string
 	UserID  string
-	// Amount is in rubles, as the script wrote it.
+	// Amount указана в рублях, ровно так, как её записал скрипт.
 	Amount float64
-	// Commission asks for the platform's share (order_commission_percent) to be
-	// withheld from this payment. False by default and normally left so: a
-	// reward is money the platform pays out, not money a customer paid, and a
-	// commission on it would only move the platform's own money between its own
-	// accounts. A behaviour whose rewards should be treated as ordinary
-	// earnings sets it explicitly.
+	// Commission просит удержать из этой выплаты долю платформы
+	// (order_commission_percent). По умолчанию false и обычно таким и остаётся:
+	// вознаграждение — это деньги, которые платит платформа, а не деньги
+	// заказчика, и комиссия с него лишь перекладывала бы собственные деньги
+	// платформы между её же счетами. Поведение, чьи вознаграждения должны
+	// считаться обычным заработком, выставляет флаг явно.
 	Commission bool
-	// Key is the idempotency key. Required for EffectPayBonus.
+	// Key — ключ идемпотентности. Обязателен для EffectPayBonus.
 	Key    string
 	Reason string
 	Text   string
 }
 
-// Actor is a user as a script sees one.
+// Actor — пользователь в том виде, в каком его видит скрипт.
 type Actor struct {
 	ID         string
 	Role       string
@@ -88,8 +88,8 @@ type Actor struct {
 	Status     string
 }
 
-// HasRole mirrors repository.User.HasRole so the script and the Go gates agree
-// on what holding a role means.
+// HasRole повторяет repository.User.HasRole, чтобы скрипт и Go-проверки
+// одинаково понимали, что значит обладать ролью.
 func (a *Actor) HasRole(role string) bool {
 	if a == nil {
 		return false
@@ -102,7 +102,7 @@ func (a *Actor) HasRole(role string) bool {
 	return a.Role == role
 }
 
-// OrderFacts is an order as a script sees one.
+// OrderFacts — заказ в том виде, в каком его видит скрипт.
 type OrderFacts struct {
 	ID         string
 	Status     string
@@ -113,98 +113,98 @@ type OrderFacts struct {
 	IsAsap     bool
 }
 
-// VariantFacts is the service node the decision is about.
+// VariantFacts — узел каталога, о котором принимается решение.
 type VariantFacts struct {
 	ID        string
 	Code      string
 	BasePrice float64
 }
 
-// SubmissionFacts describes data an executor sent for checking — for the
-// verification service, what the moderator read off the customer's document.
+// SubmissionFacts описывает данные, отправленные исполнителем на проверку: для
+// услуги верификации — то, что модератор прочитал в документе заказчика.
 //
-// It carries the *result* of the comparison and never the values compared
-// against. That is the point of the flow: the moderator is shown the address and
-// nothing else about the customer, so neither they nor the script may learn the
-// name and the birth date by asking. What the script decides is the policy —
-// how many attempts, when to warn, when to escalate.
+// Здесь лежит *результат* сравнения и никогда — значения, с которыми
+// сравнивали. В этом весь смысл потока: модератору показывают адрес и ничего
+// больше о заказчике, поэтому ни он, ни скрипт не могут выведать имя и дату
+// рождения простым вопросом. Скрипт решает политику — сколько попыток, когда
+// предупредить, когда эскалировать.
 type SubmissionFacts struct {
-	// Attempt is 1 for the first submission on this order.
+	// Attempt равен 1 для первой отправки по этому заказу.
 	Attempt int
-	// AllMatch is true when every checked field matched.
+	// AllMatch истинно, когда совпали все проверяемые поля.
 	AllMatch bool
-	// Matches is the per-field result, keyed by the field names the manifest
-	// declared in check_fields.
+	// Matches — результат по каждому полю, с ключами из имён полей, объявленных
+	// манифестом в check_fields.
 	Matches map[string]bool
-	// Escalated reports that the order is already with an administrator.
+	// Escalated сообщает, что заказ уже у администратора.
 	Escalated bool
 }
 
-// Facts is everything a hook is allowed to know. The core fills it in before
-// calling; the script cannot ask for anything that is not here, which is what
-// keeps a hook a pure function and bounds what one costs to run.
+// Facts — всё, что хуку позволено знать. Ядро заполняет их перед вызовом;
+// скрипт не может запросить ничего сверх этого — именно это оставляет хук
+// чистой функцией и ограничивает стоимость его выполнения.
 type Facts struct {
-	// Event is set for on_event only, e.g. "order.executed".
+	// Event заполняется только для on_event, например "order.executed".
 	Event string
-	// Config is the node's behavior_config, merged over the script's defaults.
+	// Config — behavior_config узла, наложенный поверх умолчаний скрипта.
 	Config map[string]interface{}
-	// User is who the decision is about: the customer for visible/can_order.
+	// User — тот, о ком принимается решение: для visible/can_order это заказчик.
 	User *Actor
-	// Viewer is the executor or moderator judging an order.
+	// Viewer — исполнитель или модератор, оценивающий заказ.
 	Viewer *Actor
-	// Customer is the order's customer, when there is an order.
+	// Customer — заказчик заказа, когда заказ есть.
 	Customer *Actor
 	Order    *OrderFacts
 	Variant  *VariantFacts
-	// Claims is how many times User has already ordered this variant.
+	// Claims — сколько раз User уже заказывал этот вариант.
 	Claims int
-	// Submission is set on a submission event and nil otherwise.
+	// Submission заполняется на событии отправки и равно nil в остальных случаях.
 	Submission *SubmissionFacts
 	Now        time.Time
 }
 
-// Manifest is the static half of a behaviour: the properties the core needs to
-// know without running anything — because they shape a database write (a claim
-// row), a UI form, or which events are worth delivering.
+// Manifest — статическая половина поведения: свойства, которые ядру нужно знать,
+// ничего не запуская, потому что они определяют запись в базу (строку claim),
+// форму в интерфейсе или то, какие события вообще стоит доставлять.
 type Manifest struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
-	// Description is shown in the admin panel next to the behaviour picker.
+	// Description показывается в админ-панели рядом с выбором поведения.
 	Description string `json:"description"`
-	// OncePerUser makes the core insert a claim row with the order, so a second
-	// order for the same variant by the same user is refused by the database.
+	// OncePerUser заставляет ядро вставлять вместе с заказом строку claim, так что
+	// второй заказ того же варианта тем же пользователем отклонит уже база.
 	OncePerUser bool `json:"once_per_user"`
-	// ReleaseClaimOnCancel returns the claim when the order is cancelled. A
-	// cancelled order must not lock a user out of a service for good.
+	// ReleaseClaimOnCancel возвращает claim при отмене заказа. Отменённый заказ не
+	// должен навсегда закрывать пользователю доступ к услуге.
 	ReleaseClaimOnCancel bool `json:"release_claim_on_cancel"`
-	// Events the script reacts to. An event outside this list is not delivered.
+	// Events — события, на которые реагирует скрипт. Событие вне списка не доставляется.
 	Events []string `json:"events"`
-	// Defaults are the config values a node inherits when it sets none.
+	// Defaults — значения конфигурации, которые узел наследует, если не задал своих.
 	Defaults map[string]interface{} `json:"defaults"`
-	// CheckFields names the customer fields an executor has to submit for this
-	// service, and which the core compares on their behalf. Declaring them here
-	// is what turns on the submission step: the app renders a form for exactly
-	// these fields, and the values are never sent to the executor.
+	// CheckFields перечисляет поля заказчика, которые исполнитель обязан отправить
+	// по этой услуге и которые ядро сравнивает за него. Само объявление этих полей
+	// и включает шаг отправки: приложение рисует форму ровно по ним, а значения
+	// исполнителю не передаются никогда.
 	//
-	// Supported: last_name, first_name, patronymic, birth_date.
+	// Поддерживаются: last_name, first_name, patronymic, birth_date.
 	CheckFields []string `json:"check_fields,omitempty"`
-	// HideCustomerContacts states that an executor working this service must
-	// see the address and nothing else about the customer. The order payload
-	// carries no customer identity in any case; this makes the requirement part
-	// of the behaviour rather than an accident of what the API happens to omit,
-	// and the regression test keys off it.
+	// HideCustomerContacts объявляет, что исполнитель, работающий по этой услуге,
+	// должен видеть адрес и ничего больше о заказчике. Полезная нагрузка заказа и
+	// так не несёт личности заказчика; флаг делает это требование частью поведения,
+	// а не случайностью того, что API чего-то не отдаёт, и регрессионный тест
+	// опирается именно на него.
 	HideCustomerContacts bool `json:"hide_customer_contacts"`
-	// Hooks lists which functions the script actually defines, for the admin
-	// panel and for the dry-run screen.
+	// Hooks перечисляет, какие функции скрипт на самом деле определяет, — для
+	// админ-панели и экрана пробного прогона.
 	Hooks []string `json:"hooks"`
-	// ConstantsSource and Source are the script's own text. The service
-	// constructor shows them: a shipped behaviour is what an admin reads to
-	// understand it and copies as the starting template for a new one.
+	// ConstantsSource и Source — собственный текст скрипта. Конструктор услуг
+	// показывает их: поставляемое поведение админ читает, чтобы разобраться, и
+	// копирует как стартовый шаблон для нового.
 	ConstantsSource string `json:"constants_source,omitempty"`
 	Source          string `json:"source,omitempty"`
 }
 
-// Handles reports whether the behaviour asked for this event.
+// Handles сообщает, запрашивало ли поведение это событие.
 func (m Manifest) Handles(event string) bool {
 	for _, e := range m.Events {
 		if e == event {
@@ -214,8 +214,8 @@ func (m Manifest) Handles(event string) bool {
 	return false
 }
 
-// DeniedError is a refusal produced by a script, carrying the message the user
-// should see. It is a normal outcome, not a failure of the script.
+// DeniedError — отказ, порождённый скриптом и несущий сообщение, которое должен
+// увидеть пользователь. Это нормальный исход, а не сбой скрипта.
 type DeniedError struct {
 	Code    string
 	Message string
@@ -223,7 +223,7 @@ type DeniedError struct {
 
 func (e *DeniedError) Error() string { return e.Message }
 
-// Denied builds a refusal.
+// Denied собирает отказ.
 func Denied(code, message string) error {
 	if message == "" {
 		message = "услуга недоступна"
@@ -231,8 +231,8 @@ func Denied(code, message string) error {
 	return &DeniedError{Code: code, Message: message}
 }
 
-// ErrUnknownBehavior reports a node naming a behaviour that is not loaded —
-// a script that failed to compile, or a code left behind by a rollback.
+// ErrUnknownBehavior сообщает, что узел ссылается на незагруженное поведение —
+// скрипт, который не скомпилировался, или код, оставшийся после отката.
 type ErrUnknownBehavior struct{ Code string }
 
 func (e *ErrUnknownBehavior) Error() string {

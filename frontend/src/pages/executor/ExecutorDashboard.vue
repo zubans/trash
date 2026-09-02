@@ -43,9 +43,9 @@
         </nav>
       </aside>
 
-      <!-- Toast Container -->
+      <!-- Контейнер всплывающих уведомлений -->
       <div class="toast-container">
-        <!-- Chat / Support Toast Notification -->
+        <!-- Всплывающее уведомление чата / поддержки -->
         <div
           v-if="chatToast"
           class="toast info chat-toast cursor-pointer"
@@ -63,7 +63,7 @@
           </button>
         </div>
 
-        <!-- Success Toast -->
+        <!-- Уведомление об успехе -->
         <div v-if="successMsg" class="toast success">
           <div class="toast-icon">
             <i class="ph-bold ph-check"></i>
@@ -77,7 +77,7 @@
           </button>
         </div>
 
-        <!-- Error Toast -->
+        <!-- Уведомление об ошибке -->
         <div v-if="errorMsg" class="toast error">
           <div class="toast-icon">
             <i class="ph-bold ph-warning"></i>
@@ -199,8 +199,8 @@
                 </div>
               </div>
               <div class="o-actions item-actions" @click.stop>
-                <!-- A service whose script asks for data to be checked: the
-                     order cannot be finished on the executor's word alone. -->
+                <!-- Услуга, чей скрипт требует проверки данных: заказ нельзя
+                     завершить на одном лишь слове исполнителя. -->
                 <button
                   v-if="order.submit_fields && order.submit_fields.length"
                   type="button"
@@ -284,7 +284,7 @@
                 </div>
               </div>
 
-              <!-- Chat Input Area -->
+              <!-- Область ввода чата -->
               <div class="chat-input-area">
                 <div v-if="editingMessageId" class="edit-banner d-flex justify-content-between align-items-center mb-2 px-3 py-1 bg-light rounded border text-xs">
                   <span><i class="ph ph-pencil-simple me-1"></i> Редактирование сообщения</span>
@@ -352,7 +352,7 @@
               </div>
             </div>
 
-            <!-- Inline chat inside pending verification order -->
+            <!-- Встроенный чат внутри заказа, ожидающего проверки -->
             <div v-if="selectedChatOrder && selectedChatOrder.id === order.id" class="inline-chat">
               <input
                 ref="chatFileInputRef"
@@ -407,7 +407,7 @@
                 </div>
               </div>
 
-              <!-- Chat Input Area -->
+              <!-- Область ввода чата -->
               <div class="chat-input-area">
                 <div v-if="editingMessageId" class="edit-banner d-flex justify-content-between align-items-center mb-2 px-3 py-1 bg-light rounded border text-xs">
                   <span><i class="ph ph-pencil-simple me-1"></i> Редактирование сообщения</span>
@@ -542,7 +542,7 @@
       </div>
     </div>
 
-    <!-- Order Details Modal for Executor -->
+    <!-- Модальное окно деталей заказа для исполнителя -->
     <OrderDetailsModal
       v-model="showOrderDetailsModal"
       :selected-order-details="selectedOrderDetails"
@@ -555,7 +555,7 @@
       @open-review-modal="openReviewModal"
     />
 
-    <!-- Review Modal for Executor -->
+    <!-- Модальное окно отзыва для исполнителя -->
     <ReviewModal
       v-model="showReviewModal"
       :order-id="reviewTargetOrderId"
@@ -563,7 +563,7 @@
       @reviewed="onReviewSubmitted"
     />
 
-    <!-- Withdrawal Modal -->
+    <!-- Модальное окно вывода средств -->
     <div v-if="showWithdrawalModal" class="topup-modal-overlay" @click.self="showWithdrawalModal = false">
       <div class="topup-modal-card">
         <div class="topup-modal-header">
@@ -604,7 +604,7 @@
       </div>
     </div>
 
-    <!-- Executor Map Modal -->
+    <!-- Модальное окно карты исполнителя -->
     <ExecutorMapModal
       v-model="showExecutorMapModal"
       :current-lat="currentLat || 55.7558"
@@ -615,7 +615,7 @@
       @error="errorMsg = $event"
     />
 
-    <!-- Executor Profile Modal -->
+    <!-- Модальное окно профиля исполнителя -->
     <ExecutorProfileModal
       v-model="showProfileModal"
       :phone="phone"
@@ -627,7 +627,7 @@
       @address-updated="baseAddress = $event"
     />
 
-    <!-- Image Preview Modal -->
+    <!-- Модальное окно просмотра изображения -->
     <div v-if="showImagePreviewModal" class="img-preview-overlay" @click="showImagePreviewModal = false">
       <div class="img-preview-card" @click.stop>
         <button type="button" class="btn-close-preview" @click="showImagePreviewModal = false">
@@ -636,7 +636,7 @@
         <img :src="previewImageUrl" class="img-preview-full" alt="Full Preview" />
       </div>
     </div>
-    <!-- Modal Поддержка -->
+    <!-- Модальное окно поддержки -->
     <SupportChatModal v-model:show="showSupportChatModal" />
   </div>
     <identity-check-modal
@@ -697,13 +697,13 @@ export default defineComponent({
     const userEmail = ref('')
     const fullName = ref('')
     const baseAddress = ref('')
-    // The balance is not kept here: it lives in the auth store, so every screen
-    // shows the same value and a refresh benefits all of them at once. null
-    // means "not loaded yet" and renders as a placeholder rather than 0.
+    // Баланс здесь не хранится: он живёт в хранилище авторизации, поэтому каждый
+    // экран показывает одно и то же значение, а обновление помогает всем сразу.
+    // null означает «ещё не загружено» и рисуется заглушкой, а не как 0.
     const balance = computed(() => authStore.balance)
     const balanceLoaded = computed(() => authStore.balance !== null)
-    // The template has always rendered a "verified" badge on this value, and it
-    // was never defined anywhere: the badge could not appear for anyone.
+    // Шаблон всегда рисовал бейдж «верифицирован» по этому значению, а оно нигде не
+    // было определено: бейдж не мог появиться ни у кого.
     const isVerified = computed(() => authStore.user?.is_verified ?? false)
     const status = ref('ACTIVE')
     const showProfileModal = ref(false)
@@ -714,7 +714,7 @@ export default defineComponent({
     const successMsg = ref('')
     const errorMsg = ref('')
 
-    // Auto dismiss toasts
+    // Автоматически прячем всплывающие уведомления
     let successTimer: any = null
     let errorTimer: any = null
     watch(successMsg, (val) => {
@@ -730,7 +730,7 @@ export default defineComponent({
       }
     })
 
-    // Shift state
+    // Состояние смены
     const activeShift = ref<any>(null)
     const shiftDuration = ref(1)
     const durationOptions = [1, 3, 5]
@@ -739,7 +739,7 @@ export default defineComponent({
     const shiftCountdown = ref('')
     let countdownIntervalId: any = null
 
-    // Orders state
+    // Состояние заказов
     const assignedOrders = ref<any[]>([])
     const availableOrders = ref<any[]>([])
     const executorHistoryOrders = ref<any[]>([])
@@ -754,11 +754,11 @@ export default defineComponent({
       assignedOrders.value.filter((o) => o.status === 'EXECUTED')
     )
 
-    // Location state
+    // Состояние местоположения
     const currentLat = ref(55.7558)
     const currentLon = ref(37.6173)
 
-    // Order Details Modal state
+    // Состояние модального окна деталей заказа
     const showOrderDetailsModal = ref(false)
     const selectedOrderDetails = ref<any>(null)
 
@@ -773,14 +773,14 @@ export default defineComponent({
         successMsg.value = 'Вы отказались от заказа'
         showOrderDetailsModal.value = false
         fetchAssignedOrders()
-        // Refusing an assigned order is fined.
+        // Отказ от назначенного заказа штрафуется.
         authStore.fetchMe()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка отказа от заказа'
       }
     }
 
-    // Review Modal state
+    // Состояние модального окна отзыва
     const showReviewModal = ref(false)
     const reviewTargetOrderId = ref('')
 
@@ -795,12 +795,12 @@ export default defineComponent({
       fetchHistoryOrders()
     }
 
-    // Withdrawal Modal state
+    // Состояние модального окна вывода
     const showWithdrawalModal = ref(false)
     const withdrawalAmount = ref(0)
     const submittingWithdrawal = ref(false)
 
-    // Chat State & Logic
+    // Состояние и логика чата
     const selectedChatOrder = ref<any>(null)
     const chatMessages = ref<any[]>([])
     const chatInputText = ref('')
@@ -954,8 +954,8 @@ export default defineComponent({
     const currentUserId = computed(() => authStore.userID)
 
     const fetchProfile = async () => {
-      // One call, one source of truth: the store fetches /auth/me and every
-      // consumer of the balance updates with it.
+      // Один вызов, один источник истины: хранилище запрашивает /auth/me, и вместе с
+      // ним обновляется каждый потребитель баланса.
       const me = await authStore.fetchMe()
       if (me) {
         phone.value = me.phone || phone.value
@@ -964,10 +964,10 @@ export default defineComponent({
         fullName.value = authStore.fullName
       }
       try {
-        // The executor's position comes from /executor/location, which is the
-        // authoritative stored one — the same the map centres on and matching
-        // measures against. It used to be parsed out of the profile's last_geo
-        // string, which no longer exists.
+        // Позиция исполнителя приходит из /executor/location — она авторитетная
+        // сохранённая, та же, по которой центрируется карта и по которой меряет
+        // подбор. Раньше её выпарсивали из строки last_geo в профиле, которой больше
+        // не существует.
         const locRes = await api.get('/executor/location')
         if (locRes.data?.has_location) {
           const lat = Number(locRes.data.lat)
@@ -982,8 +982,8 @@ export default defineComponent({
           baseAddress.value = custProfRes.data.address
         }
       } catch (err) {
-        // Profile extras (base address, last position) are optional: failing to
-        // load them must not disturb what is already on screen.
+        // Дополнения профиля (базовый адрес, последняя позиция) необязательны:
+        // неудача их загрузки не должна ломать то, что уже на экране.
         console.warn('[ExecutorDashboard] failed to load profile extras', err)
       }
     }
@@ -1035,7 +1035,7 @@ export default defineComponent({
         await api.post('/executor/shifts/early-end')
         successMsg.value = 'Смена завершена'
         await fetchActiveShift()
-        // Ending a shift early carries a penalty, so the balance just changed.
+        // Ранний уход со смены штрафуется, поэтому баланс только что изменился.
         authStore.fetchMe()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка завершения смены'
@@ -1055,10 +1055,10 @@ export default defineComponent({
 
     const fetchAvailableOrders = async () => {
       try {
-        // The server anchors the search to the executor's stored working
-        // position; lat/lon are sent only as a fallback. `radius` (not
-        // `radius_meters`) is the name the backend reads — otherwise it silently
-        // falls back to a 2 km default.
+        // Сервер привязывает поиск к сохранённой рабочей позиции исполнителя;
+        // lat/lon шлются только как запасной вариант. `radius` (а не
+        // `radius_meters`) — то имя, которое читает бэкенд, иначе он молча
+        // откатывается к умолчанию в 2 км.
         const res = await api.get('/executor/orders/nearby', {
           params: { lat: currentLat.value, lon: currentLon.value, radius: 5000 },
         })
@@ -1078,7 +1078,7 @@ export default defineComponent({
               executorReviewsMap.value[order.id] = res.review
             }
           } catch (err) {
-            // ignore
+            // игнорируем
           }
         }
       }
@@ -1118,10 +1118,10 @@ export default defineComponent({
       }
     }
 
-    // Identity check. Services whose script declares fields to submit (the
-    // account verification service) are finished by the check, not by the
-    // executor saying so: the platform compares what was typed with the account
-    // and decides. The executor is never shown the values it compares against.
+    // Проверка личности. Услуги, чей скрипт объявляет поля для отправки (услуга
+    // верификации учётной записи), завершаются проверкой, а не словами
+    // исполнителя: платформа сравнивает набранное с учётной записью и решает.
+    // Значения, с которыми она сравнивает, исполнителю не показывают никогда.
     const identityOrder = ref<any | null>(null)
 
     const openIdentityCheck = (order: any) => {
@@ -1151,16 +1151,16 @@ export default defineComponent({
       }
     }
 
-    // Location reporting. POST /executor/shifts/location keeps the executor's
-    // stored position fresh: it is what the map centres on and what automatic
-    // matching measures distance against, so without it both work from the
-    // position captured at registration.
+    // Отчёты о местоположении. POST /executor/shifts/location держит сохранённую
+    // позицию исполнителя свежей: именно по ней центрируется карта и по ней меряет
+    // расстояние автоподбор, поэтому без них оба работают по позиции, снятой при
+    // регистрации.
     //
-    // It stays off until an administrator enables tracking, because reporting a
-    // position continuously is a decision about the executor's privacy and
-    // battery, not a side effect of shipping the plumbing. The geofence it was
-    // originally built for is gone; the setting name is kept so existing
-    // installations do not silently change behaviour.
+    // Он выключен, пока администратор не включит трекинг, потому что постоянная
+    // отправка позиции — это решение о приватности и батарее исполнителя, а не
+    // побочный эффект выкатки механики. Геозоны, ради которой это изначально
+    // строилось, больше нет; имя настройки сохранено, чтобы у существующих
+    // установок поведение не поменялось молча.
     const geofenceTrackingEnabled = ref(false)
     const geofenceIntervalSec = ref(60)
     let geofenceTimer: any = null
@@ -1178,8 +1178,8 @@ export default defineComponent({
           longitude: currentLon.value,
         })
       } catch (err) {
-        // A missed point is not worth interrupting the shift over; the next
-        // tick tries again.
+        // Пропущенная точка не стоит того, чтобы прерывать смену; следующий тик
+        // попробует снова.
         console.warn('[geofence] failed to report location', err)
       }
     }
@@ -1197,10 +1197,10 @@ export default defineComponent({
       }
     }
 
-    // Reads the device position. `announce` decides whether a failure is put in
-    // front of the user: the periodic shift report should stay quiet, but a
-    // position the person actively asked for must say why it could not be read
-    // rather than leaving the map sitting on a stale point.
+    // Читает позицию устройства. `announce` решает, показывать ли сбой
+    // пользователю: периодический отчёт в смене должен молчать, а позиция, о
+    // которой человек попросил сам, обязана сказать, почему её не удалось
+    // прочитать, а не оставлять карту на устаревшей точке.
     const updateCurrentPosition = async (force = false, announce = false) => {
       try {
         const position = await getCurrentCoordinates()
@@ -1217,9 +1217,9 @@ export default defineComponent({
 
     const openMapPicker = () => {
       showExecutorMapModal.value = true
-      // Opening the map is the moment the position matters most, and it is a
-      // deliberate action — so a failure to read it is reported rather than
-      // leaving the map centred on a stale point with no explanation.
+      // Открытие карты — момент, когда позиция важнее всего, и это осознанное
+      // действие, поэтому о неудаче чтения сообщается, а не оставляется карта,
+      // центрированная на устаревшей точке без объяснений.
       updateCurrentPosition(false, true)
     }
 
@@ -1236,7 +1236,7 @@ export default defineComponent({
       fetchAvailableOrders()
     }
 
-    // Chat Logic
+    // Логика чата
     const editingMessageId = ref<string | null>(null)
 
     const isSystemMessage = (msg: any) => {
@@ -1309,7 +1309,7 @@ export default defineComponent({
         console.error(err)
       }
 
-      // Setup WebSocket connection if not already connected
+      // Устанавливаем соединение WebSocket, если оно ещё не установлено
       if (!ws.value && selectedChatOrder.value) {
         try {
           const wsUrl = buildChatWebSocketUrl(orderId)
@@ -1408,10 +1408,10 @@ export default defineComponent({
 
       chatInputText.value = ''
 
-      // Always send over REST — the same path the (working) support chat uses.
-      // ws.send() gives no delivery confirmation and the native WebView can
-      // swallow it, which is what broke the order chat; the REST endpoint saves
-      // the message and broadcasts it to the room, so realtime still works.
+      // Всегда шлём через REST — тем же путём, что и (работающий) чат поддержки.
+      // ws.send() не даёт подтверждения доставки, а нативный WebView может его
+      // проглотить — именно это ломало чат заказа; REST-эндпоинт сохраняет
+      // сообщение и рассылает его в комнату, поэтому реалтайм всё равно работает.
       try {
         const res = await api.post(`/chats/${selectedChatOrder.value.id}/messages`, { text })
         if (res.data) {
@@ -1617,7 +1617,7 @@ export default defineComponent({
           geofenceIntervalSec.value = interval
         }
       } catch (err) {
-        // Defaults keep reporting off, which is the safe direction.
+        // Умолчания оставляют отчёты выключенными — это безопасное направление.
         console.warn('[geofence] failed to read settings', err)
       }
     }
@@ -1642,14 +1642,14 @@ export default defineComponent({
         fetchAvailableOrders()
         fetchUnreadSummary()
         checkSupportNotification()
-        // The balance moves without any action from this screen: an order the
-        // customer confirms, a fine, an approved withdrawal. Poll it with the
-        // rest instead of leaving a number from screen-open time on display.
+        // Баланс двигается без всякого действия с этого экрана: заказ, который
+        // подтвердил заказчик, штраф, одобренный вывод. Опрашиваем его вместе с
+        // остальным, а не оставляем на экране число с момента открытия.
         authStore.fetchMe()
       }, pollIntervalMs)
 
-      // A backgrounded WebView stops its timers, so whatever was on screen when
-      // the app was suspended is stale on return.
+      // WebView в фоне останавливает свои таймеры, поэтому то, что было на экране в
+      // момент усыпления приложения, при возврате устарело.
       document.addEventListener('visibilitychange', onVisibilityChange)
     })
 
@@ -1809,7 +1809,7 @@ export default defineComponent({
   gap: 24px;
 }
 
-/* --- Header --- */
+/* --- Шапка --- */
 .glass-header {
   display: flex;
   justify-content: space-between;
@@ -1817,7 +1817,7 @@ export default defineComponent({
   margin-bottom: 12px;
 }
 
-/* Toast Notifications Styles */
+/* Стили всплывающих уведомлений */
 .toast-container {
   position: fixed;
   top: 84px;
@@ -1946,7 +1946,7 @@ export default defineComponent({
   gap: 12px;
 }
 
-/* --- Header --- */
+/* --- Шапка --- */
 .header {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
 }
@@ -2007,9 +2007,9 @@ export default defineComponent({
 .sidebar-nav {
   padding: 16px; flex: 1;
   display: flex; flex-direction: column; gap: 6px;
-  /* The menu scrolls rather than being clipped by the fixed-height sidebar:
-     min-height lets this flex child shrink below its content, and contained
-     overscroll keeps the page behind the overlay still. */
+  /* Меню прокручивается, а не обрезается боковой панелью фиксированной высоты:
+     min-height позволяет этому flex-элементу сжаться меньше содержимого, а
+     ограниченный overscroll держит страницу за оверлеем неподвижной. */
   min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -2034,7 +2034,7 @@ export default defineComponent({
 }
 .lang-control span { font-weight: 700; font-size: 14px; color: var(--text-title, #0f172a); }
 
-/* --- Profile Card (New Compact Design) --- */
+/* --- Карточка профиля (новый компактный дизайн) --- */
 .profile-card {
   background: var(--surface-card, #ffffff);
   border-radius: var(--rad-lg, 24px);
@@ -2071,7 +2071,7 @@ export default defineComponent({
   font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;
 }
 
-/* --- Balance Card (New Compact Dark Design) --- */
+/* --- Карточка баланса (новый компактный тёмный дизайн) --- */
 .balance-card {
   background: linear-gradient(135deg, #1e1b4b, #3b2c6b);
   border-radius: var(--rad-lg, 24px);
@@ -2103,7 +2103,7 @@ export default defineComponent({
 }
 .btn-balance:hover { background: rgba(255,255,255,0.2); }
 
-/* --- Shift Control (Compact) --- */
+/* --- Управление сменой (компактное) --- */
 .shift-bar {
   background: var(--surface-card, #ffffff);
   border-radius: var(--rad-md, 16px);
@@ -2142,7 +2142,7 @@ export default defineComponent({
 }
 .btn-start-shift.danger { background: #ef4444; }
 
-/* --- Section Headers --- */
+/* --- Заголовки разделов --- */
 .section-header { display: flex; align-items: center; gap: 8px; margin-top: 8px; margin-bottom: 4px; }
 .section-title { font-size: 16px; font-weight: 700; color: var(--text-title, #0f172a); flex: 1; margin: 0; }
 .section-count { font-size: 16px; font-weight: 700; color: var(--text-muted, #64748b); }
@@ -2154,14 +2154,14 @@ export default defineComponent({
 }
 .btn-refresh { width: 28px; padding: 0; color: var(--text-muted, #64748b); }
 
-/* --- Grid --- */
+/* --- Сетка --- */
 .premium-grid {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   gap: 24px;
 }
 
-/* --- Profile Card --- */
+/* --- Карточка профиля --- */
 .surface-card {
   background: var(--surface-card);
   border-radius: var(--rad-lg);
@@ -2245,7 +2245,7 @@ export default defineComponent({
   color: var(--text-muted);
 }
 
-/* --- Wallet Card --- */
+/* --- Карточка кошелька --- */
 .wallet-card {
   background: var(--dark-wallet-bg);
   border-radius: var(--rad-lg);
@@ -2309,7 +2309,7 @@ export default defineComponent({
   background: rgba(255,255,255,0.18);
 }
 
-/* --- Shift Action Bar --- */
+/* --- Панель действий смены --- */
 .shift-action-bar {
   background: var(--surface-card);
   border-radius: var(--rad-md);
@@ -2456,7 +2456,7 @@ export default defineComponent({
   color: #ffffff;
 }
 
-/* --- Section Container --- */
+/* --- Контейнер раздела --- */
 .section-container {
   display: flex;
   flex-direction: column;
@@ -2512,7 +2512,7 @@ export default defineComponent({
   font-size: 14px;
 }
 
-/* --- Orders Stack --- */
+/* --- Стопка заказов --- */
 .orders-stack {
   display: flex;
   flex-direction: column;
@@ -2666,7 +2666,7 @@ export default defineComponent({
   box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
 }
 
-/* --- GPS Bar --- */
+/* --- Полоса GPS --- */
 .gps-card-bar {
   background: var(--surface-card);
   border-radius: var(--rad-md);
@@ -2720,7 +2720,7 @@ export default defineComponent({
   cursor: pointer;
 }
 
-/* --- Inline Chat Accordion --- */
+/* --- Встроенный чат-аккордеон --- */
 .inline-chat {
   background: rgba(15, 23, 42, 0.02);
   border-top: 1px solid rgba(0,0,0,0.04);
@@ -2754,9 +2754,9 @@ export default defineComponent({
 .msg.incoming { align-self: flex-start; }
 .msg.outgoing { align-self: flex-end; }
 
-/* Message bubbles — matched to the support chat (SupportChatModal.vue). The
-   colour rules target .msg-container (the class the markup uses); they used to
-   target a stale .msg class, leaving the bubbles with no background. */
+/* Пузыри сообщений — согласованы с чатом поддержки (SupportChatModal.vue).
+   Правила цвета нацелены на .msg-container (класс, который использует разметка);
+   раньше они целились в устаревший .msg, из-за чего пузыри оставались без фона. */
 .bubble {
   padding: 10px 14px;
   font-size: 14px;
@@ -2825,7 +2825,7 @@ export default defineComponent({
   display: block;
 }
 
-/* Image Preview Modal */
+/* Модальное окно просмотра изображения */
 .img-preview-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -2867,7 +2867,7 @@ export default defineComponent({
   cursor: pointer;
 }
 
-/* --- Message Actions & Container Styling --- */
+/* --- Стили действий над сообщением и контейнера --- */
 .msg-container {
   display: flex;
   align-items: center;
@@ -2968,10 +2968,10 @@ export default defineComponent({
 .map-widget {
     position: relative; width: 100%; height: 130px; border-radius: 20px;
     overflow: hidden; box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.04)); cursor: pointer; transition: all 0.2s ease-in-out;
-    /* A stock photo of a map used to be fetched from images.unsplash.com on
-       every render of this widget. It is decoration behind an overlay that
-       covers most of it, so it is drawn locally: no third-party request, and
-       nothing to allow through the content security policy. */
+    /* Стоковое фото карты раньше загружалось с images.unsplash.com при каждой
+       отрисовке этого виджета. Это декорация под оверлеем, который закрывает
+       большую её часть, поэтому она рисуется локально: ни стороннего запроса,
+       ни необходимости пропускать что-то через политику безопасности контента. */
     background-color: #e2e8f0;
     background-image:
         linear-gradient(135deg, rgba(99, 102, 241, 0.10), rgba(16, 185, 129, 0.10)),
@@ -3017,7 +3017,7 @@ export default defineComponent({
     padding: 8px 14px; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; cursor: pointer;
 }
 
-/* --- Ultra-compact Order Item Styles --- */
+/* --- Стили ультракомпактного элемента заказа --- */
 .list-item-compact {
   background: var(--surface-card, #ffffff);
   border-radius: var(--rad-md, 16px);
@@ -3092,7 +3092,7 @@ export default defineComponent({
 .btn-action.primary { background: #e0e7ff; color: #5c60f5; }
 .btn-action.success { background: #ecfdf5; color: #10b981; }
 
-/* Modifiers for Review & History */
+/* Модификаторы для отзыва и истории */
 .list-item-compact.review { border-left: 4px solid #f59e0b; }
 .list-item-compact.review .item-icon { background: #fffbeb; color: #f59e0b; }
 .list-item-compact.review .item-price-top { color: #f59e0b; }
@@ -3117,7 +3117,7 @@ export default defineComponent({
   }
 }
 
-/* Top-up & Withdrawal Modal Styles */
+/* Стили модальных окон пополнения и вывода */
 .topup-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;

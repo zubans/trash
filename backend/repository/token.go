@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// TokenRepository defines database operations for revoked tokens.
+// TokenRepository описывает операции с базой для отозванных токенов.
 type TokenRepository interface {
 	IsTokenRevoked(ctx context.Context, tokenHash string) (bool, error)
 	RevokeToken(ctx context.Context, tokenHash string, expiresAt time.Time) error
@@ -16,7 +16,7 @@ type tokenRepo struct {
 	db *sql.DB
 }
 
-// NewTokenRepository creates a repository for token blacklisting.
+// NewTokenRepository создаёт репозиторий для чёрного списка токенов.
 func NewTokenRepository(db *sql.DB) TokenRepository {
 	return &tokenRepo{db: db}
 }

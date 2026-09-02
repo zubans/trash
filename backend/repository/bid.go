@@ -11,7 +11,7 @@ import (
 	"healthlogin/backend/money"
 )
 
-// Bid represents an executor price offer for construction waste orders.
+// Bid представляет ценовое предложение исполнителя по заказам на строительный мусор.
 type Bid struct {
 	ID            uuid.UUID    `json:"id"`
 	OrderID       uuid.UUID    `json:"order_id"`
@@ -22,9 +22,9 @@ type Bid struct {
 	ExecutorPhone string       `json:"executor_phone,omitempty"`
 }
 
-// BidRepository defines database operations for bidding. Accepting a bid is a
-// business transaction and lives in the service layer; the repository only
-// provides the locked read and the individual writes it needs.
+// BidRepository описывает операции с базой для торгов. Принятие ставки — это
+// бизнес-транзакция, и она живёт в слое сервисов; репозиторий предоставляет
+// лишь заблокированное чтение и нужные ему отдельные записи.
 type BidRepository interface {
 	CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*Bid, error)
 	GetBidsForOrder(ctx context.Context, orderID uuid.UUID) ([]*Bid, error)
@@ -37,13 +37,13 @@ type bidRepo struct {
 	db *sql.DB
 }
 
-// NewBidRepository creates a new BidRepository.
+// NewBidRepository создаёт новый BidRepository.
 func NewBidRepository(db *sql.DB) BidRepository {
 	return &bidRepo{db: db}
 }
 
 func (r *bidRepo) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*Bid, error) {
-	// 1. Check if the order is an auction and in SEARCHING status
+	// 1. Проверяем, что заказ — аукцион и в статусе SEARCHING
 	var isAuction bool
 	var status string
 	err := r.db.QueryRowContext(ctx, `
@@ -64,9 +64,9 @@ func (r *bidRepo) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, 
 		return nil, errors.New("order is not open for bidding")
 	}
 
-	// 2. Insert the bid. One executor holds at most one bid per order, so a
-	//    repeated submission updates the offer instead of stacking duplicates
-	//    (the unique index is created in migration 024).
+	// 2. Вставляем ставку. У одного исполнителя не больше одной ставки на заказ,
+	//    поэтому повторная отправка обновляет предложение, а не громоздит дубли
+	//    (уникальный индекс создан в миграции 024).
 	query := `
 		INSERT INTO bids (order_id, executor_id, offered_price, status, created_at)
 		VALUES ($1, $2, $3, 'PENDING', now())
@@ -111,8 +111,8 @@ func (r *bidRepo) GetBidsForOrder(ctx context.Context, orderID uuid.UUID) ([]*Bi
 	return bids, rows.Err()
 }
 
-// LockBidForUpdate reads a bid taking a row lock, so two customers accepting
-// concurrently serialise instead of both seeing it as PENDING.
+// LockBidForUpdate читает ставку, беря блокировку строки, чтобы два заказчика,
+// принимающих одновременно, сериализовались, а не увидели её оба как PENDING.
 func (r *bidRepo) LockBidForUpdate(ctx context.Context, q Querier, bidID uuid.UUID) (*Bid, error) {
 	var b Bid
 	err := r.exec(ctx, q).QueryRowContext(ctx, `
@@ -126,15 +126,15 @@ func (r *bidRepo) LockBidForUpdate(ctx context.Context, q Querier, bidID uuid.UU
 	return &b, nil
 }
 
-// SetBidStatus moves a bid out of PENDING; the guard keeps a concurrent accept
-// from overwriting an already decided bid.
+// SetBidStatus выводит ставку из PENDING; охрана не даёт параллельному принятию
+// переписать уже решённую ставку.
 func (r *bidRepo) SetBidStatus(ctx context.Context, q Querier, bidID uuid.UUID, status string) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE bids SET status = $1 WHERE id = $2 AND status = 'PENDING'`, status, bidID)
 }
 
-// RejectOtherBids closes every other open offer on an order. It may legitimately
-// affect no rows, so it is not guarded.
+// RejectOtherBids закрывает все прочие открытые предложения по заказу. Он
+// законно может не затронуть ни одной строки, поэтому не охраняется.
 func (r *bidRepo) RejectOtherBids(ctx context.Context, q Querier, orderID, exceptBidID uuid.UUID) error {
 	_, err := r.exec(ctx, q).ExecContext(ctx,
 		`UPDATE bids SET status = 'REJECTED' WHERE order_id = $1 AND id != $2 AND status = 'PENDING'`,

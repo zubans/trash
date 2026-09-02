@@ -17,7 +17,7 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// mockRepo is an in-memory implementation of repository.UserRepository for tests.
+// mockRepo — реализация repository.UserRepository в памяти для тестов.
 type mockRepo struct {
 	users     map[string]*repository.User
 	findErr   error
@@ -87,8 +87,8 @@ func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string
 	return sql.ErrNoRows
 }
 
-// UpdateVerifiedTx runs the same write; the fake has no transactions, so the
-// querier is ignored.
+// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
+// querier игнорируется.
 func (m *mockRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	return m.UpdateVerified(ctx, id, verified)
 }
@@ -254,9 +254,9 @@ func TestRegister_Success(t *testing.T) {
 	}
 }
 
-// TestRegisterRequiresBirthDate: an account with no birth date reads as age 0,
-// so every min_age gate would refuse it without saying why. Registration has to
-// refuse first.
+// TestRegisterRequiresBirthDate: учётка без даты рождения читается как возраст
+// 0, поэтому любая проверка min_age отказала бы ей, не сказав почему.
+// Регистрация обязана отказать раньше.
 func TestRegisterRequiresBirthDate(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 
@@ -267,8 +267,8 @@ func TestRegisterRequiresBirthDate(t *testing.T) {
 	}
 }
 
-// TestRegisterRejectsImpossibleBirthDates covers the values that produce an age
-// no gate can read sensibly: a future date (negative age) and a malformed one.
+// TestRegisterRejectsImpossibleBirthDates покрывает значения, дающие возраст,
+// который ни одна проверка не прочтёт осмысленно: дату в будущем и кривую.
 func TestRegisterRejectsImpossibleBirthDates(t *testing.T) {
 	cases := map[string]string{
 		"future":     time.Now().AddDate(1, 0, 0).Format("2006-01-02"),
@@ -288,8 +288,8 @@ func TestRegisterRejectsImpossibleBirthDates(t *testing.T) {
 	}
 }
 
-// TestRegisterStoresBirthDate: the date has to survive to the stored user, or
-// the age gates read 0 for every account created through the form.
+// TestRegisterStoresBirthDate: дата обязана дожить до сохранённого
+// пользователя, иначе возрастные проверки читают 0 для каждой учётки из формы.
 func TestRegisterStoresBirthDate(t *testing.T) {
 	svc := NewAuthServiceWithSecret(newMockRepo(), "test-secret", nil, nil)
 	born := time.Now().AddDate(-30, 0, -1)
@@ -584,7 +584,7 @@ func (m *mockRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, newHash
 	return nil
 }
 
-// failingMailer stands in for a mail transport that is down.
+// failingMailer подменяет собой лежащий почтовый транспорт.
 type failingMailer struct{ calls int }
 
 func (m *failingMailer) SendEmailVerification(string, string) error { return nil }
@@ -593,10 +593,10 @@ func (m *failingMailer) SendPasswordResetCode(string, string) error {
 	return errors.New("dial tcp: connection refused")
 }
 
-// TestRequestPasswordReset_DoesNotRevealAccounts pins the property that made
-// the endpoint an account-existence oracle in production: an unknown address
-// reported success while a known address whose mail could not be sent reported
-// an error, so a 400 meant "this email has an account here".
+// TestRequestPasswordReset_DoesNotRevealAccounts фиксирует свойство, из-за
+// которого эндпоинт стал в проде оракулом существования учёток: неизвестный
+// адрес отчитывался успехом, а известный, чьё письмо не удалось отправить, —
+// ошибкой, поэтому 400 означал «за этой почтой здесь есть учётная запись».
 func TestRequestPasswordReset_DoesNotRevealAccounts(t *testing.T) {
 	mailer := &failingMailer{}
 	repo := newMockRepo()
@@ -615,11 +615,11 @@ func TestRequestPasswordReset_DoesNotRevealAccounts(t *testing.T) {
 	}
 }
 
-// TestRegisterAcceptsRealBuildingNumbers is the user-visible half of the
-// address change. Registration used to demand a purely numeric house number, so
-// anyone living in a корпус or a строение could pick their address from the
-// suggestion list and then be refused by the form. These are ordinary Russian
-// addresses and they must go through.
+// TestRegisterAcceptsRealBuildingNumbers — видимая пользователю половина
+// изменения адресов. Регистрация раньше требовала чисто числовой номер дома,
+// поэтому любой живущий в корпусе или строении мог выбрать свой адрес из списка
+// подсказок и получить отказ формы. Это обычные российские адреса, и они
+// обязаны проходить.
 func TestRegisterAcceptsRealBuildingNumbers(t *testing.T) {
 	addresses := []string{
 		"Россия, Москва, Тверская улица, д. 12к1",
@@ -640,8 +640,8 @@ func TestRegisterAcceptsRealBuildingNumbers(t *testing.T) {
 	}
 }
 
-// TestRegisterStillRequiresABuilding: relaxing the format must not turn into
-// accepting anything. An address without a house cannot be delivered to.
+// TestRegisterStillRequiresABuilding: послабление формата не должно превратиться
+// в приём чего угодно. По адресу без дома доставить нельзя.
 func TestRegisterStillRequiresABuilding(t *testing.T) {
 	rejected := []string{
 		"Россия, Москва, Тверская улица",
@@ -662,8 +662,8 @@ func TestRegisterStillRequiresABuilding(t *testing.T) {
 	}
 }
 
-// recordingRepo notes what was written to the reset code, so a test can tell a
-// stored code from a cleared one.
+// recordingRepo отмечает, что было записано в код сброса, чтобы тест мог
+// отличить сохранённый код от очищенного.
 type resetCodeRecorder struct {
 	*mockRepo
 	lastCode string
@@ -676,11 +676,11 @@ func (r *resetCodeRecorder) SetPasswordResetCode(ctx context.Context, userID uui
 	return r.mockRepo.SetPasswordResetCode(context.Background(), userID, code, expiresAt)
 }
 
-// TestUndeliveredResetCodeIsCleared covers what the production log exposed: the
-// send failed and the next line still announced that a code had been sent. The
-// code is now removed when it cannot be delivered, so a stored code always
-// means a code somebody can actually receive — and the previous one is not left
-// overwritten by a code that never arrived.
+// TestUndeliveredResetCodeIsCleared покрывает то, что вскрыл прод-лог: отправка
+// провалилась, а следующая строка всё равно объявляла, что код отправлен. Код
+// теперь удаляется, если доставить его нельзя, поэтому сохранённый код всегда
+// означает код, который кто-то действительно может получить, — а предыдущий не
+// остаётся перезаписанным кодом, который так и не пришёл.
 func TestUndeliveredResetCodeIsCleared(t *testing.T) {
 	base := newMockRepo()
 	known := &repository.User{ID: uuid.New(), Phone: "+79990000002", Email: "known@example.com", Role: "CUSTOMER"}

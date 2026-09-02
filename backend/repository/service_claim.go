@@ -10,28 +10,28 @@ import (
 	"github.com/lib/pq"
 )
 
-// ErrServiceAlreadyClaimed reports that the user has already ordered a service
-// that may be ordered only once.
+// ErrServiceAlreadyClaimed сообщает, что пользователь уже заказывал услугу,
+// которую можно заказать только один раз.
 var ErrServiceAlreadyClaimed = errors.New("service already ordered by this user")
 
-// ServiceClaimRepository records that a user has taken up a once-per-user
-// service.
+// ServiceClaimRepository фиксирует, что пользователь воспользовался услугой
+// «один раз на пользователя».
 //
-// The rule could have been a query — "does this customer already have an order
-// for this variant?" — but a query cannot stop two simultaneous requests from
-// both finding nothing. A row with a primary key can: the claim is inserted in
-// the same transaction as the order, and the second insert loses.
+// Правило могло быть запросом — «есть ли у этого заказчика заказ по этому
+// варианту?» — но запрос не может помешать двум одновременным обращениям обоим
+// ничего не найти. Строка с первичным ключом может: claim вставляется в той же
+// транзакции, что и заказ, и вторая вставка проигрывает.
 type ServiceClaimRepository interface {
-	// Claim records the claim inside the caller's transaction. Returns
-	// ErrServiceAlreadyClaimed when the user already holds one.
+	// Claim записывает claim внутри транзакции вызывающего. Возвращает
+	// ErrServiceAlreadyClaimed, когда у пользователя он уже есть.
 	Claim(ctx context.Context, q Querier, userID, variantID, orderID uuid.UUID) error
-	// ReleaseByOrder drops the claim a cancelled order held. A cancelled order
-	// must not lock a user out of the service for good.
+	// ReleaseByOrder снимает claim, который держал отменённый заказ. Отменённый
+	// заказ не должен навсегда закрывать пользователю доступ к услуге.
 	ReleaseByOrder(ctx context.Context, q Querier, orderID uuid.UUID) error
-	// CountForVariant reports whether this user has claimed this variant.
+	// CountForVariant сообщает, занимал ли этот пользователь этот вариант.
 	CountForVariant(ctx context.Context, userID, variantID uuid.UUID) (int, error)
-	// CountsForUser returns the user's claims per variant in one query, for the
-	// catalog listings that judge every node at once.
+	// CountsForUser возвращает claim'ы пользователя по вариантам одним запросом —
+	// для списков каталога, которые оценивают все узлы разом.
 	CountsForUser(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]int, error)
 }
 
@@ -39,7 +39,7 @@ type serviceClaimRepo struct {
 	db *sql.DB
 }
 
-// NewServiceClaimRepository creates a ServiceClaimRepository.
+// NewServiceClaimRepository создаёт ServiceClaimRepository.
 func NewServiceClaimRepository(db *sql.DB) ServiceClaimRepository {
 	return &serviceClaimRepo{db: db}
 }

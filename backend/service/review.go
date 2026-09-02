@@ -27,8 +27,8 @@ type CreateReviewDTO struct {
 	Photos  []string `json:"photos"`
 }
 
-// Review input limits. Without them a review is an unbounded write into the
-// database and an unchecked URL rendered in somebody else's browser.
+// Ограничения на ввод отзыва. Без них отзыв — это неограниченная запись в базу
+// и непроверенный URL, отрисованный в чужом браузере.
 const (
 	maxCommentRunes = 2000
 	maxReviewPhotos = 10
@@ -46,7 +46,7 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 		return nil, errors.New("слишком много фотографий")
 	}
 	for _, photo := range dto.Photos {
-		// Same rule as order photos: only our own upload paths.
+		// То же правило, что и для фото заказа: только наши собственные пути загрузки.
 		if !strings.HasPrefix(photo, "/uploads/") || strings.Contains(photo, "..") {
 			return nil, errors.New("фотографии должны быть загружены через приложение")
 		}
@@ -64,7 +64,7 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 		return nil, errors.New("reviews can only be submitted for completed orders")
 	}
 
-	// 7 days SLA check
+	// Проверка 7-дневного SLA
 	if order.CompletedAt != nil && time.Since(*order.CompletedAt) > 7*24*time.Hour {
 		return nil, errors.New("review window has expired (7 days max after order completion)")
 	}
@@ -111,7 +111,7 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 		return nil, err
 	}
 
-	// Target role is target's role
+	// Роль цели — это роль объекта отзыва
 	targetRole := "EXECUTOR"
 	if authorRole == "EXECUTOR" {
 		targetRole = "CUSTOMER"

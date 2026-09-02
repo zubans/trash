@@ -8,16 +8,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// MaxUserAddresses is the number of addresses a user (customer or executor) may keep.
+// MaxUserAddresses — сколько адресов может хранить пользователь (заказчик или исполнитель).
 const MaxUserAddresses = 2
 
-// ErrAddressLimitReached is returned when a user already has the maximum.
+// ErrAddressLimitReached возвращается, когда у пользователя уже достигнут максимум.
 var ErrAddressLimitReached = errors.New("address limit reached")
 
-// ErrAddressNotFound is returned for an address that does not exist or is not the caller's.
+// ErrAddressNotFound возвращается для адреса, которого не существует или который принадлежит не вызывающему.
 var ErrAddressNotFound = errors.New("address not found")
 
-// Address is one saved address, kept with its structured parts.
+// Address — один сохранённый адрес вместе с его структурными частями.
 type Address struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
@@ -37,14 +37,14 @@ type Address struct {
 	Source string `json:"source,omitempty"`
 }
 
-// AddressRepository stores saved addresses for customers and executors.
+// AddressRepository хранит сохранённые адреса заказчиков и исполнителей.
 type AddressRepository interface {
 	List(ctx context.Context, userID uuid.UUID) ([]Address, error)
 	Add(ctx context.Context, userID uuid.UUID, address Address) ([]Address, error)
 	Delete(ctx context.Context, userID, addressID uuid.UUID) ([]Address, error)
 	SetDefault(ctx context.Context, userID, addressID uuid.UUID) ([]Address, error)
-	// SetDefaultByValue keeps older clients working: they identify an address
-	// by its text rather than by id.
+	// SetDefaultByValue сохраняет работоспособность старых клиентов: они опознают
+	// адрес по тексту, а не по id.
 	SetDefaultByValue(ctx context.Context, userID uuid.UUID, address string) ([]Address, error)
 }
 
@@ -52,7 +52,7 @@ type addressRepo struct {
 	db *sql.DB
 }
 
-// NewAddressRepository creates an AddressRepository.
+// NewAddressRepository создаёт AddressRepository.
 func NewAddressRepository(db *sql.DB) AddressRepository {
 	return &addressRepo{db: db}
 }
@@ -78,7 +78,7 @@ func scanAddresses(rows *sql.Rows) ([]Address, error) {
 	return addresses, rows.Err()
 }
 
-// List returns the addresses with the default one first, then oldest to newest.
+// List возвращает адреса: сначала адрес по умолчанию, затем от старых к новым.
 func (r *addressRepo) List(ctx context.Context, userID uuid.UUID) ([]Address, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+addressSelectCols+` FROM addresses
@@ -91,9 +91,9 @@ func (r *addressRepo) List(ctx context.Context, userID uuid.UUID) ([]Address, er
 	return scanAddresses(rows)
 }
 
-// Add saves an address, making it the default if it is the user's first one or
-// if the caller asked for it. Re-saving an address the user already has is an
-// update, not a new address: it refreshes the stored parts and coordinates.
+// Add сохраняет адрес, делая его адресом по умолчанию, если он у пользователя
+// первый или если вызывающий об этом попросил. Повторное сохранение уже
+// имеющегося адреса — это обновление, а не новый адрес: оно освежает части и координаты.
 func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address) ([]Address, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -101,10 +101,10 @@ func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address
 	}
 	defer tx.Rollback()
 
-	// The limit counts addresses, so it may only reject a genuinely new one.
-	// Charging it for an update is what stopped a user at the limit from
-	// re-saving an address they already had — for instance to attach the
-	// coordinates that arrive with a suggestion.
+	// Предел считает адреса, поэтому отклонять он может только по-настоящему
+	// новый. Взимание его за обновление и мешало пользователю на пределе
+	// пересохранить уже имеющийся адрес — например, чтобы прикрепить
+	// координаты, приходящие с подсказкой.
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM addresses WHERE user_id = $1 AND address = $2)`,
@@ -126,9 +126,9 @@ func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address
 		}
 	}
 
-	// is_default is OR-ed rather than overwritten: an update that does not ask
-	// to be the default must not clear the flag, which would leave the user
-	// with addresses but no default at all.
+	// is_default объединяется по ИЛИ, а не перезаписывается: обновление, которое
+	// не просит стать умолчанием, не должно сбрасывать флаг, иначе пользователь
+	// останется с адресами, но вовсе без адреса по умолчанию.
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO addresses
 		     (user_id, address, is_default, region, city, street, house, flat, fias_id, geo_lat, geo_lon, source)
@@ -151,7 +151,7 @@ func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address
 	return r.List(ctx, userID)
 }
 
-// Delete removes an address. If it was default, another remaining address becomes default.
+// Delete удаляет адрес. Если он был по умолчанию, им становится другой оставшийся.
 func (r *addressRepo) Delete(ctx context.Context, userID, addressID uuid.UUID) ([]Address, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

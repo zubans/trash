@@ -129,8 +129,8 @@ export default defineComponent({
       }
     }
 
-    // The columns are whatever the attempts contain, so a behaviour that checks
-    // different fields renders without touching this page.
+    // Колонки — это то, что содержат попытки, поэтому поведение, проверяющее другие
+    // поля, отрисовывается без правки этой страницы.
     const fieldsOf = (item: BehaviorEscalation) => {
       const fields = new Set<string>()
       ;(item.submissions || []).forEach((submission) => {

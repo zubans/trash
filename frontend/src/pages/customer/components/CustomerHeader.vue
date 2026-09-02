@@ -1,6 +1,6 @@
 <template>
   <div class="dashboard-header-container mb-4">
-    <!-- Top Bar: Title & Right Controls -->
+    <!-- Верхняя полоса: заголовок и правые элементы управления -->
     <div class="top-nav-bar d-flex justify-content-between align-items-center mb-3">
       <div>
         <h1 class="page-title m-0">Личный кабинет</h1>
@@ -15,17 +15,17 @@
       </div>
     </div>
 
-    <!-- Main Header Card -->
+    <!-- Основная карточка шапки -->
     <div class="header-card p-4 rounded-2xl bg-white shadow-sm border">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
-        <!-- Left: Profile Info -->
+        <!-- Слева: сведения профиля -->
         <div class="d-flex align-items-center gap-3">
-          <!-- Avatar Icon Circle -->
+          <!-- Круг с иконкой аватара -->
           <div class="avatar-circle" @click="$emit('openProfileModal')">
             <va-icon name="person" size="large" color="primary" />
           </div>
 
-          <!-- Phone & Badges -->
+          <!-- Телефон и бейджи -->
           <div>
             <div class="d-flex align-items-center gap-2">
               <h2 class="user-phone font-bold m-0 cursor-pointer" @click="$emit('openProfileModal')">
@@ -42,7 +42,7 @@
           </div>
         </div>
 
-        <!-- Right: Balance & Top-Up Action -->
+        <!-- Справа: баланс и действие пополнения -->
         <div class="d-flex align-items-center gap-4">
           <div class="balance-block text-right">
             <span class="balance-label text-secondary text-xs d-block mb-1">Баланс</span>

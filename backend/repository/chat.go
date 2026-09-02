@@ -10,14 +10,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// Chat represents a chat room session between Customer and Executor for an order.
+// Chat представляет сессию чата между заказчиком и исполнителем по заказу.
 type Chat struct {
 	ID       uuid.UUID `json:"id"`
 	OrderID  uuid.UUID `json:"order_id"`
 	IsActive bool      `json:"is_active"`
 }
 
-// Message represents an individual text or file message in a chat room.
+// Message представляет отдельное текстовое или файловое сообщение в чат-комнате.
 type Message struct {
 	ID        uuid.UUID  `json:"id"`
 	ChatID    uuid.UUID  `json:"chat_id"`
@@ -34,7 +34,7 @@ type Message struct {
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
-// SupportChat represents a support conversation between a user and admins.
+// SupportChat представляет переписку пользователя с админами в поддержке.
 type SupportChat struct {
 	ID          uuid.UUID  `json:"id"`
 	UserID      uuid.UUID  `json:"user_id"`
@@ -46,7 +46,7 @@ type SupportChat struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
-// SupportChatListItem represents a user chat item in the admin Telegram-style list.
+// SupportChatListItem представляет элемент чата пользователя в админском списке в стиле Telegram.
 type SupportChatListItem struct {
 	ChatID      uuid.UUID  `json:"chat_id"`
 	UserID      uuid.UUID  `json:"user_id"`
@@ -63,14 +63,14 @@ type SupportChatListItem struct {
 	LastTime    *time.Time `json:"last_time,omitempty"`
 }
 
-// ChatRepository defines database operations for chats and messages.
+// ChatRepository описывает операции с базой для чатов и сообщений.
 type ChatRepository interface {
 	GetChatByOrderID(ctx context.Context, orderID uuid.UUID) (*Chat, error)
 	CreateChat(ctx context.Context, orderID uuid.UUID) (*Chat, error)
 	SaveMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error)
 	SaveMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
-	// GetMessages returns a bounded window of an order chat's history, always
-	// oldest-first. See MessageQuery for how the window is chosen.
+	// GetMessages возвращает ограниченное окно истории чата заказа, всегда от
+	// старых к новым. Как выбирается окно, см. в MessageQuery.
 	GetMessages(ctx context.Context, chatID uuid.UUID, q MessageQuery) ([]*Message, error)
 	DeactivateChat(ctx context.Context, chatID uuid.UUID) error
 	MarkMessagesAsDelivered(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error)
@@ -80,20 +80,20 @@ type ChatRepository interface {
 	UpdateMessage(ctx context.Context, messageID, senderID uuid.UUID, newText string) (*Message, error)
 
 	GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*SupportChat, error)
-	// SupportChatOwner returns the user a support chat belongs to, so callers
-	// can verify ownership before reading or writing messages.
+	// SupportChatOwner возвращает пользователя, которому принадлежит чат
+	// поддержки, чтобы вызывающие могли проверить владение до чтения или записи.
 	SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid.UUID, error)
-	// CanAccessAttachment reports whether a user is a participant of the chat
-	// that a stored file belongs to.
+	// CanAccessAttachment сообщает, является ли пользователь участником чата,
+	// которому принадлежит сохранённый файл.
 	CanAccessAttachment(ctx context.Context, userID uuid.UUID, fileURL string) (bool, error)
-	// GetSupportMessages is GetMessages for a support conversation.
+	// GetSupportMessages — это GetMessages для переписки с поддержкой.
 	GetSupportMessages(ctx context.Context, chatID uuid.UUID, q MessageQuery) ([]*Message, error)
 	SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, text string) (*Message, error)
 	SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*Message, error)
-	// GetAdminSupportChatList returns support conversations for the admin
-	// inbox, most recently active first, capped at limit (see
-	// DefaultHistoryPageSize). The admin UI polls this, and every row costs two
-	// correlated subqueries, so it must not be allowed to grow unbounded.
+	// GetAdminSupportChatList возвращает переписки поддержки для админского
+	// ящика, сначала недавно активные, не более limit (см.
+	// DefaultHistoryPageSize). Админский интерфейс опрашивает это, и каждая строка
+	// стоит двух коррелированных подзапросов, поэтому расти без границ ей нельзя.
 	GetAdminSupportChatList(ctx context.Context, limit int) ([]*SupportChatListItem, error)
 	MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error
 	BanSupportChat(ctx context.Context, chatID uuid.UUID, duration string) error
@@ -106,8 +106,8 @@ type chatRepo struct {
 	db *sql.DB
 }
 
-// NewChatRepository creates a new ChatRepository. Schema changes belong in
-// migrations, not here.
+// NewChatRepository создаёт новый ChatRepository. Изменения схемы — дело
+// миграций, а не этого места.
 func NewChatRepository(db *sql.DB) ChatRepository {
 	return &chatRepo{db: db}
 }
@@ -164,30 +164,30 @@ func (r *chatRepo) SaveMessageWithAttachment(ctx context.Context, chatID, sender
 	return &m, nil
 }
 
-// MessageQuery bounds a read of chat history.
+// MessageQuery ограничивает чтение истории чата.
 //
-// It exists because the history used to be returned in full, on an endpoint the
-// clients poll: a long-running conversation re-sent every message it had ever
-// held, several times a minute. The three shapes below are the three things a
-// chat client actually needs.
+// Он существует потому, что раньше история возвращалась целиком, на эндпоинте,
+// который клиенты опрашивают: долгая переписка заново пересылала каждое
+// когда-либо хранившееся сообщение, по нескольку раз в минуту. Три формы ниже —
+// это три вещи, которые на деле нужны клиенту чата.
 type MessageQuery struct {
-	// Limit caps how many messages come back. Zero means DefaultMessagePageSize,
-	// and anything above MaxMessagePageSize is clamped to it — the page size is
-	// the protection here, so a client cannot opt out of it.
+	// Limit ограничивает, сколько сообщений вернётся. Ноль означает
+	// DefaultMessagePageSize, а всё сверх MaxMessagePageSize ужимается до него:
+	// защита здесь — размер страницы, поэтому клиент не может от неё отказаться.
 	Limit int
-	// Before asks for the newest messages older than this instant: paging
-	// upwards through history as the user scrolls back.
+	// Before запрашивает самые новые сообщения старше этого момента: листание
+	// вверх по истории, пока пользователь прокручивает назад.
 	Before *time.Time
-	// After asks for the oldest messages newer than this instant: what a poll
-	// needs, which is only what it has not already seen.
+	// After запрашивает самые старые сообщения новее этого момента: то, что нужно
+	// опросу, — только то, чего он ещё не видел.
 	After *time.Time
 }
 
 const (
-	// DefaultMessagePageSize is what a client that asks for no window gets: the
-	// most recent messages, which is what a freshly opened chat shows.
+	// DefaultMessagePageSize — то, что получает клиент, не запросивший окна:
+	// самые свежие сообщения, то есть то, что показывает только что открытый чат.
 	DefaultMessagePageSize = 100
-	// MaxMessagePageSize caps what any single request can pull.
+	// MaxMessagePageSize ограничивает то, что может вытянуть один запрос.
 	MaxMessagePageSize = 500
 )
 
@@ -202,21 +202,21 @@ func (q MessageQuery) limit() int {
 	}
 }
 
-// queryMessages reads one window of a conversation. Order chats and support
-// chats have identical message tables and identical paging rules, so they share
-// this; table is an internal constant, never anything a caller supplies.
+// queryMessages читает одно окно переписки. У чатов заказов и чатов поддержки
+// одинаковые таблицы сообщений и одинаковые правила листания, поэтому они делят
+// это; table — внутренняя константа, никогда не то, что передал вызывающий.
 //
-// The result is always oldest-first, whichever direction the window was taken
-// in — the clients render ascending and should not have to care.
+// Результат всегда от старых к новым, в какую бы сторону ни бралось окно:
+// клиенты рисуют по возрастанию и не должны об этом задумываться.
 func (r *chatRepo) queryMessages(ctx context.Context, table string, chatID uuid.UUID, q MessageQuery) ([]*Message, error) {
 	const columns = `id, chat_id, sender_id, COALESCE(text, ''), COALESCE(status, 'sent'), file_url, file_name, file_type, file_size, COALESCE(is_deleted, false), created_at, read_at, updated_at`
 
 	where := "chat_id = $1 AND COALESCE(is_deleted, false) = false"
 	args := []interface{}{chatID}
 
-	// Ascending only when paging forward from a known point: that is the one
-	// case where the first rows in creation order are the wanted ones. Every
-	// other case wants the newest, so it reads descending and is reversed below.
+	// По возрастанию — только при листании вперёд от известной точки: это
+	// единственный случай, когда нужны первые строки в порядке создания. Всем
+	// прочим нужны самые новые, поэтому читается по убыванию и ниже переворачивается.
 	ascending := false
 	switch {
 	case q.After != nil:
@@ -418,9 +418,9 @@ func (r *chatRepo) SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid
 	return userID, nil
 }
 
-// CanAccessAttachment checks both attachment sources: order chats (customer and
-// assigned executor) and support chats (the owning user). Admin access is
-// handled by the caller.
+// CanAccessAttachment проверяет оба источника вложений: чаты заказов (заказчик
+// и назначенный исполнитель) и чаты поддержки (пользователь-владелец). Доступ
+// админа обрабатывает вызывающий.
 func (r *chatRepo) CanAccessAttachment(ctx context.Context, userID uuid.UUID, fileURL string) (bool, error) {
 	var allowed bool
 	err := r.db.QueryRowContext(ctx, `

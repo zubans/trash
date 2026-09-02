@@ -15,49 +15,49 @@ import (
 	"healthlogin/backend/metrics"
 )
 
-// DaData suggests Russian addresses from the state address register.
+// DaData подсказывает российские адреса из государственного адресного реестра.
 //
-// It replaces Nominatim for address entry for three reasons the old setup could
-// not solve: it knows apartments, which OpenStreetMap does not hold at all; it
-// returns coordinates with the suggestion, so picking an address no longer
-// needs a second geocoding round trip; and it is meant to be typed at, unlike
-// the public Nominatim instance, whose usage policy forbids autocomplete and
-// which was therefore throttled here to one request per second for the whole
-// platform.
+// Он заменил Nominatim при вводе адреса по трём причинам, которые старая
+// схема решить не могла: он знает квартиры, которых в OpenStreetMap нет вовсе;
+// он возвращает координаты вместе с подсказкой, поэтому выбор адреса больше не
+// требует второго похода за геокодированием; и он рассчитан на набор текста —
+// в отличие от публичного экземпляра Nominatim, чья политика использования
+// запрещает автодополнение и который поэтому был здесь ограничен одним запросом
+// в секунду на всю платформу.
 type DaData struct {
 	client  *http.Client
 	apiKey  string
 	baseURL string
-	// inflight bounds how many requests may be at the provider at once.
+	// inflight ограничивает, сколько запросов может быть у провайдера одновременно.
 	//
-	// The client's timeout bounds one request, not the number of them. When the
-	// provider slows down, address entry does not: every keystroke from every
-	// user starts another call, each holding a goroutine and a connection for
-	// up to the timeout, and the pile grows for as long as the provider stays
-	// slow. This caps the pile; callers past the cap fail fast with
-	// ErrAddressProviderBusy, which the API already knows how to report.
+	// Таймаут клиента ограничивает один запрос, а не их количество. Когда
+	// провайдер замедляется, ввод адреса — нет: каждое нажатие клавиши каждого
+	// пользователя запускает новый вызов, каждый держит горутину и соединение
+	// вплоть до таймаута, и куча растёт всё время, пока провайдер тормозит. Это
+	// ограничивает кучу; вызывающие сверх предела быстро падают с
+	// ErrAddressProviderBusy, о которой API уже умеет сообщать.
 	inflight chan struct{}
 }
 
-// defaultDaDataConcurrency is the ceiling on simultaneous provider calls. It is
-// deliberately small: address entry is served from the geocode cache for
-// anything already seen, and a queue that outlives the caller's patience helps
-// nobody.
+// defaultDaDataConcurrency — потолок одновременных вызовов провайдера. Он
+// намеренно мал: ввод адреса обслуживается из кэша геокодирования для всего уже
+// виденного, а очередь, живущая дольше терпения вызывающего, помогает
+// никому.
 const defaultDaDataConcurrency = 8
 
 const daDataSuggestURL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address"
 
-// ErrNoAddressProvider is returned when no suggestion provider is configured.
+// ErrNoAddressProvider возвращается, когда провайдер подсказок не настроен.
 var ErrNoAddressProvider = errors.New("address suggestions are not configured")
 
-// ErrAddressProviderBusy reports that the provider rate-limited the request, so
-// the caller should back off and retry rather than treat it as "not found".
+// ErrAddressProviderBusy сообщает, что провайдер ограничил запрос по частоте,
+// поэтому вызывающему стоит отступить и повторить, а не считать это «не найдено».
 var ErrAddressProviderBusy = errors.New("address provider is busy, try again")
 
-// NewDaData builds a suggester from DADATA_API_KEY. It returns nil when the key
-// is absent so the process still starts; address entry and resolution then
-// report ErrNoAddressProvider until the key is set, rather than the whole
-// service failing to boot.
+// NewDaData собирает подсказчик из DADATA_API_KEY. Он возвращает nil, когда
+// ключа нет, чтобы процесс всё равно стартовал; ввод и разрешение адреса тогда
+// сообщают ErrNoAddressProvider, пока ключ не задан, — вместо того чтобы весь
+// сервис не смог подняться.
 func NewDaData() *DaData {
 	key := strings.TrimSpace(os.Getenv("DADATA_API_KEY"))
 	if key == "" {
@@ -70,8 +70,8 @@ func NewDaData() *DaData {
 		}
 	}
 	return &DaData{
-		// Address entry is interactive: a suggestion that arrives after the
-		// next keystroke is worthless, so the timeout is short.
+		// Ввод адреса интерактивен: подсказка, пришедшая после следующего
+		// нажатия клавиши, бесполезна, поэтому таймаут короткий.
 		client:   &http.Client{Timeout: 4 * time.Second},
 		apiKey:   key,
 		baseURL:  daDataSuggestURL,
@@ -79,12 +79,12 @@ func NewDaData() *DaData {
 	}
 }
 
-// daDataRequest is the documented request body.
+// daDataRequest — документированное тело запроса.
 type daDataRequest struct {
 	Query string `json:"query"`
 	Count int    `json:"count"`
-	// Locations restricts results to Russia. Without it the register also
-	// offers addresses in neighbouring countries it carries.
+	// Locations ограничивает результаты Россией. Без этого реестр предлагает и
+	// адреса соседних стран, которые он тоже содержит.
 	Locations []map[string]string `json:"locations,omitempty"`
 	Language  string              `json:"language,omitempty"`
 }
@@ -110,7 +110,7 @@ type daDataResponse struct {
 	} `json:"suggestions"`
 }
 
-// Suggest returns address suggestions for a partial query.
+// Suggest возвращает подсказки адресов по частичному запросу.
 func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Address, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -141,9 +141,9 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Token "+d.apiKey)
 
-	// Take a slot, or report the provider as busy. Waiting for one would just
-	// move the queue from the provider to here, and the caller is a person
-	// typing an address.
+	// Занимаем слот или сообщаем, что провайдер занят. Ожидание слота лишь
+	// перенесло бы очередь от провайдера сюда, а вызывающий — это человек,
+	// набирающий адрес.
 	if d.inflight != nil {
 		select {
 		case d.inflight <- struct{}{}:
@@ -161,15 +161,15 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 		return nil, err
 	}
 	defer resp.Body.Close()
-	// A rejected key and an exhausted quota both look like "no suggestions" to
-	// the user, so they are separate label values rather than one error bucket.
+	// Отвергнутый ключ и исчерпанная квота для пользователя оба выглядят как «нет
+	// подсказок», поэтому это отдельные значения лейбла, а не одна корзина ошибок.
 	metrics.UpstreamResult("dadata", "suggest", daDataOutcome(resp.StatusCode), time.Since(started))
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusForbidden:
-		// The key itself is never included in the error: it would end up in the
-		// logs and, through the handler, in a client's error message.
+		// Сам ключ никогда не включается в ошибку: он оказался бы в логах и,
+		// через обработчик, в сообщении об ошибке у клиента.
 		return nil, errors.New("address provider rejected the credentials")
 	case http.StatusTooManyRequests:
 		return nil, ErrAddressProviderBusy
@@ -186,8 +186,8 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 	for _, s := range parsed.Suggestions {
 		city := s.Data.City
 		if city == "" {
-			// Villages and settlements have no city, and dropping them would
-			// make every address outside a city unusable.
+			// У сёл и посёлков нет города, и их отбрасывание сделало бы любой адрес
+			// вне города непригодным.
 			city = s.Data.Settlement
 		}
 
@@ -207,8 +207,8 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 			addr.Lon = &lon
 		}
 
-		// Value comes from the provider so the list reads the way the register
-		// spells it; Compose covers the rare suggestion with no parts at all.
+		// Value приходит от провайдера, чтобы список читался так, как пишет реестр;
+		// Compose закрывает редкую подсказку, у которой вообще нет частей.
 		addr.Value = strings.TrimSpace(s.Value)
 		if addr.Value == "" {
 			addr.Value = addr.Compose()
@@ -218,16 +218,16 @@ func (d *DaData) Suggest(ctx context.Context, query string, count int) ([]Addres
 	return out, nil
 }
 
-// composeHouse keeps the building identifier whole. A house is not always a
-// number: "12 к. 1" and "10 стр. 2" are ordinary Russian addresses, and the old
-// regular expression rejected every one of them.
+// composeHouse сохраняет идентификатор здания целиком. Дом — не всегда число:
+// «12 к. 1» и «10 стр. 2» — обычные российские адреса, а старое регулярное
+// выражение отвергало каждый из них.
 func composeHouse(house, houseType, block, blockType string) string {
 	house = strings.TrimSpace(house)
 	if house == "" {
 		return ""
 	}
-	// The type prefix is dropped for plain houses ("д. 12" is added back when
-	// the line is composed) but kept for anything else, such as "влд. 5".
+	// Префикс типа отбрасывается для обычных домов («д. 12» добавляется обратно
+	// при сборке строки), но сохраняется для всего прочего, например «влд. 5».
 	if t := strings.TrimSpace(houseType); t != "" && t != "д" {
 		house = t + ". " + house
 	}
@@ -241,7 +241,7 @@ func composeHouse(house, houseType, block, blockType string) string {
 	return house
 }
 
-// daDataOutcome maps an HTTP status onto the outcome label used in metrics.
+// daDataOutcome сопоставляет HTTP-статус с лейблом исхода, используемым в метриках.
 func daDataOutcome(status int) string {
 	switch status {
 	case http.StatusOK:

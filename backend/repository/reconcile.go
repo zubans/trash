@@ -12,8 +12,8 @@ import (
 	"healthlogin/backend/money"
 )
 
-// BalanceDiscrepancy is one user whose stored balance does not match the sum of
-// their ledger entries.
+// BalanceDiscrepancy — один пользователь, чей сохранённый баланс не совпадает с
+// суммой его проводок.
 type BalanceDiscrepancy struct {
 	UserID     uuid.UUID    `json:"user_id"`
 	Phone      string       `json:"phone"`
@@ -24,8 +24,8 @@ type BalanceDiscrepancy struct {
 	Entries    int          `json:"entries"`
 }
 
-// OrderHoldAnomaly is an order whose held amount contradicts its status: money
-// still held on a finished order, or nothing held on a live one.
+// OrderHoldAnomaly — заказ, чья удержанная сумма противоречит его статусу:
+// деньги ещё удерживаются на завершённом заказе или ничего не удерживается на живом.
 type OrderHoldAnomaly struct {
 	OrderID    uuid.UUID    `json:"order_id"`
 	CustomerID uuid.UUID    `json:"customer_id"`
@@ -34,7 +34,7 @@ type OrderHoldAnomaly struct {
 	Reason     string       `json:"reason"`
 }
 
-// BooksSummary is the closing position of the whole system.
+// BooksSummary — итоговая позиция всей системы.
 type BooksSummary struct {
 	UserTotal    money.Amount    `json:"user_total"`
 	AccountTotal money.Amount    `json:"account_total"`
@@ -45,27 +45,27 @@ type BooksSummary struct {
 	EscrowDrift  money.Amount    `json:"escrow_drift"`
 }
 
-// ReconciliationReport is the outcome of a full pass.
+// ReconciliationReport — исход полного прохода.
 type ReconciliationReport struct {
 	UsersChecked  int                  `json:"users_checked"`
 	Discrepancies []BalanceDiscrepancy `json:"discrepancies"`
 	HoldAnomalies []OrderHoldAnomaly   `json:"hold_anomalies"`
 	UnknownTypes  []string             `json:"unknown_transaction_types"`
 	Books         BooksSummary         `json:"books"`
-	// BooksOpen is set when the two sides of the system do not cancel out.
+	// BooksOpen выставляется, когда две стороны системы не взаимозачитываются.
 	BooksOpen bool `json:"books_open"`
-	// EscrowMismatch is set when the escrow account and the live order holds
-	// have drifted apart.
+	// EscrowMismatch выставляется, когда счёт эскроу и удержания по живым заказам
+	// разошлись.
 	EscrowMismatch bool `json:"escrow_mismatch"`
 }
 
-// OK reports whether the books balance.
+// OK сообщает, сходятся ли книги.
 func (r *ReconciliationReport) OK() bool {
 	return len(r.Discrepancies) == 0 && len(r.HoldAnomalies) == 0 &&
 		len(r.UnknownTypes) == 0 && !r.BooksOpen && !r.EscrowMismatch
 }
 
-// Summary renders a one-line result for logs.
+// Summary отдаёт однострочный результат для логов.
 func (r *ReconciliationReport) Summary() string {
 	if r.OK() {
 		return fmt.Sprintf("reconciliation clean: %d users match the ledger", r.UsersChecked)
@@ -83,8 +83,8 @@ func (r *ReconciliationReport) Summary() string {
 	return parts
 }
 
-// ReconciliationRepository verifies that the stored balances agree with the
-// transaction log.
+// ReconciliationRepository проверяет, что сохранённые балансы согласуются с
+// журналом транзакций.
 type ReconciliationRepository interface {
 	Reconcile(ctx context.Context, tolerance money.Amount) (*ReconciliationReport, error)
 }
@@ -93,13 +93,13 @@ type reconcileRepo struct {
 	db *sql.DB
 }
 
-// NewReconciliationRepository creates a ReconciliationRepository.
+// NewReconciliationRepository создаёт ReconciliationRepository.
 func NewReconciliationRepository(db *sql.DB) ReconciliationRepository {
 	return &reconcileRepo{db: db}
 }
 
-// ledgerSumExpr builds the SUM(CASE ...) expression from the sign convention, so
-// the SQL cannot drift away from LedgerSign.
+// ledgerSumExpr строит выражение SUM(CASE ...) из соглашения о знаках, чтобы
+// SQL не мог разойтись с LedgerSign.
 func ledgerSumExpr(column string) string {
 	types := KnownTransactionTypes()
 	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
@@ -109,7 +109,7 @@ func ledgerSumExpr(column string) string {
 	for _, t := range types {
 		sign, _ := LedgerSign(t)
 		if sign == 0 {
-			// Recorded but does not move the balance.
+			// Записывается, но баланс не двигает.
 			fmt.Fprintf(&b, "WHEN %s.type = '%s' THEN 0 ", column, t)
 			continue
 		}
@@ -119,14 +119,14 @@ func ledgerSumExpr(column string) string {
 		}
 		fmt.Fprintf(&b, "WHEN %s.type = '%s' THEN %s%s.amount ", column, t, op, column)
 	}
-	// Anything not covered by the convention is surfaced separately; treating it
-	// as zero here would hide the very thing that makes the sum wrong.
+	// Всё, что соглашением не покрыто, выносится отдельно; трактовка этого здесь
+	// как нуля прятала бы ровно то, из-за чего сумма и неверна.
 	b.WriteString("ELSE 0 END), 0)")
 	return b.String()
 }
 
-// Reconcile compares every user's balance with the sum of their ledger entries.
-// tolerance absorbs float rounding; pass 0.01 to allow a kopeck of drift.
+// Reconcile сравнивает баланс каждого пользователя с суммой его проводок.
+// tolerance поглощает округление float; передайте 0.01, чтобы допустить копейку расхождения.
 func (r *reconcileRepo) Reconcile(ctx context.Context, tolerance money.Amount) (*ReconciliationReport, error) {
 	report := &ReconciliationReport{}
 
@@ -134,15 +134,15 @@ func (r *reconcileRepo) Reconcile(ctx context.Context, tolerance money.Amount) (
 		return nil, fmt.Errorf("count users: %w", err)
 	}
 
-	// 1. Transaction types the sign convention does not cover. Checked first:
-	//    if any exist, the sums below cannot be trusted.
+	// 1. Типы транзакций, не покрытые соглашением о знаках. Проверяются первыми:
+	//    если такие есть, суммам ниже доверять нельзя.
 	unknown, err := r.unknownTransactionTypes(ctx)
 	if err != nil {
 		return nil, err
 	}
 	report.UnknownTypes = unknown
 
-	// 2. Balance against the ledger.
+	// 2. Баланс против реестра.
 	query := fmt.Sprintf(`
 		SELECT u.id, u.phone, u.role, u.balance, %s AS ledger, COUNT(t.id) AS entries
 		FROM users u
@@ -170,15 +170,15 @@ func (r *reconcileRepo) Reconcile(ctx context.Context, tolerance money.Amount) (
 		return nil, err
 	}
 
-	// 3. Holds that contradict the order status.
+	// 3. Удержания, противоречащие статусу заказа.
 	anomalies, err := r.holdAnomalies(ctx, tolerance)
 	if err != nil {
 		return nil, err
 	}
 	report.HoldAnomalies = anomalies
 
-	// 4. Do the books close? Every movement touches a user balance and a system
-	//    account, so the two sides must cancel out exactly.
+	// 4. Сходятся ли книги? Каждое движение затрагивает баланс пользователя и
+	//    системный счёт, поэтому две стороны обязаны взаимозачесться точно.
 	books, err := r.books(ctx)
 	if err != nil {
 		return nil, err
@@ -190,8 +190,8 @@ func (r *reconcileRepo) Reconcile(ctx context.Context, tolerance money.Amount) (
 	return report, nil
 }
 
-// books adds up both sides of the system and compares escrow against the orders
-// it is supposed to be holding money for.
+// books складывает обе стороны системы и сравнивает эскроу с заказами, ради
+// которых он должен держать деньги.
 func (r *reconcileRepo) books(ctx context.Context) (*BooksSummary, error) {
 	var b BooksSummary
 
@@ -260,22 +260,22 @@ func (r *reconcileRepo) unknownTransactionTypes(ctx context.Context) ([]string, 
 	return unknown, rows.Err()
 }
 
-// holdAnomalies finds orders whose held amount contradicts their status: a
-// finished order still holding money, or a live order that held money and no
-// longer does — the signature of a refund or payout that ran without its state
-// transition.
+// holdAnomalies находит заказы, чья удержанная сумма противоречит их статусу:
+// завершённый заказ, всё ещё держащий деньги, или живой заказ, который деньги
+// держал и больше не держит, — подпись возврата или выплаты, прошедших без
+// своего перехода состояния.
 //
-// "Holds nothing" on its own is not evidence of anything. Two kinds of live
-// order legitimately hold nothing: an auction, which holds nothing until a bid
-// is accepted, and an ordinary order for a free service, where there was never
-// anything to hold. Reporting those meant the check fired on correct data, and
-// a check that fires on correct data is one people learn to scroll past.
+// «Ничего не удерживает» само по себе ничего не доказывает. Два вида живых
+// заказов законно не удерживают ничего: аукцион, который ничего не держит до
+// принятия ставки, и обычный заказ бесплатной услуги, где держать было нечего.
+// Их попадание в отчёт означало, что проверка срабатывает на корректных данных,
+// а проверку, срабатывающую на корректных данных, люди учатся пролистывать.
 //
-// The discriminator is the log rather than the current price. Ledger.Reserve
-// returns without writing anything when the amount is zero, so a free order has
-// no HOLD entry at all, while an order that was paid for has one whether or not
-// the price has been edited since. That keeps the answer right even when a
-// service is repriced after the fact.
+// Различитель — журнал, а не текущая цена. Ledger.Reserve возвращается, ничего
+// не записав, когда сумма нулевая, поэтому у бесплатного заказа записи HOLD нет
+// вовсе, а у оплаченного она есть независимо от того, правили ли цену после.
+// Это оставляет ответ верным даже тогда, когда услугу переоценили задним
+// числом.
 func (r *reconcileRepo) holdAnomalies(ctx context.Context, tolerance money.Amount) ([]OrderHoldAnomaly, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT o.id, o.customer_id, o.status::text, o.hold_amount,

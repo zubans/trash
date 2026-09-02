@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// --- settings cache ---
+// --- кэш настроек ---
 
 type countingSettingsRepo struct {
 	values map[string]string
@@ -50,8 +50,8 @@ func TestSettingsCacheServesRepeatReadsFromMemory(t *testing.T) {
 	}
 }
 
-// An admin who changes a tariff must see it apply to the very next order, not
-// once the TTL happens to lapse.
+// Админ, меняющий тариф, должен увидеть его действие уже на следующем заказе, а
+// не когда случайно истечёт TTL.
 func TestSettingsCacheUpdateIsVisibleImmediately(t *testing.T) {
 	inner := &countingSettingsRepo{values: map[string]string{"fine_amount": "500"}}
 	repo := NewCachedSettingsRepository(inner, time.Minute)
@@ -73,8 +73,8 @@ func TestSettingsCacheUpdateIsVisibleImmediately(t *testing.T) {
 	}
 }
 
-// The cache hands out a copy: a caller that edits the returned map must not be
-// able to change what every other reader sees.
+// Кэш выдаёт копию: вызывающий, правящий возвращённую карту, не должен уметь
+// изменить то, что видят все прочие читатели.
 func TestSettingsCacheReturnsCopy(t *testing.T) {
 	inner := &countingSettingsRepo{values: map[string]string{"fine_amount": "500"}}
 	repo := NewCachedSettingsRepository(inner, time.Minute)
@@ -111,11 +111,11 @@ func TestSettingsCacheDisabledWithZeroTTL(t *testing.T) {
 	}
 }
 
-// --- catalog cache ---
+// --- кэш каталога ---
 
-// countingCatalogRepo implements only the methods the cache exercises. The
-// embedded nil interface makes any other call panic loudly rather than quietly
-// returning a zero value, which is what a test wants from an unexpected call.
+// countingCatalogRepo реализует только те методы, которые задействует кэш.
+// Встроенный nil-интерфейс заставляет любой другой вызов громко паниковать, а
+// не тихо возвращать нулевое значение — именно этого тест ждёт от такого вызова.
 type countingCatalogRepo struct {
 	ServiceCatalogRepository
 
@@ -165,8 +165,8 @@ func TestCatalogCacheServesRepeatLookupsFromMemory(t *testing.T) {
 	}
 }
 
-// A batch lookup must ask the database only for the ids it does not already
-// hold — that is the whole point of pairing the batch with the cache.
+// Пакетное чтение должно спрашивать у базы только те id, которых у него ещё
+// нет, — в этом весь смысл связки пакета с кэшем.
 func TestCatalogCacheBatchAsksOnlyForMissingIDs(t *testing.T) {
 	cached, missing := uuid.New(), uuid.New()
 	inner := &countingCatalogRepo{nodes: map[uuid.UUID]*ServiceNode{

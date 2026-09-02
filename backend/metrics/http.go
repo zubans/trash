@@ -11,13 +11,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Middleware records one time series per route pattern, not per URL.
+// Middleware пишет по одному временному ряду на шаблон маршрута, а не на URL.
 //
-// The pattern is read from chi *after* the handler has run, because that is
-// when routing has resolved: before it, every request looks like its raw path
-// and /uploads/<uuid>/<filename> would mint a new label set per file. Requests
-// that match nothing collapse into a single "not_found" label so a scanner
-// walking random paths cannot grow the metric unbounded.
+// Шаблон читается из chi *после* выполнения обработчика, потому что именно
+// тогда маршрутизация разрешена: до этого каждый запрос выглядит как свой сырой
+// путь, и /uploads/<uuid>/<filename> порождал бы новый набор лейблов на файл.
+// Запросы, не совпавшие ни с чем, сворачиваются в один лейбл "not_found",
+// чтобы сканер, обходящий случайные пути, не мог раздуть метрику без границ.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		IncInFlight()
@@ -37,19 +37,19 @@ func routePattern(r *http.Request) string {
 		return "not_found"
 	}
 	pattern := rctx.RoutePattern()
-	// chi leaves a trailing wildcard on mounted sub-routers that did not match.
+	// chi оставляет замыкающий шаблон на смонтированных подроутерах, которые не совпали.
 	if pattern == "" || pattern == "/*" {
 		return "not_found"
 	}
-	// The legacy root mount serves the same handlers without the /api prefix.
-	// Folding it onto the same label keeps one series per endpoint and still
-	// leaves the split visible in the nginx and access-log views.
+	// Легаси-монтирование в корне обслуживает те же обработчики без префикса /api.
+	// Сворачивание их в один лейбл сохраняет по ряду на эндпоинт и всё равно
+	// оставляет разделение видимым в nginx и в логе доступа.
 	return strings.TrimSuffix(pattern, "/*")
 }
 
-// statusRecorder captures the status code and keeps the optional interfaces the
-// rest of the stack relies on: the chat WebSocket needs Hijack, and dropping
-// Flush would break any streaming response.
+// statusRecorder перехватывает код статуса и сохраняет необязательные
+// интерфейсы, на которые опирается остальной стек: WebSocket чата нужен Hijack,
+// а потеря Flush сломала бы любой потоковый ответ.
 type statusRecorder struct {
 	http.ResponseWriter
 	status      int
@@ -69,27 +69,27 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
-// Unwrap lets http.ResponseController reach the underlying writer, which covers
-// the deadline setters and anything else added later.
+// Unwrap даёт http.ResponseController добраться до нижележащего writer'а, что
+// покрывает установщики дедлайнов и всё прочее, что добавят позже.
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
-// Hijack must be a real method, not just an Unwrap away: gorilla/websocket
-// type-asserts the ResponseWriter it is handed directly to http.Hijacker, and
-// chi's own logger wrapper decides what to implement by asserting on this
-// wrapper in turn. Without it every chat WebSocket upgrade would answer 500.
+// Hijack обязан быть настоящим методом, а не доступным через Unwrap:
+// gorilla/websocket приводит переданный ему ResponseWriter напрямую к
+// http.Hijacker, а обёртка логгера самого chi решает, что реализовывать, тоже
+// приведением этой обёртки. Без него любой апгрейд WebSocket чата отвечал бы 500.
 func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	h, ok := s.ResponseWriter.(http.Hijacker)
 	if !ok {
 		return nil, nil, errors.New("metrics: underlying ResponseWriter is not an http.Hijacker")
 	}
-	// A hijacked connection writes its own status line, so whatever was
-	// recorded here stops being meaningful; 101 is what the upgrade returns.
+	// Перехваченное соединение пишет собственную строку статуса, поэтому
+	// записанное здесь теряет смысл; 101 — то, что возвращает апгрейд.
 	s.status = http.StatusSwitchingProtocols
 	s.wroteHeader = true
 	return h.Hijack()
 }
 
-// Flush keeps streaming responses streaming.
+// Flush оставляет потоковые ответы потоковыми.
 func (s *statusRecorder) Flush() {
 	if f, ok := s.ResponseWriter.(http.Flusher); ok {
 		f.Flush()

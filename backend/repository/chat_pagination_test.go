@@ -11,12 +11,12 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// seedSupportConversation creates a support chat with n messages, one second
-// apart, oldest first, and returns the chat id and the messages' timestamps.
+// seedSupportConversation создаёт чат поддержки с n сообщениями с интервалом в
+// секунду, от старых к новым, и возвращает id чата и метки времени сообщений.
 //
-// The support table is used rather than the order-chat one because it needs no
-// order, service variant or customer scaffolding — the paging code under test
-// is shared by both tables.
+// Используется таблица поддержки, а не чатов заказов, потому что ей не нужны
+// заказ, вариант услуги и заказчик как обвязка, — а проверяемый код листания
+// общий для обеих таблиц.
 func seedSupportConversation(t *testing.T, db *sql.DB, n int) (uuid.UUID, []time.Time) {
 	t.Helper()
 	userID := createTestUser(t, db, "CUSTOMER")
@@ -57,7 +57,7 @@ func TestMessagePaging(t *testing.T) {
 		if len(msgs) != 4 {
 			t.Fatalf("got %d messages, want 4", len(msgs))
 		}
-		// The last four inserted, in ascending order.
+		// Последние четыре вставленных, по возрастанию.
 		if !msgs[0].CreatedAt.Equal(times[6]) {
 			t.Errorf("first message at %v, want %v", msgs[0].CreatedAt, times[6])
 		}
@@ -71,7 +71,7 @@ func TestMessagePaging(t *testing.T) {
 		}
 	})
 
-	// What a polling client asks for: everything it has not already seen.
+	// То, что просит опрашивающий клиент: всё, чего он ещё не видел.
 	t.Run("after returns only newer messages", func(t *testing.T) {
 		cutoff := times[7]
 		msgs, err := repo.GetSupportMessages(ctx, chatID, repository.MessageQuery{After: &cutoff})
@@ -86,8 +86,8 @@ func TestMessagePaging(t *testing.T) {
 		}
 	})
 
-	// A poll that is already up to date must come back empty, not with the page
-	// it already has.
+	// Опрос, который уже актуален, должен вернуться пустым, а не со страницей,
+	// которая у него уже есть.
 	t.Run("after the newest message returns nothing", func(t *testing.T) {
 		cutoff := times[9]
 		msgs, err := repo.GetSupportMessages(ctx, chatID, repository.MessageQuery{After: &cutoff})
@@ -99,7 +99,7 @@ func TestMessagePaging(t *testing.T) {
 		}
 	})
 
-	// What scrolling back asks for: the page just above what is on screen.
+	// То, что просит прокрутка назад: страница ровно над тем, что на экране.
 	t.Run("before returns the newest older messages", func(t *testing.T) {
 		cutoff := times[5]
 		msgs, err := repo.GetSupportMessages(ctx, chatID, repository.MessageQuery{Before: &cutoff, Limit: 3})
@@ -126,8 +126,8 @@ func TestMessagePaging(t *testing.T) {
 	})
 }
 
-// Paging must never hand back a message that was deleted — the filter has to
-// survive being moved into the shared query builder.
+// Листание никогда не должно отдавать удалённое сообщение — фильтр обязан
+// пережить переезд в общий построитель запросов.
 func TestMessagePagingSkipsDeleted(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()

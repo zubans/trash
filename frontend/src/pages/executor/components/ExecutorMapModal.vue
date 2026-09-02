@@ -56,7 +56,7 @@
           </div>
         </div>
 
-        <!-- Cluster Overlay: several orders sharing one pickup point -->
+        <!-- Оверлей кластера: несколько заказов в одной точке подачи -->
         <div v-if="selectedCluster && !selectedOrder && !pendingMove" class="order-preview-card cluster-list-card">
           <button type="button" class="btn-close-card" @click="selectedCluster = null">
             <i class="ph-bold ph-x"></i>
@@ -87,7 +87,7 @@
           </div>
         </div>
 
-        <!-- Selected Order Overlay Card -->
+        <!-- Карточка-оверлей выбранного заказа -->
         <div v-if="selectedOrder && !pendingMove" class="order-preview-card">
           <button
             v-if="selectedCluster"
@@ -213,16 +213,16 @@ export default defineComponent({
           map = null
         }
 
-        // Initialize Leaflet map without default zoomControl (custom controls used)
+        // Инициализируем карту Leaflet без стандартного zoomControl (используются свои кнопки)
         map = L.map(container, { zoomControl: false }).setView([serverLat.value, serverLon.value], 14)
 
-        // Tile layer
+        // Слой тайлов
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '© OpenStreetMap',
         }).addTo(map)
 
-        // 10km Outer Circle — faint overview hint
+        // Внешний круг 10 км — бледная обзорная подсказка
         zone50kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 10000,
           color: '#5c60f5',
@@ -232,7 +232,7 @@ export default defineComponent({
           fillOpacity: 0.02,
         }).addTo(map)
 
-        // 0.5km (500m) Search Zone Circle from template
+        // Круг зоны поиска 0,5 км (500 м) из шаблона
         zone2kmCircle = L.circle([serverLat.value, serverLon.value], {
           radius: 500,
           color: '#5c60f5',
@@ -242,7 +242,7 @@ export default defineComponent({
           fillOpacity: 0.08,
         }).addTo(map)
 
-        // User Draggable Dot Marker with Pulse
+        // Перетаскиваемая точка-маркер пользователя с пульсацией
         const userIcon = L.divIcon({
           className: 'zone-dot-wrapper',
           html: `<div class="zone-dot-marker">
@@ -258,10 +258,10 @@ export default defineComponent({
           icon: userIcon,
         }).addTo(map)
 
-        // Both gestures only propose a move. Changing the work area starts a
-        // ten minute cooldown, so an accidental tap or drag used to cost the
-        // executor their ability to reposition for the next ten minutes — the
-        // move is committed once they confirm it.
+        // Оба жеста только предлагают перемещение. Смена рабочей зоны запускает
+        // десятиминутную паузу, поэтому случайный тап или перетаскивание раньше
+        // стоили исполнителю возможности переместиться на следующие десять минут —
+        // перемещение фиксируется, только когда он его подтвердит.
         userMarker.on('dragend', (event: any) => {
           const position = event.target.getLatLng()
           proposeMove(position.lat, position.lng)
@@ -300,9 +300,9 @@ export default defineComponent({
       if (zone50kmCircle) zone50kmCircle.setLatLng([lat, lon])
     }
 
-    // Distance between two points in kilometres. Only used to tell the executor
-    // how far the marker is about to move, so the spherical approximation is
-    // more than accurate enough.
+    // Расстояние между двумя точками в километрах. Используется только чтобы
+    // сказать исполнителю, насколько сдвинется метка, поэтому сферического
+    // приближения более чем достаточно.
     const haversineKM = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
       const toRad = (deg: number) => (deg * Math.PI) / 180
       const earthRadiusKM = 6371
@@ -314,12 +314,12 @@ export default defineComponent({
       return earthRadiusKM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     }
 
-    // The move the executor has gestured but not yet agreed to. The marker is
-    // already sitting on it, so cancelling has to put the marker back.
+    // Перемещение, которое исполнитель показал жестом, но ещё не подтвердил. Метка
+    // уже стоит на нём, поэтому отмена обязана вернуть метку обратно.
     const pendingMove = ref<{ lat: number; lon: number } | null>(null)
 
-    // How far the proposed point is from the anchor the server currently holds,
-    // so the confirmation can say what is actually about to change.
+    // Насколько предлагаемая точка отстоит от якоря, который сейчас держит сервер,
+    // чтобы подтверждение сообщило, что на самом деле изменится.
     const pendingDistanceKM = computed(() => {
       if (!pendingMove.value) return 0
       return haversineKM(serverLat.value, serverLon.value, pendingMove.value.lat, pendingMove.value.lon)
@@ -332,7 +332,7 @@ export default defineComponent({
 
     const cancelMove = () => {
       pendingMove.value = null
-      // Snap the marker back to the position the server still considers current.
+      // Возвращаем метку в позицию, которую сервер всё ещё считает текущей.
       anchorTo(serverLat.value, serverLon.value)
     }
 
@@ -368,14 +368,14 @@ export default defineComponent({
       }
     }
 
-    // Guard divIcon HTML against injection: titles/addresses come from user and
-    // catalog data and go into innerHTML.
+    // Защищаем HTML в divIcon от инъекции: названия и адреса приходят из данных
+    // пользователя и каталога и попадают в innerHTML.
     const escapeHtml = (s: string): string =>
       String(s).replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string),
       )
 
-    // "Category · Service" from the fields the map endpoint attaches.
+    // «Категория · Услуга» из полей, которые прикрепляет эндпоинт карты.
     const serviceTitle = (o: any): string => {
       const variant =
         o?.service_variant?.name?.ru ||
@@ -387,7 +387,7 @@ export default defineComponent({
       return variant || category || 'Услуга'
     }
 
-    // Address without the city: keep street, house, apartment.
+    // Адрес без города: оставляем улицу, дом, квартиру.
     const streetLike =
       /^(ул\.?|улица|пер\.?|переул|пр-?кт|пр\.?|проспект|просп|б-?р|бул|наб\.?|ш\.?|шоссе|пл\.?|площад|проезд|туп\.?|аллея|линия|мкр|микрорайон|кв-?л|квартал)/i
     const shortAddress = (o: any): string => {
@@ -399,10 +399,10 @@ export default defineComponent({
       return (kept.length ? kept : parts).join(', ')
     }
 
-    // Group orders by building (street + house, apartment stripped) so several
-    // orders in one house — even in different flats — merge into one marker
-    // instead of stacking with only the top one visible. Falls back to
-    // coordinates when there is no address.
+    // Группируем заказы по зданию (улица + дом, квартира отброшена), чтобы
+    // несколько заказов в одном доме — даже в разных квартирах — сливались в одну
+    // метку, а не громоздились друг на друге так, что виден только верхний. При
+    // отсутствии адреса откатываемся к координатам.
     const buildingKey = (o: any): string => {
       const addr = (o?.address || '').toLowerCase().trim()
       const building = addr
@@ -434,10 +434,10 @@ export default defineComponent({
           const order = orders[0]
           const price = Number(order.hold_amount || 0).toFixed(0)
 
-          // What the pin has to answer at a glance is "what job is this?", so it
-          // carries the category and the service. The address was the one thing
-          // the map already shows — by where the pin is standing — and it pushed
-          // the service name out of a label this small.
+          // То, на что метка обязана ответить с первого взгляда, — «что это за работа?»,
+          // поэтому она несёт категорию и услугу. Адрес был единственным, что карта и так
+          // показывает — тем, где стоит метка, — и он выдавливал название услуги из
+          // такой маленькой подписи.
           const orderIcon = L.divIcon({
             className: 'tmpl-marker',
             html: `<div class="tmpl-pin ${order.can_accept ? 'green' : 'yellow'}">
@@ -490,11 +490,11 @@ export default defineComponent({
 
     const locating = ref(false)
 
-    // "My location" is the only thing that hands the work area back to the
-    // device. While the executor has a district pinned by hand, the periodic
-    // reports keep recording where the phone is but leave the anchor alone, so
-    // this button is what re-syncs the two — and it recentres the map on the
-    // result rather than on a position the server no longer holds.
+    // «Моё местоположение» — единственное, что возвращает рабочую зону устройству.
+    // Пока у исполнителя район приколот вручную, периодические отчёты продолжают
+    // записывать, где телефон, но якорь не трогают, поэтому именно эта кнопка
+    // снова их синхронизирует — и центрирует карту на результате, а не на позиции,
+    // которую сервер больше не держит.
     const recenterOnMe = async () => {
       if (locating.value) return
       locating.value = true
@@ -508,8 +508,8 @@ export default defineComponent({
         if (map) map.setView([lat, lon], 15, { animate: true })
         fetchMapOrders()
       } catch (err: any) {
-        // A position we could not read and a request that failed are different
-        // problems, and the executor can only act on the first one.
+        // Позиция, которую не удалось прочитать, и упавший запрос — разные проблемы, а
+        // исполнитель может что-то сделать только с первой.
         if (err instanceof GeolocationError) {
           emit('error', geolocationMessage(err))
         } else {
@@ -564,8 +564,8 @@ export default defineComponent({
       recenterOnMe,
       zoomIn,
       zoomOut,
-      // The order cards render these; without them the template throws and
-      // Vue unmounts the whole modal the moment a pin is tapped.
+      // Карточки заказов их рисуют; без них шаблон падает, и Vue размонтирует
+      // всю модалку в момент нажатия на метку.
       serviceTitle,
       shortAddress,
       locating,
@@ -772,7 +772,7 @@ export default defineComponent({
   transform: scale(0.92);
 }
 
-/* Selected Order Overlay Card */
+/* Карточка-оверлей выбранного заказа */
 .order-preview-card {
   position: absolute;
   bottom: 20px;
@@ -939,7 +939,7 @@ export default defineComponent({
   filter: brightness(0.95);
 }
 
-/* Cluster list overlay */
+/* Оверлей списка кластера */
 .cluster-list-card {
   padding-top: 22px;
 }
@@ -1046,7 +1046,7 @@ export default defineComponent({
   display: none !important;
 }
 
-/* User dot marker */
+/* Точка-маркер пользователя */
 .zone-dot-marker {
   position: relative;
   width: 24px;
@@ -1084,7 +1084,7 @@ export default defineComponent({
   100% { transform: scale(2.2); opacity: 0; }
 }
 
-/* Single Order Pin */
+/* Метка одиночного заказа */
 .tmpl-pin {
   position: absolute;
   left: 0;
@@ -1130,7 +1130,7 @@ export default defineComponent({
   color: #10b981;
 }
 
-/* Cluster Pin */
+/* Метка кластера */
 .cluster-pin {
   position: absolute;
   left: 0;

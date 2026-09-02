@@ -12,8 +12,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// fakeRefreshRepo is an in-memory RefreshTokenRepository that mirrors the
-// guarded UPDATE in the real one: a token can be consumed exactly once.
+// fakeRefreshRepo — RefreshTokenRepository в памяти, повторяющий охраняемый
+// UPDATE настоящего: токен можно израсходовать ровно один раз.
 type fakeRefreshRepo struct {
 	tokens map[string]*repository.RefreshToken
 }
@@ -108,14 +108,14 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 		t.Error("refresh must rotate the token, the same value came back")
 	}
 
-	// The rotated token works.
+	// Ротированный токен работает.
 	if _, err := svc.Refresh(context.Background(), second.RefreshToken); err != nil {
 		t.Errorf("expected the rotated token to be usable: %v", err)
 	}
 }
 
-// TestRefreshReplayRevokesEverySession is the reason rotation exists: a token
-// presented twice means the value leaked, so every session must end.
+// TestRefreshReplayRevokesEverySession — причина существования ротации: токен,
+// предъявленный дважды, означает утечку значения, поэтому все сессии завершаются.
 func TestRefreshReplayRevokesEverySession(t *testing.T) {
 	svc, _, refresh, user := newSessionTestService(t)
 
@@ -123,7 +123,7 @@ func TestRefreshReplayRevokesEverySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// A second, unrelated session of the same user (another device).
+	// Вторая, не связанная сессия того же пользователя (другое устройство).
 	if _, err := svc.IssueTokenPair(context.Background(), user); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestRefreshReplayRevokesEverySession(t *testing.T) {
 		t.Fatalf("first exchange should succeed: %v", err)
 	}
 
-	// The attacker replays the value the legitimate client already used.
+	// Атакующий повторяет значение, уже использованное законным клиентом.
 	if _, err := svc.Refresh(context.Background(), stolen.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Errorf("expected the replay to be rejected, got %v", err)
 	}
@@ -166,8 +166,8 @@ func TestRefreshRejectsUnknownExpiredAndRevoked(t *testing.T) {
 	}
 }
 
-// TestRefreshRefusesBannedUser keeps a ban from being outlived by a session that
-// simply keeps renewing itself.
+// TestRefreshRefusesBannedUser не даёт бану быть пережитым сессией, которая
+// просто продлевает саму себя.
 func TestRefreshRefusesBannedUser(t *testing.T) {
 	svc, repo, refresh, user := newSessionTestService(t)
 
@@ -186,7 +186,7 @@ func TestRefreshRefusesBannedUser(t *testing.T) {
 	}
 }
 
-// TestIssuedAccessTokenCarriesTheUser guards the claims the middleware reads.
+// TestIssuedAccessTokenCarriesTheUser охраняет утверждения, которые читает middleware.
 func TestIssuedAccessTokenCarriesTheUser(t *testing.T) {
 	svc, _, _, user := newSessionTestService(t)
 
@@ -206,8 +206,8 @@ func TestIssuedAccessTokenCarriesTheUser(t *testing.T) {
 	}
 }
 
-// TestChangePasswordRequiresTheCurrentOne covers the endpoint that the profile
-// page has always called and that did not exist until now.
+// TestChangePasswordRequiresTheCurrentOne покрывает эндпоинт, который страница
+// профиля всегда вызывала и которого до сих пор не существовало.
 func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 	svc, repo, refresh, user := newSessionTestService(t)
 
@@ -217,7 +217,7 @@ func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 	}
 	repo.users[user.Phone].Password = string(hash)
 
-	// A session that is about to be ended by the change.
+	// Сессия, которую это изменение вот-вот завершит.
 	if _, err := svc.IssueTokenPair(context.Background(), user); err != nil {
 		t.Fatalf("issue pair: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 		t.Error("the caller must receive a usable session back")
 	}
 
-	// The new password works and the old one does not.
+	// Новый пароль работает, а старый — нет.
 	stored := repo.users[user.Phone].Password
 	if bcrypt.CompareHashAndPassword([]byte(stored), []byte("An0therStr0ng!")) != nil {
 		t.Error("the new password was not stored")
@@ -249,7 +249,7 @@ func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 		t.Error("the old password still works")
 	}
 
-	// Only the freshly issued session survives.
+	// Выживает только что выданная сессия.
 	if n := refresh.usableCount(user.ID); n != 1 {
 		t.Errorf("expected every other session to end, %d are usable", n)
 	}

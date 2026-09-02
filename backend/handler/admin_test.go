@@ -20,7 +20,7 @@ import (
 	"healthlogin/backend/service"
 )
 
-// mockUserRepository implements repository.UserRepository for testing.
+// mockUserRepository реализует repository.UserRepository для тестов.
 type mockUserRepository struct {
 	users     map[uuid.UUID]*repository.User
 	addresses map[uuid.UUID]string
@@ -74,8 +74,8 @@ func (m *mockUserRepository) UpdateRole(ctx context.Context, id uuid.UUID, role 
 	return nil
 }
 
-// UpdateVerifiedTx runs the same write; the fake has no transactions, so the
-// querier is ignored.
+// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
+// querier игнорируется.
 func (m *mockUserRepository) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	return m.UpdateVerified(ctx, id, verified)
 }
@@ -143,7 +143,7 @@ func (m *mockUserRepository) UpdateUserName(ctx context.Context, userID uuid.UUI
 	return nil
 }
 
-// mockAdminRepository implements repository.AdminRepository.
+// mockAdminRepository реализует repository.AdminRepository.
 type mockAdminRepository struct {
 	users       []*repository.User
 	requests    map[uuid.UUID]*repository.TopUpRequest
@@ -223,7 +223,7 @@ func (m *mockAdminRepository) CompletedOrderFacets(ctx context.Context) (reposit
 	return repository.CompletedOrderFacets{}, nil
 }
 
-// mockSettingsRepository implements repository.SettingsRepository.
+// mockSettingsRepository реализует repository.SettingsRepository.
 type mockSettingsRepository struct {
 	settings map[string]string
 }
@@ -239,7 +239,7 @@ func (m *mockSettingsRepository) UpdateSettings(ctx context.Context, settings ma
 	return nil
 }
 
-// mockTokenRepository implements repository.TokenRepository.
+// mockTokenRepository реализует repository.TokenRepository.
 type mockTokenRepository struct{}
 
 func (m *mockTokenRepository) IsTokenRevoked(ctx context.Context, tokenHash string) (bool, error) {
@@ -301,12 +301,12 @@ func TestUpdateUserStatusHandler(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"status": "BANNED"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/users/"+u.ID.String()+"/status", bytes.NewBuffer(body))
 
-	// Inject URL param using Chi context
+	// Подставляем URL-параметр через контекст Chi
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", u.ID.String())
 	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	// The acting administrator is taken from the request context so the change
-	// can be attributed and self-demotion refused.
+	// Действующий администратор берётся из контекста запроса, чтобы изменение можно
+	// было атрибутировать, а понижение самого себя — отклонить.
 	admin := &repository.User{ID: uuid.New(), Role: "ADMIN", Status: "ACTIVE"}
 	ctx = context.WithValue(ctx, middleware.UserKey, admin)
 	req = req.WithContext(ctx)
@@ -336,12 +336,12 @@ func TestApproveTopUpRequestsHandler(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/finances/topups/"+reqObj.ID.String()+"/approve", nil)
 
-	// Inject Chi URL param
+	// Подставляем URL-параметр Chi
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", reqObj.ID.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
-	// Inject logged-in admin user into context
+	// Кладём вошедшего админа в контекст
 	req = req.WithContext(context.WithValue(req.Context(), middleware.UserKey, admin))
 
 	w := httptest.NewRecorder()
@@ -358,18 +358,18 @@ func TestApproveTopUpRequestsHandler(t *testing.T) {
 	}
 }
 
-// CountAdmins reports how many administrators exist (used to protect the last one).
+// CountAdmins сообщает, сколько существует администраторов (нужно, чтобы защитить последнего).
 func (m *mockAdminRepository) CountAdmins(ctx context.Context) (int, error) {
 	return 2, nil
 }
 
-// HasPendingWithdrawal reports an existing open withdrawal request.
+// HasPendingWithdrawal сообщает о существующей открытой заявке на вывод.
 func (m *mockAdminRepository) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
 	return false, nil
 }
 
-// LockWithdrawalRequest and SetWithdrawalStatus back the withdrawal workflow now
-// that it lives in AdminService.
+// LockWithdrawalRequest и SetWithdrawalStatus обслуживают процесс вывода теперь,
+// когда он живёт в AdminService.
 func (m *mockAdminRepository) LockWithdrawalRequest(ctx context.Context, q repository.Querier, requestID uuid.UUID) (*repository.WithdrawalRequest, error) {
 	if req, ok := m.withdrawals[requestID]; ok {
 		return req, nil
@@ -404,7 +404,7 @@ func (m *mockAdminRepository) SetTopUpStatus(ctx context.Context, q repository.Q
 	return nil
 }
 
-// --- ledger doubles for the handler tests ---
+// --- дублёры реестра для тестов обработчиков ---
 
 type mockLedgerTxRepo struct {
 	balances map[uuid.UUID]money.Amount
@@ -477,10 +477,10 @@ func (m *mockUserRepository) SetUserRoles(ctx context.Context, id uuid.UUID, rol
 	return nil
 }
 
-// The admin form binds numeric settings to <input type="number">, and Vue casts
-// those back to JSON numbers. Decoding straight into map[string]string rejected
-// the whole request with "invalid request body", so editing the commission rate
-// — or any tariff coefficient — could not be saved at all.
+// Форма админки привязывает числовые настройки к <input type="number">, а Vue
+// приводит их обратно к числам JSON. Декодирование прямо в map[string]string
+// отвергало весь запрос с «invalid request body», так что правку ставки
+// комиссии — да и любого тарифного коэффициента — вовсе нельзя было сохранить.
 func TestUpdateSettingsHandlerAcceptsNumbers(t *testing.T) {
 	h, _, _, sr := setupTestHandler()
 
@@ -496,7 +496,7 @@ func TestUpdateSettingsHandlerAcceptsNumbers(t *testing.T) {
 	if got := sr.settings["order_commission_percent"]; got != "15" {
 		t.Errorf("stored commission rate = %q, expected \"15\"", got)
 	}
-	// The digits the client sent are kept rather than round-tripped as a float.
+	// Цифры, присланные клиентом, сохраняются, а не гоняются через float.
 	if got := sr.settings["asap_tariff_coeff"]; got != "8.50" {
 		t.Errorf("stored coefficient = %q, expected \"8.50\"", got)
 	}
@@ -505,8 +505,8 @@ func TestUpdateSettingsHandlerAcceptsNumbers(t *testing.T) {
 	}
 }
 
-// A rate the settings validator refuses must still come back as a 400 naming
-// the setting, not be quietly stored.
+// Ставка, которую валидатор настроек отвергает, всё равно должна вернуться
+// как 400 с именем настройки, а не сохраняться молча.
 func TestUpdateSettingsHandlerRejectsOutOfRangeCommission(t *testing.T) {
 	h, _, _, sr := setupTestHandler()
 
@@ -524,8 +524,8 @@ func TestUpdateSettingsHandlerRejectsOutOfRangeCommission(t *testing.T) {
 	}
 }
 
-// A value that is neither text nor a number names the offending key, instead of
-// failing the whole request with an unattributed "invalid request body".
+// Значение, которое не текст и не число, называет виновный ключ, вместо того
+// чтобы ронять весь запрос безадресным «invalid request body».
 func TestUpdateSettingsHandlerNamesTheBadSetting(t *testing.T) {
 	h, _, _, _ := setupTestHandler()
 

@@ -60,8 +60,8 @@ func TestServiceNode_DeletedIsNotOrderable(t *testing.T) {
 	}
 }
 
-// TestServiceNodeFilter_Where pins the predicates the tree queries rely on:
-// deleted nodes drop out unless they are asked for by name.
+// TestServiceNodeFilter_Where фиксирует предикаты, на которые опираются запросы
+// по дереву: удалённые узлы выпадают, пока их не запросят явно.
 func TestServiceNodeFilter_Where(t *testing.T) {
 	cases := map[string]struct {
 		filter ServiceNodeFilter

@@ -1,7 +1,7 @@
 <template>
   <div class="completed-orders">
     <div class="admin-card">
-      <!-- Page header -->
+      <!-- Шапка страницы -->
       <div class="page-header">
         <h1 class="page-title">{{ $t('users.completedOrders') }}</h1>
         <button
@@ -15,7 +15,7 @@
         </button>
       </div>
 
-      <!-- Toolbar -->
+      <!-- Панель инструментов -->
       <div class="toolbar">
         <div class="search-box">
           <i class="ph-bold ph-magnifying-glass"></i>
@@ -37,7 +37,7 @@
         </span>
       </div>
 
-      <!-- Table -->
+      <!-- Таблица -->
       <div class="grid-table">
         <div class="grid-row grid-header">
           <button type="button" class="th sortable" @click="toggleSort('service')">
@@ -109,7 +109,7 @@
         <div v-else-if="orders.length === 0" class="table-note">Выполненных заказов пока нет</div>
       </div>
 
-      <!-- Pagination -->
+      <!-- Постраничная навигация -->
       <div v-if="totalPages > 1" class="table-footer">
         <button type="button" class="page-btn" :disabled="page === 1" @click="goToPage(page - 1)">
           <i class="ph-bold ph-caret-left"></i> Назад
@@ -160,8 +160,8 @@ export default defineComponent({
     const periodKeys = ref<string[]>([])
 
     const PAGE_SIZE = 50
-    // The server refuses more than this per request, so a full export walks
-    // pages instead of asking for everything at once.
+    // Сервер отказывает, если попросить больше за один запрос, поэтому полная
+    // выгрузка обходит страницы, а не запрашивает всё разом.
     const MAX_PAGE_SIZE = 200
 
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
@@ -171,8 +171,8 @@ export default defineComponent({
     const amountLabel = (o: CompletedOrder) =>
       isFree(o) ? 'Бесплатно' : `${Number(o.final_amount).toFixed(2)} ${currencySymbol.value}`
 
-    // Addresses are composed as "Город, Улица, д. X, кв. Y", so the building
-    // and flat split off cleanly onto their own line.
+    // Адреса собираются как «Город, Улица, д. X, кв. Y», поэтому дом и квартира
+    // чисто отделяются на собственную строку.
     const splitAddress = (address?: string) => {
       const value = (address || '').trim()
       if (!value) return { main: '—', sub: '' }
@@ -192,7 +192,7 @@ export default defineComponent({
       'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
     ]
 
-    // Periods arrive as YYYY-MM, which sorts chronologically as text.
+    // Периоды приходят как YYYY-MM, что как текст сортируется хронологически.
     const periodOptions = computed(() =>
       periodKeys.value.map((value) => {
         const [year, month] = value.split('-')
@@ -240,8 +240,8 @@ export default defineComponent({
       }
     }
 
-    // Filtering and sorting happen in SQL, so any change restarts at page one
-    // and refetches rather than reshuffling the rows already on screen.
+    // Фильтрация и сортировка происходят в SQL, поэтому любое изменение начинает с
+    // первой страницы и перезапрашивает, а не тасует уже выведенные строки.
     let searchTimer: ReturnType<typeof setTimeout> | undefined
     const reload = () => {
       page.value = 1
@@ -369,7 +369,7 @@ export default defineComponent({
   overflow: hidden;
 }
 
-/* Page header */
+/* Шапка страницы */
 .page-header {
   padding: 24px;
   border-bottom: 1px solid #e2e8f0;
@@ -413,7 +413,7 @@ export default defineComponent({
   cursor: not-allowed;
 }
 
-/* Toolbar */
+/* Панель инструментов */
 .toolbar {
   padding: 16px 24px;
   background: #f8fafc;
@@ -482,7 +482,7 @@ export default defineComponent({
   white-space: nowrap;
 }
 
-/* Grid */
+/* Сетка */
 .grid-table {
   width: 100%;
   display: flex;
@@ -507,8 +507,8 @@ export default defineComponent({
   letter-spacing: 0.5px;
 }
 
-/* Header cells are buttons where the column can be sorted, so the rule has to
-   reach any element, not just div. */
+/* Ячейки заголовка — кнопки там, где колонку можно сортировать, поэтому
+   правило обязано доставать до любого элемента, а не только до div. */
 .grid-header > .th {
   padding: 16px 20px;
   display: flex;
@@ -555,7 +555,7 @@ export default defineComponent({
   min-width: 0;
 }
 
-/* Service and tags */
+/* Услуга и метки */
 .service-title {
   font-weight: 800;
   font-size: 15px;
@@ -597,7 +597,7 @@ export default defineComponent({
   color: #64748b;
 }
 
-/* Participants */
+/* Участники */
 .phone-wrapper {
   display: flex;
   align-items: center;
@@ -640,7 +640,7 @@ export default defineComponent({
   font-weight: 700;
 }
 
-/* Amount */
+/* Сумма */
 .amount {
   font-weight: 900;
   font-size: 15px;
@@ -652,7 +652,7 @@ export default defineComponent({
   font-weight: 700;
 }
 
-/* Address */
+/* Адрес */
 .address-text {
   font-size: 13px;
   font-weight: 600;
@@ -668,7 +668,7 @@ export default defineComponent({
   margin-top: 2px;
 }
 
-/* Date */
+/* Дата */
 .date-main {
   font-size: 14px;
   font-weight: 700;

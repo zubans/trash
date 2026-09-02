@@ -1,13 +1,13 @@
 <template>
   <div class="admin-support-chats">
-    <!-- Header -->
+    <!-- Шапка -->
     <div class="chat-page-header">
       <h1 class="page-title">Диалоги с клиентами</h1>
     </div>
 
-    <!-- Chat Application Container -->
+    <!-- Контейнер чат-приложения -->
     <div class="chat-container">
-      <!-- Left Sidebar: Contacts List -->
+      <!-- Левая панель: список контактов -->
       <div :class="['chat-contacts', { 'mobile-hidden': selectedChat }]">
         <div class="contacts-header">
           <div class="search-box">
@@ -59,10 +59,10 @@
         </div>
       </div>
 
-      <!-- Right Area: Active Chat -->
+      <!-- Правая область: активный чат -->
       <div :class="['chat-main', { 'mobile-hidden': !selectedChat }]">
         <template v-if="selectedChat">
-          <!-- Active User Header -->
+          <!-- Шапка активного пользователя -->
           <div class="chat-header">
             <button
               type="button"
@@ -91,7 +91,7 @@
               </div>
             </div>
 
-            <!-- Kebab Menu for Actions (Ban / Unban) -->
+            <!-- Меню-кебаб для действий (бан / снятие бана) -->
             <div class="dropdown-wrapper">
               <button
                 type="button"
@@ -141,7 +141,7 @@
             </div>
           </div>
 
-          <!-- Messages Scroll Area -->
+          <!-- Область прокрутки сообщений -->
           <div ref="messagesContainerRef" class="chat-history">
             <div v-if="messagesLoading" class="empty-history-state">
               <div class="spinner-sm mb-2"></div>
@@ -152,8 +152,8 @@
               <p>История сообщений пуста. Напишите сообщение первыми.</p>
             </div>
             <template v-else>
-              <!-- The server returns the most recent page; older history is
-                   fetched on request rather than on every poll. -->
+              <!-- Сервер возвращает самую свежую страницу; более старая история
+                   достаётся по запросу, а не при каждом опросе. -->
               <div v-if="canLoadOlder" class="load-older-row">
                 <button type="button" :disabled="loadingOlder" @click="loadOlderMessages">
                   {{ loadingOlder ? 'Загрузка...' : 'Показать более ранние сообщения' }}
@@ -169,7 +169,7 @@
                     {{ msg.sender_id === currentUserId ? 'Поддержка' : selectedChat.full_name }}
                   </div>
 
-                  <!-- Media attachment -->
+                  <!-- Медиа-вложение -->
                   <div v-if="msg.file_url" class="msg-img-box mb-2">
                     <img
                       v-if="msg.file_type === 'image'"
@@ -194,7 +194,7 @@
             </template>
           </div>
 
-          <!-- Input Area -->
+          <!-- Область ввода -->
           <div class="chat-input-area">
             <input
               type="file"
@@ -237,7 +237,7 @@
       </div>
     </div>
 
-    <!-- Image Preview Modal -->
+    <!-- Модальное окно просмотра изображения -->
     <div v-if="showImageModal" class="img-modal-overlay" @click="showImageModal = false">
       <div class="img-modal-card" @click.stop>
         <button class="btn-close-modal" @click="showImageModal = false"><i class="ph ph-x"></i></button>
@@ -267,8 +267,8 @@ export default defineComponent({
     const loading = ref(false)
     const messagesLoading = ref(false)
 
-    // Mirrors repository.DefaultMessagePageSize: a full page back means there
-    // is probably more history above it.
+    // Повторяет repository.DefaultMessagePageSize: полная страница назад означает,
+    // что выше неё, вероятно, есть ещё история.
     const PAGE_SIZE = 100
     const hasOlder = ref(false)
     const loadingOlder = ref(false)
@@ -308,10 +308,10 @@ export default defineComponent({
       )
     })
 
-    // Incremental refresh of the conversation on screen: ask for what arrived
-    // after the newest message already loaded, and append it. Re-reading the
-    // whole conversation on a timer made the cost of an open admin tab grow
-    // with the length of the conversation it happened to be showing.
+    // Инкрементальное обновление переписки на экране: спрашиваем то, что пришло
+    // после самого свежего уже загруженного сообщения, и добавляем в конец.
+    // Перечитывание всей переписки по таймеру заставляло стоимость открытой вкладки
+    // админки расти вместе с длиной показываемой переписки.
     const pollOpenConversation = async () => {
       const chat = selectedChat.value
       if (!chat) return
@@ -322,8 +322,8 @@ export default defineComponent({
         })
         const incoming = res.data || []
         if (!incoming.length) return
-        // Without a reference point this was a full read, so it replaces
-        // rather than appends.
+        // Без точки отсчёта это было полное чтение, поэтому оно заменяет, а не
+        // дополняет.
         messages.value = newest?.created_at ? [...messages.value, ...incoming] : incoming
         scrollToBottom()
       } catch (err) {
@@ -331,8 +331,8 @@ export default defineComponent({
       }
     }
 
-    // Fetch the page above what is on screen and prepend it, holding the
-    // reader's position instead of jumping.
+    // Достаём страницу над тем, что на экране, и добавляем её сверху, удерживая
+    // позицию читателя вместо прыжка.
     const loadOlderMessages = async () => {
       const chat = selectedChat.value
       if (!chat || loadingOlder.value) return
@@ -508,10 +508,10 @@ export default defineComponent({
     onMounted(() => {
       fetchChats()
       window.addEventListener('click', closeDropdown)
-      // The chat list is expensive per row (last message and unread count are
-      // resolved per conversation), so it refreshes on a slow timer. The open
-      // conversation stays responsive because it asks only for messages newer
-      // than the last one on screen, which costs almost nothing.
+      // Список чатов дорог в пересчёте на строку (последнее сообщение и счётчик
+      // непрочитанного разрешаются для каждой переписки), поэтому он обновляется по
+      // медленному таймеру. Открытая переписка остаётся отзывчивой, потому что просит
+      // только сообщения новее последнего на экране, а это почти ничего не стоит.
       pollInterval = setInterval(() => {
         fetchChats()
         pollOpenConversation()
@@ -581,7 +581,7 @@ export default defineComponent({
   letter-spacing: -0.5px;
 }
 
-/* Chat Application Container */
+/* Контейнер чат-приложения */
 .chat-container {
   background: #ffffff;
   border-radius: 24px;
@@ -593,7 +593,7 @@ export default defineComponent({
   border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-/* Left Sidebar: Contacts */
+/* Левая панель: контакты */
 .chat-contacts {
   width: 360px;
   border-right: 1px solid rgba(0, 0, 0, 0.06);
@@ -642,7 +642,7 @@ export default defineComponent({
   flex-direction: column;
 }
 
-/* Contact Item */
+/* Элемент контакта */
 .contact-item {
   display: flex;
   gap: 14px;
@@ -788,7 +788,7 @@ export default defineComponent({
   margin-left: 8px;
 }
 
-/* Right Main Area */
+/* Правая основная область */
 .chat-main {
   flex: 1;
   display: flex;
@@ -796,7 +796,7 @@ export default defineComponent({
   background: #f8fafc;
 }
 
-/* Chat Header */
+/* Шапка чата */
 .chat-header {
   background: #ffffff;
   padding: 16px 28px;
@@ -858,7 +858,7 @@ export default defineComponent({
   gap: 4px;
 }
 
-/* Dropdown Menu for Actions */
+/* Выпадающее меню действий */
 .dropdown-wrapper {
   position: relative;
 }
@@ -951,7 +951,7 @@ export default defineComponent({
   color: #ef4444;
 }
 
-/* Chat History Area */
+/* Область истории чата */
 .load-older-row {
   display: flex;
   justify-content: center;
@@ -1062,7 +1062,7 @@ export default defineComponent({
   align-items: center;
 }
 
-/* Chat Input Area */
+/* Область ввода чата */
 .chat-input-area {
   background: #ffffff;
   padding: 16px 28px;
@@ -1141,7 +1141,7 @@ export default defineComponent({
   cursor: not-allowed;
 }
 
-/* Empty & Loading States */
+/* Состояния «пусто» и «загрузка» */
 .no-chat-selected,
 .empty-history-state {
   flex: 1;
@@ -1202,7 +1202,7 @@ export default defineComponent({
   flex-shrink: 0;
 }
 
-/* Image Preview Modal */
+/* Модальное окно просмотра изображения */
 .img-modal-overlay {
   position: fixed;
   top: 0;

@@ -13,10 +13,10 @@ import (
 	"time"
 )
 
-// runReconcile asks the backend to run the books check. The bot deliberately
-// does not run it against the database itself: the reconciliation gauges live
-// in the backend process, and a pass that did not update them would leave the
-// screen and the alert disagreeing about the same money.
+// runReconcile просит бэкенд выполнить сверку книг. Бот намеренно не выполняет
+// её сам по базе: датчики сверки живут в процессе бэкенда, и проход, который
+// их не обновил, оставил бы экран и алерт в разногласии об одних и тех же
+// деньгах.
 func (b *bot) runReconcile(ctx context.Context) string {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.cfg.reconcileURL, nil)
 	if err != nil {
@@ -90,8 +90,8 @@ func (b *bot) runReconcile(ctx context.Context) string {
 	return out.String()
 }
 
-// checkMetrics scrapes the targets and reports the handful of numbers worth
-// waking up for, rather than the whole exposition.
+// checkMetrics снимает метрики с целей и сообщает те несколько чисел, ради
+// которых стоит просыпаться, а не всю выкладку целиком.
 func (b *bot) checkMetrics(ctx context.Context) string {
 	var out strings.Builder
 	out.WriteString("<b>Метрики</b>\n\n")
@@ -120,9 +120,9 @@ func (b *bot) checkMetrics(ctx context.Context) string {
 	return out.String()
 }
 
-// restart runs the project's own restart target. Deliberately a fixed argument
-// list with no shell and nothing taken from the message: the only thing a
-// command can choose here is whether to run it, never what runs.
+// restart запускает собственную цель перезапуска проекта. Намеренно фиксированный
+// список аргументов без шелла и без единого значения из сообщения: команда может
+// выбрать только то, запускать ли, но никогда — что именно запускается.
 func (b *bot) restart(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, b.cfg.restartTimeout)
 	defer cancel()

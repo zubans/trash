@@ -8,9 +8,9 @@ import (
 	"go.starlark.net/starlarkstruct"
 )
 
-// factsValue renders Facts as the `f` argument every hook receives. Structs are
-// used rather than dicts so a script reads f.user.is_verified and a typo in a
-// field name fails loudly instead of silently yielding None.
+// factsValue превращает Facts в аргумент `f`, который получает каждый хук.
+// Используются структуры, а не словари, чтобы скрипт писал f.user.is_verified,
+// а опечатка в имени поля падала громко, а не возвращала молча None.
 func factsValue(f Facts) starlark.Value {
 	d := starlark.StringDict{
 		"event":      starlark.String(f.Event),
@@ -27,8 +27,8 @@ func factsValue(f Facts) starlark.Value {
 	return starlarkstruct.FromStringDict(starlark.String("facts"), d)
 }
 
-// submissionValue renders the outcome of a data check. Only the outcome: the
-// values the submission was compared against never enter the script.
+// submissionValue отдаёт исход проверки данных. Только исход: значения, с
+// которыми сравнивали отправку, в скрипт не попадают никогда.
 func submissionValue(s *SubmissionFacts) starlark.Value {
 	if s == nil {
 		return starlark.None
@@ -98,8 +98,8 @@ func variantValue(v *VariantFacts) starlark.Value {
 	})
 }
 
-// configValue renders the node's configuration as a dict, so a script can use
-// f.config.get("reward", 0) and keep working when a key was never set.
+// configValue отдаёт конфигурацию узла словарём, чтобы скрипт мог писать
+// f.config.get("reward", 0) и продолжал работать, когда ключ так и не задали.
 func configValue(cfg map[string]interface{}) starlark.Value {
 	d := starlark.NewDict(len(cfg))
 	keys := make([]string, 0, len(cfg))
@@ -113,9 +113,9 @@ func configValue(cfg map[string]interface{}) starlark.Value {
 	return d
 }
 
-// goToStarlark converts a value decoded from JSON. Anything it does not
-// recognise becomes its Go rendering as a string rather than an error: a
-// configuration key the script does not use must not break a hook.
+// goToStarlark конвертирует значение, разобранное из JSON. Всё, чего он не
+// распознал, становится строковым Go-представлением, а не ошибкой: ключ
+// конфигурации, который скрипт не использует, не должен ломать хук.
 func goToStarlark(v interface{}) starlark.Value {
 	switch t := v.(type) {
 	case nil:
@@ -143,7 +143,7 @@ func goToStarlark(v interface{}) starlark.Value {
 	}
 }
 
-// starlarkToGo converts back, for the manifest read at load time.
+// starlarkToGo конвертирует обратно — для манифеста, читаемого при загрузке.
 func starlarkToGo(v starlark.Value) interface{} {
 	switch t := v.(type) {
 	case starlark.NoneType:
@@ -175,8 +175,8 @@ func starlarkToGo(v starlark.Value) interface{} {
 	}
 }
 
-// effectValue is an Effect while it is inside a script: opaque, unhashable and
-// with no fields to read, so a script can only build one and hand it back.
+// effectValue — это Effect, пока он внутри скрипта: непрозрачный, нехешируемый и
+// без читаемых полей, так что скрипт может только создать его и вернуть.
 type effectValue struct{ effect Effect }
 
 func (e *effectValue) String() string {
@@ -187,8 +187,8 @@ func (e *effectValue) Freeze()               {}
 func (e *effectValue) Truth() starlark.Bool  { return starlark.True }
 func (e *effectValue) Hash() (uint32, error) { return 0, fmt.Errorf("effect is unhashable") }
 
-// predeclared is the environment every script is compiled against. It contains
-// the effect constructors and nothing else — no print, no load, no I/O.
+// predeclared — окружение, в котором компилируется каждый скрипт. В нём
+// конструкторы эффектов и больше ничего: ни print, ни load, ни ввода-вывода.
 func predeclared() starlark.StringDict {
 	return starlark.StringDict{
 		"complete_order": starlark.NewBuiltin("complete_order", func(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -208,8 +208,8 @@ func predeclared() starlark.StringDict {
 		"pay_bonus": starlark.NewBuiltin("pay_bonus", func(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			var to, key, reason, orderID string
 			var amount float64
-			// Commission is opt-in: a reward is not something a customer paid
-			// for, so nothing is withheld from it unless the behaviour says so.
+			// Комиссия — по явному согласию: вознаграждение не оплачено заказчиком,
+			// поэтому из него ничего не удерживается, пока поведение не попросит.
 			commission := false
 			if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 				"to", &to, "amount", &amount, "key", &key,
@@ -217,9 +217,9 @@ func predeclared() starlark.StringDict {
 				return nil, err
 			}
 			if key == "" {
-				// Refused here rather than at apply time so the mistake shows up
-				// in the script's own tests: a payment with no key would be made
-				// again on every redelivery of the event.
+				// Отказ здесь, а не в момент применения, чтобы ошибка всплыла в
+				// собственных тестах скрипта: выплата без ключа повторялась бы при
+				// каждой переотправке события.
 				return nil, fmt.Errorf("pay_bonus requires a non-empty key")
 			}
 			return &effectValue{Effect{

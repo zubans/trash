@@ -13,12 +13,12 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// These tests run against a real Postgres with the migrations applied. They
-// exist because the failure they guard against cannot be reproduced with mocks:
-// creating an order writes a ledger entry that references the order row, and
-// transactions.order_id is a foreign key checked immediately. Getting the two
-// statements in the wrong order fails only against a real database — which is
-// how it reached production.
+// Эти тесты выполняются на настоящем Postgres с применёнными миграциями. Они
+// существуют потому, что отказ, от которого они охраняют, нельзя воспроизвести
+// на моках: создание заказа пишет проводку, ссылающуюся на строку заказа, а
+// transactions.order_id — внешний ключ, проверяемый немедленно. Неверный порядок
+// этих двух операторов падает только на настоящей базе — именно так он и
+// добрался до прода.
 //
 //	ORDER_TEST_DSN="postgres://postgres:x@localhost:55432/healthlogin?sslmode=disable" \
 //	    go test ./service/ -run Integration
@@ -39,7 +39,7 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// seedCustomer creates a user with a balance and a service variant to order.
+// seedCustomer создаёт пользователя с балансом и вариант услуги для заказа.
 func seedCustomer(t *testing.T, db *sql.DB, balance money.Amount) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 
@@ -80,9 +80,9 @@ func newIntegrationOrderService(db *sql.DB) *OrderService {
 	)
 }
 
-// TestCreateOrderIntegration is the regression test for the foreign key
-// violation: the ledger entry names the order, so the order row has to exist by
-// the time it is written.
+// TestCreateOrderIntegration — регрессионный тест на нарушение внешнего ключа:
+// проводка называет заказ, поэтому к моменту её записи строка заказа обязана
+// существовать.
 func TestCreateOrderIntegration(t *testing.T) {
 	db := openTestDB(t)
 	srv := newIntegrationOrderService(db)
@@ -98,7 +98,7 @@ func TestCreateOrderIntegration(t *testing.T) {
 		t.Fatalf("expected a hold, got %s", order.HoldAmount)
 	}
 
-	// The order row is there.
+	// Строка заказа на месте.
 	var stored money.Amount
 	if err := db.QueryRow(`SELECT hold_amount FROM orders WHERE id = $1`, order.ID).Scan(&stored); err != nil {
 		t.Fatalf("the order was not persisted: %v", err)
@@ -107,7 +107,7 @@ func TestCreateOrderIntegration(t *testing.T) {
 		t.Errorf("stored hold %s does not match the returned %s", stored, order.HoldAmount)
 	}
 
-	// And so is the ledger entry that points at it.
+	// И проводка, указывающая на неё, тоже.
 	var entries int
 	if err := db.QueryRow(
 		`SELECT COUNT(*) FROM transactions WHERE order_id = $1 AND type = 'HOLD'`, order.ID).Scan(&entries); err != nil {
@@ -117,7 +117,7 @@ func TestCreateOrderIntegration(t *testing.T) {
 		t.Errorf("expected exactly one HOLD entry for the order, got %d", entries)
 	}
 
-	// The customer paid for it exactly once.
+	// Заказчик заплатил за него ровно один раз.
 	var balance money.Amount
 	if err := db.QueryRow(`SELECT balance FROM users WHERE id = $1`, customerID).Scan(&balance); err != nil {
 		t.Fatalf("read balance: %v", err)
@@ -127,14 +127,14 @@ func TestCreateOrderIntegration(t *testing.T) {
 	}
 }
 
-// TestCreateOrderRollsBackOnInsufficientFunds covers what the mocks cannot: the
-// order row and the ledger entry share one transaction, so a rejected hold
-// leaves nothing behind.
+// TestCreateOrderRollsBackOnInsufficientFunds покрывает то, чего не могут моки:
+// строка заказа и проводка делят одну транзакцию, поэтому отклонённое удержание
+// не оставляет после себя ничего.
 func TestCreateOrderRollsBackOnInsufficientFunds(t *testing.T) {
 	db := openTestDB(t)
 	srv := newIntegrationOrderService(db)
 
-	// Far too little to cover any variant in the catalog.
+	// Слишком мало, чтобы покрыть любой вариант в каталоге.
 	customerID, variantID := seedCustomer(t, db, money.FromRubles(1))
 
 	lat, lon := 55.7558, 37.6173

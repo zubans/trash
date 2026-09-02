@@ -1,6 +1,6 @@
 /**
- * Utility to compress image files on the client side before uploading.
- * Targets a file size between 150 KB and 300 KB.
+ * Утилита для сжатия файлов изображений на стороне клиента перед загрузкой.
+ * Целевой размер файла — от 150 КБ до 300 КБ.
  */
 export async function compressImage(
   file: File,
@@ -8,7 +8,7 @@ export async function compressImage(
   targetMaxKB: number = 300,
   maxDimension: number = 1600
 ): Promise<File> {
-  // If not an image or already smaller than targetMaxKB, return as-is
+  // Если это не изображение или оно уже меньше targetMaxKB, возвращаем как есть
   if (!file.type.startsWith('image/')) {
     return file
   }
@@ -25,7 +25,7 @@ export async function compressImage(
         let width = img.width
         let height = img.height
 
-        // Downscale image dimensions if larger than maxDimension
+        // Уменьшаем размеры изображения, если они больше maxDimension
         if (width > maxDimension || height > maxDimension) {
           if (width > height) {
             height = Math.round((height * maxDimension) / width)
@@ -47,7 +47,7 @@ export async function compressImage(
 
         ctx.drawImage(img, 0, 0, width, height)
 
-        // Perform binary search / iterative compression for quality (0.3 to 0.92)
+        // Выполняем двоичный поиск / итеративное сжатие по качеству (0.3 … 0.92)
         let minQuality = 0.3
         let maxQuality = 0.92
 

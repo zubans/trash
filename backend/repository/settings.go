@@ -5,7 +5,7 @@ import (
 	"database/sql"
 )
 
-// SettingsRepository defines database operations for system settings.
+// SettingsRepository описывает операции с базой для системных настроек.
 type SettingsRepository interface {
 	GetSettings(ctx context.Context) (map[string]string, error)
 	UpdateSettings(ctx context.Context, settings map[string]string) error
@@ -15,7 +15,7 @@ type settingsRepo struct {
 	db *sql.DB
 }
 
-// NewSettingsRepository creates a repository for settings operations.
+// NewSettingsRepository создаёт репозиторий для операций с настройками.
 func NewSettingsRepository(db *sql.DB) SettingsRepository {
 	return &settingsRepo{db: db}
 }

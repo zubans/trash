@@ -1,6 +1,6 @@
 <template>
   <div class="app-version-footer">
-    <!-- Tapping the version 7 times toggles the debug console (see registerTap). -->
+    <!-- Семь нажатий на версию переключают отладочную консоль (см. registerTap). -->
     <span class="version-tap" @click="registerTap" v-if="version">v{{ version }}</span>
     <span class="version-tap" @click="registerTap" v-if="build">(build {{ build }})</span>
     <span v-if="tapHint" class="tap-hint">{{ tapHint }}</span>
@@ -19,9 +19,9 @@ export default defineComponent({
     const version = ref<string | null>(null)
     const build = ref<number | null>(null)
 
-    // Hidden gesture: 7 quick taps on the version flips the debug console. This
-    // is the only way to enable request logging on an already-installed
-    // production build (which is not compiled with VITE_DEBUG).
+    // Скрытый жест: 7 быстрых нажатий на версию переключают отладочную консоль. Это
+    // единственный способ включить логирование запросов на уже установленной
+    // продовой сборке (которая собрана без VITE_DEBUG).
     const tapHint = ref('')
     let taps = 0
     let tapTimer: ReturnType<typeof setTimeout> | undefined
@@ -85,8 +85,8 @@ export default defineComponent({
   margin-left: 4px;
 }
 
-/* The version numbers are tappable (hidden debug gesture) even though the footer
-   itself ignores pointer events so it never blocks the UI behind it. */
+/* Номера версий нажимаемы (скрытый отладочный жест), хотя сам футер игнорирует
+   события указателя, чтобы никогда не перекрывать интерфейс под собой. */
 .version-tap {
   pointer-events: auto;
   cursor: default;

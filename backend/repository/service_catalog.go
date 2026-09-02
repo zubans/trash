@@ -15,7 +15,7 @@ import (
 	"healthlogin/backend/money"
 )
 
-// ServiceNodeType defines the type of a catalog node.
+// ServiceNodeType задаёт тип узла каталога.
 type ServiceNodeType string
 
 const (
@@ -23,7 +23,7 @@ const (
 	ServiceNodeTypeVariant  ServiceNodeType = "VARIANT"
 )
 
-// Catalog errors the handler layer maps to HTTP status codes.
+// Ошибки каталога, которые слой обработчиков отображает в коды статуса HTTP.
 var (
 	ErrServiceNodeNotFound      = errors.New("service node not found")
 	ErrServiceNodeDeleted       = errors.New("service node is deleted")
@@ -33,10 +33,10 @@ var (
 	ErrServiceNodeParentDeleted = errors.New("parent category is deleted")
 )
 
-// LocalizedText stores translations for one field.
+// LocalizedText хранит переводы одного поля.
 type LocalizedText map[string]string
 
-// Value implements the driver.Valuer interface for JSONB storage.
+// Value реализует интерфейс driver.Valuer для хранения в JSONB.
 func (lt LocalizedText) Value() (driver.Value, error) {
 	if lt == nil {
 		return nil, nil
@@ -44,7 +44,7 @@ func (lt LocalizedText) Value() (driver.Value, error) {
 	return json.Marshal(lt)
 }
 
-// Scan implements the sql.Scanner interface for JSONB retrieval.
+// Scan реализует интерфейс sql.Scanner для чтения из JSONB.
 func (lt *LocalizedText) Scan(value interface{}) error {
 	if value == nil {
 		*lt = nil
@@ -62,15 +62,15 @@ func (lt *LocalizedText) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, lt)
 }
 
-// BehaviorConfig is a service node's behaviour configuration as stored in
-// JSONB. It is deliberately untyped: every behaviour has its own keys, and
-// declaring them in Go would put the definition of a behaviour back into the
-// code the behaviour exists to stay out of. The script's manifest declares the
-// defaults, and the admin panel renders the form from it.
+// BehaviorConfig — конфигурация поведения узла услуги в том виде, как она
+// хранится в JSONB. Она намеренно нетипизирована: у каждого поведения свои
+// ключи, и объявление их в Go вернуло бы определение поведения в тот самый код,
+// вне которого поведение и существует. Умолчания объявляет манифест скрипта, и
+// админ-панель рисует форму по нему.
 type BehaviorConfig map[string]interface{}
 
-// Value implements driver.Valuer for JSONB storage. A nil or empty config is
-// stored as an empty object, so the column never holds NULL.
+// Value реализует driver.Valuer для хранения в JSONB. Пустая или nil-конфигурация
+// сохраняется как пустой объект, поэтому колонка никогда не хранит NULL.
 func (c BehaviorConfig) Value() (driver.Value, error) {
 	if len(c) == 0 {
 		return []byte("{}"), nil
@@ -78,7 +78,7 @@ func (c BehaviorConfig) Value() (driver.Value, error) {
 	return json.Marshal(map[string]interface{}(c))
 }
 
-// Scan implements sql.Scanner for JSONB retrieval.
+// Scan реализует sql.Scanner для чтения из JSONB.
 func (c *BehaviorConfig) Scan(value interface{}) error {
 	if value == nil {
 		*c = nil
@@ -96,7 +96,7 @@ func (c *BehaviorConfig) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, c)
 }
 
-// ServiceNode represents a node in the service catalog tree.
+// ServiceNode представляет узел в дереве каталога услуг.
 type ServiceNode struct {
 	ID                   uuid.UUID       `json:"id"`
 	ParentID             *uuid.UUID      `json:"parent_id,omitempty"`
@@ -110,47 +110,47 @@ type ServiceNode struct {
 	SortOrder            int             `json:"sort_order"`
 	RequiresVerification bool            `json:"requires_verification"`
 	MinAge               int             `json:"min_age"`
-	// ModeratorOnly marks a service whose orders are visible to and acceptable
-	// by moderators only (see migration 040).
+	// ModeratorOnly помечает услугу, заказы по которой видны и доступны для
+	// принятия только модераторам (см. миграцию 040).
 	ModeratorOnly bool `json:"moderator_only"`
-	// BehaviorCode names the script that carries this service's own rules (see
-	// package behavior and migration 043). Empty for an ordinary service, which
-	// is every service that existed before behaviours: the flags above are the
-	// whole of its behaviour.
+	// BehaviorCode называет скрипт, несущий собственные правила этой услуги (см.
+	// пакет behavior и миграцию 043). Пусто для обычной услуги, то есть для
+	// любой услуги, существовавшей до поведений: флаги выше — это всё её
+	// поведение.
 	BehaviorCode string `json:"behavior_code,omitempty"`
-	// BehaviorConfig is that script's per-node configuration — the reward it
-	// pays, the role it requires. The script declares the defaults; this holds
-	// only what this node changes.
+	// BehaviorConfig — конфигурация этого скрипта на уровне узла: вознаграждение,
+	// которое он платит, требуемая роль. Умолчания объявляет скрипт; здесь лежит
+	// только то, что меняет этот узел.
 	BehaviorConfig BehaviorConfig `json:"behavior_config,omitempty"`
-	// BehaviorConstants and BehaviorSource are the node's own script, written
-	// in the admin panel (migration 044): the constants file and the logic.
-	// When they are set they replace the file behaviour entirely — BehaviorCode
-	// then only records which library script the admin started from.
+	// BehaviorConstants и BehaviorSource — собственный скрипт узла, написанный в
+	// админ-панели (миграция 044): файл констант и логика. Если они заданы, они
+	// полностью заменяют файловое поведение — BehaviorCode тогда лишь фиксирует,
+	// с какого библиотечного скрипта админ начал.
 	BehaviorConstants string    `json:"behavior_constants,omitempty"`
 	BehaviorSource    string    `json:"behavior_source,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
-	// DeletedAt is set when the node was retired. The row stays in place so
-	// that orders which reference it keep resolving; nothing in the catalog
-	// offers it any more.
+	// DeletedAt выставляется при списании узла. Строка остаётся на месте, чтобы
+	// ссылающиеся на неё заказы продолжали разрешаться; в каталоге эту услугу
+	// больше никто не предлагает.
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
-// HasBehavior reports whether this node's rules come from a script — its own,
-// or one of the library behaviours that ship with the build.
+// HasBehavior сообщает, приходят ли правила этого узла из скрипта — собственного
+// или одного из библиотечных поведений, поставляемых со сборкой.
 func (n *ServiceNode) HasBehavior() bool {
 	return n != nil && (n.BehaviorCode != "" || n.HasOwnScript())
 }
 
-// HasOwnScript reports whether the node carries a script of its own. Such a node
-// is what the admin panel calls a special service: its rules were written in the
-// service constructor rather than shipped as a file.
+// HasOwnScript сообщает, несёт ли узел собственный скрипт. Такой узел админ-панель
+// называет особой услугой: его правила написаны в конструкторе услуг, а не
+// поставлены файлом.
 func (n *ServiceNode) HasOwnScript() bool {
 	return n != nil && strings.TrimSpace(n.BehaviorSource) != ""
 }
 
-// nullableCode stores an empty behaviour code as NULL, so "no behaviour" is one
-// value in the database rather than two.
+// nullableCode хранит пустой код поведения как NULL, чтобы «нет поведения» было
+// в базе одним значением, а не двумя.
 func nullableCode(code string) interface{} {
 	if code == "" {
 		return nil
@@ -158,7 +158,7 @@ func nullableCode(code string) interface{} {
 	return code
 }
 
-// nullableText does the same for a script that was left empty.
+// nullableText делает то же для скрипта, оставленного пустым.
 func nullableText(text string) interface{} {
 	if strings.TrimSpace(text) == "" {
 		return nil
@@ -166,44 +166,44 @@ func nullableText(text string) interface{} {
 	return text
 }
 
-// IsCategory returns true if the node is a category.
+// IsCategory возвращает true, если узел — категория.
 func (n *ServiceNode) IsCategory() bool {
 	return n.NodeType == ServiceNodeTypeCategory
 }
 
-// IsVariant returns true if the node is a service variant.
+// IsVariant возвращает true, если узел — вариант услуги.
 func (n *ServiceNode) IsVariant() bool {
 	return n.NodeType == ServiceNodeTypeVariant
 }
 
-// IsDeleted reports whether the node was soft-deleted.
+// IsDeleted сообщает, помечен ли узел как удалённый.
 func (n *ServiceNode) IsDeleted() bool {
 	return n != nil && n.DeletedAt != nil
 }
 
-// IsOrderable reports whether new orders may be placed for this node.
+// IsOrderable сообщает, можно ли размещать новые заказы по этому узлу.
 func (n *ServiceNode) IsOrderable() bool {
 	return n != nil && n.IsVariant() && n.IsActive && !n.IsDeleted()
 }
 
-// ServiceNodeFilter narrows a tree query. The zero value returns every live
-// node, active or not, which is what the admin panel shows by default.
+// ServiceNodeFilter сужает запрос по дереву. Нулевое значение возвращает все
+// живые узлы, активные и нет, — именно это админ-панель показывает по умолчанию.
 type ServiceNodeFilter struct {
-	// ActiveOnly drops nodes that are switched off in the app.
+	// ActiveOnly отбрасывает узлы, выключенные в приложении.
 	ActiveOnly bool
-	// IncludeDeleted keeps soft-deleted nodes in the result. Only the admin
-	// catalog screen asks for them.
+	// IncludeDeleted оставляет мягко удалённые узлы в результате. Их запрашивает
+	// только админский экран каталога.
 	IncludeDeleted bool
 }
 
-// FilterActive returns only the nodes the app may offer to users.
+// FilterActive возвращает только узлы, которые приложение может предлагать пользователям.
 var FilterActive = ServiceNodeFilter{ActiveOnly: true}
 
-// FilterLive returns active and inactive nodes but no deleted ones.
+// FilterLive возвращает активные и неактивные узлы, но не удалённые.
 var FilterLive = ServiceNodeFilter{}
 
-// where renders the filter as SQL predicates appended to an existing WHERE
-// clause. col is the table alias holding the node columns.
+// where отдаёт фильтр как SQL-предикаты, добавляемые к существующему WHERE.
+// col — псевдоним таблицы, содержащей колонки узла.
 func (f ServiceNodeFilter) where(col string) string {
 	clause := ""
 	if !f.IncludeDeleted {
@@ -215,44 +215,44 @@ func (f ServiceNodeFilter) where(col string) string {
 	return clause
 }
 
-// ServiceCatalogRepository defines storage operations for the service catalog.
+// ServiceCatalogRepository описывает операции хранения каталога услуг.
 type ServiceCatalogRepository interface {
 	// CRUD
 	CreateNode(ctx context.Context, node *ServiceNode) error
 	UpdateNode(ctx context.Context, node *ServiceNode) error
-	// DeleteNode soft-deletes a node: the row survives so that historical
-	// orders keep resolving, and the catalog stops offering it.
+	// DeleteNode мягко удаляет узел: строка выживает, чтобы исторические заказы
+	// продолжали разрешаться, а каталог перестаёт его предлагать.
 	DeleteNode(ctx context.Context, id uuid.UUID) error
-	// RestoreNode brings a soft-deleted node back, switched off.
+	// RestoreNode возвращает мягко удалённый узел, выключенным.
 	RestoreNode(ctx context.Context, id uuid.UUID) error
-	// GetNodeByID returns the node even when it was deleted, because orders
-	// placed before the deletion still have to render their service.
+	// GetNodeByID возвращает узел, даже если тот удалён, потому что заказы,
+	// размещённые до удаления, всё равно обязаны отрисовать свою услугу.
 	GetNodeByID(ctx context.Context, id uuid.UUID) (*ServiceNode, error)
-	// GetNodesByIDs resolves a set of nodes in one query, for the list
-	// endpoints that need the service variant of every row they return. Like
-	// GetNodeByID it includes deleted nodes, and like it, an id with no node is
-	// simply absent from the result rather than an error.
+	// GetNodesByIDs разрешает набор узлов одним запросом — для списковых
+	// эндпоинтов, которым нужен вариант услуги каждой возвращаемой строки. Как и
+	// GetNodeByID, он включает удалённые узлы, и так же id без узла просто
+	// отсутствует в результате, а не даёт ошибку.
 	GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*ServiceNode, error)
-	// GetNodeByCode looks up a live node only; a deleted code is free to be
-	// taken by a new node.
+	// GetNodeByCode ищет только живой узел; удалённый код свободен для того, чтобы
+	// его занял новый узел.
 	GetNodeByCode(ctx context.Context, code string) (*ServiceNode, error)
 
-	// Tree navigation
+	// Навигация по дереву
 	GetRootCategories(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error)
 	GetChildren(ctx context.Context, parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error)
 	GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error)
 	GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*ServiceNode, error)
 	GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*ServiceNode, error)
 
-	// Catalog helpers
+	// Помощники каталога
 	GetActiveVariants(ctx context.Context) ([]*ServiceNode, error)
-	// ListNodesWithScript returns every live node carrying a script of its own,
-	// so the behaviour engine can compile them at startup and pick up edits made
-	// by another process.
+	// ListNodesWithScript возвращает все живые узлы с собственным скриптом, чтобы
+	// движок поведений мог скомпилировать их при старте и подхватить правки,
+	// сделанные другим процессом.
 	ListNodesWithScript(ctx context.Context) ([]*ServiceNode, error)
 	GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*ServiceNode, []*ServiceNode, error)
 
-	// Transactional helpers used by the service layer.
+	// Транзакционные помощники, используемые слоем сервисов.
 	HasChildren(ctx context.Context, id uuid.UUID) (bool, error)
 	HasOrders(ctx context.Context, id uuid.UUID) (bool, error)
 	IsDescendantOf(ctx context.Context, candidateAncestor, candidateDescendant uuid.UUID) (bool, error)
@@ -262,7 +262,7 @@ type serviceCatalogRepo struct {
 	db *sql.DB
 }
 
-// NewServiceCatalogRepository creates a new service catalog repository.
+// NewServiceCatalogRepository создаёт новый репозиторий каталога услуг.
 func NewServiceCatalogRepository(db *sql.DB) ServiceCatalogRepository {
 	return &serviceCatalogRepo{db: db}
 }
@@ -274,7 +274,7 @@ const serviceNodeColumns = `
     COALESCE(behavior_constants, ''), COALESCE(behavior_source, ''), created_at, updated_at, deleted_at
 `
 
-// rowScanner is satisfied by both *sql.Row and *sql.Rows.
+// rowScanner удовлетворяется и *sql.Row, и *sql.Rows.
 type rowScanner interface {
 	Scan(dest ...interface{}) error
 }
@@ -328,8 +328,8 @@ func (r *serviceCatalogRepo) CreateNode(ctx context.Context, node *ServiceNode) 
 	node.UpdatedAt = now
 	node.DeletedAt = nil
 
-	// The unique index only covers live nodes, so report the collision with a
-	// message the admin panel can show instead of a driver error.
+	// Уникальный индекс покрывает только живые узлы, поэтому сообщаем о коллизии
+	// сообщением, которое админ-панель может показать, а не ошибкой драйвера.
 	taken, err := r.codeTaken(ctx, node.Code, node.ID)
 	if err != nil {
 		return err
@@ -381,20 +381,20 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 	if existing == nil {
 		return ErrServiceNodeNotFound
 	}
-	// A deleted node is restored first, then edited: editing it in place would
-	// let an admin change a service the catalog no longer lists.
+	// Удалённый узел сначала восстанавливается, а потом правится: правка на месте
+	// позволила бы админу менять услугу, которой в каталоге уже нет.
 	if existing.IsDeleted() {
 		return ErrServiceNodeDeleted
 	}
 
-	// node_type is immutable (H2).
+	// node_type неизменяем (H2).
 	node.NodeType = existing.NodeType
-	// code is immutable (H2); keep the existing value to avoid accidental changes.
+	// code неизменяем (H2); сохраняем существующее значение, чтобы избежать случайных изменений.
 	node.Code = existing.Code
 	node.DeletedAt = nil
 
 	if node.ParentID != nil {
-		// Prevent cycles: cannot set parent to self or any descendant.
+		// Предотвращаем циклы: нельзя назначить родителем себя или любого потомка.
 		if *node.ParentID == node.ID {
 			return errors.New("cannot set parent to self")
 		}
@@ -405,8 +405,8 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 		if isDescendant {
 			return errors.New("cannot set parent to descendant")
 		}
-		// Moving a live node under a deleted category would hide it from the
-		// catalog without ever deleting it.
+		// Перенос живого узла под удалённую категорию спрятал бы его из каталога,
+		// так его и не удалив.
 		parent, err := r.GetNodeByID(ctx, *node.ParentID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -453,10 +453,15 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 	return tx.Commit()
 }
 
-// DeleteNode retires a node without removing the row. Orders keep a foreign key
-// to the variant they were placed for, so a hard delete would either fail or
-// take the order history with it; marking the node keeps that history readable
-// while the catalog stops offering the service.
+// DeleteNode списывает узел вместе со всем его поддеревом, не удаляя строки. У
+// заказов есть внешний ключ на вариант, по которому они размещены, поэтому
+// жёсткое удаление либо упало бы, либо утащило бы историю заказов; пометка узла
+// оставляет эту историю читаемой, а каталог перестаёт предлагать услугу.
+//
+// Удаление каскадное: снимая категорию, гасим и всех её живых потомков одним
+// оператором, а не отказываем, пока у неё есть дети. Обход идёт рекурсивно по
+// parent_id, поэтому не зависит от корректности closure-таблицы; уже удалённые
+// узлы пропускаются по deleted_at, так что их is_active/deleted_at не трогаются.
 func (r *serviceCatalogRepo) DeleteNode(ctx context.Context, id uuid.UUID) error {
 	node, err := r.GetNodeByID(ctx, id)
 	if err != nil {
@@ -472,23 +477,19 @@ func (r *serviceCatalogRepo) DeleteNode(ctx context.Context, id uuid.UUID) error
 		return ErrServiceNodeDeleted
 	}
 
-	// Children are deleted from the leaves up: a category whose children were
-	// all retired can go, one that still holds live children cannot.
-	hasChildren, err := r.HasChildren(ctx, id)
-	if err != nil {
-		return err
-	}
-	if hasChildren {
-		return ErrServiceNodeHasChildren
-	}
-
-	// is_active is switched off in the same statement: every catalog query
-	// already filters on it, so the service disappears even from a caller that
-	// predates deleted_at. The database check constraint pins the pair.
+	// is_active выключается тем же оператором: любой запрос каталога и так по нему
+	// фильтрует, поэтому услуга исчезает даже для вызывающего, появившегося раньше
+	// deleted_at. Пару скрепляет check-ограничение в базе.
 	res, err := r.db.ExecContext(ctx, `
+        WITH RECURSIVE subtree AS (
+            SELECT id FROM service_nodes WHERE id = $1
+            UNION ALL
+            SELECT sn.id FROM service_nodes sn
+            JOIN subtree s ON sn.parent_id = s.id
+        )
         UPDATE service_nodes
         SET deleted_at = now(), is_active = FALSE, updated_at = now()
-        WHERE id = $1 AND deleted_at IS NULL
+        WHERE deleted_at IS NULL AND id IN (SELECT id FROM subtree)
     `, id)
 	if err != nil {
 		return err
@@ -498,14 +499,14 @@ func (r *serviceCatalogRepo) DeleteNode(ctx context.Context, id uuid.UUID) error
 		return err
 	}
 	if affected == 0 {
-		// Someone deleted it between the read and the update.
+		// Кто-то удалил его между чтением и обновлением.
 		return ErrServiceNodeDeleted
 	}
 	return nil
 }
 
-// RestoreNode clears the deletion mark. The node comes back switched off, so an
-// admin has to re-enable it deliberately before customers see it again.
+// RestoreNode снимает пометку удаления. Узел возвращается выключенным, чтобы
+// админ осознанно включил его снова, прежде чем заказчики его увидят.
 func (r *serviceCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) error {
 	node, err := r.GetNodeByID(ctx, id)
 	if err != nil {
@@ -521,7 +522,7 @@ func (r *serviceCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) erro
 		return ErrServiceNodeNotDeleted
 	}
 
-	// Restoring into a deleted branch would produce a node nobody can reach.
+	// Восстановление в удалённую ветку дало бы узел, до которого никому не добраться.
 	if node.ParentID != nil {
 		parent, err := r.GetNodeByID(ctx, *node.ParentID)
 		if err != nil {
@@ -535,7 +536,7 @@ func (r *serviceCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) erro
 		}
 	}
 
-	// The code was free while the node was deleted, so a new node may hold it.
+	// Пока узел был удалён, код был свободен, поэтому его может держать новый узел.
 	taken, err := r.codeTaken(ctx, node.Code, id)
 	if err != nil {
 		return err
@@ -552,7 +553,7 @@ func (r *serviceCatalogRepo) RestoreNode(ctx context.Context, id uuid.UUID) erro
 	return err
 }
 
-// codeTaken reports whether a live node other than exclude uses the code.
+// codeTaken сообщает, использует ли этот код живой узел, отличный от exclude.
 func (r *serviceCatalogRepo) codeTaken(ctx context.Context, code string, exclude uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, `
@@ -620,10 +621,10 @@ func (r *serviceCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid
 	return r.queryNodes(ctx, query, args...)
 }
 
-// GetAncestors and GetVariantPath keep deleted nodes: they are read to render a
-// node's position, including for orders placed on a service that was retired
-// afterwards. A live node can never sit under a deleted one, so a live node's
-// path is always live too.
+// GetAncestors и GetVariantPath сохраняют удалённые узлы: их читают, чтобы
+// отрисовать положение узла, в том числе для заказов по услуге, списанной
+// позже. Живой узел никогда не может стоять под удалённым, поэтому путь живого
+// узла тоже всегда живой.
 func (r *serviceCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_node_paths p JOIN service_nodes sn ON sn.id = p.ancestor_id WHERE p.descendant_id = $1 AND p.depth > 0 ORDER BY p.depth"
 	return r.queryNodes(ctx, query, descendantID)
@@ -661,17 +662,17 @@ func (r *serviceCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid
 	return variant, path, nil
 }
 
-// HasChildren counts live children only: a category whose whole subtree was
-// retired can be retired in turn.
+// HasChildren считает только живых детей: категорию, всё поддерево которой
+// списано, можно списать следом.
 func (r *serviceCatalogRepo) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM service_nodes WHERE parent_id = $1 AND deleted_at IS NULL`, id).Scan(&count)
 	return count > 0, err
 }
 
-// HasOrders reports whether the node was ever ordered. It no longer blocks
-// deletion — it tells the admin panel that retiring the service leaves order
-// history behind.
+// HasOrders сообщает, заказывали ли узел когда-либо. Он больше не блокирует
+// удаление — он говорит админ-панели, что списание услуги оставляет за собой
+// историю заказов.
 func (r *serviceCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE service_variant_id = $1`, id).Scan(&count)

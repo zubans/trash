@@ -1,18 +1,18 @@
 <template>
   <div class="admin-app">
-    <!-- Mobile Sidebar Backdrop Overlay -->
+    <!-- Затемняющая подложка мобильной боковой панели -->
     <div
       v-if="!sidebarMinimized && isMobile"
       class="sidebar-backdrop"
       @click="sidebarMinimized = true"
     ></div>
 
-    <!-- Premium Sidebar -->
+    <!-- Премиальная боковая панель -->
     <aside :class="['sidebar', { 'minimized': sidebarMinimized }]">
       <div class="logo">
         <AppLogo :hide-text="sidebarMinimized && !isMobile" />
-        <!-- Icon only: there is no room for the label beside the logo, so the
-             accessible name comes from aria-label rather than visible text. -->
+        <!-- Только иконка: рядом с логотипом нет места для подписи, поэтому
+             доступное имя берётся из aria-label, а не из видимого текста. -->
         <button
           class="logo-logout"
           type="button"
@@ -24,8 +24,8 @@
         </button>
       </div>
 
-      <!-- Only the nav scrolls: the logo stays put and the footer below stays
-           reachable, which is the whole point on a phone. -->
+      <!-- Прокручивается только навигация: логотип остаётся на месте, а нижний
+           блок под ним — досягаемым, в чём весь смысл на телефоне. -->
       <div class="sidebar-scroll">
         <div v-if="!sidebarMinimized || isMobile" class="nav-section">Управление</div>
         <div class="nav-list">
@@ -108,9 +108,9 @@
         </div>
       </div>
 
-      <!-- Language lives here; logout sits at the top next to the logo. The
-           whole footer is dropped when minimized, so an empty bordered strip is
-           not left behind. -->
+      <!-- Язык живёт здесь; выход — наверху рядом с логотипом. В свёрнутом виде
+           весь нижний блок убирается, чтобы не осталась пустая полоса с
+           рамкой. -->
       <div v-if="!sidebarMinimized || isMobile" class="sidebar-footer">
         <div class="sidebar-lang">
           <span>Язык</span>
@@ -119,9 +119,9 @@
       </div>
     </aside>
 
-    <!-- Main Content Area -->
+    <!-- Область основного содержимого -->
     <main class="main-wrapper">
-      <!-- Top Header Controls -->
+      <!-- Элементы управления верхней шапки -->
       <header class="top-header">
         <div class="d-flex align-items-center gap-3">
           <button class="btn-toggle-sidebar" @click="sidebarMinimized = !sidebarMinimized">
@@ -138,7 +138,7 @@
         </div>
       </header>
 
-      <!-- View Slot Container -->
+      <!-- Контейнер слота представления -->
       <div class="page-card">
         <router-view />
       </div>
@@ -188,10 +188,10 @@ export default defineComponent({
       window.addEventListener('resize', handleResize)
       window.addEventListener('support-unread-updated', fetchUnreadSupport)
       fetchUnreadSupport()
-      // 15s, not 3s: this badge counts unread support messages across every
-      // chat, which is a scan of the message table on the server. A support
-      // reply is not something the admin needs to learn about within three
-      // seconds, and the cost was paid by every open admin tab, constantly.
+      // 15 с, а не 3: этот бейдж считает непрочитанные сообщения поддержки по всем
+      // чатам, а это скан таблицы сообщений на сервере. Ответ поддержки — не то, о
+      // чём админу нужно узнать в течение трёх секунд, а платила за это каждая
+      // открытая вкладка админки, постоянно.
       unreadTimer = setInterval(fetchUnreadSupport, 15000)
     })
 
@@ -281,7 +281,7 @@ export default defineComponent({
   overflow: hidden;
 }
 
-/* Sidebar Styles */
+/* Стили боковой панели */
 .sidebar {
   width: 260px;
   background: #ffffff;
@@ -308,7 +308,7 @@ export default defineComponent({
   padding: 0 4px;
 }
 
-/* Logout, pinned to the top row beside the logo. */
+/* Выход, закреплён в верхнем ряду рядом с логотипом. */
 .logo-logout {
   display: flex;
   align-items: center;
@@ -330,8 +330,8 @@ export default defineComponent({
   background: #fef2f2;
 }
 
-/* Minimized, the 80px rail has no room for two things side by side, so the
-   button drops under the logo mark instead of being squeezed out of view. */
+/* В свёрнутом виде на рейке шириной 80px нет места для двух элементов рядом,
+   поэтому кнопка уходит под знак логотипа, а не выдавливается из виду. */
 .sidebar.minimized .logo {
   flex-direction: column;
   gap: 12px;
@@ -373,19 +373,19 @@ export default defineComponent({
   letter-spacing: 0.3px;
 }
 
-/* The scrolling part of the sidebar.
-   The sidebar is a fixed-height flex column, so without this the nav simply
-   overflowed it and .admin-app's overflow:hidden clipped whatever did not fit.
-   On a phone that put the footer — language and "Выйти из аккаунта" — below the
-   fold with no way to scroll to it. */
+/* Прокручиваемая часть боковой панели.
+   Панель — flex-колонка фиксированной высоты, поэтому без этого навигация
+   просто переполняла её, а overflow:hidden у .admin-app обрезал всё, что не
+   влезло. На телефоне это уводило нижний блок — язык и «Выйти из аккаунта» —
+   за пределы экрана без возможности до него доскроллить. */
 .sidebar-scroll {
   flex: 1;
-  /* A flex child refuses to shrink below its content without this, which would
-     keep the overflow on the sidebar instead of moving it in here. */
+  /* Без этого flex-элемент отказывается сжиматься меньше своего содержимого,
+     и переполнение осталось бы на панели вместо того, чтобы переехать сюда. */
   min-height: 0;
   overflow-y: auto;
-  /* Scrolling to the end of the menu must not start dragging the page behind
-     the open overlay. */
+  /* Прокрутка до конца меню не должна начинать тащить страницу за открытым
+     оверлеем. */
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
@@ -483,7 +483,7 @@ export default defineComponent({
   font-size: 20px;
 }
 
-/* Sidebar footer: the language switcher, pinned to the bottom. */
+/* Низ боковой панели: переключатель языка, прижат к нижнему краю. */
 .sidebar-footer {
   margin-top: auto;
   padding-top: 12px;
@@ -506,7 +506,7 @@ export default defineComponent({
   color: #64748b;
 }
 
-/* Main Content Wrapper */
+/* Обёртка основного содержимого */
 .main-wrapper {
   flex: 1;
   display: flex;
@@ -516,7 +516,7 @@ export default defineComponent({
   gap: 24px;
 }
 
-/* Top Header */
+/* Верхняя шапка */
 .top-header {
   display: flex;
   justify-content: space-between;
@@ -592,7 +592,7 @@ export default defineComponent({
   transform: scale(1.05);
 }
 
-/* Page Card Box */
+/* Карточка страницы */
 .page-card {
   background: #ffffff;
   border-radius: 24px;
@@ -612,9 +612,9 @@ export default defineComponent({
     top: 0;
     left: 0;
     bottom: 0;
-    /* 100vh can exceed what is actually visible while a mobile browser's
-       toolbars are showing, which would push the footer off screen again even
-       with the nav scrolling. dvh tracks the visible viewport. */
+    /* 100vh может превышать реально видимое, пока показаны панели мобильного
+       браузера, и это снова вытолкнуло бы нижний блок за экран даже при
+       прокручиваемой навигации. dvh следит за видимой областью. */
     height: 100vh;
     height: 100dvh;
     z-index: 1000;
@@ -630,8 +630,8 @@ export default defineComponent({
     width: 260px !important;
   }
 
-  /* In the installed app the home indicator sits over the bottom of the screen;
-     without this the logout ends up underneath it. Resolves to 0 elsewhere. */
+  /* В установленном приложении домашний индикатор лежит поверх низа экрана;
+     без этого выход оказывается под ним. В остальных случаях равно 0. */
   .sidebar-footer {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }

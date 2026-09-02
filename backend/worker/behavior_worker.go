@@ -9,44 +9,44 @@ import (
 	"healthlogin/backend/service"
 )
 
-// BehaviorWorker drains the domain event outbox into the behaviour scripts.
+// BehaviorWorker вычерпывает outbox доменных событий в скрипты поведений.
 //
-// It runs often — the events it carries are things a user is waiting for: an
-// order that closes by itself once the customer is verified, and the reward
-// that goes with it.
+// Он работает часто: события, которые он несёт, — то, чего ждёт пользователь.
+// Заказ, закрывающий себя сам, когда заказчик верифицирован, и идущее с этим
+// вознаграждение.
 type BehaviorWorker struct {
 	dispatcher *service.BehaviorDispatcher
 	behaviors  *service.Behaviors
 	guard      func(func() error) error
 }
 
-// NewBehaviorWorker creates a BehaviorWorker.
+// NewBehaviorWorker создаёт BehaviorWorker.
 func NewBehaviorWorker(dispatcher *service.BehaviorDispatcher) *BehaviorWorker {
 	return &BehaviorWorker{dispatcher: dispatcher}
 }
 
-// WithScriptSync makes the worker recompile the scripts stored on catalog nodes
-// on a timer. An admin's edit applies to the process that served the save at
-// once; this is how it reaches the others, and how a change made directly in
-// the database is picked up at all.
+// WithScriptSync заставляет воркер по таймеру перекомпилировать скрипты,
+// хранящиеся на узлах каталога. Правка админа применяется к обслужившему
+// сохранение процессу сразу; так она доходит до остальных, и так вообще
+// подхватывается изменение, сделанное прямо в базе.
 //
-// It runs on every process, unguarded by the leader lock on purpose: compiling
-// is local work, and each process needs its own copy of the result.
+// Он работает на каждом процессе и намеренно не охраняется блокировкой лидера:
+// компиляция — локальная работа, и каждому процессу нужна своя копия результата.
 func (w *BehaviorWorker) WithScriptSync(behaviors *service.Behaviors) *BehaviorWorker {
 	w.behaviors = behaviors
 	return w
 }
 
-// WithLeader makes this worker run at most once across every process. It pays
-// money, so a second process running the same batch is exactly the duplication
-// the lock exists to prevent — the effect keys would catch it, but a guard that
-// stops the work is better than a constraint that undoes it.
+// WithLeader заставляет этот воркер выполняться не более одного раза среди всех
+// процессов. Он платит деньги, поэтому второй процесс, обрабатывающий ту же
+// пачку, — ровно то дублирование, ради предотвращения которого блокировка и
+// существует: ключи эффектов поймали бы его, но защита, останавливающая работу, лучше.
 func (w *BehaviorWorker) WithLeader(leader *Leader, name string) *BehaviorWorker {
 	w.guard = leader.Guard(name)
 	return w
 }
 
-// Start runs the dispatch loop.
+// Start выполняет цикл диспетчеризации.
 func (w *BehaviorWorker) Start(interval time.Duration) {
 	if w.dispatcher == nil {
 		return
@@ -67,7 +67,7 @@ func (w *BehaviorWorker) Start(interval time.Duration) {
 	log.Printf("[BehaviorWorker] Background worker started every %v", interval)
 }
 
-// StartScriptSync runs the node-script resync loop.
+// StartScriptSync выполняет цикл пересинхронизации скриптов узлов.
 func (w *BehaviorWorker) StartScriptSync(interval time.Duration) {
 	if w.behaviors == nil {
 		return

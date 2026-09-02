@@ -1,22 +1,22 @@
-// Package behaviors carries the behaviour scripts into the binary.
+// Package behaviors переносит скрипты поведений внутрь бинарника.
 //
-// Layout: one directory per behaviour, and the directory name is the code a
-// catalog node names in service_nodes.behavior_code.
+// Раскладка: по каталогу на поведение, и имя каталога — это код, на который
+// ссылается узел каталога в service_nodes.behavior_code.
 //
 //	behaviors/
 //	  verification/
-//	    config.star     constants and everything the script exchanges with the
-//	                    core: amounts, roles, event names, messages
-//	    behavior.star   MANIFEST and the hooks
+//	    config.star     константы и всё, чем скрипт обменивается с ядром:
+//	                    суммы, роли, имена событий, сообщения
+//	    behavior.star   MANIFEST и хуки
 //
-// config.star is executed first and its globals are visible to the rest of the
-// behaviour, so a rule and the number it uses are separate edits.
+// config.star выполняется первым, и его глобалы видны остальной части
+// поведения, поэтому правило и число, которое оно использует, правятся порознь.
 //
-// The scripts are data, not Go code — that is the point of them — but they must
-// travel with the deployment, and a container that has to mount a directory to
-// start is a worse default than one that already contains its behaviours. A
-// directory (BEHAVIORS_DIR) with the same layout is still read on top of these
-// at startup, so a rule can be corrected without rebuilding the image.
+// Скрипты — это данные, а не Go-код, в этом их смысл, но они должны ехать
+// вместе с деплоем, а контейнер, которому для старта надо примонтировать
+// каталог, — умолчание хуже того, что уже содержит свои поведения. Каталог
+// (BEHAVIORS_DIR) с той же раскладкой всё равно читается поверх этих при
+// старте, чтобы правило можно было поправить без пересборки образа.
 package behaviors
 
 import "embed"

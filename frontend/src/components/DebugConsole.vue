@@ -20,7 +20,7 @@
       <div ref="logEl" class="dbg-log">
         <div v-if="logs.length === 0" class="dbg-empty">Пока нет запросов…</div>
         <template v-for="log in logs" :key="log.id">
-          <!-- Tap a request to expand its full details. -->
+          <!-- Нажатие на запрос разворачивает его полные детали. -->
           <div class="dbg-line" :class="[lineClass(log), { open: isOpen(log.id) }]" @click="toggle(log.id)">
             <span class="dbg-caret">{{ isOpen(log.id) ? '▾' : '▸' }}</span>
             <span class="dbg-time">{{ fmtTime(log.ts) }}</span>
@@ -70,8 +70,8 @@ export default defineComponent({
   setup() {
     const collapsed = ref(true)
     const logEl = ref<HTMLElement | null>(null)
-    // Which request rows are expanded to show their details. A Set (reassigned on
-    // change) lets several be open at once.
+    // Какие строки запросов развёрнуты и показывают детали. Set (пересоздаваемый при
+    // изменении) позволяет держать открытыми сразу несколько.
     const openIds = ref<Set<number>>(new Set())
     const copiedId = ref<number | null>(null)
 
@@ -86,13 +86,13 @@ export default defineComponent({
       return ''
     }
 
-    // WS events have no HTTP status; show OK/ERR from the ok/error flags.
+    // У WS-событий нет HTTP-статуса; показываем OK/ERR по флагам ok/error.
     const codeLabel = (log: DebugLogEntry) => {
       if (log.method === 'WS') return log.error ? 'ERR' : 'OK'
       return log.status ?? (log.error ? 'ERR' : '…')
     }
 
-    // Strip origin and the /api prefix so the path reads clearly on a phone.
+    // Убираем источник и префикс /api, чтобы путь читался на телефоне.
     const shortUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '') || '/'
     const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString()
 
@@ -112,7 +112,7 @@ export default defineComponent({
           if (copiedId.value === log.id) copiedId.value = null
         }, 1200)
       } catch {
-        // clipboard unavailable — ignore
+        // буфер обмена недоступен — игнорируем
       }
     }
 
@@ -125,8 +125,8 @@ export default defineComponent({
       collapsed.value = true
     }
 
-    // Follow the tail like a terminal, but only when the user is already at the
-    // bottom, so scrolling up to read history is not yanked back down.
+    // Следим за хвостом, как в терминале, но только когда пользователь уже внизу,
+    // чтобы прокрутку вверх ради истории не дёргало обратно.
     watch(
       () => debugLogs.value.length,
       async () => {
@@ -261,7 +261,7 @@ export default defineComponent({
   min-width: 40px;
 }
 .dbg-method.ws {
-  color: #c084fc; /* WS events stand out from HTTP verbs */
+  color: #c084fc; /* WS-события выделяются на фоне HTTP-глаголов */
 }
 .dbg-code {
   font-weight: 700;
@@ -285,7 +285,7 @@ export default defineComponent({
   color: #7fe08a;
 }
 
-/* Expanded detail block */
+/* Развёрнутый блок деталей */
 .dbg-detail {
   margin: 2px 0 6px 14px;
   padding: 8px 10px;

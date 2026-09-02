@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// RateLimiter is a fixed-window limiter keyed by client address. It is process
-// local: with several replicas each one enforces its own share, which is enough
-// to stop credential stuffing and reset-code brute force from a single client
-// but should be replaced by a shared store (Redis) if the service is scaled out.
+// RateLimiter — ограничитель с фиксированным окном по адресу клиента. Он
+// локален для процесса: с несколькими репликами каждая держит свою долю, чего
+// хватает, чтобы остановить подстановку учётных данных и перебор кодов сброса с
+// одного клиента, но при масштабировании его стоит заменить общим хранилищем (Redis).
 type RateLimiter struct {
 	limit  int
 	window time.Duration
@@ -25,7 +25,7 @@ type bucket struct {
 	windowStart time.Time
 }
 
-// NewRateLimiter creates a limiter allowing limit requests per window per key.
+// NewRateLimiter создаёт ограничитель, разрешающий limit запросов за окно на ключ.
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		limit:   limit,
@@ -36,7 +36,7 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	return rl
 }
 
-// collect drops idle buckets so the map cannot grow without bound.
+// collect удаляет простаивающие корзины, чтобы карта не росла без границ.
 func (rl *RateLimiter) collect() {
 	ticker := time.NewTicker(10 * time.Minute)
 	for range ticker.C {
@@ -51,7 +51,7 @@ func (rl *RateLimiter) collect() {
 	}
 }
 
-// Allow reports whether another request from key fits in the current window.
+// Allow сообщает, помещается ли ещё один запрос с ключа в текущее окно.
 func (rl *RateLimiter) Allow(key string) bool {
 	now := time.Now()
 
@@ -70,7 +70,7 @@ func (rl *RateLimiter) Allow(key string) bool {
 	return true
 }
 
-// Middleware rejects requests over the limit with 429.
+// Middleware отвергает запросы сверх лимита с кодом 429.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !rl.Allow(clientIP(r)) {
@@ -82,7 +82,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP resolves the caller address, honouring the proxy header set by nginx.
+// clientIP определяет адрес вызывающего, учитывая прокси-заголовок от nginx.
 func clientIP(r *http.Request) string {
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		if first := strings.TrimSpace(strings.Split(forwarded, ",")[0]); first != "" {
@@ -96,8 +96,8 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// MaxBodyBytes caps the size of a request body before any handler reads it.
-// Multipart uploads set their own, larger limit.
+// MaxBodyBytes ограничивает размер тела запроса до того, как его прочтёт обработчик.
+// Multipart-загрузки ставят собственный, больший предел.
 func MaxBodyBytes(limit int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -109,8 +109,8 @@ func MaxBodyBytes(limit int64) func(http.Handler) http.Handler {
 	}
 }
 
-// SecurityHeaders sets the response headers that protect API responses in a
-// browser context. The API returns JSON only, so a restrictive CSP is safe.
+// SecurityHeaders выставляет заголовки ответа, защищающие ответы API в
+// браузерном контексте. API возвращает только JSON, поэтому строгий CSP безопасен.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

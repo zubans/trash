@@ -11,10 +11,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// The chat WebSocket lives on the same router as the API, and
-// gorilla/websocket asserts the ResponseWriter it is given to http.Hijacker
-// directly. A wrapper that only forwards Hijack through Unwrap fails that
-// assertion and every upgrade answers 500, so the interface is asserted here.
+// WebSocket чата живёт на том же роутере, что и API, а gorilla/websocket
+// приводит переданный ему ResponseWriter напрямую к http.Hijacker. Обёртка,
+// которая лишь пробрасывает Hijack через Unwrap, это приведение проваливает, и
+// каждый апгрейд отвечает 500, поэтому интерфейс проверяется здесь.
 func TestMiddlewarePreservesHijacker(t *testing.T) {
 	var hijackable bool
 	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -35,8 +35,8 @@ func TestMiddlewareLabelsByRoutePattern(t *testing.T) {
 	r.Use(Middleware)
 	r.Get("/api/orders/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
-	// Two different orders must land on one series: the label is the pattern,
-	// not the path, or every entity id would mint its own time series.
+	// Два разных заказа должны попасть в один ряд: лейбл — это шаблон, а не путь,
+	// иначе каждый идентификатор сущности штамповал бы собственный временной ряд.
 	for _, path := range []string{"/api/orders/aaa", "/api/orders/bbb"} {
 		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
 	}
@@ -62,8 +62,8 @@ func TestMiddlewareFoldsUnmatchedPaths(t *testing.T) {
 	}
 }
 
-// hijackRecorder is an httptest.ResponseRecorder that also claims to be an
-// http.Hijacker, standing in for the real net/http response writer.
+// hijackRecorder — это httptest.ResponseRecorder, который к тому же выдаёт себя
+// за http.Hijacker, заменяя настоящий writer ответа из net/http.
 type hijackRecorder struct{ *httptest.ResponseRecorder }
 
 func (hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) { return nil, nil, nil }

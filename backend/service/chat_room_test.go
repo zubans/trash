@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// joinAndLeave does what one WebSocket connection does to a room: take it,
-// register, then unregister and let it go.
+// joinAndLeave делает с комнатой то же, что одно соединение WebSocket: берёт
+// её, регистрируется, затем отписывается и отпускает.
 func joinAndLeave(s *ChatService, orderID, chatID uuid.UUID) {
 	room := s.getOrCreateRoom(context.Background(), orderID, chatID)
 	client := &ChatClient{Send: make(chan []byte, 1)}
@@ -19,8 +19,8 @@ func joinAndLeave(s *ChatService, orderID, chatID uuid.UUID) {
 	s.releaseRoom(room)
 }
 
-// A room must survive while any connection still holds it, and disappear once
-// the last one leaves.
+// Комната обязана жить, пока её держит хоть одно соединение, и исчезнуть, когда
+// уходит последнее.
 func TestChatRoomLifecycle(t *testing.T) {
 	s := NewChatService(nil, nil)
 	orderID, chatID := uuid.New(), uuid.New()
@@ -54,13 +54,13 @@ func TestChatRoomLifecycle(t *testing.T) {
 	}
 }
 
-// Connections joining and leaving the same order concurrently must not wedge.
+// Соединения, входящие и выходящие по одному заказу одновременно, не должны заклинивать.
 //
-// This is the failure the reference count exists to prevent: a connection that
-// had taken the room pointer, and reached its blocking send on Register just
-// after the previous connection's departure retired the room, blocked forever
-// on a goroutine that had already returned. Run with -race, this also covers
-// the map access itself.
+// Это тот отказ, ради предотвращения которого и существует счётчик ссылок:
+// соединение, взявшее указатель на комнату и добравшееся до блокирующей
+// отправки в Register сразу после того, как уход предыдущего соединения списал
+// комнату, блокировалось навсегда на уже вернувшейся горутине. Запуск с -race
+// покрывает заодно и сам доступ к карте.
 func TestChatRoomChurnDoesNotBlock(t *testing.T) {
 	s := NewChatService(nil, nil)
 	orderID, chatID := uuid.New(), uuid.New()

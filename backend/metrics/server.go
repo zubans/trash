@@ -8,16 +8,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Serve starts the metrics listener in the background.
+// Serve запускает слушатель метрик в фоне.
 //
-// It is a separate server on a separate port on purpose. /metrics enumerates
-// the shape of the system and must not be reachable from the internet: the
-// port is only published to the compose network, where Prometheus scrapes it,
-// and nginx never proxies it. Keeping it off the API router also means a
-// scrape cannot be rate limited, CORS-rejected or slowed down by the
-// application middleware chain.
+// Это намеренно отдельный сервер на отдельном порту. /metrics перечисляет
+// устройство системы и не должен быть достижим из интернета: порт публикуется
+// только в сеть compose, где его собирает Prometheus, а nginx его не
+// проксирует. Вынос его с роутера API означает также, что сбор нельзя
+// ограничить по частоте, отвергнуть по CORS или замедлить цепочкой
+// прикладных middleware.
 //
-// Passing an empty addr disables the listener.
+// Пустой addr выключает слушатель.
 func Serve(addr string, ops OpsHandlers) {
 	if addr == "" {
 		return
@@ -26,13 +26,13 @@ func Serve(addr string, ops OpsHandlers) {
 	mux := http.NewServeMux()
 	ops.register(mux)
 	mux.Handle("/metrics", promhttp.HandlerFor(Registry, promhttp.HandlerOpts{
-		// A broken collector must not take the scrape endpoint down with it:
-		// report what can be reported and log the rest.
+		// Сломанный коллектор не должен утаскивать за собой эндпоинт сбора:
+		// отдаём, что можно отдать, остальное пишем в лог.
 		ErrorHandling: promhttp.ContinueOnError,
 		ErrorLog:      log.Default(),
 	}))
-	// Liveness for the scraper itself, so a container healthcheck has something
-	// cheap to hit that does not touch the database.
+	// Живость самого сборщика, чтобы у healthcheck контейнера было что-то дешёвое,
+	// что не трогает базу.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -50,7 +50,7 @@ func Serve(addr string, ops OpsHandlers) {
 	go func() {
 		log.Printf("[metrics] serving /metrics on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// Not fatal: losing observability must not take the API with it.
+			// Не фатально: потеря наблюдаемости не должна утаскивать API.
 			log.Printf("[metrics] listener stopped: %v", err)
 		}
 	}()

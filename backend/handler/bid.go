@@ -13,13 +13,13 @@ import (
 	"healthlogin/backend/service"
 )
 
-// BidHandler holds dependencies for bidding HTTP endpoints.
+// BidHandler хранит зависимости HTTP-эндпоинтов торгов.
 type BidHandler struct {
 	bidService   *service.BidService
 	orderService *service.OrderService
 }
 
-// NewBidHandler creates a new BidHandler.
+// NewBidHandler создаёт новый BidHandler.
 func NewBidHandler(bidService *service.BidService, orderService *service.OrderService) *BidHandler {
 	return &BidHandler{
 		bidService:   bidService,
@@ -27,7 +27,7 @@ func NewBidHandler(bidService *service.BidService, orderService *service.OrderSe
 	}
 }
 
-// CreateConstructionOrderHandler creates a construction waste order auction.
+// CreateConstructionOrderHandler создаёт аукцион на вывоз строительного мусора.
 func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -58,7 +58,7 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(order)
 }
 
-// CreateBidHandler allows executors to bid on construction orders.
+// CreateBidHandler позволяет исполнителям делать ставки по строительным заказам.
 func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -92,7 +92,7 @@ func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bid)
 }
 
-// AcceptBidHandler allows customers to accept a specific bid.
+// AcceptBidHandler позволяет заказчикам принять конкретную ставку.
 func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -118,7 +118,7 @@ func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "bid accepted successfully"})
 }
 
-// GetBidsHandler lists all bids on a specific construction order.
+// GetBidsHandler перечисляет все ставки по конкретному строительному заказу.
 func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {
@@ -143,7 +143,7 @@ func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bids)
 }
 
-// GetAvailableConstructionOrdersHandler lists open construction orders for executors.
+// GetAvailableConstructionOrdersHandler перечисляет открытые строительные заказы для исполнителей.
 func (h *BidHandler) GetAvailableConstructionOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok || user == nil {

@@ -14,7 +14,7 @@ import (
 	"healthlogin/backend/service"
 )
 
-// SLAWorker automatically downgrades delayed ASAP/URGENT orders.
+// SLAWorker автоматически понижает просроченные заказы ASAP/URGENT.
 type SLAWorker struct {
 	db           *sql.DB
 	orderService *service.OrderService
@@ -23,9 +23,9 @@ type SLAWorker struct {
 	guard func(func() error) error
 }
 
-// NewSLAWorker creates a new SLAWorker. The ledger is required: the downgrade
-// refunds part of the hold, and a refund that does not come out of the escrow
-// account is exactly the one-sided movement the ledger exists to prevent.
+// NewSLAWorker создаёт новый SLAWorker. Реестр обязателен: понижение возвращает
+// часть удержания, а возврат, который не выходит со счёта эскроу, — ровно то
+// одностороннее движение, ради предотвращения которого реестр и существует.
 func NewSLAWorker(db *sql.DB, orderService *service.OrderService, chatService *service.ChatService, ledger *service.Ledger) *SLAWorker {
 	return &SLAWorker{
 		db:           db,
@@ -35,7 +35,7 @@ func NewSLAWorker(db *sql.DB, orderService *service.OrderService, chatService *s
 	}
 }
 
-// Start runs the worker loop periodically.
+// Start периодически выполняет цикл воркера.
 func (w *SLAWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -55,7 +55,7 @@ type overdueOrder struct {
 	HoldAmount       money.Amount
 }
 
-// CheckSLAOverdue scans for overdue orders and updates them.
+// CheckSLAOverdue ищет просроченные заказы и обновляет их.
 func (w *SLAWorker) CheckSLAOverdue() error {
 	query := `
 		SELECT id, customer_id, service_variant_id, hold_amount 
@@ -101,14 +101,14 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Calculate base (non-urgent) price for the variant.
+	// 1. Считаем базовую (несрочную) цену варианта.
 	basePrice, err := w.orderService.CalculatePrice(context.Background(), o.ServiceVariantID, false, false, false)
 	if err != nil {
 		return err
 	}
 	if basePrice > o.HoldAmount {
-		// Never raise the hold retroactively; the customer only authorised the
-		// amount that was taken at order time.
+		// Никогда не поднимаем удержание задним числом; заказчик авторизовал только
+		// ту сумму, которая была взята в момент заказа.
 		basePrice = o.HoldAmount
 	}
 
@@ -117,10 +117,10 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 		refund = money.Zero
 	}
 
-	// 2. Update order columns. hold_amount must follow the refund: the payout at
-	// confirmation time is derived from the hold, so leaving the original urgent
-	// hold in place would pay the executor the full urgent price after the
-	// customer has already been refunded the difference.
+	// 2. Обновляем колонки заказа. hold_amount обязан следовать за возвратом:
+	// выплата в момент подтверждения выводится из удержания, поэтому оставленное
+	// исходное срочное удержание выплатило бы исполнителю полную срочную цену уже
+	// после того, как заказчику вернули разницу.
 	res, err := tx.Exec(`
 		UPDATE orders
 		SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, hold_amount = $1, is_downgraded = TRUE
@@ -133,17 +133,17 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 		return err
 	}
 	if affected == 0 {
-		// Another worker or a confirmation already moved this order on.
+		// Другой воркер или подтверждение уже сдвинули этот заказ дальше.
 		return nil
 	}
 
-	// 3. Issue refund if applicable.
+	// 3. Выдаём возврат, если он положен.
 	//
-	// Out of escrow, through the ledger. The hold is reduced to basePrice just
-	// above, so escrow must give up exactly the difference; the raw UPDATE this
-	// replaces credited the customer and left escrow holding money that no
-	// order claimed any more, which is one of the ways the platform books came
-	// to differ from the sum of user balances.
+	// Из эскроу, через реестр. Удержание сокращается до basePrice чуть выше,
+	// поэтому эскроу обязан отдать ровно разницу; заменённый этим сырой UPDATE
+	// зачислял заказчику и оставлял эскроу держать деньги, на которые больше не
+	// претендовал ни один заказ, — один из путей, которыми книги платформы
+	// разошлись с суммой балансов пользователей.
 	if refund.IsPositive() {
 		if err := w.ledger.Release(context.Background(), tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
 			return err
@@ -155,7 +155,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 		return err
 	}
 
-	// 4. Send websocket notification to active rooms
+	// 4. Отправляем уведомление по websocket в активные комнаты
 	w.chatService.BroadcastSystemMessage(context.Background(), o.ID, map[string]interface{}{
 		"type":         "system",
 		"action":       "downgrade",
@@ -167,9 +167,9 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	return nil
 }
 
-// guard runs one tick under the job's advisory lock when a Leader is wired, so
-// a second replica skips the tick instead of duplicating it. Unset means run
-// directly, which is what a single-process deployment and the tests do.
+// guard выполняет один тик под advisory-блокировкой задачи, когда подключён
+// Leader, чтобы вторая реплика пропустила тик, а не продублировала его. Без
+// него выполняется напрямую — так и делают однопроцессный деплой и тесты.
 func (w *SLAWorker) runGuarded(job func() error) error {
 	if w.guard == nil {
 		return job()
@@ -177,7 +177,7 @@ func (w *SLAWorker) runGuarded(job func() error) error {
 	return w.guard(job)
 }
 
-// WithLeader makes this worker run at most once across every process.
+// WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.
 func (w *SLAWorker) WithLeader(leader *Leader, name string) *SLAWorker {
 	w.guard = leader.Guard(name)
 	return w

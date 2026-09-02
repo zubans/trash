@@ -1,6 +1,6 @@
 <template>
   <div class="reconciliation-page">
-    <!-- Top Action Toolbar -->
+    <!-- Верхняя панель действий -->
     <div class="page-toolbar mb-4">
       <div class="toolbar-info">
         <h2 class="toolbar-title">{{ $t('reconciliation.title') }}</h2>
@@ -21,7 +21,7 @@
       </div>
     </div>
 
-    <!-- API Error Alert -->
+    <!-- Уведомление об ошибке API -->
     <div v-if="error" class="alert-card danger mb-4">
       <div class="alert-icon"><i class="ph-bold ph-warning-circle"></i></div>
       <div class="alert-content">
@@ -30,7 +30,7 @@
       </div>
     </div>
 
-    <!-- Main Alert Card (Status & Detailed Technical Log) -->
+    <!-- Основная карточка уведомления (статус и подробный технический лог) -->
     <div
       v-if="report"
       class="alert-card mb-4"
@@ -44,7 +44,7 @@
           {{ isReportBalanced ? $t('reconciliation.balanced') : $t('reconciliation.drifted') }}
         </div>
         
-        <!-- Technical Log in JetBrains Mono -->
+        <!-- Технический лог в JetBrains Mono -->
         <div
           v-if="report.summary"
           class="alert-tech-log"
@@ -53,7 +53,7 @@
           {{ report.summary }}
         </div>
         
-        <!-- Human Explainer Text -->
+        <!-- Пояснение человеческим языком -->
         <div class="alert-text">
           {{ $t('reconciliation.explainer') }}
           <div class="alert-note">{{ $t('reconciliation.runNote') }}</div>
@@ -61,7 +61,7 @@
       </div>
     </div>
 
-    <!-- Bento Grid Metrics -->
+    <!-- Метрики в bento-сетке -->
     <div v-if="books" class="metrics-grid mb-4">
       <div class="metric-card">
         <div class="metric-label">{{ $t('reconciliation.userTotal') }}</div>
@@ -82,7 +82,7 @@
       </div>
     </div>
 
-    <!-- Section 1: System Accounts -->
+    <!-- Раздел 1: системные счета -->
     <div v-if="books && books.accounts && books.accounts.length" class="section-wrap mb-4">
       <div class="section-header">
         <i class="ph-fill ph-hard-drives"></i>
@@ -122,7 +122,7 @@
       </div>
     </div>
 
-    <!-- Section 2: Escrow & Active Orders -->
+    <!-- Раздел 2: эскроу и активные заказы -->
     <div v-if="books" class="section-wrap mb-4">
       <div class="section-header">
         <i class="ph-fill ph-lock-key"></i>
@@ -151,7 +151,7 @@
       </div>
     </div>
 
-    <!-- Section 3: Discrepancies (if any) -->
+    <!-- Раздел 3: расхождения (если есть) -->
     <div
       v-if="report && report.discrepancies && report.discrepancies.length"
       class="section-wrap section-wrap-danger mb-4"
@@ -187,7 +187,7 @@
       </div>
     </div>
 
-    <!-- Section 4: Hold Anomalies (if any) -->
+    <!-- Раздел 4: аномалии удержаний (если есть) -->
     <div
       v-if="report && report.hold_anomalies && report.hold_anomalies.length"
       class="section-wrap section-wrap-warning mb-4"
@@ -233,7 +233,7 @@
         </div>
       </div>
 
-      <!-- Pagination for anomalies -->
+      <!-- Постраничная навигация по аномалиям -->
       <div v-if="report.hold_anomalies.length > perPage" class="pagination-bar mt-2">
         <button
           type="button"
@@ -255,7 +255,7 @@
       </div>
     </div>
 
-    <!-- Section 5: Unknown Transaction Types Alert -->
+    <!-- Раздел 5: уведомление о неизвестных типах транзакций -->
     <div
       v-if="report && report.unknown_transaction_types && report.unknown_transaction_types.length"
       class="alert-card danger mb-4"
@@ -269,7 +269,7 @@
       </div>
     </div>
 
-    <!-- Loading Skeleton -->
+    <!-- Скелет загрузки -->
     <div v-if="loading && !report" class="skeleton-container py-5">
       <div class="skeleton-bar title-bar mb-4"></div>
       <div class="skeleton-grid mb-4">
@@ -280,7 +280,7 @@
       <div class="skeleton-box mb-4"></div>
     </div>
 
-    <!-- Copy Toast Notification -->
+    <!-- Всплывающее уведомление о копировании -->
     <transition name="toast-fade">
       <div v-if="toastMessage" class="toast-notification">
         <i class="ph-fill ph-check-circle"></i>
@@ -455,7 +455,7 @@ export default defineComponent({
   color: #0f172a;
 }
 
-/* Toolbar */
+/* Панель инструментов */
 .page-toolbar {
   display: flex;
   justify-content: space-between;
@@ -523,7 +523,7 @@ export default defineComponent({
   to { transform: rotate(360deg); }
 }
 
-/* Alert Card */
+/* Карточка уведомления */
 .alert-card {
   border-radius: 20px;
   padding: 24px;
@@ -598,7 +598,7 @@ export default defineComponent({
 .alert-text { font-size: 14px; color: #7f1d1d; line-height: 1.5; }
 .alert-card.success .alert-text { font-size: 14px; color: #047857; line-height: 1.5; }
 
-/* Bento Grid Metrics */
+/* Метрики в bento-сетке */
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -647,7 +647,7 @@ export default defineComponent({
 .metric-card.highlight-success .metric-label { color: #065f46; }
 .metric-card.highlight-success .metric-value { color: #047857; }
 
-/* Section Styling */
+/* Оформление разделов */
 .section-wrap {
   background: #ffffff;
   border-radius: 20px;
@@ -678,7 +678,7 @@ export default defineComponent({
   font-weight: 600;
 }
 
-/* Tables */
+/* Таблицы */
 .table-responsive {
   width: 100%;
   overflow-x: auto;
@@ -730,7 +730,7 @@ export default defineComponent({
   grid-template-columns: 220px 140px 140px 1fr;
 }
 
-/* Cells & Tags */
+/* Ячейки и метки */
 .cell-mono {
   font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
@@ -856,7 +856,7 @@ export default defineComponent({
   text-align: right;
 }
 
-/* Pagination Bar */
+/* Панель постраничной навигации */
 .pagination-bar {
   display: flex;
   align-items: center;
@@ -895,7 +895,7 @@ export default defineComponent({
   color: #64748b;
 }
 
-/* Skeleton Loading */
+/* Скелет загрузки */
 .skeleton-container {
   display: flex;
   flex-direction: column;
@@ -935,7 +935,7 @@ export default defineComponent({
   50% { opacity: 0.9; }
 }
 
-/* Toast Notification */
+/* Всплывающее уведомление */
 .toast-notification {
   position: fixed;
   bottom: 24px;
@@ -964,7 +964,7 @@ export default defineComponent({
   transform: translateY(10px);
 }
 
-/* Responsive Rules */
+/* Правила адаптивности */
 @media (max-width: 900px) {
   .metrics-grid {
     grid-template-columns: 1fr;

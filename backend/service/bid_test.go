@@ -51,7 +51,7 @@ func (m *mockBidRepo) LockBidForUpdate(ctx context.Context, q repository.Querier
 func (m *mockBidRepo) SetBidStatus(ctx context.Context, q repository.Querier, bidID uuid.UUID, status string) error {
 	for _, b := range m.bids {
 		if b.ID == bidID {
-			// Mirrors the guarded UPDATE: only a pending bid can be decided.
+			// Повторяет охраняемый UPDATE: решить можно только ожидающую ставку.
 			if b.Status != "PENDING" {
 				return repository.ErrConflict
 			}
@@ -81,7 +81,7 @@ func TestBidService_CreateBid(t *testing.T) {
 
 	executorID := uuid.New()
 
-	// The order has to exist: bidding now re-checks the order and the executor.
+	// Заказ обязан существовать: подача ставки теперь перепроверяет заказ и исполнителя.
 	order := &repository.Order{
 		ID:               uuid.New(),
 		CustomerID:       uuid.New(),
@@ -91,14 +91,14 @@ func TestBidService_CreateBid(t *testing.T) {
 	orderRepo.orders = append(orderRepo.orders, order)
 	orderID := order.ID
 
-	// Case 1: No active shift (should fail)
+	// Случай 1: нет активной смены (должно упасть)
 	_, err := srv.CreateBid(context.Background(), orderID, executorID, money.FromRubles(350.00))
 	if err == nil {
 		t.Error("expected error placing bid without active shift")
 	}
 
-	// Case 2: Active shift (should succeed)
-	_, _ = shiftRepo.StartShift(context.Background(), executorID, 1) // Start active shift in mock
+	// Случай 2: активная смена (должно пройти)
+	_, _ = shiftRepo.StartShift(context.Background(), executorID, 1) // Стартуем активную смену в подделке
 	bid, err := srv.CreateBid(context.Background(), orderID, executorID, money.FromRubles(350.00))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -108,13 +108,13 @@ func TestBidService_CreateBid(t *testing.T) {
 		t.Errorf("expected price 350.00, got %s", bid.OfferedPrice)
 	}
 
-	// Case 3: Invalid price (should fail)
+	// Случай 3: недопустимая цена (должно упасть)
 	_, err = srv.CreateBid(context.Background(), orderID, executorID, money.FromRubles(-10.0))
 	if err == nil {
 		t.Error("expected error placing bid with negative price")
 	}
 
-	// Case 4: bidding on your own order is refused.
+	// Случай 4: ставка по собственному заказу отклоняется.
 	_, err = srv.CreateBid(context.Background(), orderID, order.CustomerID, 350.00)
 	if err == nil {
 		t.Error("expected error placing bid on own order")

@@ -7,7 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// renderForTest returns the exposition text the scraper would see.
+// renderForTest возвращает текст выкладки, который увидел бы сборщик.
 func renderForTest(t *testing.T) string {
 	t.Helper()
 	rec := httptest.NewRecorder()

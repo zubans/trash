@@ -1,7 +1,7 @@
 <template>
   <div class="profile-page-wrapper">
     <div class="profile-container">
-      <!-- Top Navigation Header -->
+      <!-- Верхняя навигационная шапка -->
       <div class="top-nav">
         <button type="button" class="btn-back" @click="goBack">
           <i class="ph-bold ph-arrow-left"></i>
@@ -14,7 +14,7 @@
       </div>
 
       <div class="profile-card">
-        <!-- Phone Banner -->
+        <!-- Баннер с телефоном -->
         <div class="user-phone-banner">
           <div class="banner-avatar">
             <i class="ph ph-user"></i>
@@ -28,7 +28,7 @@
           </div>
         </div>
 
-        <!-- Date of Birth -->
+        <!-- Дата рождения -->
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-cake" style="color: #ec4899;"></i>
@@ -63,7 +63,7 @@
           </div>
         </div>
 
-        <!-- Email Management -->
+        <!-- Управление почтой -->
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
@@ -90,7 +90,7 @@
           </div>
         </div>
 
-        <!-- Address Management -->
+        <!-- Управление адресами -->
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-map-pin" style="color: #ef4444;"></i>
@@ -99,7 +99,7 @@
           <div class="section-subtitle">Выберите активный для заказов</div>
         </div>
 
-        <!-- Address List -->
+        <!-- Список адресов -->
         <div class="address-list">
           <div v-if="customerAddresses.length === 0" class="empty-address-box">
             Нет сохраненных адресов. Добавьте адрес ниже.
@@ -140,7 +140,7 @@
           </label>
         </div>
 
-        <!-- Add / Edit Address Form -->
+        <!-- Форма добавления / правки адреса -->
         <div v-if="customerAddresses.length < 2 || editingAddressId" class="add-address-form">
           <div v-if="editingAddressId" class="edit-hint-row">
             <span><i class="ph-bold ph-pencil-simple"></i> Изменение адреса</span>
@@ -168,7 +168,7 @@
           <span>ℹ️ Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
         </div>
 
-        <!-- Action Footer -->
+        <!-- Подвал с действиями -->
         <div class="profile-actions">
           <button type="button" class="btn-back-home" @click="goBack">
             <i class="ph-bold ph-house"></i>
@@ -201,7 +201,7 @@ export default defineComponent({
     const newAddress = ref<StructuredAddress | null>(null)
     const addingAddress = ref(false)
     const addressError = ref('')
-    // Id of the saved address currently being edited (null = adding a new one).
+    // Id сохранённого адреса, который сейчас редактируют (null — добавляется новый).
     const editingAddressId = ref<string | null>(null)
 
     const emailInput = ref('')
@@ -302,7 +302,7 @@ export default defineComponent({
     const startEditAddress = (addr: any) => {
       editingAddressId.value = addr.id
       addressError.value = ''
-      // Seed the field with the saved parts so it can be adjusted in place.
+      // Заполняем поле сохранёнными частями, чтобы адрес можно было поправить на месте.
       newAddress.value = {
         value: addr.address,
         region: addr.region,
@@ -326,7 +326,7 @@ export default defineComponent({
     const addNewAddress = async () => {
       const chosen = newAddress.value
       const editingId = editingAddressId.value
-      // When adding (not editing) the two-address cap applies.
+      // При добавлении (не редактировании) действует лимит в два адреса.
       if (!chosen || addingAddress.value) return
       if (!editingId && customerAddresses.value.length >= 2) return
 
@@ -337,10 +337,10 @@ export default defineComponent({
           ? customerAddresses.value.find((a: any) => a.id === editingId)?.address === defaultAddress.value
           : false
 
-        // Editing replaces the saved address: remove the old row first so the
-        // new one fits within the two-address cap, then save the new parts.
-        // Coordinates travel with the parts, so the address stays visible to
-        // distance matching.
+        // Редактирование заменяет сохранённый адрес: сначала убираем старую строку,
+        // чтобы новая влезла в лимит двух адресов, затем сохраняем новые части.
+        // Координаты едут вместе с частями, поэтому адрес остаётся видимым для
+        // подбора по расстоянию.
         if (editingId) {
           await api.delete(`/user/address/${editingId}`)
         }
@@ -361,15 +361,15 @@ export default defineComponent({
         if (customerAddresses.value.length === 1) {
           defaultAddress.value = customerAddresses.value[0].address
         }
-        // Keep the edited address active if it was the default before.
+        // Оставляем отредактированный адрес активным, если он был адресом по умолчанию.
         if (wasDefault) {
           await setActiveAddress(chosen.value)
         }
         newAddress.value = null
         editingAddressId.value = null
       } catch (err: any) {
-        // Previously this only reached the console, so a rejected address
-        // looked like a button that did nothing.
+        // Раньше это доходило только до консоли, поэтому отклонённый адрес
+        // выглядел как кнопка, которая ничего не делает.
         addressError.value =
           err?.response?.data?.error || err?.response?.data || 'Не удалось сохранить адрес'
       } finally {
@@ -500,7 +500,7 @@ export default defineComponent({
   padding: 32px;
 }
 
-/* User phone banner */
+/* Баннер с телефоном пользователя */
 .user-phone-banner {
   display: flex;
   align-items: center;
@@ -539,7 +539,7 @@ export default defineComponent({
 .banner-fullname { font-size: 14px; font-weight: 600; color: #0f172a; margin-top: 2px; }
 .banner-subtitle { font-size: 13px; color: #64748b; display: block; margin-top: 2px; }
 
-/* Section Header */
+/* Заголовок раздела */
 .section-header {
   margin-bottom: 14px;
 }
@@ -568,7 +568,7 @@ export default defineComponent({
   margin-left: 4px;
 }
 
-/* Email Box */
+/* Блок почты */
 .email-box {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -630,7 +630,7 @@ export default defineComponent({
   color: #ef4444;
 }
 
-/* Address List */
+/* Список адресов */
 .address-list {
   display: flex;
   flex-direction: column;
@@ -756,7 +756,7 @@ export default defineComponent({
   background: #eef2ff;
 }
 
-/* Add / edit address form */
+/* Форма добавления / правки адреса */
 .add-address-field { flex: 1 1 100%; }
 
 .edit-hint-row {

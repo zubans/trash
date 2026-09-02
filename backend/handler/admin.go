@@ -15,17 +15,17 @@ import (
 	"healthlogin/backend/service"
 )
 
-// AdminHandler holds HTTP handler functions for admin operations.
+// AdminHandler хранит HTTP-обработчики административных операций.
 type AdminHandler struct {
 	adminService *service.AdminService
 }
 
-// NewAdminHandler creates a new AdminHandler.
+// NewAdminHandler создаёт новый AdminHandler.
 func NewAdminHandler(adminService *service.AdminService) *AdminHandler {
 	return &AdminHandler{adminService: adminService}
 }
 
-// GetUsersHandler retrieves a paginated and filtered list of users.
+// GetUsersHandler отдаёт постраничный отфильтрованный список пользователей.
 func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -39,7 +39,7 @@ func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove passwords from response
+	// Убираем пароли из ответа
 	for _, u := range users {
 		u.Password = ""
 	}
@@ -52,7 +52,7 @@ func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// UpdateUserStatusHandler blocks or unblocks a user.
+// UpdateUserStatusHandler блокирует или разблокирует пользователя.
 func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -84,7 +84,7 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]string{"message": "status updated successfully"})
 }
 
-// UpdateUserVerifiedHandler sets or clears a user's manual verification flag.
+// UpdateUserVerifiedHandler ставит или снимает флаг ручной верификации пользователя.
 func (h *AdminHandler) UpdateUserVerifiedHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -116,7 +116,7 @@ func (h *AdminHandler) UpdateUserVerifiedHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(map[string]string{"message": "verification updated successfully"})
 }
 
-// UpdateUserRoleHandler changes a user's role.
+// UpdateUserRoleHandler меняет роль пользователя.
 func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -148,8 +148,8 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"message": "role updated successfully"})
 }
 
-// UpdateUserRolesHandler replaces the full set of roles a user holds
-// (multi-role). Admin-only.
+// UpdateUserRolesHandler заменяет полный набор ролей пользователя
+// (мультироль). Только для админов.
 func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -181,7 +181,7 @@ func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]string{"message": "roles updated successfully"})
 }
 
-// UpdateUserAddressHandler updates a customer's pickup address (admin-only).
+// UpdateUserAddressHandler обновляет адрес подачи заказчика (только для админов).
 func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -207,7 +207,7 @@ func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(map[string]string{"message": "address updated successfully"})
 }
 
-// UpdateUserNameHandler updates a user's full name (admin-only).
+// UpdateUserNameHandler обновляет ФИО пользователя (только для админов).
 func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -235,8 +235,8 @@ func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"message": "name updated successfully"})
 }
 
-// UpdateUserBirthDateHandler corrects a user's birth date. It is separate from
-// the name handler so a rejected date cannot roll back an accepted name.
+// UpdateUserBirthDateHandler исправляет дату рождения пользователя. Он отделён
+// от обработчика имени, чтобы отклонённая дата не откатывала принятое имя.
 func (h *AdminHandler) UpdateUserBirthDateHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -262,7 +262,7 @@ func (h *AdminHandler) UpdateUserBirthDateHandler(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(map[string]string{"message": "birth date updated successfully"})
 }
 
-// TopUpUserBalanceHandler adds funds directly to a user's balance.
+// TopUpUserBalanceHandler зачисляет средства прямо на баланс пользователя.
 func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -294,15 +294,15 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]string{"message": "balance topped up successfully"})
 }
 
-// pageParams reads limit/offset from the query string. Both are optional; the
-// service clamps them.
+// pageParams читает limit/offset из строки запроса. Оба необязательны; сервис
+// ограничивает их сверху.
 func pageParams(r *http.Request) (int, int) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	return limit, offset
 }
 
-// GetTopUpRequestsHandler lists manual balance top-up requests.
+// GetTopUpRequestsHandler перечисляет ручные заявки на пополнение баланса.
 func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	reqs, err := h.adminService.GetTopUpRequests(r.Context(), limit, offset)
@@ -315,7 +315,7 @@ func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(reqs)
 }
 
-// ApproveTopUpRequestsHandler approves a balance top-up request.
+// ApproveTopUpRequestsHandler одобряет заявку на пополнение баланса.
 func (h *AdminHandler) ApproveTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	reqID, err := uuid.Parse(idStr)
@@ -339,7 +339,7 @@ func (h *AdminHandler) ApproveTopUpRequestsHandler(w http.ResponseWriter, r *htt
 	json.NewEncoder(w).Encode(map[string]string{"message": "top-up request approved successfully"})
 }
 
-// RejectTopUpRequestsHandler rejects a balance top-up request.
+// RejectTopUpRequestsHandler отклоняет заявку на пополнение баланса.
 func (h *AdminHandler) RejectTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	reqID, err := uuid.Parse(idStr)
@@ -363,7 +363,7 @@ func (h *AdminHandler) RejectTopUpRequestsHandler(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(map[string]string{"message": "top-up request rejected successfully"})
 }
 
-// CreateWithdrawalRequestHandler creates a withdrawal request for the authenticated user.
+// CreateWithdrawalRequestHandler создаёт заявку на вывод для аутентифицированного пользователя.
 func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -390,7 +390,7 @@ func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *
 	json.NewEncoder(w).Encode(wReq)
 }
 
-// GetWithdrawalRequestsHandler lists all manual balance withdrawal requests.
+// GetWithdrawalRequestsHandler перечисляет все ручные заявки на вывод средств.
 func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	reqs, err := h.adminService.GetWithdrawalRequests(r.Context(), limit, offset)
@@ -403,7 +403,7 @@ func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(reqs)
 }
 
-// ApproveWithdrawalRequestsHandler approves a balance withdrawal request.
+// ApproveWithdrawalRequestsHandler одобряет заявку на вывод средств.
 func (h *AdminHandler) ApproveWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	reqID, err := uuid.Parse(idStr)
@@ -427,7 +427,7 @@ func (h *AdminHandler) ApproveWithdrawalRequestsHandler(w http.ResponseWriter, r
 	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request approved successfully"})
 }
 
-// RejectWithdrawalRequestsHandler rejects a balance withdrawal request.
+// RejectWithdrawalRequestsHandler отклоняет заявку на вывод средств.
 func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	reqID, err := uuid.Parse(idStr)
@@ -451,8 +451,8 @@ func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r 
 	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request rejected successfully"})
 }
 
-// GetReconciliationHandler reports whether stored balances still agree with the
-// transaction log.
+// GetReconciliationHandler сообщает, сходятся ли ещё сохранённые балансы с
+// журналом транзакций.
 func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.Request) {
 	tolerance := money.FromRubles(0.01)
 	if raw := r.URL.Query().Get("tolerance"); raw != "" {
@@ -484,8 +484,8 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 	})
 }
 
-// GetCommissionHandler reports the platform's collected commission and the rate
-// it is charged at.
+// GetCommissionHandler сообщает собранную комиссию платформы и ставку, по
+// которой она берётся.
 func (h *AdminHandler) GetCommissionHandler(w http.ResponseWriter, r *http.Request) {
 	commission, err := h.adminService.GetCommission(r.Context())
 	if err != nil {
@@ -497,9 +497,9 @@ func (h *AdminHandler) GetCommissionHandler(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(commission)
 }
 
-// PayoutCommissionHandler withdraws collected commission out of the system. The
-// route sits behind RequireAdmin, so the caller is always an admin; the admin
-// on the request is what gets recorded against the payout.
+// PayoutCommissionHandler выводит собранную комиссию из системы. Маршрут стоит
+// за RequireAdmin, поэтому вызывающий всегда админ; именно админ из запроса и
+// записывается против этой выплаты.
 func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Request) {
 	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -525,7 +525,7 @@ func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(commission)
 }
 
-// GetTransactionsHandler retrieves audit logs of transactions.
+// GetTransactionsHandler отдаёт аудит-логи транзакций.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	txs, err := h.adminService.GetTransactions(r.Context(), limit, offset)
@@ -538,7 +538,7 @@ func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(txs)
 }
 
-// GetPublicSettingsHandler returns public system settings (e.g. currency).
+// GetPublicSettingsHandler возвращает публичные системные настройки (например, валюту).
 func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.adminService.GetSettings(r.Context())
 	if err != nil {
@@ -551,15 +551,15 @@ func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.R
 		"currency":                 settings["currency"],
 		"shift_early_exit_penalty": settings["shift_early_exit_penalty"],
 		"executor_location_send_interval_seconds": settings["executor_location_send_interval_seconds"],
-		// Whether executor apps should report their position during a shift.
-		// Those reports are what keeps the stored position fresh for the map and
-		// for automatic matching. The geofence this was named after is gone; the
-		// key is kept so existing installations keep their setting.
+		// Должны ли приложения исполнителей сообщать своё положение во время смены.
+		// Именно эти отчёты держат сохранённую позицию свежей для карты и
+		// автоматического подбора. Геозона, по которой это названо, исчезла; ключ
+		// сохранён, чтобы у существующих установок осталась их настройка.
 		"geofence_tracking_enabled": settings["geofence_tracking_enabled"],
 	})
 }
 
-// GetSettingsHandler retrieves system settings.
+// GetSettingsHandler отдаёт системные настройки.
 func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.adminService.GetSettings(r.Context())
 	if err != nil {
@@ -571,18 +571,18 @@ func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(settings)
 }
 
-// UpdateSettingsHandler updates system settings.
+// UpdateSettingsHandler обновляет системные настройки.
 //
-// Values arrive as either JSON strings or JSON numbers. Settings are stored as
-// text, and this used to decode straight into map[string]string — which meant
-// one numeric value failed the whole request with an opaque "invalid request
-// body". The admin form binds numeric fields to <input type="number">, and Vue
-// hands those back as real numbers, so editing a tariff or the commission rate
-// sent a number and could not be saved at all.
+// Значения приходят либо строками JSON, либо числами JSON. Настройки хранятся
+// текстом, и раньше это декодировалось прямо в map[string]string — из-за чего
+// одно числовое значение роняло весь запрос невнятным «invalid request body».
+// Форма админки привязывает числовые поля к <input type="number">, а Vue
+// возвращает их настоящими числами, так что правка тарифа или ставки комиссии
+// отправляла число и вовсе не сохранялась.
 func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	// Numbers keep the digits the client sent instead of going through a float,
-	// so 8.50 is stored as written rather than as 8.5.
+	// Числа сохраняют присланные клиентом цифры, не проходя через float,
+	// поэтому 8.50 хранится так, как записано, а не как 8.5.
 	decoder.UseNumber()
 
 	var raw map[string]interface{}
@@ -599,8 +599,8 @@ func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Requ
 		case json.Number:
 			req[key] = v.String()
 		default:
-			// Anything else is a client bug, and naming the key beats making an
-			// admin guess which field of a dozen was rejected.
+			// Всё прочее — ошибка клиента, и назвать ключ лучше, чем заставлять
+			// админа гадать, какое из десятка полей отвергли.
 			http.Error(w, "setting "+key+" must be a string or a number", http.StatusBadRequest)
 			return
 		}
@@ -615,7 +615,7 @@ func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]string{"message": "settings updated successfully"})
 }
 
-// CreateTopUpRequestHandler creates a balance top-up request (Customer endpoint).
+// CreateTopUpRequestHandler создаёт заявку на пополнение баланса (эндпоинт заказчика).
 func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -642,7 +642,7 @@ func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(topupReq)
 }
 
-// GetProfileHandler returns the authenticated user's profile info including customer address.
+// GetProfileHandler возвращает профиль аутентифицированного пользователя, включая адрес заказчика.
 func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -660,7 +660,7 @@ func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(profile)
 }
 
-// writeAddresses renders the saved-address list the profile page expects.
+// writeAddresses отдаёт список сохранённых адресов в том виде, какого ждёт страница профиля.
 func writeAddresses(w http.ResponseWriter, addresses []repository.Address, err error) {
 	if err != nil {
 		switch {
@@ -677,7 +677,7 @@ func writeAddresses(w http.ResponseWriter, addresses []repository.Address, err e
 	json.NewEncoder(w).Encode(map[string]interface{}{"addresses": addresses})
 }
 
-// AddAddressHandler saves a pickup address for the authenticated customer.
+// AddAddressHandler сохраняет адрес подачи для аутентифицированного заказчика.
 func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -695,9 +695,9 @@ func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request)
 	writeAddresses(w, addresses, err)
 }
 
-// DeleteAddressHandler removes one of the caller's saved addresses. The client
-// addresses it by id; a positional index is also accepted because the installed
-// app sends the row number.
+// DeleteAddressHandler удаляет один из сохранённых адресов вызывающего. Клиент
+// адресует его по id; позиционный индекс тоже принимается, потому что
+// установленное приложение присылает номер строки.
 func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -729,7 +729,7 @@ func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Reque
 	writeAddresses(w, addresses, err)
 }
 
-// SetDefaultAddressHandler marks which saved address new orders start from.
+// SetDefaultAddressHandler отмечает, с какого сохранённого адреса начинаются новые заказы.
 func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -758,7 +758,7 @@ func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.R
 	writeAddresses(w, addresses, err)
 }
 
-// GetActiveShiftsHandler lists all active executor shifts.
+// GetActiveShiftsHandler перечисляет все активные смены исполнителей.
 func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Request) {
 	shifts, err := h.adminService.GetActiveShifts(r.Context())
 	if err != nil {
@@ -769,7 +769,7 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(shifts)
 }
 
-// GetActiveOrdersHandler lists active customer orders (searching or assigned).
+// GetActiveOrdersHandler перечисляет активные заказы заказчиков (в поиске или назначенные).
 func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	orders, err := h.adminService.GetActiveOrders(r.Context(), limit, offset)
@@ -781,7 +781,7 @@ func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(orders)
 }
 
-// GetCompletedOrdersHandler lists completed customer orders.
+// GetCompletedOrdersHandler перечисляет завершённые заказы заказчиков.
 func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	q := r.URL.Query()
@@ -801,8 +801,8 @@ func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.
 	if orders == nil {
 		orders = []*repository.AdminOrder{}
 	}
-	// Facets travel with the page so the filter dropdowns list every service and
-	// month that exists, not only the ones on screen.
+	// Фасеты едут вместе со страницей, чтобы выпадающие фильтры перечисляли все
+	// существующие услуги и месяцы, а не только попавшие на экран.
 	facets, err := h.adminService.CompletedOrderFacets(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -818,7 +818,7 @@ func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.
 	})
 }
 
-// SendBroadcastEmailHandler sends an email broadcast to selected recipients.
+// SendBroadcastEmailHandler рассылает письмо выбранным получателям.
 func (h *AdminHandler) SendBroadcastEmailHandler(w http.ResponseWriter, r *http.Request) {
 	var req service.BroadcastEmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -836,10 +836,10 @@ func (h *AdminHandler) SendBroadcastEmailHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(res)
 }
 
-// addressRequest accepts both shapes a client can send: the single line the
-// installed mobile builds still post, and the parts that come straight from the
-// suggestion list. Sending the parts is what lets a корпус or a строение
-// through, since nothing has to parse them back out of the line.
+// addressRequest принимает обе формы, которые может прислать клиент: одну
+// строку, которую до сих пор шлют установленные мобильные сборки, и части,
+// приходящие прямо из списка подсказок. Именно отправка частей пропускает
+// корпус или строение, ведь их не приходится выпарсивать обратно из строки.
 type addressRequest struct {
 	Address string   `json:"address"`
 	Region  string   `json:"region"`
@@ -853,12 +853,12 @@ type addressRequest struct {
 	Source  string   `json:"source"`
 }
 
-// toAddress prefers the parts and falls back to splitting the line.
+// toAddress предпочитает части и откатывается к разбору строки.
 func (r addressRequest) toAddress() service.Address {
 	if r.City == "" && r.Street == "" && r.House == "" {
 		addr := service.ParseAddressLine(r.Address)
-		// A flat sent alongside a legacy line still applies: that is how the
-		// older registration screen submits one.
+		// Квартира, присланная рядом с легаси-строкой, всё равно применяется: именно
+		// так её отправляет старый экран регистрации.
 		if r.Flat != "" {
 			addr = addr.WithFlat(r.Flat)
 		}

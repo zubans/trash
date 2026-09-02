@@ -13,8 +13,8 @@ export interface UpdateInfo {
   releaseNotes: string
 }
 
-// Singleton state: multiple components may consume the same update state,
-// but only the first mounted component starts the periodic check.
+// Состояние-синглтон: одно и то же состояние обновления могут потреблять
+// несколько компонентов, но периодическую проверку запускает только первый из них.
 const updateAvailable = ref(false)
 const forceUpdate = ref(false)
 const downloadUrl = ref<string | null>(null)

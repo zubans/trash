@@ -1,6 +1,6 @@
 <template>
   <div class="topup-requests">
-    <!-- Table Toolbar -->
+    <!-- Панель инструментов таблицы -->
     <div class="table-toolbar mb-4">
       <div class="search-box">
         <i class="ph ph-magnifying-glass"></i>
@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <!-- Requests Table -->
+    <!-- Таблица заявок -->
     <va-data-table :items="filteredRequests" :columns="columns" :loading="loading" class="mb-4">
       <template #cell(user_phone)="{ value }">
         <div class="cell-phone">
@@ -57,7 +57,7 @@
       </template>
     </va-data-table>
 
-    <!-- Confirmation Modal -->
+    <!-- Модальное окно подтверждения -->
     <va-modal
       v-model="showConfirm"
       :title="modalTitle"
@@ -87,7 +87,7 @@ export default defineComponent({
       return authStore.currency === 'RUB' ? '₽' : '$'
     })
 
-    // Modal Control
+    // Управление модальным окном
     const showConfirm = ref(false)
     const selectedRequest = ref<any>(null)
     const actionType = ref<'APPROVE' | 'REJECT'>('APPROVE')
@@ -127,7 +127,7 @@ export default defineComponent({
 
       try {
         await api.post(`/admin/finances/topups/${reqId}/${endpoint}`)
-        fetchRequests() // Reload
+        fetchRequests() // Перезагрузка
       } catch (err: any) {
         alert(err.response?.data || t('topups.operationFailed'))
       } finally {

@@ -3,11 +3,11 @@ import { createPinia } from 'pinia'
 import { createVuestic } from 'vuestic-ui'
 import 'vuestic-ui/dist/vuestic-ui.css'
 import 'leaflet/dist/leaflet.css'
-// Icons are bundled, not fetched from a CDN at runtime. Seven components used
-// to inject <script src="https://unpkg.com/@phosphor-icons/web">, which is
-// third-party code executing in the app's origin next to the session token,
-// with no pinned version and no integrity check — and it took the whole icon
-// set down with it whenever unpkg was unreachable. Only the weights the app
+// Иконки идут в сборке, а не запрашиваются с CDN во время работы. Семь
+// компонентов раньше внедряли <script src="https://unpkg.com/@phosphor-icons/web">,
+// то есть сторонний код, выполняющийся в источнике приложения рядом с токеном
+// сессии, без закреплённой версии и без проверки целостности — и он утаскивал за
+// собой весь набор иконок всякий раз, когда unpkg был недоступен. Только те начертания, что приложение
 import '@phosphor-icons/web/regular/style.css'
 import '@phosphor-icons/web/bold/style.css'
 import '@phosphor-icons/web/fill/style.css'
@@ -17,7 +17,7 @@ import { i18n } from './i18n'
 
 const app = createApp(App)
 
-// Prevent unhandled Vue runtime errors from causing white screen crashes
+// Не даём необработанным runtime-ошибкам Vue приводить к белому экрану
 app.config.errorHandler = (err, _instance, info) => {
   console.error('[Vue ErrorHandler Caught]:', err, info)
 }

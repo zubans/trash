@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Domain event types. They name something that has happened, never something
-// that should happen: what to do about it is a behaviour's decision, and two
-// behaviours may well want different things from the same event.
+// Типы доменных событий. Они называют то, что произошло, и никогда — то, что
+// должно произойти: что с этим делать — решение поведения, и два поведения
+// вполне могут хотеть от одного события разного.
 const (
 	EventUserVerified   = "user.verified"
 	EventOrderCreated   = "order.created"
@@ -21,28 +21,28 @@ const (
 	EventOrderExecuted  = "order.executed"
 	EventOrderConfirmed = "order.confirmed"
 	EventOrderCanceled  = "order.canceled"
-	// EventOrderSubmission carries data an executor submitted for checking and
-	// how it compared — never the values it was compared against.
+	// EventOrderSubmission несёт данные, отправленные исполнителем на проверку, и
+	// то, как они сравнились, — но никогда значения, с которыми сравнивали.
 	EventOrderSubmission = "order.submission"
 )
 
-// Event subject types. The subject decides who the event is delivered to: an
-// order event goes to that order's behaviour, a user event to the behaviours of
-// that user's open orders.
+// Типы субъектов события. Субъект решает, кому событие доставят: событие заказа
+// уходит поведению этого заказа, событие пользователя — поведениям его открытых
+// заказов.
 const (
 	EventSubjectUser  = "user"
 	EventSubjectOrder = "order"
 )
 
-// DomainEvent is one row of the transactional outbox.
+// DomainEvent — одна строка транзакционного outbox.
 //
-// The outbox exists because the two halves of a scripted service must not come
-// apart. "The moderator marked the visit done" is a state change; "the verifier
-// is paid" is what a behaviour decides in response. If the second were done in
-// the same request, a failure there would roll back the first as well; if it
-// were done afterwards, a crash in between would lose it. Writing the event
-// with the state change, and acting on it later, is the only arrangement where
-// neither is possible.
+// Outbox существует потому, что две половины скриптовой услуги не должны
+// разъезжаться. «Модератор отметил визит выполненным» — это изменение
+// состояния; «проверяющему заплачено» — то, что поведение решает в ответ. Если
+// бы второе делалось в том же запросе, сбой в нём откатил бы и первое; если бы
+// делалось после, падение между ними его потеряло бы. Записать событие вместе с
+// изменением состояния, а действовать по нему позже — единственная схема, где
+// невозможно ни то ни другое.
 type DomainEvent struct {
 	ID          uuid.UUID              `json:"id"`
 	Type        string                 `json:"type"`
@@ -54,34 +54,34 @@ type DomainEvent struct {
 	Attempts    int                    `json:"attempts"`
 }
 
-// ErrEffectAlreadyApplied reports that an effect with this idempotency key has
-// already been applied. It is a normal outcome — a redelivered event asking for
-// a payment that was made — and callers skip the effect rather than fail.
+// ErrEffectAlreadyApplied сообщает, что эффект с этим ключом идемпотентности уже
+// применён. Это нормальный исход — переотправленное событие, просящее уже
+// сделанную выплату, — и вызывающие пропускают эффект, а не падают.
 var ErrEffectAlreadyApplied = errors.New("behavior effect already applied")
 
-// EventRepository stores domain events and the effects applied in response.
+// EventRepository хранит доменные события и применённые в ответ эффекты.
 type EventRepository interface {
-	// RunInTx runs fn in a transaction, for callers that have to publish an
-	// event together with the change it describes.
+	// RunInTx выполняет fn в транзакции — для вызывающих, которым надо опубликовать
+	// событие вместе с изменением, которое оно описывает.
 	RunInTx(ctx context.Context, fn func(*sql.Tx) error) error
-	// Publish appends an event. It takes a Querier because it is nearly always
-	// called inside somebody else's transaction — that is the point of it.
+	// Publish добавляет событие. Он принимает Querier, потому что почти всегда
+	// вызывается внутри чужой транзакции — в этом весь его смысл.
 	Publish(ctx context.Context, q Querier, event *DomainEvent) error
-	// ClaimPending returns the oldest unprocessed events and counts an attempt
-	// against each, so an event that kills the dispatcher every time cannot be
-	// retried forever.
+	// ClaimPending возвращает самые старые необработанные события и засчитывает
+	// каждому попытку, чтобы событие, всякий раз убивающее диспетчер, нельзя было
+	// повторять вечно.
 	ClaimPending(ctx context.Context, limit, maxAttempts int) ([]*DomainEvent, error)
 	MarkProcessed(ctx context.Context, id uuid.UUID) error
 	MarkFailed(ctx context.Context, id uuid.UUID, reason string) error
-	// RecordEffect claims an idempotency key inside the applier's transaction.
-	// Returns ErrEffectAlreadyApplied when the key is taken, which is how a
-	// reward is paid once however many events describe it.
+	// RecordEffect занимает ключ идемпотентности внутри транзакции применителя.
+	// Возвращает ErrEffectAlreadyApplied, когда ключ занят, — так вознаграждение
+	// платится один раз, сколько бы событий его ни описывало.
 	RecordEffect(ctx context.Context, q Querier, key string, eventID uuid.UUID, behaviorCode, kind string, payload map[string]interface{}) error
-	// CountPending reports the backlog, for the admin panel and metrics.
+	// CountPending сообщает размер очереди — для админ-панели и метрик.
 	CountPending(ctx context.Context) (int, error)
-	// PurgeProcessed drops events that were handled longer ago than the given
-	// window. Processed rows are history, and history that nothing reads still
-	// has to stop growing.
+	// PurgeProcessed удаляет события, обработанные раньше заданного окна.
+	// Обработанные строки — это история, а история, которую никто не читает, всё
+	// равно обязана перестать расти.
 	PurgeProcessed(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
@@ -89,7 +89,7 @@ type eventRepo struct {
 	db *sql.DB
 }
 
-// NewEventRepository creates an EventRepository.
+// NewEventRepository создаёт EventRepository.
 func NewEventRepository(db *sql.DB) EventRepository {
 	return &eventRepo{db: db}
 }
@@ -133,8 +133,8 @@ func (r *eventRepo) ClaimPending(ctx context.Context, limit, maxAttempts int) ([
 	if limit <= 0 {
 		limit = 50
 	}
-	// SKIP LOCKED on top of the leader guard: the guard makes the dispatcher
-	// single, this makes a second one harmless rather than duplicating work.
+	// SKIP LOCKED поверх защиты лидером: защита делает диспетчер единственным, а
+	// это делает второго безвредным, а не дублирующим работу.
 	rows, err := r.db.QueryContext(ctx, `
         UPDATE domain_events SET attempts = attempts + 1
         WHERE id IN (
@@ -173,9 +173,9 @@ func (r *eventRepo) MarkProcessed(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *eventRepo) MarkFailed(ctx context.Context, id uuid.UUID, reason string) error {
-	// The row stays unprocessed on purpose: it is retried until it succeeds or
-	// runs out of attempts, and the last error is kept so the reason is visible
-	// without reading the logs.
+	// Строка намеренно остаётся необработанной: её повторяют, пока не выйдет или
+	// пока не кончатся попытки, а последняя ошибка сохраняется, чтобы причина была
+	// видна без чтения логов.
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE domain_events SET last_error = $2 WHERE id = $1`, id, reason)
 	return err
@@ -209,9 +209,9 @@ func (r *eventRepo) PurgeProcessed(ctx context.Context, olderThan time.Duration)
 	if olderThan <= 0 {
 		return 0, nil
 	}
-	// The effects are removed with their event (ON DELETE CASCADE). That is safe
-	// only because the window is far longer than any redelivery: an idempotency
-	// key has to outlive every retry of the event that claimed it.
+	// Эффекты удаляются вместе со своим событием (ON DELETE CASCADE). Это
+	// безопасно только потому, что окно намного длиннее любой переотправки: ключ
+	// идемпотентности обязан пережить каждую повторную попытку занявшего его события.
 	result, err := r.db.ExecContext(ctx,
 		`DELETE FROM domain_events WHERE processed_at IS NOT NULL AND processed_at < now() - $1::interval`,
 		fmt.Sprintf("%d seconds", int64(olderThan.Seconds())))

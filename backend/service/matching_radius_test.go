@@ -10,8 +10,8 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// fakeGeoRepo serves fixed executor positions. Only the location lookup is
-// exercised here; the alert side of the interface is inert.
+// fakeGeoRepo отдаёт фиксированные позиции исполнителей. Здесь задействовано
+// только чтение местоположения; сторона алертов в интерфейсе инертна.
 type fakeGeoRepo struct {
 	positions map[uuid.UUID][2]float64
 	err       error
@@ -79,8 +79,8 @@ func (f *fakeGeoRepo) GetGeoAlerts(ctx context.Context, status string, limit, of
 	return nil, nil
 }
 
-// matchingFixture wires a matching service around one searching order and one
-// executor on shift, so each test only has to vary the geography.
+// matchingFixture собирает сервис подбора вокруг одного заказа в поиске и
+// одного исполнителя на смене, чтобы каждому тесту оставалось менять географию.
 type matchingFixture struct {
 	srv        *MatchingService
 	orderRepo  *mockOrderRepo
@@ -89,7 +89,7 @@ type matchingFixture struct {
 	executorID uuid.UUID
 }
 
-// Moscow city centre, and the pickup point every case measures against.
+// Центр Москвы и точка подачи, относительно которой меряет каждый случай.
 const (
 	pickupLat = 55.7512
 	pickupLon = 37.6000
@@ -103,9 +103,9 @@ func newMatchingFixture(t *testing.T, settings map[string]string) *matchingFixtu
 	orderID := uuid.New()
 
 	lat, lon := pickupLat, pickupLon
-	// A real service variant, because eligibility resolves the order's variant
-	// and an order whose variant cannot be resolved is not assignable — the same
-	// answer the production repository gives for an unknown id.
+	// Настоящий вариант услуги, потому что допуск разрешает вариант заказа, а
+	// заказ, чей вариант не разрешается, назначить нельзя — тот же ответ, который
+	// продовый репозиторий даёт для неизвестного id.
 	orderRepo := &mockOrderRepo{orders: []*repository.Order{{
 		ID:               orderID,
 		CustomerID:       customerID,
@@ -121,8 +121,8 @@ func newMatchingFixture(t *testing.T, settings map[string]string) *matchingFixtu
 		Status:     repository.ShiftStatusActive,
 	}}}
 
-	// Automatic matching is off by default in production; these tests exercise
-	// the matching logic itself, so enable it unless a case overrides the flag.
+	// В проде автоподбор выключен по умолчанию; эти тесты проверяют саму логику
+	// подбора, поэтому включаем его, если случай не переопределяет флаг.
 	if settings == nil {
 		settings = map[string]string{}
 	}
@@ -143,7 +143,7 @@ func newMatchingFixture(t *testing.T, settings map[string]string) *matchingFixtu
 	}
 }
 
-// assigned reports whether the order ended up with the executor.
+// assigned сообщает, достался ли заказ исполнителю.
 func (f *matchingFixture) assigned(t *testing.T) bool {
 	t.Helper()
 	for _, o := range f.orderRepo.orders {
@@ -155,10 +155,10 @@ func (f *matchingFixture) assigned(t *testing.T) bool {
 	return false
 }
 
-// An executor standing next to the pickup point is the case matching exists for.
+// Исполнитель, стоящий рядом с точкой подачи, — тот случай, ради которого подбор и существует.
 func TestMatching_AssignsExecutorInsideRadius(t *testing.T) {
 	f := newMatchingFixture(t, nil)
-	// ~150 m away.
+	// ~150 м.
 	f.geoRepo.set(f.executorID, 55.7520, 37.6010)
 
 	if err := f.srv.MatchOrders(context.Background()); err != nil {
@@ -169,11 +169,11 @@ func TestMatching_AssignsExecutorInsideRadius(t *testing.T) {
 	}
 }
 
-// With automatic matching turned off (the production default), even an executor
-// standing next to the pickup is left alone — orders are taken manually.
+// С выключенным автоподбором (умолчание прода) даже исполнителя, стоящего
+// рядом с подачей, не трогают — заказы берутся вручную.
 func TestMatching_DisabledLeavesOrderUnassigned(t *testing.T) {
 	f := newMatchingFixture(t, map[string]string{"auto_matching_enabled": "0"})
-	f.geoRepo.set(f.executorID, 55.7520, 37.6010) // right next to the pickup
+	f.geoRepo.set(f.executorID, 55.7520, 37.6010) // прямо рядом с точкой подачи
 
 	if err := f.srv.MatchOrders(context.Background()); err != nil {
 		t.Fatalf("unexpected error matching orders: %v", err)
@@ -183,11 +183,11 @@ func TestMatching_DisabledLeavesOrderUnassigned(t *testing.T) {
 	}
 }
 
-// Beyond the radius the order must stay in the queue rather than be handed to
-// someone who would only cancel it.
+// За пределами радиуса заказ обязан остаться в очереди, а не достаться тому,
+// кто сможет только его отменить.
 func TestMatching_SkipsExecutorOutsideRadius(t *testing.T) {
 	f := newMatchingFixture(t, nil)
-	// Saint Petersburg: ~630 km from the pickup point.
+	// Санкт-Петербург: ~630 км от точки подачи.
 	f.geoRepo.set(f.executorID, 59.9311, 30.3609)
 
 	if err := f.srv.MatchOrders(context.Background()); err != nil {
@@ -198,11 +198,11 @@ func TestMatching_SkipsExecutorOutsideRadius(t *testing.T) {
 	}
 }
 
-// An unknown position is a "no", not a free pass: this is the case that used to
-// slip through and assign orders across the country.
+// Неизвестная позиция — это «нет», а не безусловный пропуск: именно этот случай
+// раньше проскакивал и назначал заказы через всю страну.
 func TestMatching_SkipsExecutorWithoutLocation(t *testing.T) {
 	f := newMatchingFixture(t, nil)
-	// Deliberately no position stored for the executor.
+	// Позиция исполнителя намеренно не сохранена.
 
 	if err := f.srv.MatchOrders(context.Background()); err != nil {
 		t.Fatalf("unexpected error matching orders: %v", err)
@@ -212,8 +212,8 @@ func TestMatching_SkipsExecutorWithoutLocation(t *testing.T) {
 	}
 }
 
-// An order with no pickup coordinates cannot be measured against anything, so
-// it stays searching instead of being assigned blindly.
+// Заказ без координат подачи не с чем сравнивать, поэтому он остаётся в поиске,
+// а не назначается вслепую.
 func TestMatching_SkipsOrderWithoutCoordinates(t *testing.T) {
 	f := newMatchingFixture(t, nil)
 	f.orderRepo.orders[0].PickupLat = nil
@@ -228,10 +228,10 @@ func TestMatching_SkipsOrderWithoutCoordinates(t *testing.T) {
 	}
 }
 
-// The bound is operational, not hard-coded: widening it lets a distant
-// executor through, which is what makes the setting worth having.
+// Граница операционная, а не зашитая: её расширение пропускает дальнего
+// исполнителя — именно это и делает настройку осмысленной.
 func TestMatching_RadiusIsConfigurable(t *testing.T) {
-	// ~57 km north of the pickup point: outside the 10 km default.
+	// ~57 км к северу от точки подачи: за пределами умолчания в 10 км.
 	const farLat, farLon = 56.2600, 37.6000
 
 	tight := newMatchingFixture(t, nil)
@@ -253,8 +253,8 @@ func TestMatching_RadiusIsConfigurable(t *testing.T) {
 	}
 }
 
-// Without the geo dependencies the worker cannot judge distance at all, and
-// must decline rather than fall back to assigning everyone.
+// Без гео-зависимостей воркер вообще не может судить о расстоянии и обязан
+// отказаться, а не откатиться к назначению всем подряд.
 func TestMatching_WithoutGeoAssignsNothing(t *testing.T) {
 	f := newMatchingFixture(t, nil)
 	f.srv.geoRepo = nil
@@ -268,12 +268,12 @@ func TestMatching_WithoutGeoAssignsNothing(t *testing.T) {
 	}
 }
 
-// One executor must not be handed two orders by the same cycle.
+// Одному исполнителю нельзя вручить два заказа в одном цикле.
 //
-// The worker used to re-count an executor's assigned orders from the database
-// before every pairing, which made this true as a side effect. The count is now
-// loaded once per cycle, so the cycle has to remember what it has already
-// handed out — this test is what holds that in place.
+// Раньше воркер пересчитывал назначенные исполнителю заказы из базы перед
+// каждым сопоставлением, из-за чего это выполнялось побочным эффектом. Теперь
+// счётчик загружается раз за цикл, поэтому цикл обязан помнить, что уже раздал,
+// — и удерживает это именно данный тест.
 func TestMatching_AssignsAtMostOneOrderPerExecutorPerCycle(t *testing.T) {
 	customerID := uuid.New()
 	executorID := uuid.New()

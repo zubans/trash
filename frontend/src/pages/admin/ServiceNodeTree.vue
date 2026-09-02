@@ -7,17 +7,17 @@
       :class="{ collapsed: isCollapsed(item.node.id) }"
     >
       <div class="node-row" :class="{ deleted: isDeleted(item.node) }">
-        <!-- Drag Handle -->
+        <!-- Ручка перетаскивания -->
         <i class="ph-bold ph-dots-six-vertical drag-handle" title="Перетащить"></i>
 
-        <!-- Chevron (Expand/Collapse) -->
+        <!-- Шеврон (развернуть/свернуть) -->
         <i
           class="ph-bold ph-caret-down chevron"
           :class="{ hidden: !item.children || item.children.length === 0 }"
           @click.stop="toggleNode(item.node.id)"
         ></i>
 
-        <!-- Node Icon -->
+        <!-- Иконка узла -->
         <i
           v-if="item.node.node_type === 'CATEGORY'"
           class="ph-fill node-icon cat"
@@ -28,7 +28,7 @@
           class="ph-fill ph-tag node-icon var"
         ></i>
 
-        <!-- Node Content -->
+        <!-- Содержимое узла -->
         <div class="node-content">
           <span class="node-title">{{ item.node.name['ru'] || item.node.code }}</span>
           <span class="node-code">{{ item.node.code }}</span>
@@ -49,14 +49,14 @@
           ></div>
         </div>
 
-        <!-- Price (For Variants / Right Aligned) -->
+        <!-- Цена (для вариантов, выровнена вправо) -->
         <div v-if="item.node.node_type === 'VARIANT'" class="node-price">
           {{ item.node.is_auction ? '—' : formatPrice(item.node.base_price) }}
         </div>
 
-        <!-- Node Actions -->
+        <!-- Действия над узлом -->
         <div class="node-actions">
-          <!-- A deleted node is restored before it can be edited again. -->
+          <!-- Удалённый узел сначала восстанавливают, и только потом его можно править. -->
           <button
             v-if="isDeleted(item.node)"
             type="button"
@@ -96,7 +96,7 @@
         </div>
       </div>
 
-      <!-- Children -->
+      <!-- Потомки -->
       <div v-if="item.children && item.children.length > 0" class="tree-children">
         <service-node-tree
           :nodes="item.children"
@@ -162,7 +162,7 @@ export default defineComponent({
   flex-direction: column;
 }
 
-/* Tree Children */
+/* Потомки дерева */
 .tree-children {
   margin-left: 22px;
   padding-left: 12px;
@@ -180,7 +180,7 @@ export default defineComponent({
   transform: rotate(-90deg);
 }
 
-/* Node Row */
+/* Строка узла */
 .node-row {
   display: flex;
   align-items: center;
@@ -195,7 +195,7 @@ export default defineComponent({
   background: #f8fafc;
 }
 
-/* Drag Handle */
+/* Ручка перетаскивания */
 .drag-handle {
   color: #cbd5e1;
   font-size: 20px;
@@ -214,7 +214,7 @@ export default defineComponent({
   cursor: grabbing;
 }
 
-/* Chevron */
+/* Шеврон */
 .chevron {
   color: #64748b;
   font-size: 14px;
@@ -238,7 +238,7 @@ export default defineComponent({
   pointer-events: none;
 }
 
-/* Node Icon */
+/* Иконка узла */
 .node-icon {
   font-size: 20px;
   display: flex;
@@ -256,7 +256,7 @@ export default defineComponent({
   font-size: 18px;
 }
 
-/* Node Content */
+/* Содержимое узла */
 .node-content {
   display: flex;
   align-items: center;
@@ -282,7 +282,7 @@ export default defineComponent({
   font-weight: 500;
 }
 
-/* Status & Badges */
+/* Статус и бейджи */
 .status-dot {
   width: 8px;
   height: 8px;
@@ -337,7 +337,7 @@ export default defineComponent({
   gap: 4px;
 }
 
-/* Price */
+/* Цена */
 .node-price {
   font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
@@ -348,7 +348,7 @@ export default defineComponent({
   flex-shrink: 0;
 }
 
-/* Contextual Actions */
+/* Контекстные действия */
 .node-actions {
   display: flex;
   align-items: center;

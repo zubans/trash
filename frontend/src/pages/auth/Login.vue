@@ -1,7 +1,7 @@
 <template>
   <div class="split-layout">
     <RoleSelectOverlay v-if="showRoleSelect" :roles="roleSelectRoles" @select="onRoleSelected" />
-    <!-- MOBILE HEADER (visible on screen width <= 900px) -->
+    <!-- МОБИЛЬНАЯ ШАПКА (видна при ширине экрана <= 900px) -->
     <header class="app-header">
       <AppLogo />
       <div class="mobile-lang-switch">
@@ -9,9 +9,9 @@
       </div>
     </header>
 
-    <!-- LEFT SIDE: Branding Presentation (visible on screen width > 900px) -->
+    <!-- ЛЕВАЯ СТОРОНА: презентация бренда (видна при ширине экрана > 900px) -->
     <div class="layout-left">
-      <!-- Scaled Logo Wrapper -->
+      <!-- Обёртка масштабируемого логотипа -->
       <div class="logo-wrapper">
         <AppLogo />
       </div>
@@ -35,13 +35,13 @@
         </p>
       </div>
 
-      <div><!-- Spacer for vertical alignment --></div>
+      <div><!-- Распорка для вертикального выравнивания --></div>
     </div>
 
-    <!-- RIGHT SIDE: Form Container -->
+    <!-- ПРАВАЯ СТОРОНА: контейнер формы -->
     <div class="layout-right">
       <div class="form-container" :class="{ 'is-register': mode === 'register' }">
-        <!-- Form Header (Tabs & Lang Switcher for Desktop) -->
+        <!-- Шапка формы (вкладки и переключатель языка для десктопа) -->
         <div class="form-header">
           <div class="auth-tabs">
             <button
@@ -65,12 +65,12 @@
           </div>
         </div>
 
-        <!-- Form Title -->
+        <!-- Заголовок формы -->
         <h2 class="form-title">
           {{ mode === 'login' ? $t('login.welcomeBack') : $t('login.createAccount') }}
         </h2>
 
-        <!-- Alerts -->
+        <!-- Уведомления -->
         <transition name="fade">
           <div v-if="error" class="custom-alert error-alert mb-4">
             <i class="ph-bold ph-warning-circle alert-icon"></i>
@@ -85,9 +85,9 @@
           </div>
         </transition>
 
-        <!-- Form -->
+        <!-- Форма -->
         <form @submit.prevent="handleSubmit">
-          <!-- LOGIN MODE FIELDS -->
+          <!-- ПОЛЯ РЕЖИМА ВХОДА -->
           <div v-if="mode === 'login'" class="form-fields">
             <div class="input-group">
               <label class="input-label">{{ $t('login.phone') }}</label>
@@ -123,7 +123,7 @@
               Забыли пароль?
             </a>
 
-            <!-- Desktop inline submit button -->
+            <!-- Встроенная кнопка отправки для десктопа -->
             <div class="desktop-submit-wrap">
               <button ref="submitBtnRef" type="submit" class="btn-submit" :disabled="loading">
                 <span v-if="loading" class="spinner"></span>
@@ -134,7 +134,7 @@
             </div>
           </div>
 
-          <!-- REGISTRATION MODE FIELDS -->
+          <!-- ПОЛЯ РЕЖИМА РЕГИСТРАЦИИ -->
           <div v-else class="form-grid">
             <div class="input-group">
               <label class="input-label">{{ $t('login.phone') }}</label>
@@ -262,7 +262,7 @@
               </div>
             </div>
 
-            <!-- Desktop inline submit button -->
+            <!-- Встроенная кнопка отправки для десктопа -->
             <div class="desktop-submit-wrap col-span-2">
               <button ref="submitBtnRef" type="submit" class="btn-submit" :disabled="loading">
                 <span v-if="loading" class="spinner"></span>
@@ -273,7 +273,7 @@
             </div>
           </div>
 
-          <!-- Floating Bottom Action Bar for Mobile -->
+          <!-- Плавающая нижняя панель действий для мобильных -->
           <div class="bottom-action-bar">
             <button type="submit" class="btn-submit" :disabled="loading">
               <span v-if="loading" class="spinner"></span>
@@ -287,7 +287,7 @@
       </div>
     </div>
 
-    <!-- Forgot / Reset Password Modal -->
+    <!-- Модальное окно восстановления/сброса пароля -->
     <div v-if="showForgotModal" class="forgot-modal-overlay" @click.self="showForgotModal = false">
       <div class="forgot-modal-card">
         <div class="forgot-modal-header">
@@ -297,7 +297,7 @@
           </button>
         </div>
 
-        <!-- Step 1: Request Code -->
+        <!-- Шаг 1: запрос кода -->
         <form v-if="resetStep === 1" @submit.prevent="requestResetCode">
           <p class="forgot-desc">Введите ваш Email, чтобы получить код восстановления.</p>
           <div class="input-group mb-3">
@@ -316,7 +316,7 @@
           </button>
         </form>
 
-        <!-- Step 2: Enter Code & New Password -->
+        <!-- Шаг 2: ввод кода и нового пароля -->
         <form v-else @submit.prevent="resetPasswordWithCode">
           <p class="forgot-desc">Код восстановления отправлен на <strong>{{ resetEmail }}</strong>.</p>
           <div v-if="resetSuccessMsg" class="custom-alert success-alert mb-3">
@@ -403,8 +403,8 @@ export default defineComponent({
     const displayPhone = ref('')
     const phone = ref('')
 
-    // Role selection after login: shown when the account holds more than one
-    // dashboard role (e.g. customer + executor) so the user picks how to work now.
+    // Выбор роли после входа: показывается, когда у учётной записи больше одной
+    // роли с дашбордом (например, заказчик + исполнитель), чтобы выбрать, как работать сейчас.
     const showRoleSelect = ref(false)
     const roleSelectRoles = ref<string[]>([])
 
@@ -424,8 +424,8 @@ export default defineComponent({
       router.push(home)
     }
 
-    // Decide where to land after a successful login. Multi-role accounts get the
-    // picker; single-role accounts go straight to their dashboard.
+    // Решаем, куда попасть после успешного входа. Мультиролевые учётки получают
+    // выбор; однорольные идут прямо на свой дашборд.
     const finishLogin = (primaryRole: string) => {
       if (authStore.switchableRoles.length > 1) {
         roleSelectRoles.value = authStore.switchableRoles
@@ -500,8 +500,8 @@ export default defineComponent({
     const birthDate = ref('')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
 
-    // The date picker refuses tomorrow before the request is made; the backend
-    // refuses it again, since a native build can post whatever it likes.
+    // Выбор даты отклоняет завтрашний день ещё до запроса; бэкенд отклоняет его
+    // снова, ведь нативная сборка может отправить что угодно.
     const maxBirthDate = new Date().toISOString().slice(0, 10)
     const pickedAddress = ref<StructuredAddress | null>(null)
     const error = ref('')
@@ -646,9 +646,9 @@ export default defineComponent({
           }
 
           authStore.login(token, claims.role, claims.phone, claims.sub, response.data.refresh_token)
-          // Load the full role set first: it decides whether to show the role
-          // picker (multi-role) and lets a pure MODERATOR resolve to the executor
-          // dashboard.
+          // Сначала грузим полный набор ролей: он решает, показывать ли выбор роли
+          // (мультироль), и позволяет чистому MODERATOR разрешиться в дашборд
+          // исполнителя.
           await authStore.fetchMe()
           finishLogin(claims.role)
         } else {
@@ -775,12 +775,12 @@ export default defineComponent({
   box-sizing: border-box;
 }
 
-/* --- App Header (Mobile) --- */
+/* --- Шапка приложения (мобильная) --- */
 .app-header {
   display: none;
 }
 
-/* --- Layout Left (Presentation) --- */
+/* --- Левая часть макета (презентация) --- */
 .layout-left {
   flex: 1;
   background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
@@ -846,7 +846,7 @@ export default defineComponent({
   line-height: 1.6;
 }
 
-/* --- Layout Right (Form) --- */
+/* --- Правая часть макета (форма) --- */
 .layout-right {
   flex: 1;
   max-width: 720px;
@@ -867,7 +867,7 @@ export default defineComponent({
   max-width: 540px;
 }
 
-/* Form Header (Tabs & Lang) */
+/* Шапка формы (вкладки и язык) */
 .form-header {
   display: flex;
   justify-content: space-between;
@@ -917,7 +917,7 @@ export default defineComponent({
   letter-spacing: -0.5px;
 }
 
-/* --- Alerts --- */
+/* --- Уведомления --- */
 .custom-alert {
   padding: 12px 16px;
   border-radius: var(--rad-md);
@@ -946,7 +946,7 @@ export default defineComponent({
   flex-shrink: 0;
 }
 
-/* --- Forms & Inputs --- */
+/* --- Формы и поля ввода --- */
 .form-fields {
   display: flex;
   flex-direction: column;
@@ -1029,7 +1029,7 @@ export default defineComponent({
   padding-left: 16px;
 }
 
-/* Address Autocomplete Deep Styling */
+/* Глубокая стилизация автодополнения адреса */
 :deep(.address-label) {
   font-size: 11px;
   font-weight: 800;
@@ -1073,7 +1073,7 @@ export default defineComponent({
   margin-top: 4px;
 }
 
-/* Role Selector Radio Cards */
+/* Радио-карточки выбора роли */
 .role-selector {
   display: flex;
   gap: 12px;
@@ -1118,7 +1118,7 @@ export default defineComponent({
   color: var(--brand-primary);
 }
 
-/* Forgot Password Link */
+/* Ссылка «Забыли пароль» */
 .forgot-link {
   font-size: 13px;
   font-weight: 700;
@@ -1134,7 +1134,7 @@ export default defineComponent({
   text-decoration: underline;
 }
 
-/* Submit Button */
+/* Кнопка отправки */
 .btn-submit {
   width: 100%;
   padding: 16px;
@@ -1198,7 +1198,7 @@ export default defineComponent({
   }
 }
 
-/* --- Forgot Password Modal --- */
+/* --- Модальное окно восстановления пароля --- */
 .forgot-modal-overlay {
   position: fixed;
   top: 0;
@@ -1293,7 +1293,7 @@ export default defineComponent({
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* --- MOBILE RESPONSIVE MEDIA QUERIES --- */
+/* --- МОБИЛЬНЫЕ АДАПТИВНЫЕ МЕДИАЗАПРОСЫ --- */
 @media (max-width: 900px) {
   .split-layout {
     flex-direction: column;
@@ -1326,7 +1326,7 @@ export default defineComponent({
 
   .layout-right {
     max-width: 100%;
-    padding: 24px 20px 120px 20px; /* Padding at bottom for sticky action bar */
+    padding: 24px 20px 120px 20px; /* Отступ снизу для липкой панели действий */
     align-items: flex-start;
   }
 

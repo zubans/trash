@@ -12,8 +12,8 @@ var (
 	origins     map[string]bool
 )
 
-// AllowedOrigins returns the set of browser origins permitted to call the API
-// and to open a WebSocket. CORS_ORIGIN may hold a comma separated list.
+// AllowedOrigins возвращает набор браузерных источников, которым позволено
+// звать API и открывать WebSocket. CORS_ORIGIN может содержать список через запятую.
 func AllowedOrigins() map[string]bool {
 	originsOnce.Do(func() {
 		origins = map[string]bool{
@@ -33,9 +33,9 @@ func AllowedOrigins() map[string]bool {
 	return origins
 }
 
-// IsAllowedOrigin reports whether a request's Origin header is trusted. A
-// missing Origin is accepted because native mobile clients do not send one;
-// browsers always do, which is what the cross-site protection relies on.
+// IsAllowedOrigin сообщает, доверенный ли заголовок Origin у запроса.
+// Отсутствующий Origin принимается, потому что нативные мобильные клиенты его
+// не шлют; браузеры шлют всегда — на это и опирается межсайтовая защита.
 func IsAllowedOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

@@ -1,7 +1,7 @@
 <template>
   <div v-if="show" class="modal-overlay" @click.self="show = false">
     <div class="modal-card">
-      <!-- Header -->
+      <!-- Шапка -->
       <div class="modal-header">
         <div class="modal-title">
           <i class="ph-fill ph-user-circle"></i>
@@ -13,7 +13,7 @@
       </div>
 
 
-      <!-- User Phone & Full Name Banner -->
+      <!-- Баннер с телефоном и ФИО пользователя -->
       <div class="user-phone-banner mb-4">
         <div class="banner-avatar">
           <i class="ph ph-user"></i>
@@ -26,7 +26,7 @@
         </div>
       </div>
 
-      <!-- Email Management -->
+      <!-- Управление почтой -->
       <div class="section-header">
         <div class="section-title">
           <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
@@ -53,7 +53,7 @@
         </div>
       </div>
 
-      <!-- Address Management -->
+      <!-- Управление адресами -->
       <div class="section-header">
         <div class="section-title">
           <i class="ph-fill ph-map-pin" style="color: #ef4444;"></i>
@@ -62,7 +62,7 @@
         <div class="section-subtitle">Выберите активный для заказов</div>
       </div>
 
-      <!-- Address List -->
+      <!-- Список адресов -->
       <div class="address-list">
         <div v-if="customerAddresses.length === 0" class="empty-address-box">
           Нет сохраненных адресов. Добавьте адрес ниже.
@@ -103,7 +103,7 @@
         </label>
       </div>
 
-      <!-- Add / Edit Address Form -->
+      <!-- Форма добавления / правки адреса -->
       <div v-if="customerAddresses.length < 2 || editingAddressId" class="add-address-form">
         <div v-if="editingAddressId" class="edit-hint-row">
           <span><i class="ph-bold ph-pencil-simple"></i> Изменение адреса</span>
@@ -132,7 +132,7 @@
         <span>ℹ️ Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
       </div>
 
-      <!-- Footer -->
+      <!-- Подвал -->
       <div class="modal-footer">
         <button type="button" class="btn-cancel" @click="show = false">
           Закрыть
@@ -241,7 +241,7 @@ export default defineComponent({
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
-/* --- Modal Overlay --- */
+/* --- Оверлей модального окна --- */
 .modal-overlay {
   --bg-base: #f8f9fa;
   --surface-card: rgba(255, 255, 255, 0.92);
@@ -284,7 +284,7 @@ export default defineComponent({
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* --- Modal Card --- */
+/* --- Карточка модального окна --- */
 .modal-card {
   background: var(--surface-card);
   backdrop-filter: blur(24px);
@@ -306,7 +306,7 @@ export default defineComponent({
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* --- Modal Header --- */
+/* --- Шапка модального окна --- */
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -351,7 +351,7 @@ export default defineComponent({
   transform: rotate(90deg);
 }
 
-/* --- Verification Box --- */
+/* --- Блок верификации --- */
 .verification-box {
   background: var(--success-bg);
   border: 1px solid rgba(16, 185, 129, 0.2);
@@ -409,7 +409,7 @@ export default defineComponent({
   color: var(--text-body);
 }
 
-/* --- Address Section --- */
+/* --- Раздел адресов --- */
 .section-header {
   margin-bottom: 16px;
 }
@@ -583,7 +583,7 @@ export default defineComponent({
   color: #6366f1;
 }
 
-/* --- Add / Edit Address Form --- */
+/* --- Форма добавления / правки адреса --- */
 .add-address-field { flex: 1 1 100%; }
 
 .edit-hint-row {
@@ -673,7 +673,7 @@ export default defineComponent({
   margin-bottom: 24px;
 }
 
-/* --- Footer --- */
+/* --- Подвал --- */
 .modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -762,7 +762,7 @@ export default defineComponent({
   color: #ef4444;
 }
 
-/* Responsive */
+/* Адаптивность */
 @media (max-width: 480px) {
   .modal-card { padding: 24px; border-radius: 28px; }
   .v-header { flex-direction: column; align-items: flex-start; gap: 8px; }

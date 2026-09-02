@@ -12,10 +12,10 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Special services: a script written in the admin panel and stored on the node.
-// What these tests pin is the contract the editor relies on — a script that does
-// not compile is refused before it is saved, and one that does takes effect for
-// that node and no other.
+// Особые услуги: скрипт, написанный в админ-панели и хранимый на узле.
+// Эти тесты фиксируют контракт, на который опирается редактор: скрипт, который
+// не компилируется, отклоняется до сохранения, а тот, что компилируется,
+// действует для этого узла и ни для какого другого.
 
 const nodeScriptConstants = `
 REWARD = 50
@@ -84,16 +84,16 @@ func TestNodeScriptIsCompiledAndApplied(t *testing.T) {
 	if err != nil || !ok || !price.IsZero() {
 		t.Errorf("price = %s (set: %v, err: %v), want the script's 0", price, ok, err)
 	}
-	// The constants file is a separate script; the logic above reads MSG_CLOSED
-	// from it, so an anonymous visitor gets that exact message back.
+	// Файл констант — отдельный скрипт; логика выше читает из него MSG_CLOSED,
+	// поэтому анонимный посетитель получает ровно это сообщение.
 	err = behaviors.CanOrder(ctx, nil, node)
 	if err == nil || !strings.Contains(err.Error(), "услуга закрыта") {
 		t.Errorf("refusal = %v, want the message from the node's constants", err)
 	}
 }
 
-// A broken script must never reach the database: saved, it would fail every gate
-// on the node, which a customer reads as the service having disappeared.
+// Сломанный скрипт не должен доходить до базы: сохранённый, он провалил бы все
+// проверки узла, а заказчик прочёл бы это как исчезновение услуги.
 func TestBrokenNodeScriptIsRefusedBeforeSaving(t *testing.T) {
 	behaviors := newBehaviorsForTest()
 	node := nodeWithScript("", `
@@ -106,14 +106,14 @@ def visible(f)
 	if err == nil {
 		t.Fatal("a script with a syntax error was accepted")
 	}
-	// The message is what the admin sees in the editor, so it has to say where.
+	// Это сообщение админ видит в редакторе, поэтому оно обязано сказать, где именно.
 	if !strings.Contains(err.Error(), "behavior.star") {
 		t.Errorf("error %q does not name the file the mistake is in", err)
 	}
 }
 
-// Clearing the script makes the node an ordinary service again — not one whose
-// gates fail closed because a behaviour code is still pointing at nothing.
+// Очистка скрипта снова делает узел обычной услугой, а не такой, чьи проверки
+// закрыты, потому что код поведения всё ещё указывает в никуда.
 func TestClearingTheScriptMakesTheNodeOrdinary(t *testing.T) {
 	ctx := context.Background()
 	behaviors := newBehaviorsForTest()
@@ -135,7 +135,7 @@ func TestClearingTheScriptMakesTheNodeOrdinary(t *testing.T) {
 	}
 }
 
-// Two special services must not see each other's rules.
+// Две особые услуги не должны видеть правила друг друга.
 func TestNodeScriptsAreIsolated(t *testing.T) {
 	ctx := context.Background()
 	behaviors := newBehaviorsForTest()

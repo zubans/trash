@@ -10,30 +10,30 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// AddressSuggester answers address lookups. DaData is the only provider:
-// falling back to a coarser one would quietly return addresses with no apartment
-// and no reliable house number, which is the failure this design exists to
-// remove. When it is not configured, address entry reports that plainly rather
-// than degrading into something that looks like it works.
+// AddressSuggester отвечает на поиск адресов. DaData — единственный провайдер:
+// откат к более грубому молча возвращал бы адреса без квартиры и без надёжного
+// номера дома, а именно этот отказ данная схема и устраняет. Когда он не
+// настроен, ввод адреса прямо об этом сообщает, а не деградирует во что-то
+// похожее на работающее.
 //
-// It also resolves a free-form address to coordinates (see Resolve), which is
-// the single geocoding path in the system; the coordinate cache keeps that
-// fallback path from paying the provider for the same address twice.
+// Он же разрешает произвольный адрес в координаты (см. Resolve) — это
+// единственный путь геокодирования в системе; кэш координат не даёт этому
+// запасному пути платить провайдеру за один и тот же адрес дважды.
 type AddressSuggester struct {
 	dadata *DaData
 	cache  repository.GeocodeCacheRepository
 }
 
-// NewAddressSuggester wires the provider and the resolve cache. cache may be nil
-// (resolving then always calls the provider), which keeps tests trivial.
+// NewAddressSuggester подключает провайдера и кэш разрешения. cache может быть
+// nil (тогда разрешение всегда идёт к провайдеру), что делает тесты тривиальными.
 func NewAddressSuggester(dadata *DaData, cache repository.GeocodeCacheRepository) *AddressSuggester {
 	return &AddressSuggester{dadata: dadata, cache: cache}
 }
 
-// Configured reports whether suggestions can be served at all.
+// Configured сообщает, можно ли вообще отдавать подсказки.
 func (s *AddressSuggester) Configured() bool { return s.dadata != nil }
 
-// Suggest returns structured suggestions for a partial query.
+// Suggest возвращает структурированные подсказки по частичному запросу.
 func (s *AddressSuggester) Suggest(ctx context.Context, query string, count int) ([]Address, error) {
 	if s.dadata == nil {
 		return nil, ErrNoAddressProvider
@@ -41,14 +41,14 @@ func (s *AddressSuggester) Suggest(ctx context.Context, query string, count int)
 	return s.dadata.Suggest(ctx, query, count)
 }
 
-// Resolve turns a free-form address string into coordinates. It is the fallback
-// for the non-interactive paths — order creation and registration when the
-// client sent no coordinates, the /geo/geocode endpoint kept for installed
-// clients, and the backfill worker. A picked suggestion already carries its
-// coordinates and must never reach this.
+// Resolve превращает произвольную строку адреса в координаты. Это запасной путь
+// для неинтерактивных сценариев — создание заказа и регистрация, когда клиент
+// не прислал координат, эндпоинт /geo/geocode, оставленный для установленных
+// клиентов, и воркер дозаполнения. Выбранная подсказка уже несёт свои
+// координаты и сюда попадать не должна.
 //
-// It answers from the cache first and otherwise takes the top provider match,
-// which is the register's best guess for the typed line.
+// Он отвечает сперва из кэша, а иначе берёт лучшее совпадение провайдера —
+// лучшую догадку реестра по набранной строке.
 func (s *AddressSuggester) Resolve(ctx context.Context, query string) (*GeocodingResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -82,10 +82,10 @@ func (s *AddressSuggester) Resolve(ctx context.Context, query string) (*Geocodin
 	return nil, errors.New("address not found")
 }
 
-// LegacySuggest returns the shape the installed mobile clients expect:
-// "Россия, Город, Улица, д. N". Those builds re-validate the string against
-// their own regular expression before submitting, so the format they were
-// released with has to survive even though the provider behind it changed.
+// LegacySuggest возвращает форму, какой ждут установленные мобильные клиенты:
+// «Россия, Город, Улица, д. N». Те сборки перепроверяют строку собственным
+// регулярным выражением перед отправкой, поэтому формат, с которым они вышли,
+// обязан пережить смену провайдера за ним.
 func (s *AddressSuggester) LegacySuggest(ctx context.Context, query string) ([]AutocompleteResult, error) {
 	if s.dadata == nil {
 		return nil, ErrNoAddressProvider
@@ -98,9 +98,9 @@ func (s *AddressSuggester) LegacySuggest(ctx context.Context, query string) ([]A
 
 	out := make([]AutocompleteResult, 0, len(suggestions))
 	for _, a := range suggestions {
-		// An older client cannot use an address without a house number: its
-		// own check rejects the string on submit, so offering it only produces
-		// a dead end.
+		// Старый клиент не может использовать адрес без номера дома: его
+		// собственная проверка отвергает строку при отправке, поэтому предложение
+		// такого адреса ведёт только в тупик.
 		if !a.IsDeliverable() {
 			continue
 		}
@@ -119,10 +119,10 @@ func (s *AddressSuggester) LegacySuggest(ctx context.Context, query string) ([]A
 	return out, nil
 }
 
-// parseLegacyCanonical recovers the parts of an address that was stored as one
-// line: the mobile builds already installed still send it, and rows saved before
-// the structured columns existed still hold it. Anything picked from the
-// suggestion list arrives already split, with its parts from the provider.
+// parseLegacyCanonical восстанавливает части адреса, сохранённого одной
+// строкой: уже установленные мобильные сборки всё ещё её шлют, а строки,
+// сохранённые до появления структурных колонок, всё ещё её хранят. Всё
+// выбранное из списка подсказок приходит уже разделённым, с частями от провайдера.
 func parseLegacyCanonical(line string) Address {
 	addr := Address{Value: strings.TrimSpace(line), Source: SourceLegacyText}
 
@@ -130,7 +130,7 @@ func parseLegacyCanonical(line string) Address {
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
-	// Drop a leading country, which the old canonical form always carried.
+	// Отбрасываем ведущую страну, которую старая каноническая форма всегда несла.
 	if len(parts) > 0 && strings.EqualFold(parts[0], "Россия") {
 		parts = parts[1:]
 	}
@@ -148,8 +148,8 @@ func parseLegacyCanonical(line string) Address {
 		}
 	}
 
-	// "д. 12 кв. 5" arrives as one component when the flat was appended without
-	// a comma, which is how registration used to build it.
+	// «д. 12 кв. 5» приходит одним компонентом, когда квартиру дописали без
+	// запятой, — именно так её собирала регистрация.
 	if house, flat, found := strings.Cut(addr.House, " кв. "); found {
 		addr.House = strings.TrimSpace(house)
 		addr.Flat = strings.TrimSpace(flat)

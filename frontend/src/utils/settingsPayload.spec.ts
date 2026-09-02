@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { toSettingsPayload } from './settingsPayload'
 
 describe('toSettingsPayload', () => {
-  // The regression: Vue hands back a number for any `<input type="number">`
-  // the admin edited, and the settings API only accepts strings.
+  // Регрессия: Vue возвращает число для любого `<input type="number">`,
+  // который правил админ, а API настроек принимает только строки.
   it('stringifies numbers produced by number inputs', () => {
     expect(toSettingsPayload({ order_commission_percent: 15 })).toEqual({
       order_commission_percent: '15',

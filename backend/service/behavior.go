@@ -15,22 +15,22 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// Behaviors is the core's side of a behaviour script: it turns database rows
-// into the facts a script is allowed to see, calls the hook, and turns the
-// answer back into the errors the rest of the service layer already speaks.
+// Behaviors — сторона ядра в скрипте поведения: он превращает строки базы в
+// факты, которые скрипту позволено видеть, вызывает хук и превращает ответ
+// обратно в ошибки, на которых остальной слой сервисов уже говорит.
 //
-// Every method is nil-safe. A deployment with no scripts, and every test that
-// does not care about them, passes nil and gets exactly the behaviour the
-// service had before behaviours existed.
+// Каждый метод безопасен к nil. Установка без скриптов и любой тест, которому
+// они безразличны, передают nil и получают ровно то поведение, какое сервис имел
+// до появления поведений.
 type Behaviors struct {
 	engine  *behavior.Engine
 	claims  repository.ServiceClaimRepository
 	catalog repository.ServiceCatalogRepository
 }
 
-// NewBehaviors wires the engine to the claim store. claims may be nil, in which
-// case once-per-user services cannot be enforced and are refused rather than
-// silently allowed twice.
+// NewBehaviors подключает движок к хранилищу claim'ов. claims может быть nil, и
+// тогда услуги «один раз на пользователя» нельзя обеспечить — они отклоняются, а
+// не молча разрешаются дважды.
 func NewBehaviors(engine *behavior.Engine, claims repository.ServiceClaimRepository) *Behaviors {
 	if engine == nil {
 		return nil
@@ -38,8 +38,8 @@ func NewBehaviors(engine *behavior.Engine, claims repository.ServiceClaimReposit
 	return &Behaviors{engine: engine, claims: claims}
 }
 
-// WithCatalog lets the behaviours compile the scripts stored on catalog nodes —
-// the special services written in the admin panel.
+// WithCatalog позволяет поведениям компилировать скрипты, хранящиеся на узлах
+// каталога, — особые услуги, написанные в админ-панели.
 func (b *Behaviors) WithCatalog(catalog repository.ServiceCatalogRepository) *Behaviors {
 	if b != nil {
 		b.catalog = catalog
@@ -47,10 +47,10 @@ func (b *Behaviors) WithCatalog(catalog repository.ServiceCatalogRepository) *Be
 	return b
 }
 
-// codeFor is the behaviour a node actually runs. A node with a script of its own
-// runs that script, registered under its id; otherwise it runs the library
-// behaviour it names. Everything below goes through this, so "which script"
-// is decided in one place.
+// codeFor — то поведение, которое узел на самом деле выполняет. Узел с
+// собственным скриптом выполняет его, зарегистрированный под своим id; иначе он
+// выполняет названное им библиотечное поведение. Всё ниже идёт через это, чтобы
+// «какой скрипт» решалось в одном месте.
 func (b *Behaviors) codeFor(node *repository.ServiceNode) string {
 	if node == nil {
 		return ""
@@ -61,7 +61,7 @@ func (b *Behaviors) codeFor(node *repository.ServiceNode) string {
 	return node.BehaviorCode
 }
 
-// nodeSources renders a node's own script as the two files the engine compiles.
+// nodeSources отдаёт собственный скрипт узла как два файла, которые компилирует движок.
 func nodeSources(node *repository.ServiceNode) []behavior.SourceFile {
 	files := make([]behavior.SourceFile, 0, 2)
 	if strings.TrimSpace(node.BehaviorConstants) != "" {
@@ -70,9 +70,9 @@ func nodeSources(node *repository.ServiceNode) []behavior.SourceFile {
 	return append(files, behavior.SourceFile{Name: "behavior.star", Src: []byte(node.BehaviorSource)})
 }
 
-// Validate compiles a candidate script without registering it. The admin panel
-// calls it before saving: a script that does not compile would take the service
-// off sale silently, so it is refused while somebody is still looking at it.
+// Validate компилирует кандидата, не регистрируя его. Админ-панель вызывает его
+// перед сохранением: скрипт, который не компилируется, молча снял бы услугу с
+// продажи, поэтому его отклоняют, пока на него ещё кто-то смотрит.
 func (b *Behaviors) Validate(node *repository.ServiceNode) error {
 	if b == nil || node == nil || !node.HasOwnScript() {
 		return nil
@@ -80,9 +80,9 @@ func (b *Behaviors) Validate(node *repository.ServiceNode) error {
 	return b.engine.Validate(nodeSources(node))
 }
 
-// SyncNode compiles the node's own script, or unregisters it when the script was
-// removed. Called right after an admin saves, so the edit applies to the next
-// request on this process.
+// SyncNode компилирует собственный скрипт узла или снимает его с регистрации,
+// когда скрипт удалили. Вызывается сразу после сохранения админом, чтобы правка
+// применилась к следующему запросу на этом процессе.
 func (b *Behaviors) SyncNode(node *repository.ServiceNode) error {
 	if b == nil || node == nil {
 		return nil
@@ -95,8 +95,8 @@ func (b *Behaviors) SyncNode(node *repository.ServiceNode) error {
 	return b.engine.CompileFiles(code, nodeSources(node))
 }
 
-// RemoveNode unregisters a node's script, for the paths that hold only its id —
-// a retired node stops being special immediately, not at the next resync.
+// RemoveNode снимает регистрацию скрипта узла — для путей, где есть только его
+// id: списанный узел перестаёт быть особым сразу, а не на следующей пересинхронизации.
 func (b *Behaviors) RemoveNode(nodeID uuid.UUID) {
 	if b == nil {
 		return
@@ -104,9 +104,9 @@ func (b *Behaviors) RemoveNode(nodeID uuid.UUID) {
 	b.engine.Remove(behavior.NodeCode(nodeID.String()))
 }
 
-// SyncAll compiles every node script in the catalog and drops the ones that are
-// gone. It runs at startup and on a timer: another replica's edit, or a change
-// made directly in the database, has to reach this process too.
+// SyncAll компилирует каждый скрипт узла в каталоге и убирает исчезнувшие. Он
+// выполняется при старте и по таймеру: правка другой реплики или изменение,
+// сделанное прямо в базе, должны дойти и до этого процесса.
 func (b *Behaviors) SyncAll(ctx context.Context) error {
 	if b == nil || b.catalog == nil {
 		return nil
@@ -122,8 +122,8 @@ func (b *Behaviors) SyncAll(ctx context.Context) error {
 		code := behavior.NodeCode(node.ID.String())
 		live[code] = struct{}{}
 		if err := b.engine.CompileFiles(code, nodeSources(node)); err != nil {
-			// Reported, not fatal, and deliberately not registered: the node
-			// falls back to "unknown behaviour", which fails its gates closed.
+			// Сообщается, но не фатально, и намеренно не регистрируется: узел
+			// откатывается к «неизвестному поведению», чьи проверки закрыты.
 			b.engine.Remove(code)
 			failed = append(failed, node.Code)
 			log.Printf("[behavior] node %s (%s): %v", node.Code, node.ID, err)
@@ -143,14 +143,14 @@ func (b *Behaviors) SyncAll(ctx context.Context) error {
 	return nil
 }
 
-// ErrBehaviorUnavailable is what a caller gets when the script that governs a
-// service cannot be run — it failed to compile, it timed out, it returned
-// nonsense. Every gate fails closed on it: a service whose rules cannot be
-// evaluated is a service nobody may order or take.
+// ErrBehaviorUnavailable — то, что получает вызывающий, когда скрипт, правящий
+// услугой, не может быть выполнен: не скомпилировался, вышел за таймаут, вернул
+// бессмыслицу. Любая проверка отказывает на нём в безопасную сторону: услугу,
+// чьи правила нельзя вычислить, никто не может ни заказать, ни взять.
 var ErrBehaviorUnavailable = errors.New("услуга временно недоступна")
 
-// Engine exposes the compiled behaviours, for the admin endpoint that lists
-// them. Nothing else needs it.
+// Engine открывает скомпилированные поведения — для админского эндпоинта,
+// который их перечисляет. Больше он никому не нужен.
 func (b *Behaviors) Engine() *behavior.Engine {
 	if b == nil {
 		return nil
@@ -158,19 +158,19 @@ func (b *Behaviors) Engine() *behavior.Engine {
 	return b.engine
 }
 
-// governs reports whether this node's rules come from a script this engine has.
+// governs сообщает, приходят ли правила этого узла из скрипта, который есть у движка.
 func (b *Behaviors) governs(node *repository.ServiceNode) bool {
 	return b != nil && node != nil && node.HasBehavior()
 }
 
-// Governs reports whether this node's rules come from a script at all. Callers
-// use it to skip work that only a scripted service needs — an ordinary service
-// must not pay for a mechanism it does not use.
+// Governs сообщает, приходят ли правила этого узла из скрипта вообще.
+// Вызывающие используют это, чтобы пропустить работу, нужную только скриптовой
+// услуге: обычная услуга не должна платить за механизм, которым не пользуется.
 func (b *Behaviors) Governs(node *repository.ServiceNode) bool {
 	return b.governs(node)
 }
 
-// Manifest returns the static declaration behind a node's behaviour.
+// Manifest возвращает статическое объявление за поведением узла.
 func (b *Behaviors) Manifest(node *repository.ServiceNode) (behavior.Manifest, bool) {
 	if !b.governs(node) {
 		return behavior.Manifest{}, false
@@ -178,13 +178,13 @@ func (b *Behaviors) Manifest(node *repository.ServiceNode) (behavior.Manifest, b
 	return b.engine.Manifest(b.codeFor(node))
 }
 
-// Config returns the node's configuration laid over the behaviour's own
-// constants — the same merge the script sees through f.config.
+// Config возвращает конфигурацию узла, наложенную поверх собственных констант
+// поведения, — то же слияние, что видит скрипт через f.config.
 //
-// The core needs it wherever it checks something the script also reads: the
-// verifier role, for instance, is a constant in config.star, and a guard that
-// looked only at the node's column would refuse what the script allows the
-// moment that constant changes.
+// Ядру она нужна везде, где оно проверяет то же, что читает скрипт: роль
+// проверяющего, например, — константа в config.star, и проверка, смотрящая
+// только в колонку узла, отказывала бы в том, что скрипт разрешает, как только
+// эта константа изменится.
 func (b *Behaviors) Config(node *repository.ServiceNode) map[string]interface{} {
 	if !b.governs(node) {
 		return nil
@@ -201,7 +201,7 @@ func (b *Behaviors) Config(node *repository.ServiceNode) map[string]interface{} 
 	return merged
 }
 
-// ConfigString reads one string setting out of that merge.
+// ConfigString читает одну строковую настройку из этого слияния.
 func (b *Behaviors) ConfigString(node *repository.ServiceNode, key, fallback string) string {
 	if value, ok := b.Config(node)[key].(string); ok && value != "" {
 		return value
@@ -209,22 +209,22 @@ func (b *Behaviors) ConfigString(node *repository.ServiceNode, key, fallback str
 	return fallback
 }
 
-// OncePerUser reports whether ordering this node has to claim it for the user.
+// OncePerUser сообщает, обязан ли заказ этого узла занять claim за пользователем.
 func (b *Behaviors) OncePerUser(node *repository.ServiceNode) bool {
 	m, ok := b.Manifest(node)
 	return ok && m.OncePerUser
 }
 
-// ReleasesClaimOnCancel reports whether cancelling an order for this node gives
-// the user their one attempt back.
+// ReleasesClaimOnCancel сообщает, возвращает ли отмена заказа по этому узлу
+// пользователю его единственную попытку.
 func (b *Behaviors) ReleasesClaimOnCancel(node *repository.ServiceNode) bool {
 	m, ok := b.Manifest(node)
 	return ok && m.OncePerUser && m.ReleaseClaimOnCancel
 }
 
-// Visible decides whether a catalog node may be listed for this viewer. It is
-// given the viewer's claim counts because the listing judges many nodes at once
-// and must not query per node.
+// Visible решает, можно ли перечислять узел каталога для этого смотрящего. Ему
+// передают счётчики claim'ов смотрящего, потому что список судит много узлов
+// разом и не должен делать запрос на каждый.
 func (b *Behaviors) Visible(ctx context.Context, viewer *repository.User, node *repository.ServiceNode, claims map[uuid.UUID]int) bool {
 	if !b.governs(node) {
 		return true
@@ -237,16 +237,16 @@ func (b *Behaviors) Visible(ctx context.Context, viewer *repository.User, node *
 	}
 	visible, err := b.engine.Visible(b.codeFor(node), facts)
 	if err != nil {
-		// Hidden, not shown: a service whose visibility rule cannot be run is
-		// one nobody can order either (CanOrder fails the same way), and
-		// listing it would only produce a refusal at checkout.
+		// Скрыт, а не показан: услуга, чьё правило видимости нельзя выполнить, —
+		// это услуга, которую никто и заказать не может (CanOrder падает так же),
+		// и её показ породил бы лишь отказ при оформлении.
 		b.report(node, behavior.HookVisible, err)
 		return false
 	}
 	return visible
 }
 
-// CanOrder is the scripted half of canCustomerOrderVariant.
+// CanOrder — скриптовая половина canCustomerOrderVariant.
 func (b *Behaviors) CanOrder(ctx context.Context, customer *repository.User, variant *repository.ServiceNode) error {
 	if !b.governs(variant) {
 		return nil
@@ -264,7 +264,7 @@ func (b *Behaviors) CanOrder(ctx context.Context, customer *repository.User, var
 	return b.translate(variant, behavior.HookCanOrder, b.engine.CanOrder(b.codeFor(variant), facts))
 }
 
-// CanViewOrTake is the scripted half of canViewOrTakeOrder.
+// CanViewOrTake — скриптовая половина canViewOrTakeOrder.
 func (b *Behaviors) CanViewOrTake(ctx context.Context, viewer, customer *repository.User, variant *repository.ServiceNode) error {
 	if !b.governs(variant) {
 		return nil
@@ -279,9 +279,9 @@ func (b *Behaviors) CanViewOrTake(ctx context.Context, viewer, customer *reposit
 	return b.translate(variant, behavior.HookCanViewOrTake, b.engine.CanViewOrTake(b.codeFor(variant), facts))
 }
 
-// Price returns the price a behaviour dictates, if it dictates one. A script
-// that prices a service overrides the catalog completely, tariff coefficients
-// included: "free" has to mean free even for an ASAP order.
+// Price возвращает цену, которую диктует поведение, если оно её диктует.
+// Скрипт, назначающий цену услуге, полностью перекрывает каталог, включая
+// тарифные коэффициенты: «бесплатно» обязано значить бесплатно даже для срочного заказа.
 func (b *Behaviors) Price(ctx context.Context, variant *repository.ServiceNode) (money.Amount, bool, error) {
 	if !b.governs(variant) {
 		return money.Zero, false, nil
@@ -301,10 +301,10 @@ func (b *Behaviors) Price(ctx context.Context, variant *repository.ServiceNode) 
 	return money.FromRubles(rubles), true, nil
 }
 
-// claimCount answers "how many times has this user ordered this variant", and
-// only for the behaviours that care. A behaviour that is once-per-user without
-// a claim store is refused: allowing it would mean the limit silently does not
-// hold.
+// claimCount отвечает на вопрос «сколько раз этот пользователь заказывал этот
+// вариант», и только для тех поведений, которым это важно. Поведению «один раз
+// на пользователя» без хранилища claim'ов отказывают: разрешить означало бы, что
+// ограничение молча не действует.
 func (b *Behaviors) claimCount(ctx context.Context, user *repository.User, variant *repository.ServiceNode) (int, error) {
 	if user == nil || !b.OncePerUser(variant) {
 		return 0, nil
@@ -319,7 +319,7 @@ func (b *Behaviors) claimCount(ctx context.Context, user *repository.User, varia
 	return count, nil
 }
 
-// ClaimsFor loads a user's claims in one query, for the catalog listings.
+// ClaimsFor загружает claim'ы пользователя одним запросом — для списков каталога.
 func (b *Behaviors) ClaimsFor(ctx context.Context, user *repository.User) map[uuid.UUID]int {
 	if b == nil || b.claims == nil || user == nil {
 		return nil
@@ -332,9 +332,9 @@ func (b *Behaviors) ClaimsFor(ctx context.Context, user *repository.User) map[uu
 	return counts
 }
 
-// translate turns a script's answer into the service layer's error vocabulary:
-// a refusal keeps its message, anything else becomes ErrBehaviorUnavailable and
-// is reported.
+// translate превращает ответ скрипта в словарь ошибок слоя сервисов: отказ
+// сохраняет своё сообщение, всё прочее становится ErrBehaviorUnavailable и
+// логируется.
 func (b *Behaviors) translate(node *repository.ServiceNode, hook string, err error) error {
 	if err == nil {
 		return nil
@@ -353,8 +353,8 @@ func (b *Behaviors) report(node *repository.ServiceNode, hook string, err error)
 	metrics.BehaviorHookError(code, hook)
 }
 
-// Code is the behaviour a node runs, for the callers outside this file that
-// need to name it — the dispatcher, when it records what asked for an effect.
+// Code — поведение, которое выполняет узел, для вызывающих вне этого файла,
+// которым нужно его назвать: диспетчеру, когда он записывает, кто просил эффект.
 func (b *Behaviors) Code(node *repository.ServiceNode) string {
 	if b == nil {
 		return ""
@@ -362,8 +362,8 @@ func (b *Behaviors) Code(node *repository.ServiceNode) string {
 	return b.codeFor(node)
 }
 
-// actorFacts renders a user for a script. Nil stays nil: "no user" is a case
-// scripts have to handle (an anonymous catalog visitor), not an error.
+// actorFacts отдаёт пользователя для скрипта. Nil остаётся nil: «нет
+// пользователя» — случай, который скрипты обязаны обрабатывать (анонимный посетитель), а не ошибка.
 func actorFacts(u *repository.User) *behavior.Actor {
 	if u == nil {
 		return nil

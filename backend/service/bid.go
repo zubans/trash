@@ -13,7 +13,7 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// BidService manages bidding business operations.
+// BidService управляет бизнес-операциями торгов.
 type BidService struct {
 	bidRepo     repository.BidRepository
 	orderRepo   repository.OrderRepository
@@ -22,23 +22,23 @@ type BidService struct {
 	userRepo    repository.UserRepository
 	catalogRepo repository.ServiceCatalogRepository
 	chatRepo    repository.ChatRepository
-	// behaviors applies the scripted rules of a service, when the variant has
-	// any; events records what a behaviour reacts to. Both optional: nil means
-	// no service has scripted rules.
+	// behaviors применяет скриптовые правила услуги, когда они у варианта есть;
+	// events записывает то, на что реагирует поведение. Оба необязательны: nil
+	// означает, что ни у одной услуги нет скриптовых правил.
 	behaviors *Behaviors
 	events    repository.EventRepository
 }
 
-// WithBehaviors wires the behaviour scripts into the auction gates, so a
-// scripted service restricts bidding exactly as it restricts accepting, and
-// publishes the assignment event a behaviour may react to.
+// WithBehaviors подключает скрипты поведений к воротам аукциона, чтобы
+// скриптовая услуга ограничивала ставки ровно так же, как ограничивает
+// принятие, и публиковала событие назначения, на которое реагирует поведение.
 func (s *BidService) WithBehaviors(behaviors *Behaviors, events repository.EventRepository) *BidService {
 	s.behaviors = behaviors
 	s.events = events
 	return s
 }
 
-// NewBidService creates a new BidService.
+// NewBidService создаёт новый BidService.
 func NewBidService(
 	bidRepo repository.BidRepository,
 	orderRepo repository.OrderRepository,
@@ -59,12 +59,12 @@ func NewBidService(
 	}
 }
 
-// maxBidPrice caps an offer so a typo (or an abusive client) cannot push a
-// value the NUMERIC(18,2) column cannot hold.
-// maxBidPrice caps an offer at ten million rubles.
+// maxBidPrice ограничивает предложение, чтобы опечатка (или злонамеренный
+// клиент) не протолкнула значение, которое не влезет в колонку NUMERIC(18,2).
+// maxBidPrice ограничивает предложение десятью миллионами рублей.
 const maxBidPrice = money.Amount(10_000_000 * 100)
 
-// CreateBid submits a bid on a construction waste order.
+// CreateBid подаёт ставку по заказу на вывоз строительного мусора.
 func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
 	if !offeredPrice.IsPositive() {
 		return nil, errors.New("offered price must be greater than zero")
@@ -73,7 +73,7 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 		return nil, errors.New("offered price is too large")
 	}
 
-	// Verify executor has an active shift
+	// Проверяем, что у исполнителя есть активная смена
 	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
 	if err != nil {
 		return nil, err
@@ -82,8 +82,8 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 		return nil, errors.New("cannot place a bid without an active work shift")
 	}
 
-	// The same age / verification rules that apply to accepting an order apply
-	// to bidding on one.
+	// Те же правила возраста и верификации, что применяются к принятию заказа,
+	// применяются и к ставке по нему.
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, errors.New("order not found")
@@ -124,8 +124,8 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 	return bid, nil
 }
 
-// GetBidsForOrder lists bids placed on an order, but only for the customer who
-// owns it — bids carry executor contact details.
+// GetBidsForOrder перечисляет ставки по заказу, но только для владеющего им
+// заказчика — ставки несут контактные данные исполнителей.
 func (s *BidService) GetBidsForOrder(ctx context.Context, orderID, customerID uuid.UUID) ([]*repository.Bid, error) {
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
@@ -137,12 +137,12 @@ func (s *BidService) GetBidsForOrder(ctx context.Context, orderID, customerID uu
 	return s.bidRepo.GetBidsForOrder(ctx, orderID)
 }
 
-// AcceptBid accepts an offer: it holds the customer's money, assigns the
-// executor and closes the remaining offers, all in one transaction.
+// AcceptBid принимает предложение: он удерживает деньги заказчика, назначает
+// исполнителя и закрывает остальные предложения — всё в одной транзакции.
 //
-// This used to live in the repository, which meant it applied a different set
-// of rules than Accept() for regular orders — an executor could win an auction
-// while banned, off shift, or below the age the service variant requires.
+// Раньше это жило в репозитории, из-за чего применялся другой набор правил, чем
+// в Accept() для обычных заказов: исполнитель мог выиграть аукцион забаненным,
+// вне смены или моложе возраста, которого требует вариант услуги.
 func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID) error {
 	var acceptedOrderID uuid.UUID
 
@@ -174,8 +174,8 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 			return errors.New("order is not an auction")
 		}
 
-		// The executor must still be allowed to take this order at the moment
-		// the customer accepts, not only when the bid was placed.
+		// Исполнителю должно быть по-прежнему позволено взять этот заказ в момент,
+		// когда заказчик принимает, а не только когда ставка подавалась.
 		executor, err := s.userRepo.FindByID(ctx, bid.ExecutorID)
 		if err != nil {
 			return errors.New("executor not found")
@@ -189,8 +189,8 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 			return errors.New("исполнитель сейчас не на смене, выберите другое предложение")
 		}
 
-		// The accepted price moves from the customer into escrow, exactly like a
-		// regular order hold.
+		// Принятая цена уходит от заказчика в эскроу, ровно как удержание по
+		// обычному заказу.
 		if err := s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, bid.OfferedPrice, repository.TransactionTypeHold, &order.ID); err != nil {
 			return err
 		}
@@ -204,8 +204,8 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 			return err
 		}
 		acceptedOrderID = order.ID
-		// Winning an auction assigns the order exactly as accepting one does, so
-		// it publishes the same event, in the same transaction.
+		// Победа в аукционе назначает заказ ровно так же, как его принятие, поэтому
+		// публикуется то же событие, в той же транзакции.
 		if s.events != nil {
 			if err := s.events.Publish(ctx, tx, &repository.DomainEvent{
 				Type:        repository.EventOrderAccepted,
@@ -228,8 +228,8 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 		return err
 	}
 
-	// The chat room is not part of the money transaction: failing to create it
-	// must not undo an accepted bid.
+	// Чат-комната не входит в денежную транзакцию: неудача при её создании не
+	// должна отменять принятую ставку.
 	if s.chatRepo != nil {
 		if _, err := s.chatRepo.CreateChat(ctx, acceptedOrderID); err != nil {
 			log.Printf("[BidService] failed to create chat for order %s: %v", acceptedOrderID, err)

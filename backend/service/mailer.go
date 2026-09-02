@@ -19,8 +19,8 @@ type unencryptedPlainAuth struct {
 	host                         string
 }
 
-// UnencryptedPlainAuth implements smtp.Auth without Go's mandatory TLS/localhost restriction,
-// allowing authentication over internal container networks (e.g. mailserver:587).
+// UnencryptedPlainAuth реализует smtp.Auth без обязательного в Go ограничения на TLS/localhost,
+// позволяя аутентификацию во внутренних сетях контейнеров (например, mailserver:587).
 func UnencryptedPlainAuth(identity, username, password, host string) smtp.Auth {
 	return &unencryptedPlainAuth{identity, username, password, host}
 }
@@ -129,14 +129,14 @@ func NewSmtpMailSender() *SmtpMailSender {
 	}
 }
 
-// validRecipient rejects addresses that could inject extra SMTP headers.
-// The message is assembled by string concatenation, so a CR/LF in the address
-// would let the caller add arbitrary headers such as Bcc.
+// validRecipient отвергает адреса, которыми можно внедрить лишние SMTP-заголовки.
+// Сообщение собирается конкатенацией строк, поэтому CR/LF в адресе позволил бы
+// вызывающему добавить произвольные заголовки, например Bcc.
 var validRecipient = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
-// SendEmail submits one message. It is the public entry point used for
-// broadcasts; the templated system mails below go through sendKind so a failing
-// password reset is distinguishable from a failing newsletter on the dashboard.
+// SendEmail отправляет одно сообщение. Это публичная точка входа, используемая
+// для рассылок; шаблонные системные письма ниже идут через sendKind, чтобы на
+// дашборде падающий сброс пароля отличался от падающей рассылки.
 func (m *SmtpMailSender) SendEmail(to, subject, bodyHTML string) error {
 	return m.sendKind("broadcast", to, subject, bodyHTML)
 }
@@ -158,8 +158,8 @@ func (m *SmtpMailSender) send(to, subject, bodyHTML string) error {
 	}
 
 	if m.host == "" {
-		// The body may contain a verification token or a reset code, so it is
-		// never written to the log.
+		// Тело может содержать токен подтверждения или код сброса, поэтому оно
+		// никогда не пишется в лог.
 		log.Printf("[SmtpMailSender] SMTP_HOST not set; refusing to send mail to %s (subject: %s)", to, subject)
 		return fmt.Errorf("mail transport is not configured")
 	}

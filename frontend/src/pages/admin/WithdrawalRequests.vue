@@ -2,7 +2,7 @@
   <div class="withdrawal-requests">
     <h1 class="va-h3 mb-4">{{ $t('withdrawals.title') }}</h1>
 
-    <!-- Requests Table -->
+    <!-- Таблица заявок -->
     <va-data-table :items="requests" :columns="columns" :loading="loading" class="mb-4">
       <template #cell(amount)="{ value }">
         <strong style="color: #ef4444;">{{ currencySymbol }}{{ Number(value).toFixed(2) }}</strong>
@@ -40,7 +40,7 @@
       </template>
     </va-data-table>
 
-    <!-- Confirmation Modal -->
+    <!-- Модальное окно подтверждения -->
     <va-modal
       v-model="showConfirm"
       :title="modalTitle"
@@ -70,7 +70,7 @@ export default defineComponent({
       return authStore.currency === 'RUB' ? '₽' : '$'
     })
 
-    // Modal Control
+    // Управление модальным окном
     const showConfirm = ref(false)
     const selectedRequest = ref<any>(null)
     const actionType = ref<'APPROVE' | 'REJECT'>('APPROVE')
@@ -110,7 +110,7 @@ export default defineComponent({
 
       try {
         await api.post(`/admin/finances/withdrawals/${reqId}/${endpoint}`)
-        fetchRequests() // Reload
+        fetchRequests() // Перезагрузка
       } catch (err: any) {
         alert(err.response?.data || t('withdrawals.operationFailed'))
       } finally {

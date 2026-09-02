@@ -12,19 +12,19 @@ import (
 	"healthlogin/backend/service"
 )
 
-// AuctionWorker automatically cancels auction orders that remain unmatched for 7 days.
+// AuctionWorker автоматически отменяет аукционные заказы, не нашедшие пары за 7 дней.
 type AuctionWorker struct {
 	db           *sql.DB
 	orderService *service.OrderService
 	guard func(func() error) error
 }
 
-// NewAuctionWorker creates a new AuctionWorker.
+// NewAuctionWorker создаёт новый AuctionWorker.
 func NewAuctionWorker(db *sql.DB, orderService *service.OrderService) *AuctionWorker {
 	return &AuctionWorker{db: db, orderService: orderService}
 }
 
-// Start runs the worker loop periodically.
+// Start периодически выполняет цикл воркера.
 func (w *AuctionWorker) Start(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -41,7 +41,7 @@ type expiredAuction struct {
 	ID uuid.UUID
 }
 
-// CheckExpiredAuctions selects and cancels expired auction orders.
+// CheckExpiredAuctions выбирает и отменяет истёкшие аукционные заказы.
 func (w *AuctionWorker) CheckExpiredAuctions() error {
 	query := `
 		SELECT o.id
@@ -68,15 +68,15 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	}
 
 	for _, a := range list {
-		// One correct cancel path, under a row lock, instead of this worker's
-		// own raw SQL — which credited the customer without ever debiting
-		// escrow and left hold_amount standing.
+		// Один правильный путь отмены, под блокировкой строки, вместо собственного
+		// сырого SQL этого воркера, который зачислял заказчику, ни разу не списав
+		// с эскроу, и оставлял hold_amount на месте.
 		//
-		// CancelUnclaimedAuction rather than CancelOrder: an auction holds no
-		// money until a bid is accepted, and accepting one is exactly what
-		// moves it to ASSIGNED. A request that reached ASSIGNED between the
-		// scan above and this line has been claimed and is no longer expired
-		// business — it belongs to the executor who won it.
+		// CancelUnclaimedAuction, а не CancelOrder: аукцион не держит денег, пока
+		// не принята ставка, а принятие — ровно то, что переводит его в ASSIGNED.
+		// Заявка, дошедшая до ASSIGNED между сканом выше и этой строкой, уже
+		// забрана и больше не истёкшее дело — она принадлежит выигравшему её
+		// исполнителю.
 		err := w.orderService.CancelUnclaimedAuction(context.Background(), a.ID)
 		if err != nil {
 			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", a.ID, err)
@@ -88,9 +88,9 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 	return nil
 }
 
-// guard runs one tick under the job's advisory lock when a Leader is wired, so
-// a second replica skips the tick instead of duplicating it. Unset means run
-// directly, which is what a single-process deployment and the tests do.
+// guard выполняет один тик под advisory-блокировкой задачи, когда подключён
+// Leader, чтобы вторая реплика пропустила тик, а не продублировала его. Без
+// него выполняется напрямую — так и делают однопроцессный деплой и тесты.
 func (w *AuctionWorker) runGuarded(job func() error) error {
 	if w.guard == nil {
 		return job()
@@ -98,7 +98,7 @@ func (w *AuctionWorker) runGuarded(job func() error) error {
 	return w.guard(job)
 }
 
-// WithLeader makes this worker run at most once across every process.
+// WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.
 func (w *AuctionWorker) WithLeader(leader *Leader, name string) *AuctionWorker {
 	w.guard = leader.Guard(name)
 	return w

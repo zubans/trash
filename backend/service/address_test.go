@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// TestComposeKeepsBuildingsTheOldRegexRejected is the point of the change: the
-// previous format check accepted only a purely numeric house number, so a
-// корпус or a строение — ordinary Russian addresses — could be chosen from the
-// suggestion list and then refused by the form.
+// TestComposeKeepsBuildingsTheOldRegexRejected — смысл этого изменения: прежняя
+// проверка формата принимала только чисто числовой номер дома, поэтому корпус
+// или строение — обычные российские адреса — можно было выбрать из списка
+// подсказок и получить отказ формы.
 func TestComposeKeepsBuildingsTheOldRegexRejected(t *testing.T) {
 	cases := []struct {
 		name string
@@ -50,9 +50,9 @@ func TestComposeKeepsBuildingsTheOldRegexRejected(t *testing.T) {
 	}
 }
 
-// TestWithFlatRebuildsTheLine covers joining the apartment onto an address the
-// provider returned for a building — which is what happens whenever a person
-// picks a house from the list and then types their flat.
+// TestWithFlatRebuildsTheLine покрывает присоединение квартиры к адресу,
+// который провайдер вернул для здания, — то есть то, что происходит всякий раз,
+// когда человек выбирает дом из списка, а потом печатает свою квартиру.
 func TestWithFlatRebuildsTheLine(t *testing.T) {
 	building := Address{
 		Value: "г Москва, ул Тверская, д 7", City: "г Москва", Street: "ул Тверская", House: "7",
@@ -69,15 +69,15 @@ func TestWithFlatRebuildsTheLine(t *testing.T) {
 		t.Error("WithFlat must not modify the original address")
 	}
 
-	// Clearing the flat removes it from the line again.
+	// Очистка квартиры снова убирает её из строки.
 	if cleared := withFlat.WithFlat(""); cleared.Flat != "" ||
 		cleared.Value != "г Москва, ул Тверская, д. 7" {
 		t.Errorf("clearing the flat left %+v", cleared)
 	}
 }
 
-// TestOnlyAddressesWithAHouseAreDeliverable: a suggestion that stops at the
-// street is useful while typing and useless as a pickup address.
+// TestOnlyAddressesWithAHouseAreDeliverable: подсказка, заканчивающаяся улицей,
+// полезна при наборе и бесполезна как адрес подачи.
 func TestOnlyAddressesWithAHouseAreDeliverable(t *testing.T) {
 	cases := map[string]struct {
 		addr Address
@@ -100,9 +100,9 @@ func TestOnlyAddressesWithAHouseAreDeliverable(t *testing.T) {
 	}
 }
 
-// TestLegacyAddressesKeepTheirParts covers what happens to the addresses already
-// stored as one line: they have to survive the move to structured fields,
-// including the flat that registration used to append without a comma.
+// TestLegacyAddressesKeepTheirParts покрывает судьбу адресов, уже сохранённых
+// одной строкой: они обязаны пережить переезд в структурные поля, включая
+// квартиру, которую регистрация раньше дописывала без запятой.
 func TestLegacyAddressesKeepTheirParts(t *testing.T) {
 	cases := []struct {
 		line         string
@@ -123,8 +123,8 @@ func TestLegacyAddressesKeepTheirParts(t *testing.T) {
 	}
 }
 
-// TestComposeFallsBackToStoredText: an address with nothing structured left
-// must still display, not turn into an empty line.
+// TestComposeFallsBackToStoredText: адрес, у которого не осталось ничего
+// структурного, всё равно обязан отображаться, а не превращаться в пустую строку.
 func TestComposeFallsBackToStoredText(t *testing.T) {
 	addr := Address{Value: "Свободный текст, введённый вручную"}
 	if got := addr.Compose(); got != "Свободный текст, введённый вручную" {
@@ -132,8 +132,8 @@ func TestComposeFallsBackToStoredText(t *testing.T) {
 	}
 }
 
-// TestComposeHouseKeepsCorpusAndBuilding covers the provider-side assembly of a
-// building identifier from its separate fields.
+// TestComposeHouseKeepsCorpusAndBuilding покрывает сборку идентификатора здания
+// из отдельных полей на стороне провайдера.
 func TestComposeHouseKeepsCorpusAndBuilding(t *testing.T) {
 	cases := []struct {
 		house, houseType, block, blockType string
@@ -155,9 +155,9 @@ func TestComposeHouseKeepsCorpusAndBuilding(t *testing.T) {
 	}
 }
 
-// TestSuggestionsFailLoudlyWithoutAProvider: there is no fallback by design, so
-// a deployment with no key must say it cannot suggest addresses rather than
-// return an empty list, which reads to a user as "your street does not exist".
+// TestSuggestionsFailLoudlyWithoutAProvider: запасного варианта по замыслу нет,
+// поэтому установка без ключа обязана сказать, что не умеет подсказывать
+// адреса, а не вернуть пустой список — пользователь прочтёт это как «вашей улицы нет».
 func TestSuggestionsFailLoudlyWithoutAProvider(t *testing.T) {
 	suggester := NewAddressSuggester(nil, nil)
 
@@ -172,8 +172,8 @@ func TestSuggestionsFailLoudlyWithoutAProvider(t *testing.T) {
 	}
 }
 
-// TestNewDaDataNeedsAKey covers the switch that decides whether suggestions are
-// available at all.
+// TestNewDaDataNeedsAKey покрывает переключатель, решающий, доступны ли
+// подсказки вообще.
 func TestNewDaDataNeedsAKey(t *testing.T) {
 	t.Setenv("DADATA_API_KEY", "")
 	if NewDaData() != nil {

@@ -10,7 +10,7 @@
           Отправка рекламных и информационных писем от имени системного ящика <strong>system@moya-usluga.ru</strong>.
         </p>
 
-        <!-- Segment selector buttons / Tabs -->
+        <!-- Кнопки выбора сегмента / вкладки -->
         <div class="segment-selector mb-4">
           <label class="d-block font-weight-bold mb-2">Выбор аудитории для рассылки:</label>
           <div class="d-flex flex-wrap gap-2">
@@ -38,7 +38,7 @@
           </div>
         </div>
 
-        <!-- Custom email list input when CUSTOM_EMAILS target is chosen -->
+        <!-- Поле произвольного списка адресов, когда выбрана цель CUSTOM_EMAILS -->
         <div v-if="targetGroup === 'CUSTOM_EMAILS'" class="mb-4">
           <va-input
             v-model="customEmailsInput"
@@ -54,7 +54,7 @@
           </span>
         </div>
 
-        <!-- Email Subject -->
+        <!-- Тема письма -->
         <div class="mb-4">
           <va-input
             v-model="subject"
@@ -64,7 +64,7 @@
           />
         </div>
 
-        <!-- HTML Body editor -->
+        <!-- Редактор HTML-тела -->
         <div class="mb-4">
           <label class="d-block font-weight-bold mb-2">Текст письма (HTML поддерживается):</label>
           <va-input
@@ -77,7 +77,7 @@
           />
         </div>
 
-        <!-- Action Button & Status -->
+        <!-- Кнопка действия и статус -->
         <div class="d-flex align-items-center justify-between mt-4">
           <va-button
             color="primary"
@@ -90,7 +90,7 @@
           </va-button>
         </div>
 
-        <!-- Send Results alert -->
+        <!-- Уведомление о результатах отправки -->
         <va-alert v-if="result" :color="result.failed === 0 ? 'success' : 'warning'" class="mt-4">
           <template #title>Результаты рассылки</template>
           <div>Успешно отправлено: <strong>{{ result.successful }}</strong> из {{ result.total }} писем.</div>
@@ -102,7 +102,7 @@
           </div>
         </va-alert>
 
-        <!-- General Error Alert -->
+        <!-- Общее уведомление об ошибке -->
         <va-alert v-if="error" color="danger" class="mt-4" dismissible @dismiss="error = ''">
           {{ error }}
         </va-alert>

@@ -8,52 +8,52 @@ import (
 	"healthlogin/backend/money"
 )
 
-// System account codes. Every movement of user money faces one of these, so the
-// money always has somewhere to come from and somewhere to go.
+// Коды системных счетов. Любое движение денег пользователя смотрит на один из
+// них, поэтому у денег всегда есть откуда прийти и куда уйти.
 const (
-	// AccountEscrow holds what has been taken from customers for orders that are
-	// still running. It is released to the executor on completion or back to the
-	// customer on cancellation.
+	// AccountEscrow держит то, что взято с заказчиков по ещё выполняющимся
+	// заказам. Оно уходит исполнителю при завершении или возвращается
+	// заказчику при отмене.
 	AccountEscrow = "ESCROW"
-	// AccountFines collects penalties charged to executors. Before this account
-	// existed a fine simply left the executor's balance and vanished.
+	// AccountFines собирает штрафы, наложенные на исполнителей. До появления этого
+	// счёта штраф просто уходил с баланса исполнителя и исчезал.
 	AccountFines = "FINES"
-	// AccountDeposits is the outside world: money enters the system from here.
+	// AccountDeposits — внешний мир: отсюда деньги входят в систему.
 	AccountDeposits = "DEPOSITS"
-	// AccountPayouts holds money reserved by pending withdrawal requests and
-	// releases it outward when a payout is approved.
+	// AccountPayouts держит деньги, зарезервированные ожидающими заявками на вывод,
+	// и отпускает их наружу, когда выплата одобрена.
 	AccountPayouts = "PAYOUTS"
-	// AccountCommission collects the platform's share of every completed order.
-	// It is the one account whose balance is the platform's own money rather
-	// than money it is holding for somebody, and only an admin may pay it out.
+	// AccountCommission собирает долю платформы с каждого завершённого заказа.
+	// Это единственный счёт, чей баланс — собственные деньги платформы, а не
+	// деньги, которые она за кого-то держит, и выплатить его может только админ.
 	AccountCommission = "COMMISSION"
-	// AccountBonuses is what the platform has paid out in rewards that no
-	// customer funded — a verifier's fee, for instance. Like DEPOSITS it goes
-	// negative, and that negative balance is the running cost of those rewards.
+	// AccountBonuses — то, что платформа выплатила вознаграждениями, которые не
+	// финансировал ни один заказчик, например гонорар проверяющего. Как и DEPOSITS,
+	// он уходит в минус, и этот минус — текущая стоимость таких вознаграждений.
 	AccountBonuses = "BONUSES"
 )
 
-// ErrUnknownSystemAccount is returned for a code with no account.
+// ErrUnknownSystemAccount возвращается для кода, за которым нет счёта.
 var ErrUnknownSystemAccount = errors.New("unknown system account")
 
-// SystemAccount is one side of the platform's books.
+// SystemAccount — одна сторона книг платформы.
 type SystemAccount struct {
 	Code    string       `json:"code"`
 	Name    string       `json:"name"`
 	Balance money.Amount `json:"balance"`
 }
 
-// SystemAccountRepository moves money on the platform's own accounts.
+// SystemAccountRepository двигает деньги по собственным счетам платформы.
 type SystemAccountRepository interface {
-	// Credit adds to an account; Debit subtracts. Both take the caller's
-	// transaction, because an account movement is always the other half of a
-	// user balance movement and the two must commit together.
+	// Credit прибавляет к счёту, Debit вычитает. Оба принимают транзакцию
+	// вызывающего, потому что движение по счёту — всегда вторая половина движения
+	// баланса пользователя, и коммититься они обязаны вместе.
 	Credit(ctx context.Context, q Querier, code string, amount money.Amount) error
 	Debit(ctx context.Context, q Querier, code string, amount money.Amount) error
-	// DebitAvailable subtracts only if the account holds that much, atomically.
-	// Returns ErrInsufficientFunds when it does not. Debit is unguarded because
-	// its callers are the other half of a movement that already established the
-	// money is there; this is for paying money out of an account on request.
+	// DebitAvailable вычитает, только если на счёте столько есть, атомарно.
+	// Возвращает ErrInsufficientFunds, когда нет. Debit не охраняется, потому что
+	// его вызывающие — вторая половина движения, уже установившего, что деньги на
+	// месте; это же нужно для выплаты со счёта по запросу.
 	DebitAvailable(ctx context.Context, q Querier, code string, amount money.Amount) error
 	List(ctx context.Context) ([]SystemAccount, error)
 	Get(ctx context.Context, code string) (*SystemAccount, error)
@@ -63,7 +63,7 @@ type systemAccountRepo struct {
 	db *sql.DB
 }
 
-// NewSystemAccountRepository creates a SystemAccountRepository.
+// NewSystemAccountRepository создаёт SystemAccountRepository.
 func NewSystemAccountRepository(db *sql.DB) SystemAccountRepository {
 	return &systemAccountRepo{db: db}
 }
@@ -83,8 +83,8 @@ func (r *systemAccountRepo) Debit(ctx context.Context, q Querier, code string, a
 	return r.move(ctx, q, code, amount.Neg())
 }
 
-// move applies a delta. A zero amount is a no-op rather than an error: several
-// call sites legitimately move nothing (a refund of zero, a fine of zero).
+// move применяет дельту. Нулевая сумма — это no-op, а не ошибка: несколько мест
+// вызова законно ничего не двигают (возврат нуля, штраф в ноль).
 func (r *systemAccountRepo) move(ctx context.Context, q Querier, code string, delta money.Amount) error {
 	if delta.IsZero() {
 		return nil
@@ -98,8 +98,8 @@ func (r *systemAccountRepo) move(ctx context.Context, q Querier, code string, de
 	return err
 }
 
-// DebitAvailable subtracts in a single guarded statement, so two concurrent
-// payouts cannot both pass a balance check and push the account negative.
+// DebitAvailable вычитает одним охраняемым оператором, чтобы две параллельные
+// выплаты не могли обе пройти проверку баланса и увести счёт в минус.
 func (r *systemAccountRepo) DebitAvailable(ctx context.Context, q Querier, code string, amount money.Amount) error {
 	if amount.IsNegative() {
 		return errors.New("debit amount must not be negative")
@@ -111,8 +111,8 @@ func (r *systemAccountRepo) DebitAvailable(ctx context.Context, q Querier, code 
 		`UPDATE system_accounts SET balance = balance - $1, updated_at = now() WHERE code = $2 AND balance >= $1`,
 		amount, code)
 	if errors.Is(err, ErrConflict) {
-		// Either the account does not exist or it does not hold enough. Tell the
-		// two apart so an unknown code is not reported as a money problem.
+		// Либо счёта не существует, либо на нём недостаточно средств. Различаем эти
+		// случаи, чтобы неизвестный код не выдавался за проблему с деньгами.
 		if _, getErr := r.Get(ctx, code); getErr != nil {
 			return getErr
 		}

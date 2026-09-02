@@ -20,7 +20,7 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// AuthService handles user registration and authentication.
+// AuthService занимается регистрацией и аутентификацией пользователей.
 type AuthService struct {
 	repo        repository.UserRepository
 	addressRepo repository.AddressRepository
@@ -32,16 +32,16 @@ type AuthService struct {
 	secret      []byte
 }
 
-// JWTClaims contains the data extracted from a validated access token.
+// JWTClaims содержит данные, извлечённые из проверенного access-токена.
 type JWTClaims struct {
 	UserID uuid.UUID
 	Phone  string
 	Role   string
 }
 
-// NewAuthService creates an AuthService using the provided repository.
-// The JWT signing secret is read from JWT_SECRET; a development default is used
-// if the variable is not set.
+// NewAuthService создаёт AuthService на переданном репозитории.
+// Секрет подписи JWT читается из JWT_SECRET; если переменная не задана,
+// используется значение по умолчанию для разработки.
 func NewAuthService(repo repository.UserRepository, resolver AddressResolver) *AuthService {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
@@ -50,8 +50,8 @@ func NewAuthService(repo repository.UserRepository, resolver AddressResolver) *A
 	return NewAuthServiceWithSecret(repo, secret, resolver, NewSmtpMailSender())
 }
 
-// NewAuthServiceWithSecret creates an AuthService with an explicit JWT secret.
-// Useful for tests and for environments where the secret is injected directly.
+// NewAuthServiceWithSecret создаёт AuthService с явным секретом JWT. Полезно
+// для тестов и для окружений, куда секрет внедряют напрямую.
 func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, resolver AddressResolver, mailer MailSender) *AuthService {
 	if mailer == nil {
 		mailer = NewSmtpMailSender()
@@ -59,40 +59,40 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, res
 	return &AuthService{repo: repo, resolver: resolver, mailer: mailer, secret: []byte(secret)}
 }
 
-// WithAddresses attaches the address repository used during registration.
+// WithAddresses присоединяет репозиторий адресов, используемый при регистрации.
 func (s *AuthService) WithAddresses(addressRepo repository.AddressRepository) *AuthService {
 	s.addressRepo = addressRepo
 	return s
 }
 
-// WithExecutorGeo attaches the executor geo repository for setting initial location.
+// WithExecutorGeo присоединяет гео-репозиторий исполнителей для задания начального местоположения.
 func (s *AuthService) WithExecutorGeo(execGeoRepo repository.ExecutorGeoRepository) *AuthService {
 	s.execGeoRepo = execGeoRepo
 	return s
 }
 
-// WithSessionStorage attaches the stores that back session handling: refresh
-// tokens and the access-token blacklist. Without them the service can still
-// issue access tokens, which is what the unit tests rely on.
+// WithSessionStorage присоединяет хранилища, обслуживающие сессии: refresh-токены
+// и чёрный список access-токенов. Без них сервис всё равно умеет выдавать
+// access-токены — на это и опираются юнит-тесты.
 func (s *AuthService) WithSessionStorage(refreshRepo repository.RefreshTokenRepository, tokenRepo repository.TokenRepository) *AuthService {
 	s.refreshRepo = refreshRepo
 	s.tokenRepo = tokenRepo
 	return s
 }
 
-// minPasswordLength is the shortest password accepted at registration and at
-// password reset.
+// minPasswordLength — самый короткий пароль, принимаемый при регистрации и при
+// сбросе пароля.
 const minPasswordLength = 8
 
-// weakPasswords are the values seen most often in credential stuffing lists.
+// weakPasswords — значения, чаще всего встречающиеся в списках для подстановки учётных данных.
 var weakPasswords = map[string]bool{
 	"12345678": true, "123456789": true, "1234567890": true, "password": true,
 	"qwerty123": true, "qwertyui": true, "11111111": true, "iloveyou": true,
 	"admin123": true, "parol123": true, "password1": true,
 }
 
-// validatePassword enforces a minimum strength. Without it a single character
-// password was accepted, which made the (unthrottled) login endpoint trivial.
+// validatePassword требует минимальной стойкости. Без него принимался пароль из
+// одного символа, что делало (неограниченный) эндпоинт входа тривиальным.
 func validatePassword(password string) error {
 	if len([]rune(password)) < minPasswordLength {
 		return fmt.Errorf("пароль должен быть не короче %d символов", minPasswordLength)
@@ -103,15 +103,15 @@ func validatePassword(password string) error {
 	return nil
 }
 
-// maxHumanAge bounds how far back a birth date may sit. It is a sanity check on
-// a hand-typed date, not a policy: the age limits that actually gate anything
-// live per service in min_age.
+// maxHumanAge ограничивает, насколько давней может быть дата рождения. Это
+// проверка здравого смысла для набранной вручную даты, а не политика:
+// реально что-то ограничивающие возрастные пределы живут по услугам в min_age.
 const maxHumanAge = 120
 
-// parseBirthDate turns the wire format into a date and rejects what cannot
-// describe a living person. A date in the future is the one that does real
-// damage: GetAge would report a negative age, so every min_age gate would read
-// as "too young" and no screen would say why.
+// parseBirthDate превращает формат обмена в дату и отвергает то, что не может
+// описывать живого человека. Настоящий вред наносит дата в будущем: GetAge
+// сообщил бы отрицательный возраст, поэтому любая проверка min_age читалась бы
+// как «слишком молод», и ни один экран не сказал бы почему.
 func parseBirthDate(birthDate string) (time.Time, error) {
 	birthDate = strings.TrimSpace(birthDate)
 	if birthDate == "" {
@@ -133,9 +133,9 @@ func parseBirthDate(birthDate string) (time.Time, error) {
 
 var phoneCleanup = regexp.MustCompile(`[^0-9+]`)
 
-// normalizePhone reduces a Russian phone number to a single canonical form, so
-// that "+7 999 …", "8999…" and "7999…" cannot become three separate accounts
-// for the same person.
+// normalizePhone приводит российский номер телефона к единой канонической
+// форме, чтобы «+7 999 …», «8999…» и «7999…» не превратились в три отдельные
+// учётные записи одного человека.
 func normalizePhone(phone string) string {
 	digits := phoneCleanup.ReplaceAllString(strings.TrimSpace(phone), "")
 	digits = strings.TrimPrefix(digits, "+")
@@ -148,20 +148,20 @@ func normalizePhone(phone string) string {
 	return "+" + digits
 }
 
-// validRegistrationRole reports whether a role may be chosen during registration.
-// ADMIN is explicitly forbidden; only CUSTOMER and EXECUTOR are allowed.
+// validRegistrationRole сообщает, можно ли выбрать роль при регистрации.
+// ADMIN запрещён явно; разрешены только CUSTOMER и EXECUTOR.
 func validRegistrationRole(role string) bool {
 	return role == "CUSTOMER" || role == "EXECUTOR"
 }
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
-// Register creates a new user with the given phone, email, password, birth date, pickup address and role.
+// Register создаёт нового пользователя с указанными телефоном, почтой, паролем, датой рождения, адресом подачи и ролью.
 func (s *AuthService) Register(ctx context.Context, phone, email, password, lastName, firstName, patronymic, birthDate, address, role string) (*repository.User, error) {
 	return s.RegisterWithCoordinates(ctx, phone, email, password, lastName, firstName, patronymic, birthDate, address, role, nil, nil)
 }
 
-// RegisterWithCoordinates creates a new user with email, phone, password, birth date and address.
+// RegisterWithCoordinates создаёт нового пользователя с почтой, телефоном, паролем, датой рождения и адресом.
 func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email, password, lastName, firstName, patronymic, birthDate, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
 		return nil, errors.New("phone and password are required")
@@ -176,9 +176,9 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 	if lastName == "" || firstName == "" || patronymic == "" {
 		return nil, errors.New("last_name, first_name, and patronymic are required")
 	}
-	// Required from here on: the per-service min_age gates read GetAge(), and an
-	// account with no birth date reads as age 0 — silently ineligible for every
-	// age-restricted service.
+	// Дальше обязательно: проверки min_age по услугам читают GetAge(), а учётка без
+	// даты рождения читается как возраст 0 — молча недопущенная до любой услуги с
+	// возрастным ограничением.
 	parsedBirthDate, err := parseBirthDate(birthDate)
 	if err != nil {
 		return nil, err
@@ -194,10 +194,10 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		return nil, errors.New("address is required")
 	}
 
-	// The address is checked for what it has to contain — a settlement, a
-	// street and a building — rather than matched against a fixed spelling.
-	// The old format check demanded a purely numeric house number, so a person
-	// living at 12к1 could not register at all.
+	// Адрес проверяется на то, что он обязан содержать, — населённый пункт,
+	// улицу и здание, — а не на совпадение с фиксированным написанием.
+	// Старая проверка формата требовала чисто числового номера дома, поэтому
+	// человек, живущий в доме 12к1, вообще не мог зарегистрироваться.
 	parsedAddress := ParseAddressLine(address)
 	if err := parsedAddress.Validate(); err != nil {
 		return nil, err
@@ -252,7 +252,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		return nil, err
 	}
 
-	// Resolve coordinates for initial address if not provided
+	// Разрешаем координаты начального адреса, если они не переданы
 	var resLat, resLon *float64
 	if lat != nil && lon != nil {
 		resLat = lat
@@ -286,7 +286,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		}
 	}
 
-	// Set initial executor location
+	// Задаём начальное местоположение исполнителя
 	if role == "EXECUTOR" && resLat != nil && resLon != nil && s.execGeoRepo != nil {
 		if err := s.execGeoRepo.UpdateExecutorLocation(ctx, created.ID, *resLat, *resLon, false); err != nil {
 			log.Printf("[AuthService] failed to store initial executor geo for %s: %v", created.ID, err)
@@ -300,7 +300,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 	return created, nil
 }
 
-// Authenticate verifies phone/password or email/password and returns the matching user.
+// Authenticate проверяет пару телефон/пароль или почта/пароль и возвращает подходящего пользователя.
 func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password string) (*repository.User, error) {
 	if phoneOrEmail == "" || password == "" {
 		return nil, errors.New("phone and password are required")
@@ -320,7 +320,7 @@ func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password s
 	}
 
 	if err != nil || user == nil {
-		// Hash anyway so a missing account is not distinguishable by timing.
+		// Хешируем в любом случае, чтобы отсутствующую учётку нельзя было отличить по времени.
 		_, _ = bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		return nil, errors.New("invalid credentials")
 	}
@@ -332,7 +332,7 @@ func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password s
 	return user, nil
 }
 
-// GenerateJWT creates a signed JWT for the authenticated user.
+// GenerateJWT создаёт подписанный JWT для аутентифицированного пользователя.
 func (s *AuthService) GenerateJWT(ctx context.Context, user *repository.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   user.ID.String(),
@@ -344,7 +344,7 @@ func (s *AuthService) GenerateJWT(ctx context.Context, user *repository.User) (s
 	return token.SignedString(s.secret)
 }
 
-// ParseJWT validates a token string and returns the extracted claims.
+// ParseJWT проверяет строку токена и возвращает извлечённые утверждения.
 func (s *AuthService) ParseJWT(ctx context.Context, tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -383,7 +383,7 @@ func (s *AuthService) ParseJWT(ctx context.Context, tokenStr string) (*JWTClaims
 	}, nil
 }
 
-// VerifyEmail confirms user email by token.
+// VerifyEmail подтверждает почту пользователя по токену.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repository.User, error) {
 	if token == "" {
 		return nil, errors.New("token is required")
@@ -391,7 +391,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repositor
 	return s.repo.VerifyEmailToken(ctx, token)
 }
 
-// RequestPasswordReset generates a 6-digit code for password reset and sends it via email.
+// RequestPasswordReset генерирует 6-значный код сброса пароля и отправляет его письмом.
 func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) error {
 	email = strings.TrimSpace(email)
 	if email == "" {
@@ -399,14 +399,14 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) er
 	}
 	user, err := s.repo.FindByEmail(ctx, email)
 	if err != nil || user == nil {
-		// Report success regardless: a different answer here tells an attacker
-		// which email addresses have an account.
+		// Сообщаем об успехе в любом случае: иной ответ здесь подсказал бы
+		// атакующему, за какими адресами почты есть учётная запись.
 		log.Printf("[PASSWORD RESET] requested for unknown email")
 		return nil
 	}
 
-	// Cryptographically secure 8-digit reset code. There is no time-based
-	// fallback: a predictable code is worse than a failed request.
+	// Криптостойкий 8-значный код сброса. Никакого отката ко времени:
+	// предсказуемый код хуже, чем неудавшийся запрос.
 	n, err := rand.Int(rand.Reader, big.NewInt(100000000))
 	if err != nil {
 		return errors.New("не удалось сгенерировать код, попробуйте позже")
@@ -420,16 +420,16 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) er
 
 	if s.mailer != nil {
 		if err := s.mailer.SendPasswordResetCode(email, code); err != nil {
-			// The answer must not depend on whether the address has an account.
-			// Returning an error here while an unknown address gets a cheerful
-			// success turns this endpoint into an account-existence oracle —
-			// the very thing the unknown-address branch above exists to avoid.
-			// A transport that is down is an operator problem, visible in this
-			// log, not something to report back to an anonymous caller.
+			// Ответ не должен зависеть от того, есть ли за адресом учётная запись.
+			// Возврат ошибки здесь, тогда как неизвестный адрес получает бодрый
+			// успех, превращает этот эндпоинт в оракул существования учёток —
+			// ровно то, чего избегает ветка неизвестного адреса выше.
+			// Лежащий транспорт — проблема оператора, видимая в этом логе, а не
+			// то, о чём стоит сообщать анонимному вызывающему.
 			//
-			// The stored code is cleared: it can never be delivered, and leaving
-			// it in place would keep the previous code overwritten and the
-			// attempt counter reset for nothing.
+			// Сохранённый код очищается: доставить его уже нельзя, а оставив его
+			// на месте, мы держали бы предыдущий код перезаписанным и счётчик
+			// попыток обнулённым — и всё зря.
 			log.Printf("[PASSWORD RESET] user %s: the code was NOT delivered: %v", user.ID, err)
 			if clearErr := s.repo.SetPasswordResetCode(ctx, user.ID, "", time.Now()); clearErr != nil {
 				log.Printf("[PASSWORD RESET] user %s: could not clear the undelivered code: %v", user.ID, clearErr)
@@ -438,12 +438,12 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) er
 		}
 	}
 
-	// The code itself is never logged.
+	// Сам код никогда не логируется.
 	log.Printf("[PASSWORD RESET] Code sent to user %s (expires %s)", user.ID, expiresAt.Format(time.RFC3339))
 	return nil
 }
 
-// ResetPassword verifies the code and updates password.
+// ResetPassword проверяет код и обновляет пароль.
 func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPassword string) error {
 	email = strings.TrimSpace(email)
 	code = strings.TrimSpace(code)
@@ -463,11 +463,11 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 	return err
 }
 
-// ChangePassword replaces a signed-in user's password after checking the
-// current one, and ends every other session.
+// ChangePassword заменяет пароль вошедшего пользователя после проверки
+// текущего и завершает все остальные сессии.
 //
-// The profile page has always offered this form; there was no endpoint behind
-// it, so the only way to change a password was the forgot-password flow.
+// Страница профиля всегда предлагала эту форму; за ней не было эндпоинта,
+// поэтому единственным способом сменить пароль был поток восстановления.
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) (*TokenPair, error) {
 	if oldPassword == "" || newPassword == "" {
 		return nil, errors.New("укажите текущий и новый пароль")
@@ -495,15 +495,15 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 		return nil, err
 	}
 
-	// Whoever else was signed in with the old password is signed out. The caller
-	// gets a fresh pair so the device that made the change stays usable.
+	// Все, кто ещё был в системе со старым паролем, выходят. Вызывающий получает
+	// свежую пару, чтобы устройство, сделавшее изменение, осталось рабочим.
 	if err := s.RevokeAllSessions(ctx, userID); err != nil {
 		log.Printf("[AuthService] failed to end sessions after password change for %s: %v", userID, err)
 	}
 	return s.IssueTokenPair(ctx, user)
 }
 
-// UpdateUserEmail updates the email for a user and triggers verification.
+// UpdateUserEmail обновляет почту пользователя и запускает подтверждение.
 func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, newEmail string) (*repository.User, error) {
 	newEmail = strings.TrimSpace(newEmail)
 	if newEmail == "" || !emailRegex.MatchString(newEmail) {
@@ -540,7 +540,7 @@ func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, new
 	return user, nil
 }
 
-// UpdateUserBirthDate updates user's date of birth.
+// UpdateUserBirthDate обновляет дату рождения пользователя.
 func (s *AuthService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDateStr string) (*repository.User, error) {
 	t, err := parseBirthDate(birthDateStr)
 	if err != nil {

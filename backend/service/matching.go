@@ -12,12 +12,12 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// defaultAutoMatchRadiusKM bounds automatic assignment. It matches the radius
-// the executor map shows orders within, so the worker can only hand out orders
-// the executor would have seen and could plausibly travel to.
+// defaultAutoMatchRadiusKM ограничивает автоматическое назначение. Он совпадает
+// с радиусом, в котором карта исполнителя показывает заказы, поэтому воркер
+// может раздавать только те заказы, которые исполнитель увидел бы и мог доехать.
 const defaultAutoMatchRadiusKM = 10.0
 
-// MatchingService matches searching orders with active executors.
+// MatchingService сопоставляет заказы в поиске с активными исполнителями.
 type MatchingService struct {
 	orderRepo    repository.OrderRepository
 	shiftRepo    repository.ShiftRepository
@@ -25,16 +25,16 @@ type MatchingService struct {
 	catalogRepo  repository.ServiceCatalogRepository
 	geoRepo      repository.ExecutorGeoRepository
 	settingsRepo repository.SettingsRepository
-	// behaviors applies the scripted rules of a service, so automatic matching
-	// cannot assign an order to somebody who could not have accepted it by
-	// hand. Optional.
+	// behaviors применяет скриптовые правила услуги, чтобы автоподбор не мог
+	// назначить заказ тому, кто не смог бы принять его вручную.
+	// Необязательно.
 	behaviors *Behaviors
-	// leaderGuard, when set, runs a cycle only on the process holding the
-	// matching job's lock. See WithLeaderGuard.
+	// leaderGuard, если задан, выполняет цикл только на процессе, держащем
+	// блокировку задачи подбора. См. WithLeaderGuard.
 	leaderGuard func(func() error) error
 }
 
-// NewMatchingService creates a new MatchingService.
+// NewMatchingService создаёт новый MatchingService.
 func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo repository.ShiftRepository, userRepo repository.UserRepository, catalogRepo repository.ServiceCatalogRepository) *MatchingService {
 	return &MatchingService{
 		orderRepo:   orderRepo,
@@ -44,22 +44,22 @@ func NewMatchingService(orderRepo repository.OrderRepository, shiftRepo reposito
 	}
 }
 
-// WithBehaviors wires the behaviour scripts into the matcher's candidate test.
+// WithBehaviors подключает скрипты поведений к проверке кандидатов подборщиком.
 func (s *MatchingService) WithBehaviors(behaviors *Behaviors) *MatchingService {
 	s.behaviors = behaviors
 	return s
 }
 
-// WithGeo attaches the stores automatic matching needs to bound assignment by
-// distance. Without them the worker cannot tell how far an executor is from an
-// order, and refuses to assign rather than guessing.
+// WithGeo присоединяет хранилища, нужные автоподбору, чтобы ограничивать
+// назначение по расстоянию. Без них воркер не может определить, как далеко
+// исполнитель от заказа, и отказывается назначать, а не гадает.
 func (s *MatchingService) WithGeo(geoRepo repository.ExecutorGeoRepository, settingsRepo repository.SettingsRepository) *MatchingService {
 	s.geoRepo = geoRepo
 	s.settingsRepo = settingsRepo
 	return s
 }
 
-// autoMatchRadiusKM reads the configured bound, falling back to the default.
+// autoMatchRadiusKM читает настроенную границу, откатываясь к умолчанию.
 func (s *MatchingService) autoMatchRadiusKM(ctx context.Context) float64 {
 	if s.settingsRepo == nil {
 		return defaultAutoMatchRadiusKM
@@ -76,13 +76,13 @@ func (s *MatchingService) autoMatchRadiusKM(ctx context.Context) float64 {
 	return defaultAutoMatchRadiusKM
 }
 
-// SettingAutoMatchingEnabled is the system_settings key that turns automatic
-// assignment on or off. It defaults to OFF: with it off, orders are only ever
-// taken by an executor pressing "take", never assigned by the worker.
+// SettingAutoMatchingEnabled — ключ system_settings, включающий и выключающий
+// автоматическое назначение. По умолчанию ВЫКЛ: пока он выключен, заказы
+// берутся только нажатием исполнителем «взять» и никогда не назначаются воркером.
 const SettingAutoMatchingEnabled = "auto_matching_enabled"
 
-// autoMatchingEnabled reports whether the worker may assign orders. Off unless an
-// admin explicitly turns it on, so the default behaviour is manual-only.
+// autoMatchingEnabled сообщает, можно ли воркеру назначать заказы. Выключено,
+// пока админ явно не включит, поэтому по умолчанию всё только вручную.
 func (s *MatchingService) autoMatchingEnabled(ctx context.Context) bool {
 	if s.settingsRepo == nil {
 		return false
@@ -94,14 +94,14 @@ func (s *MatchingService) autoMatchingEnabled(ctx context.Context) bool {
 	return settings[SettingAutoMatchingEnabled] == "1"
 }
 
-// withinAutoMatchRadius reports whether an order is close enough to an executor
-// to be assigned automatically.
+// withinAutoMatchRadius сообщает, достаточно ли заказ близок к исполнителю,
+// чтобы быть назначенным автоматически.
 //
-// An unknown position is a "no", never a free pass. Letting an unlocatable
-// executor through is how an order ends up assigned to somebody on the other
-// side of the country, who can only cancel it. The positions are loaded once
-// per cycle rather than per candidate, so a missing entry in the map is exactly
-// that unknown position.
+// Неизвестная позиция — это «нет», а никогда не безусловный пропуск. Пропуск
+// исполнителя без координат — то, как заказ достаётся кому-то на другом конце
+// страны, кто может только его отменить. Позиции загружаются раз за цикл, а не
+// на кандидата, поэтому отсутствующая запись в карте — это ровно та самая
+// неизвестная позиция.
 func withinAutoMatchRadius(position repository.ExecutorPosition, known bool, order *repository.Order, radiusKM float64) bool {
 	if !known {
 		return false
@@ -112,18 +112,18 @@ func withinAutoMatchRadius(position repository.ExecutorPosition, known bool, ord
 	return HaversineDistanceKM(*order.PickupLat, *order.PickupLon, position.Lat, position.Lon) <= radiusKM
 }
 
-// WithLeaderGuard makes the matching worker run at most once across every
-// process. The guard comes from the caller (worker.Leader) rather than being
-// built here, because this package must not depend on the worker package.
+// WithLeaderGuard заставляет воркер подбора выполняться не более одного раза
+// среди всех процессов. Защита приходит от вызывающего (worker.Leader), а не
+// строится здесь, потому что этот пакет не должен зависеть от пакета worker.
 //
-// Without it, two processes would each assign the same waiting orders, and an
-// order can only be assigned once — the loser logs an error every cycle.
+// Без неё два процесса назначали бы одни и те же ждущие заказы, а заказ можно
+// назначить лишь однажды — проигравший пишет ошибку каждый цикл.
 func (s *MatchingService) WithLeaderGuard(guard func(func() error) error) *MatchingService {
 	s.leaderGuard = guard
 	return s
 }
 
-// runGuarded runs one matching cycle, under the guard when one is wired.
+// runGuarded выполняет один цикл подбора, под защитой, если она подключена.
 func (s *MatchingService) runGuarded(ctx context.Context) error {
 	job := func() error { return s.MatchOrders(ctx) }
 	if s.leaderGuard == nil {
@@ -132,7 +132,7 @@ func (s *MatchingService) runGuarded(ctx context.Context) error {
 	return s.leaderGuard(job)
 }
 
-// StartMatchingWorker starts a background loop that runs matching periodically.
+// StartMatchingWorker запускает фоновый цикл, периодически выполняющий подбор.
 func (s *MatchingService) StartMatchingWorker(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -145,27 +145,27 @@ func (s *MatchingService) StartMatchingWorker(ctx context.Context, interval time
 	log.Printf("[MatchingWorker] Started background matching every %v", interval)
 }
 
-// matchingRound holds everything one matching cycle needs, loaded up front.
+// matchingRound держит всё, что нужно одному циклу подбора, загруженное заранее.
 //
-// The worker compares every waiting order against every executor on shift. When
-// each of those comparisons went to the database for the executor, the service
-// variant, the position and the assigned-order count, a cycle cost roughly four
-// queries per pair — which grows as the product of orders and executors, on a
-// five-second timer. Loading each of those sets once turns the comparison into
-// arithmetic.
+// Воркер сравнивает каждый ждущий заказ с каждым исполнителем на смене. Когда
+// каждое такое сравнение ходило в базу за исполнителем, вариантом услуги,
+// позицией и числом назначенных заказов, цикл стоил примерно четырёх запросов
+// на пару — а это растёт как произведение заказов и исполнителей, на таймере в
+// пять секунд. Однократная загрузка каждого из этих наборов превращает
+// сравнение в арифметику.
 type matchingRound struct {
 	users    map[uuid.UUID]*repository.User
 	variants map[uuid.UUID]*repository.ServiceNode
-	// positions holds only executors with a stored position; absence means
-	// unknown, which is never eligible.
+	// positions содержит только исполнителей с сохранённой позицией; отсутствие
+	// означает «неизвестно», а это никогда не допускается.
 	positions map[uuid.UUID]repository.ExecutorPosition
-	// activeOrders counts assigned orders per executor. It is updated as the
-	// cycle assigns, so an executor cannot be handed a second order by a later
-	// iteration of the same cycle.
+	// activeOrders считает назначенные заказы по исполнителям. Он обновляется по
+	// ходу назначения в цикле, поэтому исполнителю нельзя вручить второй заказ на
+	// более поздней итерации того же цикла.
 	activeOrders map[uuid.UUID]int
 }
 
-// loadRound fetches the round's inputs in a fixed number of queries.
+// loadRound достаёт входные данные раунда фиксированным числом запросов.
 func (s *MatchingService) loadRound(ctx context.Context, orders []*repository.Order, executorIDs []uuid.UUID) (*matchingRound, error) {
 	round := &matchingRound{
 		users:        map[uuid.UUID]*repository.User{},
@@ -174,7 +174,7 @@ func (s *MatchingService) loadRound(ctx context.Context, orders []*repository.Or
 		activeOrders: map[uuid.UUID]int{},
 	}
 
-	// Customers and executors come from the same table, so they are one lookup.
+	// Заказчики и исполнители лежат в одной таблице, поэтому это одно чтение.
 	userIDs := make([]uuid.UUID, 0, len(orders)+len(executorIDs))
 	variantIDs := make([]uuid.UUID, 0, len(orders))
 	for _, o := range orders {
@@ -213,13 +213,13 @@ func (s *MatchingService) loadRound(ctx context.Context, orders []*repository.Or
 	return round, nil
 }
 
-// executorEligible re-uses the shared visibility/accept predicate so automatic
-// matching cannot hand out an order that the executor is not allowed to take —
-// including moderator-only orders (moderators only) and the customer-verification
-// segmentation.
+// executorEligible переиспользует общий предикат видимости/принятия, чтобы
+// автоподбор не мог выдать заказ, который исполнителю брать нельзя, — включая
+// заказы только для модераторов (только модераторам) и сегментацию по
+// верификации заказчика.
 //
-// The inputs come from the pre-loaded round; the predicate is the same one the
-// map, the order list and the accept path use.
+// Входные данные приходят из предзагруженного раунда; предикат — тот же, что
+// используют карта, список заказов и путь принятия.
 func (s *MatchingService) executorEligible(ctx context.Context, round *matchingRound, executorID uuid.UUID, order *repository.Order) bool {
 	if s.userRepo == nil || s.catalogRepo == nil {
 		return true
@@ -235,15 +235,15 @@ func (s *MatchingService) executorEligible(ctx context.Context, round *matchingR
 	return canViewOrTakeOrder(ctx, s.behaviors, executor, round.users[order.CustomerID], variant) == nil
 }
 
-// MatchOrders executes the matching cycle.
+// MatchOrders выполняет цикл подбора.
 func (s *MatchingService) MatchOrders(ctx context.Context) error {
-	// Automatic assignment is opt-in. While it is off (the default), the worker
-	// does nothing and orders are taken only by an executor pressing "take".
+	// Автоматическое назначение включается явно. Пока оно выключено (по
+	// умолчанию), воркер ничего не делает, и заказы берутся только вручную.
 	if !s.autoMatchingEnabled(ctx) {
 		return nil
 	}
 
-	// 1. Get all searching orders
+	// 1. Получаем все заказы в поиске
 	orders, err := s.orderRepo.GetPendingOrders(ctx)
 	if err != nil {
 		return err
@@ -253,7 +253,7 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 		return nil
 	}
 
-	// 2. Fetch all active shifts
+	// 2. Достаём все активные смены
 	activeShifts, err := s.shiftRepo.GetActiveShifts(ctx)
 	if err != nil {
 		return err
@@ -263,19 +263,19 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 		return nil
 	}
 
-	// Candidate executors: one entry per active shift.
+	// Кандидаты-исполнители: по записи на каждую активную смену.
 	executorIDs := make([]uuid.UUID, 0, len(activeShifts))
 	for _, shift := range activeShifts {
 		executorIDs = append(executorIDs, shift.ExecutorID)
 	}
 
-	// Everything the pairing below needs, loaded once for the whole cycle.
+	// Всё, что нужно сопоставлению ниже, загруженное один раз на весь цикл.
 	round, err := s.loadRound(ctx, orders, executorIDs)
 	if err != nil {
 		return err
 	}
 
-	// 3. Match each order
+	// 3. Подбираем каждому заказу
 	radiusKM := s.autoMatchRadiusKM(ctx)
 	for _, order := range orders {
 		var matchedExecutorID uuid.UUID
@@ -283,9 +283,9 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 			if execID == order.CustomerID {
 				continue
 			}
-			// One assigned order at a time: an executor already carrying one is
-			// not a candidate. Checked first because it is the cheapest test and
-			// it accounts for orders assigned earlier in this same cycle.
+			// По одному назначенному заказу за раз: исполнитель, у которого уже есть
+			// заказ, не кандидат. Проверяется первым, потому что это самая дешёвая
+			// проверка и она учитывает заказы, назначенные раньше в этом же цикле.
 			if round.activeOrders[execID] > 0 {
 				continue
 			}
@@ -307,8 +307,8 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 				metrics.MatchingAssignment("error")
 				log.Printf("[MatchingWorker] Error assigning order %s to executor %s: %v", order.ID, matchedExecutorID, err)
 			} else {
-				// Only a successful assignment takes the executor out of the
-				// running: a failed one leaves them free for the next order.
+				// Из гонки исполнителя выводит только успешное назначение: неудачное
+				// оставляет его свободным для следующего заказа.
 				round.activeOrders[matchedExecutorID]++
 				metrics.MatchingAssignment("assigned")
 				metrics.OrderEvent("assigned")

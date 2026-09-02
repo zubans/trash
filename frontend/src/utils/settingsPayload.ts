@@ -1,19 +1,19 @@
 /**
- * The settings form binds every numeric field with `v-model` on an
- * `<input type="number">`, and Vue casts those to real numbers — a field the
- * admin actually typed into leaves the model as `15`, not `"15"`. The API
- * decodes the body into a string map, so a single edited number made the whole
- * save fail with `400 invalid request body`, while untouched fields (still
- * strings from the load) went through fine.
+ * Форма настроек привязывает каждое числовое поле через `v-model` к
+ * `<input type="number">`, а Vue приводит их к настоящим числам — поле, в
+ * которое админ действительно печатал, оставляет в модели `15`, а не `"15"`.
+ * API декодирует тело в карту строк, поэтому одно отредактированное число
+ * роняло всё сохранение с `400 invalid request body`, тогда как нетронутые поля
+ * (всё ещё строки после загрузки) проходили нормально.
  *
- * Normalising here, at the boundary, keeps the form free to hold whatever type
- * the input gives it.
+ * Нормализация здесь, на границе, оставляет форме свободу держать тот тип,
+ * который даёт ей input.
  */
 export function toSettingsPayload(values: Record<string, unknown>): Record<string, string> {
   const payload: Record<string, string> = {}
   for (const [key, value] of Object.entries(values)) {
-    // null/undefined would stringify to "null"/"undefined" and be stored as
-    // that literal text; an empty value is the honest translation.
+    // null/undefined превратились бы в «null»/«undefined» и сохранились бы этим
+    // буквальным текстом; пустое значение — честный перевод.
     payload[key] = value === null || value === undefined ? '' : String(value)
   }
   return payload

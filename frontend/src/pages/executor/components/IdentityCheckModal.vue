@@ -49,9 +49,9 @@
 import { defineComponent, reactive, ref, type PropType } from 'vue'
 import api from '../../../services/api'
 
-// Field labels. The names come from the service's script, so an unknown one is
-// shown as-is rather than dropped: a behaviour that asks for something new must
-// still be answerable.
+// Подписи полей. Имена приходят из скрипта услуги, поэтому неизвестное
+// показывается как есть, а не отбрасывается: на поведение, спрашивающее что-то
+// новое, всё равно должно быть можно ответить.
 const LABELS: Record<string, string> = {
   last_name: 'Фамилия',
   first_name: 'Имя',
@@ -90,8 +90,8 @@ export default defineComponent({
           emit('verified', data)
           return
         }
-        // Which field was wrong is not shown: the rest could then be found by
-        // trying. The server's own message says what to do next.
+        // Какое поле было неверным, не показывается: остальные тогда подобрали бы
+        // перебором. Что делать дальше, говорит собственное сообщение сервера.
         warning.value = (data.messages && data.messages[0]) || 'Данные не совпали. Сверьте их с документом.'
         if (data.escalated) {
           emit('verified', data)

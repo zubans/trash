@@ -10,28 +10,28 @@ import (
 	"strings"
 )
 
-// migrationsTable records which migration files have been applied.
+// migrationsTable фиксирует, какие файлы миграций были применены.
 const migrationsTable = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 )`
 
-// baselineBefore is the first migration this runner is allowed to apply to a
-// database that already contains the application schema. Everything before it
-// was applied either by the docker-entrypoint init scripts or by the ad-hoc DDL
-// that used to live in the repository constructors, and files 001 and 002 are
-// not idempotent, so re-running them on a populated database would fail.
+// baselineBefore — первая миграция, которую этому раннеру разрешено применить к
+// базе, где уже есть схема приложения. Всё, что до неё, применили либо
+// init-скрипты docker-entrypoint, либо разовый DDL, который раньше жил в
+// конструкторах репозиториев, а файлы 001 и 002 не идемпотентны, поэтому их
+// повторный прогон на заполненной базе упал бы.
 const baselineBefore = "024_"
 
-// noTransactionMarker lets a migration opt out of the wrapping transaction for
-// statements Postgres refuses to run inside one.
+// noTransactionMarker позволяет миграции отказаться от оборачивающей транзакции
+// ради операторов, которые Postgres отказывается выполнять внутри неё.
 const noTransactionMarker = "-- +migrate no-transaction"
 
-// Migrate applies every .sql file in dir that has not been applied yet, in file
-// name order, and records each one. It replaces both the manual `make migrate`
-// step and the DDL that used to run from repository constructors, where errors
-// were discarded and the process started against a half-built schema.
+// Migrate применяет каждый файл .sql в dir, который ещё не применён, в порядке
+// имён файлов, и записывает каждый. Он заменяет и ручной шаг `make migrate`, и
+// DDL, который раньше выполнялся из конструкторов репозиториев, где ошибки
+// отбрасывались, а процесс стартовал на недостроенной схеме.
 func Migrate(db *sql.DB, dir string) error {
 	if _, err := db.Exec(migrationsTable); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
@@ -108,9 +108,9 @@ func appliedVersions(db *sql.DB) (map[string]struct{}, error) {
 	return applied, rows.Err()
 }
 
-// baselineExistingSchema marks the historical migrations as applied when the
-// schema is already in place but has never been tracked. A brand new database
-// has no users table and gets every migration applied from the first one.
+// baselineExistingSchema помечает исторические миграции применёнными, когда
+// схема уже на месте, но никогда не отслеживалась. У совершенно новой базы нет
+// таблицы users, и ей применяются все миграции начиная с первой.
 func baselineExistingSchema(db *sql.DB, files []string) ([]string, error) {
 	var hasSchema bool
 	if err := db.QueryRow(`SELECT to_regclass('public.users') IS NOT NULL`).Scan(&hasSchema); err != nil {

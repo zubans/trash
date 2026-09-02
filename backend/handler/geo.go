@@ -9,19 +9,19 @@ import (
 	"healthlogin/backend/service"
 )
 
-// GeoHandler exposes geocoding endpoints.
+// GeoHandler открывает эндпоинты геокодирования.
 type GeoHandler struct {
 	suggester *service.AddressSuggester
 }
 
-// NewGeoHandler creates a GeoHandler.
+// NewGeoHandler создаёт GeoHandler.
 func NewGeoHandler(suggester *service.AddressSuggester) *GeoHandler {
 	return &GeoHandler{suggester: suggester}
 }
 
-// Geocode handles GET /geo/geocode?q=address. It is the resolve path kept for
-// installed clients that still send a free-form line; new clients pick a
-// suggestion that already carries coordinates and never call this.
+// Geocode обслуживает GET /geo/geocode?q=address. Это путь разрешения адреса,
+// оставленный для установленных клиентов, которые всё ещё шлют свободную
+// строку; новые клиенты выбирают подсказку с координатами и сюда не ходят.
 func (h *GeoHandler) Geocode(w http.ResponseWriter, r *http.Request) {
 	address := r.URL.Query().Get("q")
 	if address == "" {
@@ -39,7 +39,7 @@ func (h *GeoHandler) Geocode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-// Autocomplete handles GET /geo/autocomplete?q=query.
+// Autocomplete обслуживает GET /geo/autocomplete?q=query.
 func (h *GeoHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
@@ -47,9 +47,9 @@ func (h *GeoHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deliberately the old response shape. Installed mobile builds re-check the
-	// string against a format of their own before submitting it, so changing
-	// what this returns would break clients that are already in people's hands.
+	// Форма ответа намеренно старая. Установленные мобильные сборки перепроверяют
+	// строку по собственному формату перед отправкой, поэтому изменение того, что
+	// здесь возвращается, сломало бы клиентов, уже находящихся у людей на руках.
 	suggestions, err := h.suggester.LegacySuggest(r.Context(), query)
 	if err != nil {
 		writeGeoError(w, err)
@@ -60,10 +60,10 @@ func (h *GeoHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(suggestions)
 }
 
-// Suggest handles GET /geo/suggest?q=query&count=7 and returns addresses with
-// their parts kept separate — city, street, house, flat, coordinates and the
-// register identifier — so nothing downstream has to parse a string to recover
-// them.
+// Suggest обслуживает GET /geo/suggest?q=query&count=7 и возвращает адреса с
+// раздельными частями — город, улица, дом, квартира, координаты и
+// идентификатор в реестре, — чтобы ниже по потоку ничему не приходилось
+// разбирать строку ради их восстановления.
 func (h *GeoHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
@@ -89,9 +89,9 @@ func (h *GeoHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(suggestions)
 }
 
-// writeGeoError separates "this deployment cannot suggest addresses" from "this
-// query failed", so a missing key shows up as a server-side problem rather than
-// as the user having typed something wrong.
+// writeGeoError отделяет «эта установка не умеет подсказывать адреса» от «этот
+// запрос не удался», чтобы отсутствующий ключ выглядел проблемой на стороне
+// сервера, а не опечаткой пользователя.
 func writeGeoError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrNoAddressProvider):

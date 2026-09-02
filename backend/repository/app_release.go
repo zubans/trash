@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// AppRelease represents a mobile application release.
+// AppRelease представляет релиз мобильного приложения.
 type AppRelease struct {
 	ID           uuid.UUID `json:"id"`
 	Platform     string    `json:"platform"`
@@ -22,7 +22,7 @@ type AppRelease struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// AppReleaseRepository defines storage operations for mobile app releases.
+// AppReleaseRepository описывает операции хранения релизов мобильного приложения.
 type AppReleaseRepository interface {
 	GetActiveRelease(ctx context.Context, platform string) (*AppRelease, error)
 	GetReleaseByVersionCode(ctx context.Context, platform string, versionCode int) (*AppRelease, error)
@@ -35,7 +35,7 @@ type appReleaseRepo struct {
 	db *sql.DB
 }
 
-// NewAppReleaseRepository creates a new AppReleaseRepository.
+// NewAppReleaseRepository создаёт новый AppReleaseRepository.
 func NewAppReleaseRepository(db *sql.DB) AppReleaseRepository {
 	return &appReleaseRepo{db: db}
 }

@@ -5,10 +5,10 @@ import { debugConsoleEnabled, pushLog, updateLog, snippet } from './debugLog'
 function resolveApiUrl(): string {
   const isNative = Capacitor.isNativePlatform()
   if (isNative) {
-    // Native builds have no origin to fall back on, so the URL must come from
-    // the build env (.env.android sets VITE_API_URL). There is deliberately no
-    // hardcoded default: a wrong one points the app at a host we do not serve
-    // and fails as if the backend were down.
+    // У нативных сборок нет источника, к которому можно откатиться, поэтому URL
+    // обязан прийти из окружения сборки (.env.android задаёт VITE_API_URL).
+    // Зашитого умолчания намеренно нет: неверное указало бы приложение на хост,
+    // который мы не обслуживаем, и падало бы так, будто бэкенд лежит.
     const url = (import.meta.env.VITE_MOBILE_API_URL as string)
              || (import.meta.env.VITE_API_URL as string)
     if (!url) {
@@ -19,10 +19,10 @@ function resolveApiUrl(): string {
     }
     return url
   }
-  // Web builds always use relative URLs (baseURL = ''). The browser resolves
-  // them against the current origin — whatever host/port/proto the user opened.
-  // This makes VITE_API_URL unnecessary for web and avoids mismatches when the
-  // external URL differs from the Docker-mapped port (8443 → 443, CDN, etc.).
+  // Веб-сборки всегда используют относительные URL (baseURL = ''). Браузер
+  // разрешает их относительно текущего источника — того хоста/порта/протокола,
+  // который открыл пользователь. Это делает VITE_API_URL ненужным для веба и
+  // избавляет от расхождений, когда внешний URL отличается от порта Docker (8443 → 443, CDN и т. п.).
   return ''
 }
 
@@ -30,10 +30,10 @@ export const apiUrl = resolveApiUrl()
 
 export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 
-// Steady-state polling cadence. Kept coarse (30s) because it runs for every
-// signed-in client continuously and each poll goes through the auth middleware;
-// chat delivery is realtime over the WebSocket, so orders/unread don't need a
-// tight loop. Overridable via VITE_POLL_INTERVAL_SEC.
+// Ритм опроса в установившемся режиме. Держится грубым (30 с), потому что он
+// работает непрерывно у каждого вошедшего клиента и каждый опрос проходит через
+// middleware аутентификации; доставка чата — реалтайм по WebSocket, поэтому
+// заказам и непрочитанному тесный цикл не нужен. Переопределяется через VITE_POLL_INTERVAL_SEC.
 export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 30) * 1000
 
 export function formatApiError(err: any, fallbackMessage: string): string {
@@ -56,9 +56,9 @@ const api = axios.create({
   baseURL: apiUrl,
 })
 
-// Prepend the /api prefix to every relative request URL so the backend routes
-// (mounted under /api) and the SPA routes (served by nginx from /) never
-// collide. Absolute URLs (http://...) and already-prefixed paths are skipped.
+// Добавляем префикс /api к каждому относительному URL запроса, чтобы маршруты
+// бэкенда (смонтированные под /api) и маршруты SPA (которые nginx отдаёт из /)
+// никогда не сталкивались. Абсолютные URL (http://...) и уже префиксованные пути пропускаются.
 api.interceptors.request.use((config) => {
   const url = config.url || ''
   if (url && !url.startsWith('/api') && !url.startsWith('http') && !url.startsWith('ws')) {
@@ -67,31 +67,31 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Build a WebSocket URL for the chat endpoint based on the active API base URL.
-// The scheme follows the API origin (https -> wss, http -> ws) and is forced to
-// the secure wss:// whenever the app runs in a secure context — the native app
-// (androidScheme: 'https') and any https web page. An insecure ws:// opened from
-// a secure origin is mixed content: the WebView blocks or silently drops it,
-// which is why chat sends went missing on mobile. The /api prefix matches the
-// backend route mounting so SPA and API paths never collide.
+// Строим URL WebSocket для эндпоинта чата на основе активного базового URL API.
+// Схема следует за источником API (https -> wss, http -> ws) и принудительно
+// становится защищённой wss://, когда приложение работает в защищённом
+// контексте: нативное приложение (androidScheme: 'https') и любая https-страница.
+// Незащищённый ws://, открытый из защищённого источника, — смешанное содержимое:
+// WebView его блокирует или молча выбрасывает, из-за чего на мобильных пропадали
+// отправки в чат. Префикс /api совпадает с монтированием маршрутов бэкенда, поэтому пути не сталкиваются.
 export function buildChatWebSocketUrl(orderId: string): string {
-  // The token is read here rather than passed in. Callers used to hand over
-  // authStore.token, which is written at login and never again: after the first
-  // silent refresh it holds an expired access token, and the socket could no
-  // longer authenticate. getAuthToken always returns the current one.
+  // Токен читается здесь, а не передаётся снаружи. Вызывающие раньше отдавали
+  // authStore.token, который пишется при входе и больше никогда: после первого
+  // тихого обновления он держит истёкший access-токен, и сокет больше не мог
+  // аутентифицироваться. getAuthToken всегда возвращает актуальный.
   const token = getAuthToken()
 
-  // For web builds apiUrl may be empty (relative-URL mode). Derive the WS
-  // origin from window.location so the protocol/host/port always match the
-  // page the user actually opened.
+  // Для веб-сборок apiUrl может быть пустым (режим относительных URL). Выводим
+  // источник WS из window.location, чтобы протокол/хост/порт всегда совпадали со
+  // страницей, которую действительно открыл пользователь.
   let base = apiUrl
   if (!base && typeof window !== 'undefined') {
     base = window.location.origin
   }
   let wsBase = base.replace(/^http/, 'ws').replace(/\/$/, '')
 
-  // Never open an insecure ws:// from a secure context. Only a plain-http local
-  // dev origin is allowed to stay on ws://.
+  // Никогда не открываем незащищённый ws:// из защищённого контекста. Остаться на
+  // ws:// позволено только локальному dev-источнику на обычном http.
   if (wsBase.startsWith('ws://')) {
     const secureContext =
       Capacitor.isNativePlatform() ||
@@ -104,11 +104,11 @@ export function buildChatWebSocketUrl(orderId: string): string {
   return `${wsBase}/api/chats/${orderId}/ws?token=${encodeURIComponent(token)}`
 }
 
-// Convert a relative file path (e.g. /uploads/chat/...) into a full accessible URL.
-// Attachments are no longer public: the backend checks that the caller takes
-// part in the conversation the file belongs to. An <img> tag cannot send an
-// Authorization header, so the token travels as a query parameter, which the
-// backend moves into the header and strips before anything is logged.
+// Превращает относительный путь к файлу (например, /uploads/chat/...) в полный доступный URL.
+// Вложения больше не публичны: бэкенд проверяет, что вызывающий участвует в
+// переписке, которой принадлежит файл. Тег <img> не умеет слать заголовок
+// Authorization, поэтому токен едет параметром запроса, который бэкенд
+// переносит в заголовок и убирает до того, как что-либо будет залогировано.
 export function resolveFileUrl(path?: string): string {
   if (!path) return ''
   if (path.startsWith('http://') || path.startsWith('https://')) return path
@@ -125,7 +125,7 @@ export function resolveFileUrl(path?: string): string {
   return withAuth(`${base}${cleanPath}`)
 }
 
-// Helper to retrieve cookie by name
+// Помощник для получения cookie по имени
 export function getCookie(name: string): string {
   const value = `; ${document.cookie}`
   const parts = value.split(`; ${name}=`)
@@ -135,8 +135,8 @@ export function getCookie(name: string): string {
   return ''
 }
 
-// Helper to retrieve the auth token. localStorage is used as the primary
-// source because mobile WebViews cannot read cookies set for the API origin.
+// Помощник для получения токена авторизации. localStorage используется как
+// основной источник, потому что мобильные WebView не читают cookie источника API.
 function getAuthToken(): string {
   try {
     return localStorage.getItem('token') || getCookie('token') || ''
@@ -145,7 +145,7 @@ function getAuthToken(): string {
   }
 }
 
-// Inject JWT token into every API request
+// Подставляем JWT-токен в каждый запрос к API
 api.interceptors.request.use((config) => {
   const token = getAuthToken()
   if (token) {
@@ -154,9 +154,9 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Debug request logging. Records nothing unless debug mode is on, so ordinary
-// users pay no cost. The /api prefix and auth header are already applied above,
-// so what is logged is what actually goes on the wire.
+// Отладочное логирование запросов. Ничего не пишет, пока не включён режим
+// отладки, поэтому обычные пользователи за это не платят. Префикс /api и
+// заголовок авторизации уже применены выше, поэтому логируется то, что уходит в сеть.
 api.interceptors.request.use((config) => {
   if (debugConsoleEnabled.value) {
     const base = config.baseURL || ''
@@ -182,8 +182,8 @@ function logOutcome(config: any, status: number | undefined, ok: boolean, body: 
     status,
     ok,
     durationMs: typeof start === 'number' ? Math.round(now - start) : undefined,
-    // A larger cap than the default: the body is only rendered when a row is
-    // expanded, so keeping more of it makes the details actually useful.
+    // Порог больше умолчания: тело отрисовывается, только когда строку
+    // развернули, поэтому его сохранение в большем объёме делает детали полезными.
     responseSnippet: snippet(body, 4000),
     error: errText,
   })
@@ -206,12 +206,12 @@ api.interceptors.response.use(
   },
 )
 
-// Session handling.
+// Работа с сессией.
 //
-// The access token is short-lived, so a 401 is the normal end of its life, not
-// a reason to throw the user out. On the first 401 the client exchanges its
-// refresh token for a new pair and replays the original request. Only when the
-// refresh itself fails is the session really over.
+// Access-токен короткоживущий, поэтому 401 — нормальный конец его жизни, а не
+// повод выбрасывать пользователя. На первый 401 клиент обменивает свой
+// refresh-токен на новую пару и повторяет исходный запрос. Сессия по-настоящему
+// закончена, только когда падает само обновление.
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
 
@@ -244,7 +244,7 @@ function scheduleProactiveRefresh(token: string) {
     if (typeof claims.exp === 'number') {
       const expiresMs = claims.exp * 1000
       const nowMs = Date.now()
-      // Refresh 2 minutes before expiration (or halfway if lifetime is very short)
+      // Обновляем за 2 минуты до истечения (или на половине срока, если он очень короткий)
       const refreshInMs = Math.max(10000, expiresMs - nowMs - 2 * 60 * 1000)
       proactiveTimer = setTimeout(async () => {
         try {
@@ -257,7 +257,7 @@ function scheduleProactiveRefresh(token: string) {
       }, refreshInMs)
     }
   } catch {
-    // ignore parse errors
+    // игнорируем ошибки разбора
   }
 }
 
@@ -268,7 +268,7 @@ export function storeSession(token: string, refreshToken?: string) {
       localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
     }
   } catch {
-    // localStorage may be unavailable in some environments
+    // localStorage может быть недоступен в некоторых окружениях
   }
   setSessionCookie('token', token)
   if (token) {
@@ -295,7 +295,7 @@ export function clearSession() {
       localStorage.removeItem(key)
     }
   } catch {
-    // localStorage may be unavailable in some environments
+    // localStorage может быть недоступен в некоторых окружениях
   }
 }
 
@@ -309,10 +309,10 @@ function redirectToLogin() {
   }
 }
 
-// A single in-flight refresh shared by every request that hit a 401 at the same
-// time. Without it, a screen that fires five parallel requests would send five
-// refreshes, and rotation would make four of them look like a replay — which
-// the backend answers by ending every session.
+// Одно выполняющееся обновление, общее для всех запросов, получивших 401
+// одновременно. Без него экран, стреляющий пятью параллельными запросами, послал
+// бы пять обновлений, и ротация выдала бы четыре из них за повтор — а на это
+// бэкенд отвечает завершением всех сессий.
 let refreshInFlight: Promise<string> | null = null
 
 export async function refreshSession(): Promise<string> {
@@ -324,8 +324,8 @@ export async function refreshSession(): Promise<string> {
   const baseUrl = (api.defaults.baseURL || '').replace(/\/$/, '')
   const refreshUrl = baseUrl.endsWith('/api') ? `${baseUrl}/auth/refresh` : `${baseUrl}/api/auth/refresh`
 
-  // A bare axios call: this must not go through the interceptor below, or a
-  // failing refresh would try to refresh itself.
+  // Голый вызов axios: он не должен идти через перехватчик ниже, иначе падающее
+  // обновление пыталось бы обновить само себя.
   const res = await axios.post(
     refreshUrl,
     { refresh_token: refreshToken },

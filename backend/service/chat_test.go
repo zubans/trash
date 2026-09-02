@@ -141,28 +141,28 @@ func TestChatService_GetMessagesAccessControl(t *testing.T) {
 	executorID := uuid.New()
 	strangerID := uuid.New()
 
-	// Create order and assign executor
+	// Создаём заказ и назначаем исполнителя
 	standardVariantID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	order, _ := orderRepo.CreateOrderWithHold(context.Background(), customerID, standardVariantID, false, false, 100.00, "")
 	_ = orderRepo.AssignOrder(context.Background(), order.ID, executorID)
 
-	// Create chat session
+	// Создаём сессию чата
 	chat, _ := chatRepo.CreateChat(context.Background(), order.ID)
 	_, _ = chatRepo.SaveMessage(context.Background(), chat.ID, customerID, "Hello!")
 
-	// Case 1: Customer should access messages
+	// Случай 1: заказчик должен получить доступ к сообщениям
 	msgs, err := srv.GetMessages(context.Background(), order.ID, customerID, repository.MessageQuery{})
 	if err != nil || len(msgs) != 1 {
 		t.Errorf("expected customer to access messages, got err: %v, len: %d", err, len(msgs))
 	}
 
-	// Case 2: Executor should access messages
+	// Случай 2: исполнитель должен получить доступ к сообщениям
 	msgs, err = srv.GetMessages(context.Background(), order.ID, executorID, repository.MessageQuery{})
 	if err != nil || len(msgs) != 1 {
 		t.Errorf("expected executor to access messages, got err: %v", err)
 	}
 
-	// Case 3: Stranger should NOT access messages (should return error)
+	// Случай 3: посторонний НЕ должен получить доступ к сообщениям (должна вернуться ошибка)
 	_, err = srv.GetMessages(context.Background(), order.ID, strangerID, repository.MessageQuery{})
 	if err == nil {
 		t.Error("expected error for stranger accessing messages")
@@ -179,7 +179,7 @@ func TestChatService_EditAndDeleteMessage(t *testing.T) {
 	chat, _ := chatRepo.CreateChat(context.Background(), orderID)
 	msg, _ := chatRepo.SaveMessage(context.Background(), chat.ID, customerID, "Initial Message")
 
-	// Test EditMessage
+	// Проверяем EditMessage
 	editedMsg, err := srv.EditMessage(context.Background(), msg.ID, customerID, orderID, "Edited Message Text")
 	if err != nil {
 		t.Fatalf("unexpected error editing message: %v", err)
@@ -191,14 +191,14 @@ func TestChatService_EditAndDeleteMessage(t *testing.T) {
 		t.Errorf("expected UpdatedAt timestamp to be set")
 	}
 
-	// Test DeleteMessage
+	// Проверяем DeleteMessage
 	err = srv.DeleteMessage(context.Background(), msg.ID, customerID, orderID)
 	if err != nil {
 		t.Fatalf("unexpected error deleting message: %v", err)
 	}
 }
 
-// --- support chat methods required by repository.ChatRepository ---
+// --- методы чата поддержки, требуемые repository.ChatRepository ---
 
 func (m *mockChatRepo) SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid.UUID, error) {
 	if m.supportOwners == nil {
@@ -227,8 +227,8 @@ func (m *mockChatRepo) IsSupportChatBanned(ctx context.Context, chatID uuid.UUID
 
 func (m *mockChatRepo) GetAdminSupportUnreadCount(ctx context.Context) (int, error) { return 0, nil }
 
-// TestChatService_SupportChatOwnership verifies that a support conversation is
-// only readable and writable by the user it belongs to (and by admins).
+// TestChatService_SupportChatOwnership проверяет, что переписку с поддержкой
+// может читать и писать только тот пользователь, которому она принадлежит (и админы).
 func TestChatService_SupportChatOwnership(t *testing.T) {
 	owner := uuid.New()
 	stranger := uuid.New()

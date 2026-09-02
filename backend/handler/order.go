@@ -15,19 +15,19 @@ import (
 	"healthlogin/backend/service"
 )
 
-// OrderHandler handles order-related HTTP endpoints.
+// OrderHandler обслуживает HTTP-эндпоинты заказов.
 type OrderHandler struct {
 	orderService *service.OrderService
 }
 
-// NewOrderHandler creates an OrderHandler.
+// NewOrderHandler создаёт OrderHandler.
 func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
 	return &OrderHandler{orderService: orderService}
 }
 
-// writeOrderError maps domain errors to status codes. A conflict means the
-// order was not in the state the caller expected — typically a duplicate or
-// concurrent request — and must not be reported as success.
+// writeOrderError сопоставляет доменные ошибки с кодами статуса. Конфликт
+// означает, что заказ был не в том состоянии, какого ждал вызывающий, — обычно
+// дубль или параллельный запрос, — и не должен выдаваться за успех.
 func writeOrderError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, repository.ErrConflict):
@@ -47,7 +47,7 @@ func userFromContext(r *http.Request) *repository.User {
 	return user
 }
 
-// CreateOrder handles POST /customer/orders.
+// CreateOrder обслуживает POST /customer/orders.
 func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -76,7 +76,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(order)
 }
 
-// CancelOrder handles POST /customer/orders/{id}/cancel.
+// CancelOrder обслуживает POST /customer/orders/{id}/cancel.
 func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -98,7 +98,7 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ConfirmOrder handles POST /customer/orders/{id}/confirm.
+// ConfirmOrder обслуживает POST /customer/orders/{id}/confirm.
 func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -120,9 +120,9 @@ func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// TipOrder handles POST /customer/orders/{id}/tip. The customer tips the
-// executor of a completed order; the amount arrives in rubles and is charged
-// from the customer's balance.
+// TipOrder обслуживает POST /customer/orders/{id}/tip. Заказчик даёт чаевые
+// исполнителю завершённого заказа; сумма приходит в рублях и списывается с
+// баланса заказчика.
 func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -152,7 +152,7 @@ func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// AcceptOrder handles POST /executor/orders/{id}/accept.
+// AcceptOrder обслуживает POST /executor/orders/{id}/accept.
 func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -174,7 +174,7 @@ func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// RejectOrder handles POST /executor/orders/{id}/reject.
+// RejectOrder обслуживает POST /executor/orders/{id}/reject.
 func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -196,7 +196,7 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ExecuteOrder handles POST /executor/orders/{id}/execute.
+// ExecuteOrder обслуживает POST /executor/orders/{id}/execute.
 func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -218,7 +218,7 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ListAssignedOrders handles GET /executor/orders/assigned.
+// ListAssignedOrders обслуживает GET /executor/orders/assigned.
 func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -236,7 +236,7 @@ func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(orders)
 }
 
-// GetCustomerOrdersHandler handles GET /customer/orders.
+// GetCustomerOrdersHandler обслуживает GET /customer/orders.
 func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -254,7 +254,7 @@ func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(orders)
 }
 
-// GetNearbyOrdersHandler handles GET /executor/orders/nearby?lat=...&lon=...&radius=2000.
+// GetNearbyOrdersHandler обслуживает GET /executor/orders/nearby?lat=...&lon=...&radius=2000.
 func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -296,7 +296,7 @@ func parseCoords(r *http.Request) (float64, float64, int, error) {
 	return lat, lon, radius, nil
 }
 
-// Alias method names expected by main.go.
+// Псевдонимы имён методов, которых ожидает main.go.
 func (h *OrderHandler) CreateOrderHandler(w http.ResponseWriter, r *http.Request) {
 	h.CreateOrder(w, r)
 }
