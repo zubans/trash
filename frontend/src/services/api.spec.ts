@@ -5,6 +5,7 @@ import api, {
   storeSession,
   getRefreshToken,
   refreshSession,
+  ensureFreshSession,
   setSessionExpiredHandler,
 } from './api'
 
@@ -153,5 +154,77 @@ describe('обновление сессии', () => {
     await expect(refreshSession()).resolves.toBe(rotated)
     expect(onExpired).not.toHaveBeenCalled()
     expect(getRefreshToken()).toBe('refresh-2')
+  })
+})
+
+// Сокет чата предъявляет access-токен один раз, в query при рукопожатии:
+// просроченный отвергается ещё до апгрейда, и обычного пути через 401 у него
+// нет. Поэтому перед каждой попыткой соединения токен доводится до годного.
+describe('подготовка сессии к рукопожатию', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setSessionExpiredHandler(null)
+  })
+
+  afterEach(() => {
+    api.defaults.adapter = undefined
+    axios.defaults.adapter = undefined
+    setSessionExpiredHandler(null)
+    clearSession()
+  })
+
+  it('не трогает живой токен', async () => {
+    storeSession(jwt(900), 'refresh-1')
+    stubTransport(() => {
+      throw new Error('обмена быть не должно')
+    })
+
+    await expect(ensureFreshSession()).resolves.toBe('ok')
+    expect(getRefreshToken()).toBe('refresh-1')
+  })
+
+  it('обменивает истекающий токен до попытки соединения', async () => {
+    const fresh = jwt(900)
+    // Токен ещё жив, но кончится раньше, чем соединение успеет пригодиться.
+    storeSession(jwt(30), 'refresh-1')
+    stubTransport((url) => {
+      if (url.endsWith('/auth/refresh')) return { status: 200, data: { token: fresh, refresh_token: 'refresh-2' } }
+      return { status: 404 }
+    })
+
+    await expect(ensureFreshSession()).resolves.toBe('ok')
+    expect(localStorage.getItem('token')).toBe(fresh)
+  })
+
+  it('называет временный сбой обмена stale и оставляет сессию на месте', async () => {
+    storeSession(jwt(-60), 'refresh-1')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    stubTransport(() => ({ status: 503 }))
+
+    // Попытку стоит повторить позже — это сеть, а не конец сессии.
+    await expect(ensureFreshSession()).resolves.toBe('stale')
+    expect(onExpired).not.toHaveBeenCalled()
+    expect(getRefreshToken()).toBe('refresh-1')
+  })
+
+  it('называет отвергнутый refresh-токен ended и завершает сессию', async () => {
+    storeSession(jwt(-60), 'refresh-1')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    stubTransport(() => ({ status: 401 }))
+
+    await expect(ensureFreshSession()).resolves.toBe('ended')
+    expect(onExpired).toHaveBeenCalledTimes(1)
+    expect(getRefreshToken()).toBe('')
+  })
+
+  it('называет отсутствие сессии ended, никуда не ходя', async () => {
+    clearSession()
+    stubTransport(() => {
+      throw new Error('обмена быть не должно')
+    })
+
+    await expect(ensureFreshSession()).resolves.toBe('ended')
   })
 })

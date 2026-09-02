@@ -452,6 +452,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useScrollLock } from '../../composables/useScrollLock'
+import { useChatSocket } from '../../composables/useChatSocket'
 import type { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
@@ -467,8 +468,7 @@ import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
-import api, { buildChatWebSocketUrl, resolveFileUrl, pollIntervalMs } from '../../services/api'
-import { logWsEvent } from '../../services/debugLog'
+import api, { resolveFileUrl, pollIntervalMs } from '../../services/api'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -880,7 +880,19 @@ export default defineComponent({
     const blobImageCache = ref<Record<string, string>>({})
     const showImagePreviewModal = ref(false)
     const previewImageUrl = ref('')
-    const ws = ref<WebSocket | null>(null)
+    // Заказ, чей чат открыт: обработчик сообщений сокета переживает переоткрытие
+    // соединения, поэтому берёт заказ отсюда, а не из замыкания одной попытки.
+    const chatOrder = ref<any>(null)
+    const chatSocket = useChatSocket({
+      onOpen: ({ orderId, reconnected }) => {
+        // Пока связи не было, чужие сообщения шли мимо сокета. Перечитываем
+        // историю, иначе в ленте останется дыра ровно за время обрыва.
+        if (!reconnected) return
+        fetchChatMessages(orderId)
+        markChatAsRead(orderId)
+      },
+      onMessage: (data) => handleChatEvent(data),
+    })
     let chatPollTimer: any = null
     const unreadOrderIDs = ref(new Set<string>())
     const chatToast = ref<any>(null)
@@ -916,25 +928,11 @@ export default defineComponent({
       } catch (err) {
         console.warn('[CustomerDashboardV2] mark read failed:', err)
       }
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        try {
-          ws.value.send(JSON.stringify({ type: 'read_ack' }))
-          logWsEvent('send read_ack (readyState=' + ws.value.readyState + ')', { ok: true })
-        } catch (e: any) {
-          logWsEvent('send read_ack THREW', { ok: false, error: String(e?.message || e) })
-        }
-      }
+      chatSocket.send({ type: 'read_ack' })
     }
 
     const sendDeliveryAck = () => {
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        try {
-          ws.value.send(JSON.stringify({ type: 'delivery_ack' }))
-          logWsEvent('send delivery_ack (readyState=' + ws.value.readyState + ')', { ok: true })
-        } catch (e: any) {
-          logWsEvent('send delivery_ack THREW', { ok: false, error: String(e?.message || e) })
-        }
-      }
+      chatSocket.send({ type: 'delivery_ack' })
     }
 
     const getMessageStatusTitle = (status?: string) => {
@@ -1144,12 +1142,10 @@ export default defineComponent({
 
     const closeInlineChat = () => {
       openChatOrderId.value = null
+      chatOrder.value = null
       chatMessages.value = []
       chatInputText.value = ''
-      if (ws.value) {
-        ws.value.close()
-        ws.value = null
-      }
+      chatSocket.disconnect()
       if (chatPollTimer) {
         clearInterval(chatPollTimer)
         chatPollTimer = null
@@ -1186,6 +1182,68 @@ export default defineComponent({
       }
     }
 
+    const fetchChatMessages = async (orderId: string) => {
+      try {
+        const response = await api.get(`/chats/${orderId}/messages`)
+        chatMessages.value = response.data || []
+        scrollToChatBottom()
+      } catch (err) {
+        console.error('Failed to load chat messages:', err)
+      }
+    }
+
+    const handleChatEvent = (data: any) => {
+      const order = chatOrder.value
+      if (data.type === 'status_update' && Array.isArray(data.message_ids)) {
+        const updatedSet = new Set(data.message_ids)
+        chatMessages.value = chatMessages.value.map((m: any) => {
+          if (updatedSet.has(m.id)) {
+            return { ...m, status: data.status }
+          }
+          return m
+        })
+        return
+      }
+      if (data.type === 'message_deleted') {
+        chatMessages.value = chatMessages.value.filter((m: any) => m.id !== data.message_id)
+        return
+      }
+      if (data.type === 'message_edited') {
+        const targetId = data.message_id || data.id
+        const newText = data.text || data.message?.text
+        const idx = chatMessages.value.findIndex((m: any) => m.id === targetId)
+        if (idx !== -1) {
+          chatMessages.value[idx] = {
+            ...chatMessages.value[idx],
+            text: newText,
+            updated_at: data.updated_at || new Date().toISOString(),
+          }
+        }
+        return
+      }
+      if (data && (data.text || data.content || data.id)) {
+        const exists = chatMessages.value.some((m) => m.id === data.id)
+        if (!exists) {
+          chatMessages.value.push(data)
+          scrollToChatBottom()
+        }
+        if (data.sender_id !== currentUserId.value && order) {
+          sendDeliveryAck()
+          if (openChatOrderId.value === order.id) {
+            markChatAsRead(order.id)
+          } else {
+            unreadOrderIDs.value.add(order.id)
+            setChatToast({
+              id: order.id,
+              title: 'Новое сообщение',
+              text: data.text || 'Получено новое сообщение',
+              order,
+            })
+          }
+        }
+      }
+    }
+
     const toggleChat = async (order: any) => {
       if (openChatOrderId.value === order.id) {
         closeInlineChat()
@@ -1194,107 +1252,15 @@ export default defineComponent({
 
       closeInlineChat()
       openChatOrderId.value = order.id
+      chatOrder.value = order
       markChatAsRead(order.id)
 
       // 1. Получаем историю сообщений
-      try {
-        const response = await api.get(`/chats/${order.id}/messages`)
-        chatMessages.value = response.data || []
-        scrollToChatBottom()
-      } catch (err) {
-        console.error('Failed to load chat messages:', err)
-      }
+      await fetchChatMessages(order.id)
 
-      // 2. Открываем соединение WebSocket
-      try {
-        const wsUrl = buildChatWebSocketUrl(order.id)
-        // Диагностика: схема здесь в приложении должна быть wss://.
-        logWsEvent('connect ' + wsUrl.replace(/token=[^&]+/, 'token=…'))
-        ws.value = new WebSocket(wsUrl)
-        ws.value.onopen = () => {
-          logWsEvent('open (readyState=' + ws.value?.readyState + ')', { ok: true })
-          // Проба round-trip: если сервер отвечает «pong», исходящие кадры из
-          // этого WebView до сервера доходят. Если мы логируем отправку ping,
-          // но pong не видим, значит отправку проглатывают.
-          try {
-            ws.value?.send(JSON.stringify({ type: 'ping' }))
-            logWsEvent('send ping → expecting pong', { ok: true })
-          } catch (e: any) {
-            logWsEvent('send ping THREW', { ok: false, error: String(e?.message || e) })
-          }
-        }
-        ws.value.onerror = () => {
-          logWsEvent('error', { ok: false, error: 'socket error event' })
-        }
-        ws.value.onclose = (e) => {
-          logWsEvent('close code=' + e.code + (e.reason ? ' reason=' + e.reason : ''), {
-            ok: e.code === 1000,
-            error: e.code !== 1000 ? 'code ' + e.code : undefined,
-          })
-        }
-        ws.value.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data)
-            if (data.type === 'pong') {
-              logWsEvent('recv pong ✓ round-trip OK', { ok: true })
-              return
-            }
-            logWsEvent('recv ' + (data.type || 'message'), { ok: true, detail: String(event.data).slice(0, 200) })
-            if (data.type === 'status_update' && Array.isArray(data.message_ids)) {
-              const updatedSet = new Set(data.message_ids)
-              chatMessages.value = chatMessages.value.map((m: any) => {
-                if (updatedSet.has(m.id)) {
-                  return { ...m, status: data.status }
-                }
-                return m
-              })
-              return
-            }
-            if (data.type === 'message_deleted') {
-              chatMessages.value = chatMessages.value.filter((m: any) => m.id !== data.message_id)
-              return
-            }
-            if (data.type === 'message_edited') {
-              const targetId = data.message_id || data.id
-              const newText = data.text || data.message?.text
-              const idx = chatMessages.value.findIndex((m: any) => m.id === targetId)
-              if (idx !== -1) {
-                chatMessages.value[idx] = {
-                  ...chatMessages.value[idx],
-                  text: newText,
-                  updated_at: data.updated_at || new Date().toISOString(),
-                }
-              }
-              return
-            }
-            if (data && (data.text || data.content || data.id)) {
-              const exists = chatMessages.value.some((m) => m.id === data.id)
-              if (!exists) {
-                chatMessages.value.push(data)
-                scrollToChatBottom()
-              }
-              if (data.sender_id !== currentUserId.value) {
-                sendDeliveryAck()
-                if (openChatOrderId.value === order.id) {
-                  markChatAsRead(order.id)
-                } else {
-                  unreadOrderIDs.value.add(order.id)
-                  setChatToast({
-                    id: order.id,
-                    title: 'Новое сообщение',
-                    text: data.text || 'Получено новое сообщение',
-                    order,
-                  })
-                }
-              }
-            }
-          } catch (e) {
-            console.error('WS message parse error:', e)
-          }
-        }
-      } catch (e) {
-        console.warn('WS connect failed:', e)
-      }
+      // 2. Открываем соединение WebSocket. Оно само поднимается после обрывов,
+      // поэтому здесь остаётся только сказать, к какому заказу подключаться.
+      chatSocket.connect(order.id)
     }
 
     const sendChatMessage = async () => {
