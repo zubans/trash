@@ -300,21 +300,8 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 	customers, variants := s.eligibilityInputs(ctx, pendingOrders)
 
 	// Категории (родители вариантов), чтобы карта могла подписать каждый заказ
-	// как «категория · услуга». Пакетно, поэтому это два лишних запроса, а не N.
-	categories := map[uuid.UUID]*repository.ServiceNode{}
-	if s.catalogRepo != nil {
-		parentIDs := make([]uuid.UUID, 0, len(variants))
-		for _, v := range variants {
-			if v != nil && v.ParentID != nil {
-				parentIDs = append(parentIDs, *v.ParentID)
-			}
-		}
-		if len(parentIDs) > 0 {
-			if loaded, err := s.catalogRepo.GetNodesByIDs(ctx, parentIDs); err == nil {
-				categories = loaded
-			}
-		}
-	}
+	// как «категория · услуга». Пакетно, поэтому это один лишний запрос, а не N.
+	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
 
 	var mapOrders []repository.MapOrder
 
@@ -345,6 +332,7 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 			categoryName := ""
 			if v := variants[o.ServiceVariantID]; v != nil {
 				oc.ServiceVariant = v
+				oc.ServiceCategory = categoryOf(v, categories)
 				if v.ParentID != nil {
 					if cat := categories[*v.ParentID]; cat != nil {
 						categoryName = cat.Name["ru"]

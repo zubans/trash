@@ -167,6 +167,7 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 			variants = loaded
 		}
 	}
+	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
 	executors := map[uuid.UUID]*repository.User{}
 	if s.userRepo != nil && len(executorIDs) > 0 {
 		if loaded, err := s.userRepo.FindByIDs(ctx, executorIDs); err == nil {
@@ -180,6 +181,7 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 		}
 		if variant := variants[o.ServiceVariantID]; variant != nil {
 			o.ServiceVariant = variant
+			o.ServiceCategory = categoryOf(variant, categories)
 			// Что исполнитель обязан отправить, прежде чем этот заказ можно завершить.
 			// Только имена полей: их значения — то, с чем идёт сверка, и исполнителю
 			// их показывать нельзя.
@@ -1081,4 +1083,39 @@ func (s *OrderService) ListByCustomer(ctx context.Context, customerID uuid.UUID)
 	}
 	s.hydrateServiceVariants(ctx, orders)
 	return orders, nil
+}
+
+// loadOrderCategories возвращает родительские категории вариантов одним
+// запросом на список, а не одним на заказ. Подпись «категория / услуга» нужна
+// на каждом экране заказов, поэтому загрузка живёт в одном месте.
+func loadOrderCategories(
+	ctx context.Context,
+	catalogRepo repository.ServiceCatalogRepository,
+	variants map[uuid.UUID]*repository.ServiceNode,
+) map[uuid.UUID]*repository.ServiceNode {
+	if catalogRepo == nil || len(variants) == 0 {
+		return nil
+	}
+	parentIDs := make([]uuid.UUID, 0, len(variants))
+	for _, v := range variants {
+		if v != nil && v.ParentID != nil {
+			parentIDs = append(parentIDs, *v.ParentID)
+		}
+	}
+	if len(parentIDs) == 0 {
+		return nil
+	}
+	loaded, err := catalogRepo.GetNodesByIDs(ctx, parentIDs)
+	if err != nil {
+		return nil
+	}
+	return loaded
+}
+
+// categoryOf находит категорию варианта в уже загруженной пачке.
+func categoryOf(variant *repository.ServiceNode, categories map[uuid.UUID]*repository.ServiceNode) *repository.ServiceNode {
+	if variant == nil || variant.ParentID == nil || categories == nil {
+		return nil
+	}
+	return categories[*variant.ParentID]
 }

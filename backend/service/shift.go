@@ -294,9 +294,11 @@ func (s *ShiftService) hydrateHistoryVariants(ctx context.Context, orders []repo
 	if err != nil {
 		return
 	}
+	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
 	for i := range orders {
 		if variant := variants[orders[i].ServiceVariantID]; variant != nil {
 			orders[i].ServiceVariant = variant
+			orders[i].ServiceCategory = categoryOf(variant, categories)
 		}
 	}
 }

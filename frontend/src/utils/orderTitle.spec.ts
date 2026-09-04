@@ -33,6 +33,23 @@ describe('orderTitle', () => {
     expect(got).toEqual({ title: 'Уборка', subtitle: '' })
   })
 
+  it('uses the category the order carries, whatever the catalog depth', () => {
+    // /service-categories отдаёт только корни, поэтому у вложенного каталога
+    // родителя варианта в справочнике нет — заказ приносит его сам.
+    const subcategory: any = { id: 'sub1', parent_id: 'c1', code: 'STD', name: { ru: 'Стандартный' }, node_type: 'CATEGORY' }
+    const nested: any = { ...variant, parent_id: 'sub1' }
+    const got = orderTitle(
+      { service_variant: nested, service_category: subcategory },
+      { categories: [category] },
+    )
+    expect(got).toEqual({ title: 'Стандартный', subtitle: 'Стандартная цокольная' })
+  })
+
+  it('falls back to the lookup when the order carries no category', () => {
+    const got = orderTitle({ service_variant: variant }, { categories: [category] })
+    expect(got).toEqual({ title: 'Уборка', subtitle: 'Стандартная цокольная' })
+  })
+
   it('joins both parts on one line for tables', () => {
     expect(orderTitleLine({ service_variant: variant }, { categories: [category] }))
       .toBe('Уборка · Стандартная цокольная')

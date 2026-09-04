@@ -31,22 +31,27 @@ type Order struct {
 	ExecutorName     string       `json:"executor_name,omitempty"`
 	ServiceVariantID uuid.UUID    `json:"service_variant_id"`
 	ServiceVariant   *ServiceNode `json:"service_variant,omitempty"`
-	IsUrgent         bool         `json:"is_urgent"`
-	IsAsap           bool         `json:"is_asap"`
-	Status           OrderStatus  `json:"status"`
-	HoldAmount       money.Amount `json:"hold_amount"`
-	FinalAmount      money.Amount `json:"final_amount"`
-	IsDowngraded     bool         `json:"is_downgraded"`
-	PhotoURL         *string      `json:"photo_url,omitempty"`
-	Address          *string      `json:"address,omitempty"`
-	Comment          *string      `json:"comment,omitempty"`
-	PickupLat        *float64     `json:"pickup_lat,omitempty"`
-	PickupLon        *float64     `json:"pickup_lon,omitempty"`
-	CreatedAt        time.Time    `json:"created_at"`
-	AssignedAt       *time.Time   `json:"assigned_at,omitempty"`
-	DeadlineAt       *time.Time   `json:"deadline_at,omitempty"`
-	CompletedAt      *time.Time   `json:"completed_at,omitempty"`
-	CanceledAt       *time.Time   `json:"canceled_at,omitempty"`
+	// ServiceCategory — родительская категория варианта. Едет вместе с заказом,
+	// потому что клиент подписывает заказ как «категория / услуга», а достать её
+	// сам он не может: /service-categories отдаёт только корни, и у вложенного
+	// каталога родитель варианта в этот список не попадает.
+	ServiceCategory *ServiceNode `json:"service_category,omitempty"`
+	IsUrgent        bool         `json:"is_urgent"`
+	IsAsap          bool         `json:"is_asap"`
+	Status          OrderStatus  `json:"status"`
+	HoldAmount      money.Amount `json:"hold_amount"`
+	FinalAmount     money.Amount `json:"final_amount"`
+	IsDowngraded    bool         `json:"is_downgraded"`
+	PhotoURL        *string      `json:"photo_url,omitempty"`
+	Address         *string      `json:"address,omitempty"`
+	Comment         *string      `json:"comment,omitempty"`
+	PickupLat       *float64     `json:"pickup_lat,omitempty"`
+	PickupLon       *float64     `json:"pickup_lon,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	AssignedAt      *time.Time   `json:"assigned_at,omitempty"`
+	DeadlineAt      *time.Time   `json:"deadline_at,omitempty"`
+	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
+	CanceledAt      *time.Time   `json:"canceled_at,omitempty"`
 	// SubmitFields называет данные, которые исполнитель обязан отправить на
 	// проверку до завершения этого заказа, — поля личности в заказе верификации.
 	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит

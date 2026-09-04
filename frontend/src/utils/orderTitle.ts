@@ -40,9 +40,13 @@ export function orderTitle(order: any, lookup: ServiceLookup = {}): OrderTitle {
     return { title: 'Заказ', subtitle: '' }
   }
 
-  const parent = variant?.parent_id
-    ? lookup.categories?.find((c) => c.id === variant.parent_id)
-    : undefined
+  // Категория приезжает вместе с заказом. Локальный справочник — запасной путь
+  // для заказов, отданных без неё: он держит только корневые категории
+  // (/service-categories отдаёт лишь их), поэтому у вложенного каталога
+  // родителя варианта в нём не найти.
+  const parent =
+    order?.service_category ||
+    (variant?.parent_id ? lookup.categories?.find((c) => c.id === variant.parent_id) : undefined)
   const categoryName = localizedNodeName(parent)
 
   if (!categoryName || categoryName === variantName) {
