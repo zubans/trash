@@ -41,3 +41,31 @@ func TestDigitsOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestTransactionSortsAreWhitelisted: тот же контракт для журнала проводок —
+// ключ сортировки приходит из query string и попадает в ORDER BY.
+func TestTransactionSortsAreWhitelisted(t *testing.T) {
+	for _, key := range []string{"t.created_at; DROP TABLE transactions", "(SELECT 1)", "user_phone", ""} {
+		if _, ok := transactionSorts[key]; ok {
+			t.Errorf("%q must not be an accepted sort key", key)
+		}
+	}
+	for _, key := range []string{"created_at", "amount", "type", "user"} {
+		if _, ok := transactionSorts[key]; !ok {
+			t.Errorf("%q should be sortable", key)
+		}
+	}
+}
+
+// TestLedgerSignBacksTransactionDirection: направление в списке берётся из
+// соглашения о знаках, а не выводится заново, поэтому каждый тип обязан там быть.
+func TestLedgerSignBacksTransactionDirection(t *testing.T) {
+	for _, tt := range []TransactionType{
+		TransactionTypeTopUp, TransactionTypeHold, TransactionTypePayment,
+		TransactionTypeReward, TransactionTypeFine, TransactionTypeRefund,
+	} {
+		if _, ok := LedgerSign(tt); !ok {
+			t.Errorf("тип %q не объявлен в ledgerSigns", tt)
+		}
+	}
+}

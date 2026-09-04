@@ -17,36 +17,53 @@
       <div :class="['sidebar-overlay', { open: menuOpen }]" @click="menuOpen = false"></div>
 
       <aside :class="['sidebar', { open: menuOpen }]">
+        <!-- Выход стоит наверху рядом с заголовком, как в админке: до него
+             не нужно прокручивать меню. -->
         <div class="sidebar-header">
           <h2>Меню</h2>
-          <button type="button" class="close-btn" title="Закрыть" @click="menuOpen = false">
-            <i class="ph-bold ph-x"></i>
-          </button>
+          <div class="sidebar-header-actions">
+            <button
+              type="button"
+              class="header-logout"
+              title="Выйти из аккаунта"
+              aria-label="Выйти из аккаунта"
+              @click="menuOpen = false; handleLogout()"
+            >
+              <i class="ph-bold ph-sign-out"></i>
+            </button>
+            <button type="button" class="close-btn" title="Закрыть" @click="menuOpen = false">
+              <i class="ph-bold ph-x"></i>
+            </button>
+          </div>
         </div>
 
         <nav class="sidebar-nav">
-          <button type="button" class="nav-item position-relative" @click="menuOpen = false; openSupportChat()">
-            <i class="ph-fill ph-headset"></i> Поддержка
-            <span v-if="hasUnreadSupport" class="support-unread-dot nav-dot"></span>
-          </button>
-
-          <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/profile')">
-            <i class="ph-fill ph-user-circle"></i> Профиль и адреса
-          </button>
-
-          <div v-if="authStore.switchableRoles.length > 1" class="lang-control">
-            <span>Роль</span>
-            <RoleSwitcher />
+          <div class="nav-section">Аккаунт</div>
+          <div class="nav-list">
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/profile')">
+              <i class="ph-fill ph-user-circle"></i> Профиль и адреса
+            </button>
           </div>
 
-          <div class="lang-control">
-            <span>Язык приложения</span>
-            <LanguageSwitcher />
+          <div class="nav-section">Помощь</div>
+          <div class="nav-list">
+            <button type="button" class="nav-item position-relative" @click="menuOpen = false; openSupportChat()">
+              <i class="ph-fill ph-headset"></i> Поддержка
+              <span v-if="hasUnreadSupport" class="support-unread-dot nav-dot"></span>
+            </button>
           </div>
 
-          <button type="button" class="nav-item logout" @click="menuOpen = false; handleLogout()">
-            <i class="ph-bold ph-sign-out"></i> Выйти из аккаунта
-          </button>
+          <div class="sidebar-footer">
+            <div v-if="authStore.switchableRoles.length > 1" class="lang-control">
+              <span>Роль</span>
+              <RoleSwitcher />
+            </div>
+
+            <div class="lang-control">
+              <span>Язык приложения</span>
+              <LanguageSwitcher />
+            </div>
+          </div>
         </nav>
       </aside>
 
@@ -169,9 +186,9 @@
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="o-title item-title">
-                    <span class="font-bold text-base">{{ getOrderTitles(order).category }}</span>
-                    <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
+                  <div class="o-title item-title order-title-stack">
+                    <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                    <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
                   </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
@@ -315,7 +332,10 @@
               <i :class="['ph', order.status === 'COMPLETED' ? 'ph-check-circle' : 'ph-x-circle']"></i>
             </div>
             <div class="op-info">
-              <div class="op-title" style="color: var(--text-muted);">{{ formatOrderType(order) }}</div>
+              <div class="op-title order-title-stack" style="color: var(--text-muted);">
+                <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
+              </div>
               <div class="op-id">#{{ order.id.slice(0, 8) }}</div>
             </div>
             <div class="op-price" style="color: var(--text-muted); font-size: 16px;">
@@ -458,6 +478,7 @@ import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { cameraPromptLabels } from '../../utils/cameraLabels'
+import { orderTitle, orderTitleLine } from '../../utils/orderTitle'
 import { useAuthStore } from '../../stores/auth-store'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
@@ -1406,26 +1427,13 @@ export default defineComponent({
       }
     }
 
-    const getOrderTitles = (order: any) => {
-      const variant = order?.service_variant
-      if (!variant) {
-        return { category: '', variant: 'Заказ' }
-      }
-      const variantName = localizedName(variant)
-      // Ищем родительскую категорию в serviceCategories, если есть parent_id
-      if (variant.parent_id && serviceCategories.value && serviceCategories.value.length > 0) {
-        const parent = serviceCategories.value.find((c: any) => c.id === variant.parent_id)
-        if (parent) {
-          return { category: localizedName(parent), variant: variantName }
-        }
-      }
-      return { category: '', variant: variantName }
-    }
+    // Naming lives in utils/orderTitle so the executor dashboard shows an order
+    // the same way this one does.
+    const serviceLookup = computed(() => ({ categories: serviceCategories.value }))
 
-    const formatOrderType = (order: any) => {
-      const { category, variant } = getOrderTitles(order)
-      return category && category !== variant ? `${category} (${variant})` : variant
-    }
+    const getOrderTitles = (order: any) => orderTitle(order, serviceLookup.value)
+
+    const formatOrderType = (order: any) => orderTitleLine(order, serviceLookup.value)
 
     const getStatusColor = (status: string) => {
       return status === 'COMPLETED' ? 'success' : 'primary'
@@ -1693,8 +1701,6 @@ export default defineComponent({
 .nav-item i { font-size: 22px; color: var(--accent-main, #6366f1); }
 .nav-item:hover { background: #f8fafc; }
 .nav-item:active { background: #f1f5f9; }
-.nav-item.logout { color: var(--danger, #ef4444); margin-top: auto; }
-.nav-item.logout i { color: var(--danger, #ef4444); }
 .nav-item .nav-dot { top: 14px; left: 34px; right: auto; }
 
 .lang-control {
@@ -2905,5 +2911,84 @@ export default defineComponent({
   font-weight: 600;
   color: var(--text-title, #0f172a);
   margin-top: 2px;
+}
+
+/* Название заказа: категория крупно, конкретная услуга под ней. */
+.order-title-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.order-title-main {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.25;
+  color: inherit;
+}
+.order-title-sub {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-muted, #64748b);
+}
+/* .item-title truncates with an ellipsis; on a two-line stack that has to move
+   to the lines themselves, or the flex box just clips them. */
+.order-title-main,
+.order-title-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Меню по образцу админской боковой панели --- */
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Выход — иконкой наверху, как в админке: подпись живёт в aria-label,
+   потому что рядом с крестиком нет места для текста. */
+.header-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #fef2f2;
+  color: #ef4444;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.header-logout:hover { background: #fee2e2; }
+
+.nav-section {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 16px 0 8px 12px;
+}
+.nav-section:first-child { margin-top: 0; }
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 </style>

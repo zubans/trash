@@ -49,6 +49,10 @@ type Transaction struct {
 	Counterparty string     `json:"counterparty,omitempty"`
 	AdminID      *uuid.UUID `json:"admin_id,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
+	// Direction — как этот тип двигает баланс пользователя: +1, -1 или 0.
+	// Берётся из ledgerSigns, чтобы клиент не выводил соглашение о знаках
+	// заново: суммы в таблице все положительные, направление живёт в типе.
+	Direction int `json:"direction"`
 }
 
 // AdminShift дополняет Shift телефоном исполнителя для админских представлений.
@@ -82,7 +86,8 @@ type AdminRepository interface {
 	SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
 	HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error)
 	CountAdmins(ctx context.Context) (int, error)
-	GetTransactions(ctx context.Context, limit, offset int) ([]*Transaction, error)
+	GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error)
+	TransactionFacets(ctx context.Context) (TransactionFacets, error)
 	GetActiveShifts(ctx context.Context) ([]*AdminShift, error)
 	GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
 	GetCompletedOrders(ctx context.Context, f CompletedOrdersFilter) ([]*AdminOrder, int, error)
@@ -95,6 +100,34 @@ type AdminRepository interface {
 type CompletedOrderFacets struct {
 	Services []string `json:"services"`
 	Periods  []string `json:"periods"`
+}
+
+// TransactionsFilter описывает одну страницу журнала проводок. Как и фильтр
+// завершённых заказов, всё сужение идёт в SQL, поэтому страница, счётчик и
+// выгрузка описывают один и тот же набор.
+type TransactionsFilter struct {
+	Search string // телефон, id заказа или id админа
+	Type   string // точный тип проводки
+	Period string // YYYY-MM по created_at
+	Sort   string // один из transactionSorts; всё прочее откатывается к умолчанию
+	Desc   bool
+	Limit  int
+	Offset int
+}
+
+// TransactionFacets — значения, которые предлагают фильтры журнала. Считаются
+// по всей таблице, а не по текущей странице.
+type TransactionFacets struct {
+	Types   []string `json:"types"`
+	Periods []string `json:"periods"`
+}
+
+// transactionSorts — белый список того, что может дойти до ORDER BY.
+var transactionSorts = map[string]string{
+	"created_at": "t.created_at",
+	"amount":     "t.amount",
+	"type":       "t.type",
+	"user":       "u.phone",
 }
 
 // CompletedOrdersFilter описывает одну страницу списка завершённых заказов.
@@ -430,30 +463,125 @@ func (r *adminRepo) CountAdmins(ctx context.Context) (int, error) {
 	return count, err
 }
 
-func (r *adminRepo) GetTransactions(ctx context.Context, limit, offset int) ([]*Transaction, error) {
-	query := `
-		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount, t.admin_id, t.created_at
+func (r *adminRepo) GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error) {
+	where := "WHERE 1=1"
+	var args []interface{}
+
+	if search := strings.TrimSpace(f.Search); search != "" {
+		// Телефон хранится как +79997454656, а вводят его с маской, поэтому обе
+		// стороны приводятся к цифрам. Цифровое условие добавляется, только если
+		// в запросе есть цифры: иначе пустой шаблон совпал бы со всем.
+		digits := digitsOnly(search)
+		args = append(args, "%"+search+"%")
+		like := fmt.Sprintf("$%d", len(args))
+		conds := []string{
+			fmt.Sprintf("t.id::text ILIKE %s", like),
+			fmt.Sprintf("COALESCE(t.order_id::text, '') ILIKE %s", like),
+			fmt.Sprintf("COALESCE(t.admin_id::text, '') ILIKE %s", like),
+		}
+		if digits != "" {
+			args = append(args, "%"+digits+"%")
+			conds = append(conds, fmt.Sprintf(
+				"regexp_replace(u.phone, '[^0-9]', '', 'g') LIKE $%d", len(args)))
+		}
+		where += " AND (" + strings.Join(conds, " OR ") + ")"
+	}
+
+	if txType := strings.TrimSpace(f.Type); txType != "" {
+		args = append(args, txType)
+		where += fmt.Sprintf(" AND t.type = $%d", len(args))
+	}
+
+	if period := strings.TrimSpace(f.Period); period != "" {
+		args = append(args, period)
+		where += fmt.Sprintf(" AND to_char(t.created_at, 'YYYY-MM') = $%d", len(args))
+	}
+
+	from := `
 		FROM transactions t
 		JOIN users u ON t.user_id = u.id
-		ORDER BY t.created_at DESC
-		LIMIT $1 OFFSET $2`
+		` + where
 
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) "+from, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	sortExpr, ok := transactionSorts[f.Sort]
+	if !ok {
+		sortExpr = transactionSorts["created_at"]
+	}
+	direction := "ASC"
+	if f.Desc {
+		direction = "DESC"
+	}
+
+	args = append(args, f.Limit, f.Offset)
+	query := fmt.Sprintf(`
+		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount,
+		       COALESCE(t.counterparty, ''), t.admin_id, t.created_at
+		%s
+		ORDER BY %s %s NULLS LAST, t.created_at DESC
+		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	var txs []*Transaction
 	for rows.Next() {
 		var tx Transaction
-		err := rows.Scan(&tx.ID, &tx.UserID, &tx.UserPhone, &tx.OrderID, &tx.Type, &tx.Amount, &tx.AdminID, &tx.CreatedAt)
+		err := rows.Scan(&tx.ID, &tx.UserID, &tx.UserPhone, &tx.OrderID, &tx.Type, &tx.Amount,
+			&tx.Counterparty, &tx.AdminID, &tx.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
+		// Знак берётся из единственного объявления соглашения, а не выводится
+		// на клиенте заново.
+		tx.Direction, _ = LedgerSign(TransactionType(tx.Type))
 		txs = append(txs, &tx)
 	}
-	return txs, rows.Err()
+	return txs, total, rows.Err()
+}
+
+func (r *adminRepo) TransactionFacets(ctx context.Context) (TransactionFacets, error) {
+	facets := TransactionFacets{Types: []string{}, Periods: []string{}}
+
+	typeRows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT type FROM transactions ORDER BY type`)
+	if err != nil {
+		return facets, err
+	}
+	defer typeRows.Close()
+	for typeRows.Next() {
+		var t string
+		if err := typeRows.Scan(&t); err != nil {
+			return facets, err
+		}
+		facets.Types = append(facets.Types, t)
+	}
+	if err := typeRows.Err(); err != nil {
+		return facets, err
+	}
+
+	periodRows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT to_char(created_at, 'YYYY-MM') AS period
+		 FROM transactions
+		 ORDER BY period DESC`)
+	if err != nil {
+		return facets, err
+	}
+	defer periodRows.Close()
+	for periodRows.Next() {
+		var p string
+		if err := periodRows.Scan(&p); err != nil {
+			return facets, err
+		}
+		facets.Periods = append(facets.Periods, p)
+	}
+	return facets, periodRows.Err()
 }
 
 func (r *adminRepo) GetActiveShifts(ctx context.Context) ([]*AdminShift, error) {

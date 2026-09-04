@@ -646,9 +646,14 @@ func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID 
 }
 
 // GetTransactions отдаёт историю транзакций.
-func (s *AdminService) GetTransactions(ctx context.Context, limit, offset int) ([]*repository.Transaction, error) {
-	limit, offset = page(limit, offset)
-	return s.adminRepo.GetTransactions(ctx, limit, offset)
+func (s *AdminService) GetTransactions(ctx context.Context, f repository.TransactionsFilter) ([]*repository.Transaction, int, error) {
+	f.Limit, f.Offset = page(f.Limit, f.Offset)
+	return s.adminRepo.GetTransactions(ctx, f)
+}
+
+// TransactionFacets возвращает значения, которые предлагают фильтры журнала.
+func (s *AdminService) TransactionFacets(ctx context.Context) (repository.TransactionFacets, error) {
+	return s.adminRepo.TransactionFacets(ctx)
 }
 
 // GetActiveShifts возвращает все активные сейчас смены исполнителей.

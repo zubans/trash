@@ -69,8 +69,12 @@ func (m *mockAdminRepo) CreateWithdrawalRequest(ctx context.Context, q repositor
 	return req, nil
 }
 
-func (m *mockAdminRepo) GetTransactions(ctx context.Context, limit, offset int) ([]*repository.Transaction, error) {
-	return m.transactions, nil
+func (m *mockAdminRepo) GetTransactions(ctx context.Context, f repository.TransactionsFilter) ([]*repository.Transaction, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockAdminRepo) TransactionFacets(ctx context.Context) (repository.TransactionFacets, error) {
+	return repository.TransactionFacets{}, nil
 }
 
 func (m *mockAdminRepo) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {

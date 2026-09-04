@@ -528,14 +528,37 @@ func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Re
 // GetTransactionsHandler отдаёт аудит-логи транзакций.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
-	txs, err := h.adminService.GetTransactions(r.Context(), limit, offset)
+	q := r.URL.Query()
+	txs, total, err := h.adminService.GetTransactions(r.Context(), repository.TransactionsFilter{
+		Search: q.Get("search"),
+		Type:   q.Get("type"),
+		Period: q.Get("period"),
+		Sort:   q.Get("sort"),
+		Desc:   q.Get("order") != "asc",
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if txs == nil {
+		txs = []*repository.Transaction{}
+	}
+
+	facets, err := h.adminService.TransactionFacets(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(txs)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"transactions": txs,
+		"total":        total,
+		"types":        facets.Types,
+		"periods":      facets.Periods,
+	})
 }
 
 // GetPublicSettingsHandler возвращает публичные системные настройки (например, валюту).

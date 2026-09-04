@@ -15,31 +15,51 @@
       <!-- --- Сайдбар (выдвижное меню) --- -->
       <div :class="['sidebar-overlay', { open: menuOpen }]" @click="menuOpen = false"></div>
       <aside :class="['sidebar', { open: menuOpen }]">
+        <!-- Выход стоит наверху рядом с заголовком, как в админке: до него
+             не нужно прокручивать меню. -->
         <div class="sidebar-header">
           <h2>Меню</h2>
-          <button type="button" class="close-btn" title="Закрыть" @click="menuOpen = false">
-            <i class="ph-bold ph-x"></i>
-          </button>
+          <div class="sidebar-header-actions">
+            <button
+              type="button"
+              class="header-logout"
+              title="Выйти из аккаунта"
+              aria-label="Выйти из аккаунта"
+              @click="menuOpen = false; handleLogout()"
+            >
+              <i class="ph-bold ph-sign-out"></i>
+            </button>
+            <button type="button" class="close-btn" title="Закрыть" @click="menuOpen = false">
+              <i class="ph-bold ph-x"></i>
+            </button>
+          </div>
         </div>
         <nav class="sidebar-nav">
-          <button type="button" class="nav-item position-relative" @click="menuOpen = false; openSupportChat()">
-            <i class="ph-fill ph-headset"></i> Поддержка
-            <span v-if="hasUnreadSupport" class="support-unread-dot nav-dot"></span>
-          </button>
-          <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/profile')">
-            <i class="ph-fill ph-user-circle"></i> Профиль
-          </button>
-          <div v-if="authStore.switchableRoles.length > 1" class="lang-control">
-            <span>Роль</span>
-            <RoleSwitcher />
+          <div class="nav-section">Аккаунт</div>
+          <div class="nav-list">
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/profile')">
+              <i class="ph-fill ph-user-circle"></i> Профиль
+            </button>
           </div>
-          <div class="lang-control">
-            <span>Язык приложения</span>
-            <LanguageSwitcher />
+
+          <div class="nav-section">Помощь</div>
+          <div class="nav-list">
+            <button type="button" class="nav-item position-relative" @click="menuOpen = false; openSupportChat()">
+              <i class="ph-fill ph-headset"></i> Поддержка
+              <span v-if="hasUnreadSupport" class="support-unread-dot nav-dot"></span>
+            </button>
           </div>
-          <button type="button" class="nav-item logout" @click="menuOpen = false; handleLogout()">
-            <i class="ph-bold ph-sign-out"></i> Выйти из аккаунта
-          </button>
+
+          <div class="sidebar-footer">
+            <div v-if="authStore.switchableRoles.length > 1" class="lang-control">
+              <span>Роль</span>
+              <RoleSwitcher />
+            </div>
+            <div class="lang-control">
+              <span>Язык приложения</span>
+              <LanguageSwitcher />
+            </div>
+          </div>
         </nav>
       </aside>
 
@@ -190,9 +210,9 @@
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="o-title item-title">
-                    <span class="font-bold text-base">{{ getOrderTitles(order).category }}</span>
-                    <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
+                  <div class="o-title item-title order-title-stack">
+                    <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                    <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
                   </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                   <div v-if="order.comment" class="item-comment-line"><i class="ph-fill ph-chat-teardrop-text me-1 text-primary"></i>«{{ order.comment }}»</div>
@@ -336,7 +356,10 @@
                 <div class="item-icon"><i class="ph-fill ph-hourglass-high"></i></div>
                 <div class="item-text-stack">
                   <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="item-title">{{ formatOrderType(order) }}</div>
+                  <div class="item-title order-title-stack">
+                    <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                    <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
+                  </div>
                   <div class="item-subtitle">Ожидает подтверждения</div>
                 </div>
               </div>
@@ -482,9 +505,9 @@
                 </div>
                 <div class="o-info item-text-stack">
                   <div class="item-price-top">{{ Number(order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-                  <div class="o-title item-title">
-                    <span class="font-bold text-base">{{ getOrderTitles(order).category }}</span>
-                    <span class="text-xs text-muted ms-1">({{ getOrderTitles(order).variant }})</span>
+                  <div class="o-title item-title order-title-stack">
+                    <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                    <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
                   </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
@@ -523,7 +546,10 @@
             <div class="item-left-group">
               <div class="item-icon"><i class="ph-bold ph-check-circle"></i></div>
               <div class="item-text-stack">
-                <div class="item-title" style="font-size: 14px;">{{ formatOrderType(order) }}</div>
+                <div class="item-title order-title-stack" style="font-size: 14px;">
+                  <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                  <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
+                </div>
                 <div class="item-subtitle" style="font-family: inherit;">#{{ order?.id ? order.id.slice(0, 8) : '---' }}<span v-if="order.address"> • {{ order.address }}</span></div>
               </div>
             </div>
@@ -672,7 +698,8 @@ import api, { resolveFileUrl, pollIntervalMs, getRefreshToken } from '../../serv
 import { useChatSocket } from '../../composables/useChatSocket'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
-import { getServiceVariants, type ServiceNode } from '../../api/services'
+import { getServiceVariants, getServiceCategories, type ServiceNode } from '../../api/services'
+import { orderTitle, orderTitleLine } from '../../utils/orderTitle'
 
 export default defineComponent({
   name: 'ExecutorDashboard',
@@ -1493,40 +1520,36 @@ export default defineComponent({
     }
 
     const serviceVariantsMap = ref<Record<string, ServiceNode>>({})
+    const serviceCategories = ref<ServiceNode[]>([])
 
     const fetchServiceVariants = async () => {
       try {
-        const variants = await getServiceVariants()
+        const [variants, categories] = await Promise.all([
+          getServiceVariants(),
+          getServiceCategories(),
+        ])
         const map: Record<string, ServiceNode> = {}
         for (const v of variants) {
           map[v.id] = v
         }
         serviceVariantsMap.value = map
+        serviceCategories.value = categories
       } catch (err) {
-        console.error('Failed to load service variants:', err)
+        console.error('Failed to load the service catalog:', err)
       }
     }
 
-    const getOrderTitles = (order: any) => {
-      const variantName = formatOrderType(order)
-      return { category: '', variant: variantName }
-    }
+    // Same naming as the customer dashboard: the category is the title and the
+    // exact service goes under it. This side used to render only the service
+    // and leave the bold category line blank.
+    const serviceLookup = computed(() => ({
+      variants: serviceVariantsMap.value,
+      categories: serviceCategories.value,
+    }))
 
-    const formatOrderType = (order: any) => {
-      if (order?.service_variant) {
-        const nameObj = order.service_variant.name
-        if (nameObj && typeof nameObj === 'object') {
-          return nameObj['ru'] || nameObj['en'] || order.service_variant.code || ''
-        }
-      }
-      if (order?.service_variant_id && serviceVariantsMap.value[order.service_variant_id]) {
-        const node = serviceVariantsMap.value[order.service_variant_id]
-        if (node.name && typeof node.name === 'object') {
-          return node.name['ru'] || node.name['en'] || node.code || ''
-        }
-      }
-      return 'Заказ'
-    }
+    const getOrderTitles = (order: any) => orderTitle(order, serviceLookup.value)
+
+    const formatOrderType = (order: any) => orderTitleLine(order, serviceLookup.value)
 
     const getStatusColor = (statusStr: string) => {
       switch (statusStr) {
@@ -1981,8 +2004,6 @@ export default defineComponent({
 .nav-item i { font-size: 22px; color: #6366f1; }
 .nav-item:hover { background: #f8fafc; }
 .nav-item:active { background: #f1f5f9; }
-.nav-item.logout { color: #ef4444; margin-top: auto; }
-.nav-item.logout i { color: #ef4444; }
 .nav-item .nav-dot { top: 14px; left: 34px; right: auto; }
 
 .lang-control {
@@ -3324,5 +3345,84 @@ export default defineComponent({
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Название заказа: категория крупно, конкретная услуга под ней. */
+.order-title-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.order-title-main {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.25;
+  color: inherit;
+}
+.order-title-sub {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-muted, #64748b);
+}
+/* .item-title truncates with an ellipsis; on a two-line stack that has to move
+   to the lines themselves, or the flex box just clips them. */
+.order-title-main,
+.order-title-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Меню по образцу админской боковой панели --- */
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Выход — иконкой наверху, как в админке: подпись живёт в aria-label,
+   потому что рядом с крестиком нет места для текста. */
+.header-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #fef2f2;
+  color: #ef4444;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.header-logout:hover { background: #fee2e2; }
+
+.nav-section {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 16px 0 8px 12px;
+}
+.nav-section:first-child { margin-top: 0; }
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 </style>

@@ -357,202 +357,18 @@ export default defineComponent({
 </script>
 
 <style scoped>
+/* Общий вид карточки-таблицы живёт в styles/admin-table.css: он делится с
+   историей транзакций. Здесь остаётся только то, что есть на этой странице. */
+
 .completed-orders {
   display: flex;
   flex-direction: column;
 }
 
-.admin-card {
-  background: #ffffff;
-  border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.03);
-  overflow: hidden;
-}
-
-/* Шапка страницы */
-.page-header {
-  padding: 24px;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 900;
-  letter-spacing: -0.5px;
-  color: #0f172a;
-  margin: 0;
-}
-
-.btn-primary {
-  background: #5c60f5;
-  color: #ffffff;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  transition: all 0.2s ease-in-out;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #4b4fd6;
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Панель инструментов */
-.toolbar {
-  padding: 16px 24px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #ffffff;
-  padding: 8px 16px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  width: 280px;
-  transition: all 0.2s ease-in-out;
-}
-
-.search-box:focus-within {
-  border-color: #5c60f5;
-  box-shadow: 0 0 0 3px rgba(92, 96, 245, 0.1);
-}
-
-.search-box i {
-  color: #94a3b8;
-}
-
-.search-box input {
-  border: none;
-  background: transparent;
-  outline: none;
-  font-family: inherit;
-  font-size: 14px;
-  color: #0f172a;
-  width: 100%;
-}
-
-.filter-btn {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
-  cursor: pointer;
-  outline: none;
-  max-width: 220px;
-  transition: all 0.2s ease-in-out;
-}
-
-.filter-btn:hover {
-  background: #f1f5f9;
-}
-
-.toolbar-count {
-  margin-left: auto;
-  font-size: 13px;
-  font-weight: 600;
-  color: #64748b;
-  white-space: nowrap;
-}
-
-/* Сетка */
-.grid-table {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow-x: auto;
-}
-
 .grid-row {
-  display: grid;
   /* Услуга | Заказчик | Исполнитель | Сумма | Адрес | Завершен */
   grid-template-columns: minmax(200px, 1.2fr) 220px 220px 120px minmax(200px, 1.5fr) 130px;
   min-width: 1110px;
-}
-
-.grid-header {
-  background: #ffffff;
-  border-bottom: 2px solid #e2e8f0;
-  font-size: 11px;
-  font-weight: 800;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Ячейки заголовка — кнопки там, где колонку можно сортировать, поэтому
-   правило обязано доставать до любого элемента, а не только до div. */
-.grid-header > .th {
-  padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font: inherit;
-  color: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  text-align: left;
-  background: none;
-  border: none;
-}
-
-.grid-header > .sortable {
-  cursor: pointer;
-  transition: color 0.2s ease-in-out;
-}
-
-.grid-header > .sortable:hover {
-  color: #0f172a;
-}
-
-.grid-header .ph-caret-up-down {
-  opacity: 0.4;
-}
-
-.grid-item {
-  border-bottom: 1px solid #e2e8f0;
-  transition: background 0.2s ease-in-out;
-}
-
-.grid-item:hover {
-  background: #f8fafc;
-}
-
-.cell {
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  overflow: hidden;
-  min-width: 0;
 }
 
 /* Услуга и метки */
@@ -567,19 +383,6 @@ export default defineComponent({
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
 }
 
 .badge.urgent {
@@ -597,25 +400,6 @@ export default defineComponent({
   color: #64748b;
 }
 
-/* Участники */
-.phone-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.phone-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
 .phone-icon.customer {
   background: #eef2ff;
   color: #5c60f5;
@@ -624,32 +408,6 @@ export default defineComponent({
 .phone-icon.executor {
   background: #fffbeb;
   color: #f59e0b;
-}
-
-.phone-number {
-  font-size: 14px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.muted {
-  color: #cbd5e1;
-  font-weight: 700;
-}
-
-/* Сумма */
-.amount {
-  font-weight: 900;
-  font-size: 15px;
-  white-space: nowrap;
-}
-
-.amount.free {
-  color: #64748b;
-  font-weight: 700;
 }
 
 /* Адрес */
@@ -666,82 +424,5 @@ export default defineComponent({
   font-size: 12px;
   color: #64748b;
   margin-top: 2px;
-}
-
-/* Дата */
-.date-main {
-  font-size: 14px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.date-time {
-  font-size: 12px;
-  font-weight: 600;
-  color: #64748b;
-  margin-top: 2px;
-}
-
-.table-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 16px;
-  padding: 16px 20px;
-  border-top: 1px solid #e2e8f0;
-}
-
-.page-info {
-  font-size: 13px;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.page-btn {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease-in-out;
-}
-
-.page-btn:hover:not(:disabled) {
-  background: #f1f5f9;
-}
-
-.page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.table-note {
-  padding: 32px 24px;
-  text-align: center;
-  font-size: 14px;
-  font-weight: 600;
-  color: #64748b;
-}
-
-@media (max-width: 768px) {
-  .page-header,
-  .toolbar {
-    padding: 16px;
-  }
-  .search-box,
-  .filter-btn {
-    width: 100%;
-    max-width: none;
-  }
-  .toolbar-count {
-    margin-left: 0;
-  }
 }
 </style>

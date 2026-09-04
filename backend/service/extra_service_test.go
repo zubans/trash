@@ -370,7 +370,7 @@ func TestAdminService_Extended(t *testing.T) {
 	}
 
 	_ = srv.RejectTopUpRequest(context.Background(), uuid.New(), adminID)
-	_, _ = srv.GetTransactions(context.Background(), 0, 0)
+	_, _, _ = srv.GetTransactions(context.Background(), repository.TransactionsFilter{})
 }
 
 func TestChatService_Extended(t *testing.T) {
