@@ -94,11 +94,29 @@ export function dropCache(key: string): void {
   }
 }
 
+// Что ещё нужно освободить вместе с кэшем. Через этот список к концу сессии
+// подключаются хранилища, которые держат не только записи localStorage, —
+// например, блобы изображений заказа (их object URL надо ещё и отозвать).
+// Регистрация, а не прямой импорт: иначе api.ts, cache.ts и хранилище картинок
+// замкнулись бы в кольцо импортов.
+const cleanupHooks: (() => void)[] = []
+
+export function onCacheCleared(hook: () => void): void {
+  cleanupHooks.push(hook)
+}
+
 /**
  * Стирает весь кэш приложения. Вызывается в конце сессии: данные заказов и
  * профиля не должны пережить выход из аккаунта на общем устройстве.
  */
 export function clearCachedData(): void {
+  for (const hook of cleanupHooks) {
+    try {
+      hook()
+    } catch {
+      // Один сбойный обработчик не должен помешать остальным и самой очистке.
+    }
+  }
   try {
     const keys: string[] = []
     for (let i = 0; i < localStorage.length; i++) {

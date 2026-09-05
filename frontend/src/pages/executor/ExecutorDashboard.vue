@@ -292,11 +292,15 @@
 
                   <div class="msg-content">
                     <div :class="['bubble', { 'has-attachment': isImageAttachment(msg) }]">
-                      <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                      <div
+                        v-if="isImageAttachment(msg)"
+                        :class="['chat-img-wrapper mb-1', { 'img-pending': isImagePending(msg) }]"
+                      >
                         <img
                           :src="getImageSrc(msg)"
                           alt="Фото"
                           class="msg-image"
+                          @load="markImageRendered(msg)"
                           @error="onChatImgError(msg)"
                           @click="openImagePreview(getImageSrc(msg))"
                         />
@@ -418,11 +422,15 @@
 
                   <div class="msg-content">
                     <div :class="['bubble', { 'has-attachment': isImageAttachment(msg) }]">
-                      <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                      <div
+                        v-if="isImageAttachment(msg)"
+                        :class="['chat-img-wrapper mb-1', { 'img-pending': isImagePending(msg) }]"
+                      >
                         <img
                           :src="getImageSrc(msg)"
                           alt="Фото"
                           class="msg-image"
+                          @load="markImageRendered(msg)"
                           @error="onChatImgError(msg)"
                           @click="openImagePreview(getImageSrc(msg))"
                         />
@@ -717,9 +725,18 @@ import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
-import api, { resolveFileUrl, pollIntervalMs, getRefreshToken } from '../../services/api'
+import api, { pollIntervalMs, getRefreshToken } from '../../services/api'
 import { useCachedResource } from '../../composables/useCachedResource'
 import { loadByPriority } from '../../utils/loadPriority'
+import {
+  orderImageSrc,
+  cacheOrderImage,
+  rememberOrderImages,
+  releaseClosedOrderImages,
+  preloadOrderImages,
+  markImageRendered,
+  isImagePending,
+} from '../../services/orderImages'
 import { useChatSocket } from '../../composables/useChatSocket'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
@@ -823,11 +840,30 @@ export default defineComponent({
     let countdownIntervalId: any = null
 
     // Состояние заказов
+    // Предзагрузка фотографий откладывается до своей ступени в очереди
+    // приоритетов: иначе она стартовала бы вместе с первым же списком заказов и
+    // отбирала соединение у того, что пользователь видит на экране. Дальше она
+    // идёт вместе с каждым обновлением списка — прогревает только новые заказы
+    // и освобождает закрывшиеся.
+    let imagePreloadDeferred = true
+
     const assignedResource = useCachedResource<any[]>({
       key: 'executor:orders:assigned',
       initial: [],
       fetcher: async () => (await api.get('/executor/orders/assigned')).data || [],
+      // Картинки живут ровно столько, сколько открыт заказ. Список назначенных —
+      // единственное место, где видно, что заказ закрылся, поэтому освобождение
+      // висит здесь, а не на отдельном таймере.
+      onData: (orders) => {
+        if (imagePreloadDeferred) releaseClosedOrderImages(orders)
+        else void preloadOrderImages(orders)
+      },
     })
+
+    const startImagePreload = () => {
+      imagePreloadDeferred = false
+      return preloadOrderImages(assignedOrders.value)
+    }
     const availableResource = useCachedResource<any[]>({
       key: 'executor:orders:available',
       initial: [],
@@ -932,7 +968,6 @@ export default defineComponent({
     const chatContainerRef = ref<any>(null)
     const chatFileInputRef = ref<HTMLInputElement | null>(null)
     const uploadingChatFile = ref(false)
-    const blobImageCache = ref<Record<string, string>>({})
     const showImagePreviewModal = ref(false)
     const previewImageUrl = ref('')
     const chatSocket = useChatSocket({
@@ -1399,6 +1434,9 @@ export default defineComponent({
       try {
         const res = await api.get(`/chats/${orderId}/messages`)
         chatMessages.value = res.data || []
+        // Всё, что заказ показал хоть раз, остаётся под рукой до его закрытия:
+        // к фотографиям в чате возвращаются, пока заказ в работе.
+        rememberOrderImages(orderId, chatMessages.value)
         scrollToBottom()
       } catch (err) {
         console.error(err)
@@ -1437,6 +1475,9 @@ export default defineComponent({
         const exists = chatMessages.value.some((m) => m.id === data.id)
         if (!exists) {
           chatMessages.value.push(data)
+          if (selectedChatOrder.value) {
+            rememberOrderImages(selectedChatOrder.value.id, [data])
+          }
           scrollToBottom()
         }
       }
@@ -1548,35 +1589,32 @@ export default defineComponent({
       return msg.file_url || (msg.content && msg.content.startsWith('/uploads/'))
     }
 
-    const getImageSrc = (msg: any) => {
-      const path = msg.file_url || msg.content
-      if (!path) return ''
-      if (blobImageCache.value[path]) {
-        return blobImageCache.value[path]
-      }
-      return resolveFileUrl(path)
-    }
+    // Прогретый блоб, если предзагрузка успела, иначе обычный URL с токеном.
+    // Хранилище общее и реактивное: картинка, догревшаяся уже после отрисовки,
+    // подменяет источник сама.
+    const getImageSrc = (msg: any) => orderImageSrc(msg)
 
     const openImagePreview = (url: string) => {
       previewImageUrl.value = url
       showImagePreviewModal.value = true
     }
 
-    const onChatImgError = async (msg: any) => {
+    // Тег <img> не смог загрузить картинку сам — забираем её через fetch и
+    // подкладываем блобом. Тот же путь, которым идёт предзагрузка, поэтому
+    // добытое остаётся в кэше заказа до его закрытия.
+    const onChatImgError = (msg: any) => {
       const path = msg?.file_url || msg?.content
-      if (!path || blobImageCache.value[path]) return
-      const fullUrl = resolveFileUrl(path)
-      try {
-        const res = await fetch(fullUrl)
-        if (res.ok) {
-          const blob = await res.blob()
-          if (blob.size > 0) {
-            blobImageCache.value[path] = URL.createObjectURL(blob)
-          }
-        }
-      } catch (err) {
-        console.warn('[ExecutorDashboard] fetch blob fallback failed for:', fullUrl, err)
+      if (!path) return
+      const orderId = selectedChatOrder.value?.id
+      if (!orderId) {
+        markImageRendered(path)
+        return
       }
+      void cacheOrderImage(orderId, path).then((url) => {
+        // Забрать не вышло — гасим заглушку. Вечно мерцающий прямоугольник
+        // хуже честно не загрузившейся картинки.
+        if (!url) markImageRendered(path)
+      })
     }
 
     const scrollToBottom = () => {
@@ -1706,6 +1744,11 @@ export default defineComponent({
         //    свёрнута по умолчанию; на первом кадре она не нужна никому, а
         //    запросов за отзывами тянет за собой по одному на завершённый заказ.
         [historyResource.refresh],
+        // 6. Прогрев фотографий активных заказов. Идёт после всего, потому что
+        //    это подготовка к будущему нажатию, а не содержимое экрана: чат
+        //    открывают ради фотографий, и ждать их в момент открытия не должен
+        //    никто. Самая тяжёлая по трафику часть — ей и уступать очередь.
+        [startImagePreload],
       ])
 
       countdownIntervalId = setInterval(updateShiftCountdown, 1000)
@@ -1831,6 +1874,8 @@ export default defineComponent({
       onChatFileSelected,
       isImageAttachment,
       getImageSrc,
+      markImageRendered,
+      isImagePending,
       openImagePreview,
       onChatImgError,
       openFinancialHistoryModal,

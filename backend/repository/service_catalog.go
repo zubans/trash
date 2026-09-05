@@ -31,6 +31,13 @@ var (
 	ErrServiceNodeHasChildren   = errors.New("cannot delete a node that still has children")
 	ErrServiceNodeCodeTaken     = errors.New("another node already uses this code")
 	ErrServiceNodeParentDeleted = errors.New("parent category is deleted")
+
+	// ErrServiceNodeParentCycle — попытка увести узел под самого себя или под
+	// собственного потомка. Это ошибка запроса, а не сбой сервера: без
+	// собственного значения она уходила в общую ветку обработчика и отвечала 500.
+	ErrServiceNodeParentCycle = errors.New("cannot move a node under itself")
+	ErrServiceNodeParentSelf  = fmt.Errorf("%w: cannot set parent to self", ErrServiceNodeParentCycle)
+	ErrServiceNodeParentChild = fmt.Errorf("%w: cannot set parent to descendant", ErrServiceNodeParentCycle)
 )
 
 // LocalizedText хранит переводы одного поля.
@@ -368,6 +375,31 @@ func (r *serviceCatalogRepo) CreateNode(ctx context.Context, node *ServiceNode) 
 	return tx.Commit()
 }
 
+// descendantLookup отвечает на единственный вопрос, который нужен проверке
+// цикла: лежит ли `descendant` внутри поддерева `ancestor`.
+type descendantLookup func(ctx context.Context, ancestor, descendant uuid.UUID) (bool, error)
+
+// checkParentCycle решает, можно ли поставить узлу такого родителя.
+//
+// Спрашивать надо именно «не лежит ли будущий родитель внутри этого узла»:
+// дерево замыкается в кольцо, когда узел уводят под собственного потомка.
+// Обратный вопрос — «не является ли узел потомком своего родителя» — верен
+// всегда, когда родитель настоящий, и отклонял любую правку вложенного узла:
+// смена цены варианта отвечала 500 «cannot set parent to descendant».
+func checkParentCycle(ctx context.Context, nodeID, parentID uuid.UUID, isDescendantOf descendantLookup) error {
+	if parentID == nodeID {
+		return ErrServiceNodeParentSelf
+	}
+	parentInsideNode, err := isDescendantOf(ctx, nodeID, parentID)
+	if err != nil {
+		return err
+	}
+	if parentInsideNode {
+		return ErrServiceNodeParentChild
+	}
+	return nil
+}
+
 func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) error {
 	node.UpdatedAt = time.Now()
 
@@ -394,16 +426,8 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 	node.DeletedAt = nil
 
 	if node.ParentID != nil {
-		// Предотвращаем циклы: нельзя назначить родителем себя или любого потомка.
-		if *node.ParentID == node.ID {
-			return errors.New("cannot set parent to self")
-		}
-		isDescendant, err := r.IsDescendantOf(ctx, *node.ParentID, node.ID)
-		if err != nil {
+		if err := checkParentCycle(ctx, node.ID, *node.ParentID, r.IsDescendantOf); err != nil {
 			return err
-		}
-		if isDescendant {
-			return errors.New("cannot set parent to descendant")
 		}
 		// Перенос живого узла под удалённую категорию спрятал бы его из каталога,
 		// так его и не удалив.

@@ -1,8 +1,12 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestLocalizedText_ValueAndScan(t *testing.T) {
@@ -80,4 +84,68 @@ func TestServiceNodeFilter_Where(t *testing.T) {
 	if got := FilterLive.where("sn."); got != " AND sn.deleted_at IS NULL" {
 		t.Errorf("expected the alias to be applied, got %q", got)
 	}
+}
+
+// Проверка цикла при смене родителя.
+//
+// Дерево теста повторяет настоящее: категория «Мойка окон» с вариантом
+// «2-4 окна» внутри. Именно на нём ломалась правка цены — узел слали с его же
+// настоящим родителем, а проверка отвечала «cannot set parent to descendant».
+func TestCheckParentCycle(t *testing.T) {
+	category := uuid.New()
+	variant := uuid.New()
+
+	// Кто внутри чьего поддерева. Ровно то, что отвечает закрытая таблица путей.
+	subtree := map[uuid.UUID][]uuid.UUID{
+		category: {variant},
+	}
+	isDescendantOf := func(_ context.Context, ancestor, descendant uuid.UUID) (bool, error) {
+		for _, id := range subtree[ancestor] {
+			if id == descendant {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	ctx := context.Background()
+
+	t.Run("вариант остаётся в своей категории", func(t *testing.T) {
+		if err := checkParentCycle(ctx, variant, category, isDescendantOf); err != nil {
+			t.Fatalf("правка узла с его настоящим родителем должна проходить, получено: %v", err)
+		}
+	})
+
+	t.Run("категорию нельзя увести под собственный вариант", func(t *testing.T) {
+		err := checkParentCycle(ctx, category, variant, isDescendantOf)
+		if !errors.Is(err, ErrServiceNodeParentChild) {
+			t.Errorf("ожидался отказ по циклу, получено: %v", err)
+		}
+	})
+
+	t.Run("узел не может быть родителем самому себе", func(t *testing.T) {
+		err := checkParentCycle(ctx, category, category, isDescendantOf)
+		if !errors.Is(err, ErrServiceNodeParentSelf) {
+			t.Errorf("ожидался отказ «родитель — сам узел», получено: %v", err)
+		}
+	})
+
+	t.Run("сбой чтения дерева не выдаётся за цикл", func(t *testing.T) {
+		boom := errors.New("closure table unavailable")
+		err := checkParentCycle(ctx, variant, category, func(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+			return false, boom
+		})
+		if !errors.Is(err, boom) {
+			t.Errorf("ожидалась исходная ошибка, получено: %v", err)
+		}
+	})
+
+	// Отказ по циклу — ошибка запроса, и обработчик отличает её от сбоя сервера
+	// по этому признаку: без него правка отвечала 500 вместо 400.
+	t.Run("оба отказа опознаются как цикл", func(t *testing.T) {
+		if !errors.Is(ErrServiceNodeParentSelf, ErrServiceNodeParentCycle) ||
+			!errors.Is(ErrServiceNodeParentChild, ErrServiceNodeParentCycle) {
+			t.Error("оба отказа должны опознаваться как ErrServiceNodeParentCycle")
+		}
+	})
 }

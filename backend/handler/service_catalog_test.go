@@ -52,6 +52,13 @@ func (m *mockCatalogRepo) UpdateNode(ctx context.Context, node *repository.Servi
 	if existing.IsDeleted() {
 		return repository.ErrServiceNodeDeleted
 	}
+	if node.ParentID != nil && *node.ParentID != node.ID {
+		// Тот же вопрос, что задаёт настоящий репозиторий: не лежит ли будущий
+		// родитель внутри самого узла.
+		if inside, _ := m.IsDescendantOf(ctx, node.ID, *node.ParentID); inside {
+			return repository.ErrServiceNodeParentChild
+		}
+	}
 	node.CreatedAt = existing.CreatedAt
 	m.nodes[node.ID] = node
 	return nil
@@ -213,7 +220,16 @@ func (m *mockCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool, er
 	return m.withOrder[id], nil
 }
 
-func (m *mockCatalogRepo) IsDescendantOf(ctx context.Context, a, b uuid.UUID) (bool, error) {
+// IsDescendantOf отвечает по настоящим связям parent_id: без этого мок не мог
+// воспроизвести отказ по циклу, ради статуса которого и написан тест ниже.
+func (m *mockCatalogRepo) IsDescendantOf(ctx context.Context, ancestor, descendant uuid.UUID) (bool, error) {
+	node, ok := m.nodes[descendant]
+	for ok && node.ParentID != nil {
+		if *node.ParentID == ancestor {
+			return true, nil
+		}
+		node, ok = m.nodes[*node.ParentID]
+	}
 	return false, nil
 }
 
@@ -475,5 +491,43 @@ func TestAdminListNodes_HidesDeletedUnlessAsked(t *testing.T) {
 	}
 	if got := countVariants("/admin/service-nodes?include_deleted=true"); got != 1 {
 		t.Errorf("expected the deleted variant to be listed, got %d children", got)
+	}
+}
+
+// TestAdminUpdateNode_PriceChangeKeepsParent воспроизводит сообщённый баг:
+// админ менял цену варианта, форма слала узел с его же настоящим parent_id, а
+// ответ приходил 500 «cannot set parent to descendant».
+func TestAdminUpdateNode_PriceChangeKeepsParent(t *testing.T) {
+	env := newCatalogTestEnv()
+
+	rec := env.do(t, http.MethodPut, "/admin/service-nodes/"+env.variant.ID.String(), map[string]interface{}{
+		"parent_id":  env.rootCat.ID,
+		"name":       map[string]string{"ru": "Утренний выгул"},
+		"base_price": 1000,
+		"is_active":  true,
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("правка цены должна проходить, получено %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, _ := env.repo.GetNodeByID(context.Background(), env.variant.ID)
+	if stored.BasePrice == nil || *stored.BasePrice != money.FromRubles(1000) {
+		t.Errorf("цена не сохранилась: %v", stored.BasePrice)
+	}
+}
+
+// Настоящий цикл по-прежнему отклоняется — и отвечает 400, а не 500: узел,
+// который просят увести под собственного потомка, это ошибка запроса.
+func TestAdminUpdateNode_ParentCycleIsRejectedAsBadRequest(t *testing.T) {
+	env := newCatalogTestEnv()
+
+	rec := env.do(t, http.MethodPut, "/admin/service-nodes/"+env.rootCat.ID.String(), map[string]interface{}{
+		"parent_id": env.variant.ID,
+		"name":      map[string]string{"ru": "Выгул собак"},
+		"is_active": true,
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

@@ -409,6 +409,9 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 	switch {
 	case isNotFound(err):
 		http.Error(w, "node not found", http.StatusNotFound)
+	case errors.Is(err, repository.ErrServiceNodeParentCycle):
+		// Узел просят увести под самого себя — это ошибка в запросе, а не сбой.
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, repository.ErrServiceNodeDeleted),
 		errors.Is(err, repository.ErrServiceNodeNotDeleted),
 		errors.Is(err, repository.ErrServiceNodeHasChildren),

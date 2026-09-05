@@ -253,11 +253,15 @@
                   <div class="msg-content">
                     <div :class="['bubble', { 'has-attachment': isImageAttachment(msg) }]">
                       <!-- Вложение-изображение -->
-                      <div v-if="isImageAttachment(msg)" class="chat-img-wrapper mb-1">
+                      <div
+                        v-if="isImageAttachment(msg)"
+                        :class="['chat-img-wrapper mb-1', { 'img-pending': isImagePending(msg) }]"
+                      >
                         <img
                           :src="getImageSrc(msg)"
                           alt="Фото"
                           class="msg-image"
+                          @load="markImageRendered(msg)"
                           @error="onChatImgError(msg.file_url || msg.content)"
                           @click="openImagePreview(getImageSrc(msg))"
                         />
@@ -496,9 +500,18 @@ import ReviewModal from './components/ReviewModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
-import api, { resolveFileUrl, pollIntervalMs } from '../../services/api'
+import api, { pollIntervalMs } from '../../services/api'
 import { useCachedResource } from '../../composables/useCachedResource'
 import { loadByPriority } from '../../utils/loadPriority'
+import {
+  orderImageSrc,
+  cacheOrderImage,
+  rememberOrderImages,
+  releaseClosedOrderImages,
+  preloadOrderImages,
+  markImageRendered,
+  isImagePending,
+} from '../../services/orderImages'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -588,13 +601,24 @@ export default defineComponent({
     // уже полученные не перезапрашиваются.
     let historyReviewsDeferred = true
 
+    // Предзагрузка фотографий откладывается до своей ступени в очереди
+    // приоритетов: иначе она стартовала бы вместе с первым же списком заказов и
+    // отбирала соединение у того, что пользователь видит на экране. Дальше она
+    // идёт вместе с каждым обновлением списка — прогревает только новые заказы
+    // и освобождает закрывшиеся.
+    let imagePreloadDeferred = true
+
     const ordersResource = useCachedResource<any[]>({
       key: 'customer:orders',
       initial: [],
       fetcher: async () => (await api.get('/customer/orders')).data || [],
-      onData: () => {
+      onData: (orders) => {
         fetchUnreadSummary()
         checkSupportNotification()
+        // Картинки живут ровно столько, сколько открыт заказ: подтверждённый
+        // или отменённый уходит в историю, и держать его фотографии незачем.
+        if (imagePreloadDeferred) releaseClosedOrderImages(orders)
+        else void preloadOrderImages(orders)
         if (!historyReviewsDeferred) fetchReviewsForHistory()
       },
     })
@@ -602,6 +626,11 @@ export default defineComponent({
     const loadHistoryReviews = () => {
       historyReviewsDeferred = false
       return fetchReviewsForHistory()
+    }
+
+    const startImagePreload = () => {
+      imagePreloadDeferred = false
+      return preloadOrderImages(orders.value)
     }
     const orders = ordersResource.data
     const ordersLoading = ordersResource.loading
@@ -947,7 +976,6 @@ export default defineComponent({
     const chatContainerRef = ref<any>(null)
     const chatFileInputRef = ref<HTMLInputElement | null>(null)
     const uploadingChatFile = ref(false)
-    const blobImageCache = ref<Record<string, string>>({})
     const showImagePreviewModal = ref(false)
     const previewImageUrl = ref('')
     // Заказ, чей чат открыт: обработчик сообщений сокета переживает переоткрытие
@@ -1074,29 +1102,26 @@ export default defineComponent({
       return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif') || url.startsWith('/uploads/')
     }
 
-    const getImageSrc = (msg: any) => {
-      const path = typeof msg === 'string' ? msg : (msg?.file_url || msg?.content)
-      if (!path) return ''
-      if (blobImageCache.value[path]) {
-        return blobImageCache.value[path]
-      }
-      return resolveFileUrl(path)
-    }
+    // Прогретый блоб, если предзагрузка успела, иначе обычный URL с токеном.
+    // Хранилище общее и реактивное: картинка, догревшаяся уже после отрисовки,
+    // подменяет источник сама.
+    const getImageSrc = (msg: any) => orderImageSrc(msg)
 
-    const onChatImgError = async (path?: string) => {
-      if (!path || blobImageCache.value[path]) return
-      const fullUrl = resolveFileUrl(path)
-      try {
-        const res = await fetch(fullUrl)
-        if (res.ok) {
-          const blob = await res.blob()
-          if (blob.size > 0) {
-            blobImageCache.value[path] = URL.createObjectURL(blob)
-          }
-        }
-      } catch (err) {
-        console.warn('[CustomerDashboard] fetch blob fallback failed for:', fullUrl, err)
+    // Тег <img> не смог загрузить картинку сам — забираем её через fetch и
+    // подкладываем блобом. Тот же путь, которым идёт предзагрузка, поэтому
+    // добытое остаётся в кэше заказа до его закрытия.
+    const onChatImgError = (path?: string) => {
+      if (!path) return
+      const orderId = openChatOrderId.value
+      if (!orderId) {
+        markImageRendered(path)
+        return
       }
+      void cacheOrderImage(orderId, path).then((url) => {
+        // Забрать не вышло — гасим заглушку. Вечно мерцающий прямоугольник
+        // хуже честно не загрузившейся картинки.
+        if (!url) markImageRendered(path)
+      })
     }
 
     const openImagePreview = (url: string) => {
@@ -1256,6 +1281,9 @@ export default defineComponent({
       try {
         const response = await api.get(`/chats/${orderId}/messages`)
         chatMessages.value = response.data || []
+        // Всё, что заказ показал хоть раз, остаётся под рукой до его закрытия:
+        // к фотографиям в чате возвращаются, пока заказ в работе.
+        rememberOrderImages(orderId, chatMessages.value)
         scrollToChatBottom()
       } catch (err) {
         console.error('Failed to load chat messages:', err)
@@ -1295,6 +1323,7 @@ export default defineComponent({
         const exists = chatMessages.value.some((m) => m.id === data.id)
         if (!exists) {
           chatMessages.value.push(data)
+          if (order) rememberOrderImages(order.id, [data])
           scrollToChatBottom()
         }
         if (data.sender_id !== currentUserId.value && order) {
@@ -1525,6 +1554,11 @@ export default defineComponent({
         // 2. История — последней: оценки к завершённым заказам стоят по запросу
         //    на каждый заказ и нужны только значку с рейтингом.
         [loadHistoryReviews],
+        // 3. Прогрев фотографий активных заказов. Идёт после всего, потому что
+        //    это подготовка к будущему нажатию, а не содержимое экрана: чат
+        //    открывают ради фотографий, и ждать их в момент открытия не должен
+        //    никто. Самая тяжёлая по трафику часть — ей и уступать очередь.
+        [startImagePreload],
       ])
 
       intervalId = setInterval(() => {
@@ -1627,6 +1661,8 @@ export default defineComponent({
       currentUserId,
       isImageAttachment,
       getImageSrc,
+      markImageRendered,
+      isImagePending,
       onChatImgError,
       openImagePreview,
       triggerImageSelect,
