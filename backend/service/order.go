@@ -90,6 +90,19 @@ func (s *OrderService) WithExecutorGeo(geoRepo repository.ExecutorGeoRepository)
 	return s
 }
 
+// Ключи system_settings, управляющие автооткрытием смены при взятии заказа.
+// SettingAutoShiftOnAcceptEnabled принимает «1»/«0» (по умолчанию включено),
+// SettingAutoShiftDurationHours — одну из ShiftDurationsHours.
+const (
+	SettingAutoShiftOnAcceptEnabled = "auto_shift_on_accept_enabled"
+	SettingAutoShiftDurationHours   = "auto_shift_duration_hours"
+
+	// Самая короткая из разрешённых длительностей: смену открыли за
+	// исполнителя, и чем она короче, тем меньше он рискует штрафом за
+	// досрочный выход.
+	defaultAutoShiftDurationHours = 1
+)
+
 // SettingOrderCommissionPercent — ключ system_settings, хранящий долю платформы
 // с завершённого заказа в процентах от суммы, которую заказчик реально
 // заплатил. Админы правят его на экране настроек.
@@ -447,11 +460,19 @@ func (s *OrderService) Create(ctx context.Context, customerID uuid.UUID, req Cre
 // метод.
 func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID) error {
 	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	if err != nil || shift == nil {
-		return errors.New("executor has no active shift")
-	}
-	if shift.Status == repository.ShiftStatusPenalized {
+	hasShift := err == nil && shift != nil
+	if hasShift && shift.Status == repository.ShiftStatusPenalized {
 		return errors.New("executor is penalized")
+	}
+	// Смена без смены больше не тупик: исполнитель, нажавший «взять заказ»,
+	// уже сказал, что готов работать, поэтому смену открывают за него. Здесь
+	// только решается, что она понадобится; сама смена создаётся ниже, когда
+	// заказ уже прошёл все проверки, — иначе отказ по балансу или лимиту
+	// оставлял бы за исполнителем открытую смену, за досрочный выход из которой
+	// берут штраф.
+	autoOpenShift := !hasShift
+	if autoOpenShift && !s.autoShiftOnAcceptEnabled(ctx) {
+		return errors.New("executor has no active shift")
 	}
 
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
@@ -494,6 +515,19 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 		return fmt.Errorf("превышен лимит непотвержденных заказчиком исполненных заказов (не более %d)", maxExecuted)
 	}
 
+	// Смена открывается до назначения, потому что назначенный заказ обязан
+	// принадлежать исполнителю на смене: по смене его находит автоподбор и по
+	// ней же считается штраф за досрочный уход.
+	var openedShift *repository.Shift
+	if autoOpenShift {
+		openedShift, err = s.shiftRepo.StartShift(ctx, executorID, s.autoShiftDurationHours(ctx))
+		if err != nil {
+			log.Printf("[OrderService] failed to auto-open shift for executor %s: %v", executorID, err)
+			return errors.New("executor has no active shift")
+		}
+		metrics.ShiftEvent("auto_started")
+	}
+
 	// Назначение и порождаемое им событие делят одну транзакцию: поведение,
 	// реагирующее на принятый заказ, не должно ни увидеть заказ, который так и не
 	// назначили, ни пропустить тот, который назначили.
@@ -503,6 +537,17 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 		}
 		return s.publishOrderEvent(ctx, tx, repository.EventOrderAccepted, order, &executorID)
 	}); err != nil {
+		// Смену открыли только ради этого заказа, а заказа не будет — например,
+		// его успел взять другой исполнитель. Закрываем её тем же путём, что и
+		// отработавшую до конца смену (без штрафа): иначе исполнитель остался бы
+		// со сменой, которую не открывал и за досрочный выход из которой платит.
+		if openedShift != nil {
+			if endErr := s.shiftRepo.End(ctx, openedShift.ID); endErr != nil {
+				log.Printf("[OrderService] failed to roll back auto-opened shift %s: %v", openedShift.ID, endErr)
+			} else {
+				metrics.ShiftEvent("auto_rolled_back")
+			}
+		}
 		if errors.Is(err, repository.ErrConflict) {
 			return errors.New("заказ уже взят другим исполнителем")
 		}
@@ -510,6 +555,35 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	}
 	metrics.OrderEvent("accepted")
 	return nil
+}
+
+// autoShiftOnAcceptEnabled сообщает, открывать ли смену за исполнителя, который
+// берёт заказ без неё. Включено по умолчанию; выключение возвращает прежнее
+// поведение — отказ с «executor has no active shift».
+func (s *OrderService) autoShiftOnAcceptEnabled(ctx context.Context) bool {
+	if s.settingsRepo == nil {
+		return true
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return true
+	}
+	v, ok := settings[SettingAutoShiftOnAcceptEnabled]
+	if !ok {
+		return true
+	}
+	return v != "0"
+}
+
+// autoShiftDurationHours возвращает длительность автоматически открываемой
+// смены. Значение вне списка разрешённых игнорируется, а не создаёт смену,
+// которую исполнитель не смог бы открыть сам.
+func (s *OrderService) autoShiftDurationHours(ctx context.Context) int {
+	hours := settingInt(ctx, s.settingsRepo, SettingAutoShiftDurationHours, defaultAutoShiftDurationHours)
+	if !IsValidShiftDuration(hours) {
+		return defaultAutoShiftDurationHours
+	}
+	return hours
 }
 
 // checkExecutorEligibility загружает исполнителя, вариант услуги и заказчика и

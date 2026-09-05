@@ -156,10 +156,14 @@
           <div class="shift-icon"><i class="ph-bold ph-clock"></i></div>
           <div class="shift-text-stack">
             <div class="shift-title">
-              {{ activeShift && activeShift.status === 'ACTIVE' ? $t('executor.shiftActive') : $t('executor.shiftClosed') }}
+              <template v-if="shiftLoading">{{ $t('common.loading') }}</template>
+              <template v-else>
+                {{ activeShift && activeShift.status === 'ACTIVE' ? $t('executor.shiftActive') : $t('executor.shiftClosed') }}
+              </template>
             </div>
             <div class="shift-subtitle">
-              <template v-if="activeShift && activeShift.status === 'ACTIVE'">
+              <template v-if="shiftLoading">&nbsp;</template>
+              <template v-else-if="activeShift && activeShift.status === 'ACTIVE'">
                 {{ $t('executor.shiftRemaining', { timer: shiftCountdown || '00:00:00', end: formatDate(activeShift.planned_end_at) }) }}
               </template>
               <template v-else>
@@ -169,7 +173,12 @@
           </div>
         </div>
         <div class="shift-actions">
-          <template v-if="!activeShift || activeShift.status !== 'ACTIVE'">
+          <!-- Пока состояние смены неизвестно, кнопки не показываются: «Открыть»
+               рядом с уже открытой сменой сбивает с толку сильнее, чем ожидание. -->
+          <template v-if="shiftLoading">
+            <span class="spinner-sm dark"></span>
+          </template>
+          <template v-else-if="!activeShift || activeShift.status !== 'ACTIVE'">
             <select v-model="shiftDuration" class="shift-select">
               <option v-for="d in durationOptions" :key="d" :value="d">{{ d }} ч.</option>
             </select>
@@ -190,10 +199,14 @@
       <!-- Назначенные заказы -->
       <div>
         <div class="section-header">
-          <h2 class="section-title">Назначенные заказы <span class="section-count">({{ activeAssignedOrders.length }})</span></h2>
+          <h2 class="section-title">
+            Назначенные заказы <span class="section-count">({{ activeAssignedOrders.length }})</span>
+            <RefreshingBadge :active="assignedRefreshing && !assignedLoading" />
+          </h2>
         </div>
 
-        <div v-if="activeAssignedOrders.length === 0" class="empty-state">
+        <SkeletonList v-if="assignedLoading" :rows="2" :lines="3" action />
+        <div v-else-if="activeAssignedOrders.length === 0" class="empty-state">
           Ожидание назначения заказов в вашей смене
         </div>
 
@@ -468,7 +481,10 @@
       <!-- Заказы поблизости (GPS) -->
       <div>
         <div class="section-header">
-          <h2 class="section-title">{{ $t('executor.nearbyOrders') }}</h2>
+          <h2 class="section-title">
+            {{ $t('executor.nearbyOrders') }}
+            <RefreshingBadge :active="availableRefreshing && !availableLoading" />
+          </h2>
         </div>
 
         <!-- Интерактивный виджет карты заказов поблизости -->
@@ -493,7 +509,8 @@
           </div>
         </div>
 
-        <div v-if="availableOrders.length === 0" class="empty-state">
+        <SkeletonList v-if="availableLoading" :rows="3" :lines="3" action />
+        <div v-else-if="availableOrders.length === 0" class="empty-state">
           {{ $t('executor.noAvailableOrders') }}
         </div>
         <div v-else class="orders-stack">
@@ -529,12 +546,16 @@
           @click="isHistoryCollapsed = !isHistoryCollapsed"
         >
           <i class="ph-bold ph-clock-counter-clockwise" style="color: var(--text-muted); font-size: 18px;"></i>
-          <h2 class="section-title" style="font-size: 15px;">{{ $t('executor.financialHistoryTitle') }} <span class="section-count">({{ executorHistoryOrders.length }})</span></h2>
+          <h2 class="section-title" style="font-size: 15px;">
+            {{ $t('executor.financialHistoryTitle') }} <span class="section-count">({{ executorHistoryOrders.length }})</span>
+            <RefreshingBadge :active="historyRefreshing && !historyLoading" />
+          </h2>
           <i :class="['ph-bold', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="color: var(--text-muted);"></i>
         </div>
 
         <div v-if="!isHistoryCollapsed" class="orders-stack">
-          <div v-if="executorHistoryOrders.length === 0" class="empty-state">
+          <SkeletonList v-if="historyLoading" :rows="3" />
+          <div v-else-if="executorHistoryOrders.length === 0" class="empty-state">
             {{ $t('customer.noHistoryOrders') }}
           </div>
           <div
@@ -694,7 +715,11 @@ import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
+import SkeletonList from '../../components/SkeletonList.vue'
+import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { resolveFileUrl, pollIntervalMs, getRefreshToken } from '../../services/api'
+import { useCachedResource } from '../../composables/useCachedResource'
+import { loadByPriority } from '../../utils/loadPriority'
 import { useChatSocket } from '../../composables/useChatSocket'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
@@ -714,6 +739,8 @@ export default defineComponent({
     OrderDetailsModal,
     ReviewModal,
     SupportChatModal,
+    SkeletonList,
+    RefreshingBadge,
   },
   setup() {
     const router = useRouter()
@@ -757,8 +784,37 @@ export default defineComponent({
       }
     })
 
-    // Состояние смены
-    const activeShift = ref<any>(null)
+    // Состояние смены.
+    //
+    // Смена, история и оба списка заказов держатся кэшируемыми ресурсами:
+    // экран, открытый повторно, рисуется последним известным состоянием сразу, а
+    // сеть только уточняет его. Каждому ресурсу отвечают три флага —
+    // `loading` (показывать нечего, идёт прелоадер), `refreshing` (тихая
+    // догрузка поверх показанного) и `fromCache` (на экране ещё не
+    // подтверждённое сетью значение).
+    const shiftResource = useCachedResource<any>({
+      key: 'executor:shift:active',
+      initial: null,
+      // Смена, чьё плановое время уже вышло, из кэша не поднимается: она
+      // закрыта сервером, и показать её активной значило бы соврать об
+      // единственном состоянии, от которого зависит приём заказов.
+      acceptCached: (shift) =>
+        !shift || shift.status !== 'ACTIVE' || new Date(shift.planned_end_at).getTime() > Date.now(),
+      fetcher: async () => {
+        try {
+          const res = await api.get('/executor/shifts/active')
+          return res.data
+        } catch (err) {
+          // Отсутствие смены сервер сообщает ошибкой 404, и это нормальный
+          // ответ, а не сбой: он обязан вытеснить кэш, иначе закрытая смена
+          // осталась бы на экране активной.
+          return null
+        }
+      },
+      onData: () => updateShiftCountdown(),
+    })
+    const activeShift = shiftResource.data
+    const shiftLoading = shiftResource.loading
     const shiftDuration = ref(1)
     const durationOptions = [1, 3, 5]
     const startingShift = ref(false)
@@ -767,9 +823,51 @@ export default defineComponent({
     let countdownIntervalId: any = null
 
     // Состояние заказов
-    const assignedOrders = ref<any[]>([])
-    const availableOrders = ref<any[]>([])
-    const executorHistoryOrders = ref<any[]>([])
+    const assignedResource = useCachedResource<any[]>({
+      key: 'executor:orders:assigned',
+      initial: [],
+      fetcher: async () => (await api.get('/executor/orders/assigned')).data || [],
+    })
+    const availableResource = useCachedResource<any[]>({
+      key: 'executor:orders:available',
+      initial: [],
+      fetcher: async () => {
+        // Сервер привязывает поиск к сохранённой рабочей позиции исполнителя;
+        // lat/lon шлются только как запасной вариант. `radius` (а не
+        // `radius_meters`) — то имя, которое читает бэкенд, иначе он молча
+        // откатывается к умолчанию в 2 км.
+        const res = await api.get('/executor/orders/nearby', {
+          params: { lat: currentLat.value, lon: currentLon.value, radius: 5000 },
+        })
+        return res.data || []
+      },
+    })
+    const historyResource = useCachedResource<any[]>({
+      key: 'executor:history:orders',
+      initial: [],
+      fetcher: async () => {
+        const res = await api.get('/executor/history')
+        const rawOrders = res.data?.orders || res.data || []
+        // Сортировка здесь, а не в шаблоне: в кэш ложится уже готовый к показу
+        // список, поэтому первый кадр из кэша совпадает с тем, что придёт из сети.
+        return rawOrders.slice().sort((a: any, b: any) => {
+          const dateA = new Date(a.completed_at || a.canceled_at || a.created_at).getTime()
+          const dateB = new Date(b.completed_at || b.canceled_at || b.created_at).getTime()
+          return dateB - dateA
+        })
+      },
+      onData: () => fetchReviewsForExecutorHistory(),
+    })
+
+    const assignedOrders = assignedResource.data
+    const availableOrders = availableResource.data
+    const executorHistoryOrders = historyResource.data
+    const assignedLoading = assignedResource.loading
+    const availableLoading = availableResource.loading
+    const historyLoading = historyResource.loading
+    const assignedRefreshing = assignedResource.refreshing
+    const availableRefreshing = availableResource.refreshing
+    const historyRefreshing = historyResource.refreshing
     const executorReviewsMap = ref<Record<string, OrderReview>>({})
     const isHistoryCollapsed = ref(true)
 
@@ -1010,15 +1108,11 @@ export default defineComponent({
       }
     }
 
-    const fetchActiveShift = async () => {
-      try {
-        const res = await api.get('/executor/shifts/active')
-        activeShift.value = res.data
-        updateShiftCountdown()
-      } catch (err) {
-        activeShift.value = null
-      }
-    }
+    // Обновление после действия пользователя: `reload` не присоединяется к
+    // запросу, отправленному ДО действия, — тот ответ о нём не знает и вернул бы
+    // состояние до нажатия. Опрос по таймеру и возврат из фона зовут `refresh`
+    // напрямую, а первую загрузку экрана делает `load()` — с кэша.
+    const fetchActiveShift = () => shiftResource.reload()
 
     const updateShiftCountdown = () => {
       if (!activeShift.value || activeShift.value.status !== 'ACTIVE' || !activeShift.value.planned_end_at) {
@@ -1066,29 +1160,9 @@ export default defineComponent({
       }
     }
 
-    const fetchAssignedOrders = async () => {
-      try {
-        const res = await api.get('/executor/orders/assigned')
-        assignedOrders.value = res.data || []
-      } catch (err) {
-        console.error(err)
-      }
-    }
+    const fetchAssignedOrders = () => assignedResource.reload()
 
-    const fetchAvailableOrders = async () => {
-      try {
-        // Сервер привязывает поиск к сохранённой рабочей позиции исполнителя;
-        // lat/lon шлются только как запасной вариант. `radius` (а не
-        // `radius_meters`) — то имя, которое читает бэкенд, иначе он молча
-        // откатывается к умолчанию в 2 км.
-        const res = await api.get('/executor/orders/nearby', {
-          params: { lat: currentLat.value, lon: currentLon.value, radius: 5000 },
-        })
-        availableOrders.value = res.data || []
-      } catch (err) {
-        console.error(err)
-      }
-    }
+    const fetchAvailableOrders = () => availableResource.reload()
 
     const fetchReviewsForExecutorHistory = async () => {
       const completed = executorHistoryOrders.value.filter((o) => o.status === 'COMPLETED')
@@ -1106,25 +1180,21 @@ export default defineComponent({
       }
     }
 
-    const fetchHistoryOrders = async () => {
-      try {
-        const res = await api.get('/executor/history')
-        const rawOrders = res.data?.orders || res.data || []
-        executorHistoryOrders.value = rawOrders.slice().sort((a: any, b: any) => {
-          const dateA = new Date(a.completed_at || a.canceled_at || a.created_at).getTime()
-          const dateB = new Date(b.completed_at || b.canceled_at || b.created_at).getTime()
-          return dateB - dateA
-        })
-        fetchReviewsForExecutorHistory()
-      } catch (err) {
-        console.error(err)
-      }
-    }
+    const fetchHistoryOrders = () => historyResource.reload()
 
     const acceptOrder = async (orderId: string) => {
+      // Смена до нажатия. Взятие заказа без смены открывает её на сервере, и
+      // сравнение с состоянием после даёт понять, случилось ли это, — отдельного
+      // признака в ответе нет.
+      const hadShift = !!activeShift.value && activeShift.value.status === 'ACTIVE'
       try {
         await api.post(`/executor/orders/${orderId}/accept`)
-        successMsg.value = t('executor.successOrderAccepted', 'Заказ принят в работу!')
+        await fetchActiveShift()
+        const shiftOpenedForOrder =
+          !hadShift && !!activeShift.value && activeShift.value.status === 'ACTIVE'
+        successMsg.value = shiftOpenedForOrder
+          ? t('executor.orderAcceptedShiftOpened')
+          : t('executor.successOrderAccepted', 'Заказ принят в работу!')
         await fetchAssignedOrders()
         await fetchAvailableOrders()
       } catch (err: any) {
@@ -1248,6 +1318,9 @@ export default defineComponent({
     const onMapOrderAccepted = () => {
       successMsg.value = 'Заказ взят на карте!'
       fetchAssignedOrders()
+      // Заказ, взятый без смены, открывает её на сервере — панель смены обязана
+      // это показать, откуда бы заказ ни взяли.
+      fetchActiveShift()
       fetchProfile()
     }
 
@@ -1583,8 +1656,8 @@ export default defineComponent({
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return
       authStore.fetchMe()
-      fetchActiveShift()
-      fetchAssignedOrders()
+      shiftResource.refresh()
+      assignedResource.refresh()
       fetchUnreadSummary()
     }
 
@@ -1603,23 +1676,43 @@ export default defineComponent({
     }
 
     onMounted(async () => {
-      fetchServiceVariants()
-      await loadGeofenceSettings()
-      startGeofenceReporting()
-      await fetchProfile()
-      fetchActiveShift()
-      fetchAssignedOrders()
-      fetchAvailableOrders()
-      fetchHistoryOrders()
-      updateCurrentPosition()
-      fetchUnreadSummary()
-      checkSupportNotification()
+      // Кэш поднимается синхронно и до всего остального — сразу у всех четырёх
+      // ресурсов. Приоритет распределяет походы в сеть, а не показ: экран,
+      // открытый повторно, рисует прошлое состояние целиком, не дожидаясь своей
+      // очереди ни на одном участке.
+      shiftResource.hydrate()
+      assignedResource.hydrate()
+      availableResource.hydrate()
+      historyResource.hydrate()
+
+      // Порядок сетевых запросов задаётся смыслом, а не порядком строк. На
+      // мобильной сети они конкурируют за одно соединение, и запущенные разом
+      // означают, что главное приедет последним.
+      await loadByPriority([
+        // 1. То, ради чего экран открывают: на смене ли я, что на мне висит и
+        //    как эти заказы называются. Каталог здесь же — без него заказ,
+        //    отданный без вложенной услуги, назывался бы просто «Заказ».
+        [shiftResource.refresh, assignedResource.refresh, fetchServiceVariants],
+        // 2. Профиль и настройки: они приносят сохранённую позицию и решают,
+        //    отправлять ли отчёты о местоположении.
+        [fetchProfile, loadGeofenceSettings],
+        // 3. Заказы поблизости — считаются от позиции из профиля, поэтому
+        //    раньше ступени 2 их запрашивать нечем. Здесь же включаются отчёты
+        //    о местоположении: решает их настройка, прочитанная на ступени 2.
+        [startGeofenceReporting, availableResource.refresh, updateCurrentPosition],
+        // 4. Фон экрана: непрочитанное и уведомление поддержки.
+        [fetchUnreadSummary, checkSupportNotification],
+        // 5. История — самой последней. Это справка о прошлом, к тому же секция
+        //    свёрнута по умолчанию; на первом кадре она не нужна никому, а
+        //    запросов за отзывами тянет за собой по одному на завершённый заказ.
+        [historyResource.refresh],
+      ])
 
       countdownIntervalId = setInterval(updateShiftCountdown, 1000)
       intervalId = setInterval(() => {
-        fetchActiveShift()
-        fetchAssignedOrders()
-        fetchAvailableOrders()
+        shiftResource.refresh()
+        assignedResource.refresh()
+        availableResource.refresh()
         fetchUnreadSummary()
         checkSupportNotification()
         // Баланс двигается без всякого действия с этого экрана: заказ, который
@@ -1717,6 +1810,13 @@ export default defineComponent({
       startShift,
       earlyEndShift,
       acceptOrder,
+      shiftLoading,
+      assignedLoading,
+      availableLoading,
+      historyLoading,
+      assignedRefreshing,
+      availableRefreshing,
+      historyRefreshing,
       markOrderAsExecuted,
       identityOrder,
       openIdentityCheck,

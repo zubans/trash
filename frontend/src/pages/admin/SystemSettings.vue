@@ -218,6 +218,41 @@
 
           <div class="toggle-row">
             <div class="toggle-text">
+              <label class="input-label">Автооткрытие смены при взятии заказа</label>
+              <div class="input-hint">
+                Включено — исполнителю, который берёт заказ без активной смены, смена открывается автоматически.
+                Выключено — взять заказ можно только на открытой смене.
+              </div>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                v-model="values.auto_shift_on_accept_enabled"
+                true-value="1"
+                false-value="0"
+              />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="form-grid" v-if="values.auto_shift_on_accept_enabled === '1'">
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Длительность автоматически открытой смены</label>
+                <div class="input-hint">
+                  Смену открывает система, поэтому короткая длительность меньше подставляет исполнителя под штраф за досрочный выход.
+                </div>
+              </div>
+              <div class="input-wrapper">
+                <select v-model="values.auto_shift_duration_hours" class="custom-select">
+                  <option v-for="h in shiftDurationOptions" :key="h" :value="h">{{ h }} ч.</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-text">
               <label class="input-label">Автоматическое назначение заказов</label>
               <div class="input-hint">
                 Включено — свободные заказы автоматически назначаются ближайшему исполнителю на смене (без нажатия «Взять заказ»).
@@ -290,7 +325,14 @@ export default defineComponent({
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',
       auto_matching_enabled: '0',
+      auto_shift_on_accept_enabled: '1',
+      auto_shift_duration_hours: '1',
     })
+
+    // Тот же список, что принимает бэкенд (service.ShiftDurationsHours): смену,
+    // открытую автоматически, нельзя сделать длиннее той, что исполнитель может
+    // открыть сам.
+    const shiftDurationOptions = ['1', '3', '5']
 
     const initialValues = ref<Record<string, string | number>>({ ...values.value })
 
@@ -361,6 +403,7 @@ export default defineComponent({
     return {
       values,
       currencyOptions,
+      shiftDurationOptions,
       loading,
       successMsg,
       errorMsg,

@@ -1,0 +1,40 @@
+/*
+ * Индикаторы загрузки, общие для всего приложения.
+ *
+ * `.spinner-sm` разметка уже использует в восьми экранах — на кнопках, пока
+ * идёт отправка, — но правила для него были только в двух компонентах, и там
+ * они scoped. Везде остальном получался пустой <span>: кнопка «замирала» без
+ * единого признака того, что запрос ушёл. Класс общий по смыслу, поэтому и
+ * живёт он здесь, а не в очередной копии внутри SFC.
+ *
+ * Умолчание белое: почти все места применения — цветные кнопки. Модификатор
+ * `.dark` предназначен для светлого фона.
+ */
+
+.spinner-sm {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spinner-sm-rotate 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+.spinner-sm.dark {
+  border-color: rgba(100, 116, 139, 0.25);
+  border-top-color: #64748b;
+}
+
+@keyframes spinner-sm-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner-sm {
+    animation-duration: 2.4s;
+  }
+}

@@ -757,6 +757,18 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	if v, ok := settings["auto_matching_enabled"]; ok && v != "0" && v != "1" {
 		return errors.New("setting auto_matching_enabled must be 0 or 1")
 	}
+	// Открывать ли смену за исполнителя, который берёт заказ без неё.
+	if v, ok := settings[SettingAutoShiftOnAcceptEnabled]; ok && v != "0" && v != "1" {
+		return errors.New("setting " + SettingAutoShiftOnAcceptEnabled + " must be 0 or 1")
+	}
+	// Длительность такой смены ограничена тем же списком, что и ручной старт:
+	// автоматика не должна уметь открыть смену, которую исполнителю выбрать не дают.
+	if v, ok := settings[SettingAutoShiftDurationHours]; ok {
+		hours, err := strconv.Atoi(v)
+		if err != nil || !IsValidShiftDuration(hours) {
+			return fmt.Errorf("setting %s must be one of %v", SettingAutoShiftDurationHours, ShiftDurationsHours)
+		}
+	}
 	numericKeys["reject_penalty_share"] = true
 	// Доля платформы с завершённого заказа. Снизу ограничена вместе с прочими
 	// числовыми настройками, а сверху — прямо здесь, потому что доля выше 100%

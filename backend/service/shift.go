@@ -22,6 +22,22 @@ type ExecutorLocationRecorder interface {
 	RecordLiveLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error)
 }
 
+// ShiftDurationsHours — длительности смены, которые принимает платформа.
+// Список один на всех: его проверяет ручной старт смены, по нему же
+// валидируется настройка автооткрытия, поэтому смена, открытая автоматически,
+// не может получить длительность, которую исполнителю выбрать не дали бы.
+var ShiftDurationsHours = []int{1, 3, 5}
+
+// IsValidShiftDuration сообщает, входит ли длительность в разрешённые.
+func IsValidShiftDuration(hours int) bool {
+	for _, h := range ShiftDurationsHours {
+		if h == hours {
+			return true
+		}
+	}
+	return false
+}
+
 // ShiftService управляет сменами исполнителей.
 type ShiftService struct {
 	shiftRepo    repository.ShiftRepository
@@ -48,7 +64,7 @@ func (s *ShiftService) WithExecutorLocation(recorder ExecutorLocationRecorder) *
 
 // StartShift начинает новую смену исполнителя и планирует таймер автозавершения.
 func (s *ShiftService) StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
-	if durationHours != 1 && durationHours != 3 && durationHours != 5 {
+	if !IsValidShiftDuration(durationHours) {
 		return nil, errors.New("invalid shift duration")
 	}
 

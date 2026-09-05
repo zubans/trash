@@ -165,10 +165,14 @@
       <!-- Блок заказов -->
       <div>
         <div class="d-flex justify-content-between align-items-center mb-3">
-          <h2 class="section-title m-0">Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span></h2>
+          <h2 class="section-title m-0">
+            Активные заказы <span v-if="activeOrders.length" class="text-muted text-sm">({{ activeOrders.length }})</span>
+            <RefreshingBadge :active="ordersRefreshing && !ordersLoading" />
+          </h2>
         </div>
 
-        <div v-if="activeOrders.length === 0" class="empty-orders-state">
+        <SkeletonList v-if="ordersLoading" :rows="2" :lines="3" />
+        <div v-else-if="activeOrders.length === 0" class="empty-orders-state">
           <p>{{ $t('customer.noActiveOrders') }}</p>
         </div>
 
@@ -317,7 +321,8 @@
         </div>
 
         <div v-if="!isHistoryCollapsed" class="orders-stack mt-3">
-          <div v-if="historyOrders.length === 0" class="empty-orders-state">
+          <SkeletonList v-if="ordersLoading" :rows="3" />
+          <div v-else-if="historyOrders.length === 0" class="empty-orders-state">
             <p>{{ $t('customer.noHistoryOrders') }}</p>
           </div>
 
@@ -489,7 +494,11 @@ import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
+import SkeletonList from '../../components/SkeletonList.vue'
+import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { resolveFileUrl, pollIntervalMs } from '../../services/api'
+import { useCachedResource } from '../../composables/useCachedResource'
+import { loadByPriority } from '../../utils/loadPriority'
 import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
@@ -497,6 +506,8 @@ import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } fr
 export default defineComponent({
   name: 'CustomerDashboardV2',
   components: {
+    SkeletonList,
+    RefreshingBadge,
     UpdateBanner,
     LanguageSwitcher,
     RoleSwitcher,
@@ -564,8 +575,37 @@ export default defineComponent({
     const editingAddressId = ref<string | null>(null)
     const addressError = ref('')
 
-    // Заказы
-    const orders = ref<any[]>([])
+    // Заказы.
+    //
+    // Список держится кэшируемым ресурсом: экран, открытый повторно, рисуется
+    // последним известным списком сразу, а сеть уточняет его следом.
+    // `ordersLoading` означает «показывать нечего» — только тогда на месте
+    // списка стоит прелоадер; `ordersRefreshing` — тихая догрузка поверх уже
+    // показанных заказов.
+    // Отзывы к завершённым заказам — по запросу на заказ ради значка с оценкой
+    // в истории. На первой загрузке экрана их откладывает очередь приоритетов
+    // (история идёт последней); дальше они обновляются вместе со списком, а
+    // уже полученные не перезапрашиваются.
+    let historyReviewsDeferred = true
+
+    const ordersResource = useCachedResource<any[]>({
+      key: 'customer:orders',
+      initial: [],
+      fetcher: async () => (await api.get('/customer/orders')).data || [],
+      onData: () => {
+        fetchUnreadSummary()
+        checkSupportNotification()
+        if (!historyReviewsDeferred) fetchReviewsForHistory()
+      },
+    })
+
+    const loadHistoryReviews = () => {
+      historyReviewsDeferred = false
+      return fetchReviewsForHistory()
+    }
+    const orders = ordersResource.data
+    const ordersLoading = ordersResource.loading
+    const ordersRefreshing = ordersResource.refreshing
     const isHistoryCollapsed = ref(false)
     const orderReviewsMap = ref<Record<string, OrderReview>>({})
 
@@ -701,7 +741,43 @@ export default defineComponent({
     const userEmail = ref('')
     const fullName = ref('')
 
-    const fetchProfile = async () => {
+    // Профиль заказчика тоже кэшируется: до его загрузки экран показывает
+    // адрес-заглушку, и на повторном открытии её не должно быть видно вовсе.
+    const applyProfile = (data: any) => {
+      if (!data) return
+      if (data.phone) phone.value = data.phone
+      // Профиль возвращает сохранённые адреса с координатами, с которыми их
+      // выбирали (от адресного провайдера). Держим объекты целиком, чтобы заказ
+      // отправлял сохранённые lat/lon; пересборка их здесь как { address }
+      // теряла координаты и порождала заказы без
+      // pickup_lat/pickup_lon.
+      const addrs = Array.isArray(data.addresses) ? data.addresses : []
+      if (addrs.length) {
+        customerAddresses.value = addrs
+        const def = addrs.find((a: any) => a.is_default) || addrs[0]
+        defaultAddress.value = def.address
+        orderAddress.value = def.address
+      } else if (data.address) {
+        defaultAddress.value = data.address
+        orderAddress.value = data.address
+        customerAddresses.value = [{ address: data.address }]
+      }
+    }
+
+    const profileResource = useCachedResource<any>({
+      key: 'customer:profile',
+      initial: null,
+      fetcher: async () => (await api.get('/customer/profile')).data,
+      onData: (data) => applyProfile(data),
+    })
+
+    /**
+     * `force` разделяет два повода перечитать профиль. После действия
+     * пользователя (создан заказ, оставлены чаевые) нужен именно новый запрос:
+     * ответ, отправленный до действия, о нём не знает. Опрос по таймеру и
+     * первая загрузка экрана переиспользуют уже идущий запрос.
+     */
+    const fetchProfile = async (force = true) => {
       try {
         const meRes = await api.get('/auth/me')
         if (meRes.data) {
@@ -711,26 +787,7 @@ export default defineComponent({
         }
         // Держим общее состояние пользователя в такт с тем, что экран только что прочитал.
         authStore.fetchMe()
-        const response = await api.get('/customer/profile')
-        if (response.data) {
-          if (response.data.phone) phone.value = response.data.phone
-          // Профиль возвращает сохранённые адреса с координатами, с которыми их
-          // выбирали (от адресного провайдера). Держим объекты целиком, чтобы заказ
-          // отправлял сохранённые lat/lon; пересборка их здесь как { address }
-          // теряла координаты и порождала заказы без
-          // pickup_lat/pickup_lon.
-          const addrs = Array.isArray(response.data.addresses) ? response.data.addresses : []
-          if (addrs.length) {
-            customerAddresses.value = addrs
-            const def = addrs.find((a: any) => a.is_default) || addrs[0]
-            defaultAddress.value = def.address
-            orderAddress.value = def.address
-          } else if (response.data.address) {
-            defaultAddress.value = response.data.address
-            orderAddress.value = response.data.address
-            customerAddresses.value = [{ address: response.data.address }]
-          }
-        }
+        await (force ? profileResource.reload() : profileResource.refresh())
       } catch (err) {
         console.error('Failed to load profile:', err)
       }
@@ -763,19 +820,11 @@ export default defineComponent({
       }
     }
 
-    const fetchOrders = async () => {
-      try {
-        const response = await api.get('/customer/orders')
-        fetchUnreadSummary()
-        checkSupportNotification()
-        const newOrders = response.data || []
-        // Обновляем элементы на месте или обновляем заказы, если изменилась структура, чтобы не перерисовывать открытый аккордеон чата
-        orders.value = newOrders
-        fetchReviewsForHistory()
-      } catch (err) {
-        console.error('Failed to fetch orders:', err)
-      }
-    }
+    // Обновление после действия пользователя: `reload` не присоединяется к
+    // запросу, отправленному ДО действия, — тот ответ о нём не знает и вернул бы
+    // список до нажатия. Опрос по таймеру зовёт `refresh`, а первую загрузку
+    // экрана делает `ordersResource.load()` — с кэша.
+    const fetchOrders = () => ordersResource.reload()
 
     const openCreateOrderModal = async () => {
       orderAddress.value = defaultAddress.value
@@ -1457,11 +1506,30 @@ export default defineComponent({
     let intervalId: any = null
 
     onMounted(async () => {
-      getServiceCategories().then(cats => { serviceCategories.value = cats }).catch(() => {})
-      await Promise.all([fetchProfile(), fetchOrders()])
+      // Кэш поднимается первым и синхронно — у обоих ресурсов сразу. Приоритет
+      // ниже распределяет походы в сеть, а не показ: экран, открытый повторно,
+      // рисуется прошлым состоянием целиком, ещё до первого запроса.
+      ordersResource.hydrate()
+      profileResource.hydrate()
+
+      // Порядок сетевых запросов задаётся смыслом: на мобильной сети они делят
+      // одно соединение, и запущенные разом означают, что главное приедет последним.
+      await loadByPriority([
+        // 1. То, ради чего экран открывают: заказы, профиль (баланс, адрес) и
+        //    справочник категорий, по которому заказы получают свои названия.
+        [
+          ordersResource.refresh,
+          () => fetchProfile(false),
+          () => getServiceCategories().then((cats) => { serviceCategories.value = cats }),
+        ],
+        // 2. История — последней: оценки к завершённым заказам стоят по запросу
+        //    на каждый заказ и нужны только значку с рейтингом.
+        [loadHistoryReviews],
+      ])
+
       intervalId = setInterval(() => {
-        fetchProfile()
-        fetchOrders()
+        fetchProfile(false)
+        ordersResource.refresh()
       }, pollIntervalMs)
     })
 
@@ -1498,6 +1566,8 @@ export default defineComponent({
       cancelEditAddress,
       activeOrders,
       historyOrders,
+      ordersLoading,
+      ordersRefreshing,
       isHistoryCollapsed,
       orderReviewsMap,
       showCreateOrderModal,

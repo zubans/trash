@@ -17,6 +17,9 @@ import (
 
 type mockOrderRepo struct {
 	orders []*repository.Order
+	// assignErr, когда задан, отдаётся вместо назначения: так тест
+	// воспроизводит проигранную гонку за заказ.
+	assignErr error
 }
 
 func (m *mockOrderRepo) CreateOrderWithHold(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount money.Amount, lastGeo string) (*repository.Order, error) {
@@ -257,6 +260,11 @@ func (m *mockOrderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID
 }
 
 func (m *mockOrderRepo) Assign(ctx context.Context, q repository.Querier, orderID, executorID uuid.UUID) error {
+	// Назначение — единственное место, где настоящий репозиторий проигрывает
+	// гонку за заказ; assignErr позволяет тесту воспроизвести этот проигрыш.
+	if m.assignErr != nil {
+		return m.assignErr
+	}
 	return m.AssignOrder(context.Background(), orderID, executorID)
 }
 
@@ -1088,4 +1096,120 @@ func (m *mockUserRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]strin
 
 func (m *mockUserRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
 	return nil
+}
+
+// Автооткрытие смены при взятии заказа.
+//
+// Смена, открытая за исполнителя, стоит ему денег при досрочном выходе, поэтому
+// проверяется не только то, что она открывается, но и то, что она не остаётся
+// открытой, когда заказ так и не достался исполнителю.
+func TestOrderService_AcceptAutoOpensShift(t *testing.T) {
+	orderRepo := &mockOrderRepo{}
+	shiftRepo := &mockShiftRepo{}
+	settings := &mockSettingsRepo{settings: map[string]string{}}
+	srv := NewOrderService(orderRepo, testLedger(), settings, newMockUserRepo(), shiftRepo, nil, newMockCatalogRepo(), nil)
+
+	executorID := uuid.New()
+	orderID := uuid.New()
+	orderRepo.orders = append(orderRepo.orders, &repository.Order{
+		ID:     orderID,
+		Status: repository.OrderStatusSearching,
+	})
+
+	if err := srv.Accept(context.Background(), orderID, executorID); err != nil {
+		t.Fatalf("accept without a shift should open one, got: %v", err)
+	}
+
+	shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+	if shift == nil {
+		t.Fatal("expected an active shift after accepting an order without one")
+	}
+	if shift.DurationHours != defaultAutoShiftDurationHours {
+		t.Errorf("expected auto shift of %d h, got %d", defaultAutoShiftDurationHours, shift.DurationHours)
+	}
+}
+
+func TestOrderService_AcceptAutoShiftHonoursSettings(t *testing.T) {
+	newOrder := func(repo *mockOrderRepo) uuid.UUID {
+		id := uuid.New()
+		repo.orders = append(repo.orders, &repository.Order{ID: id, Status: repository.OrderStatusSearching})
+		return id
+	}
+
+	t.Run("disabled keeps the old refusal", func(t *testing.T) {
+		orderRepo := &mockOrderRepo{}
+		shiftRepo := &mockShiftRepo{}
+		settings := &mockSettingsRepo{settings: map[string]string{SettingAutoShiftOnAcceptEnabled: "0"}}
+		srv := NewOrderService(orderRepo, testLedger(), settings, newMockUserRepo(), shiftRepo, nil, newMockCatalogRepo(), nil)
+
+		err := srv.Accept(context.Background(), newOrder(orderRepo), uuid.New())
+		if err == nil || err.Error() != "executor has no active shift" {
+			t.Errorf("expected the no-shift refusal, got: %v", err)
+		}
+		if len(shiftRepo.shifts) != 0 {
+			t.Errorf("expected no shift to be opened, got %d", len(shiftRepo.shifts))
+		}
+	})
+
+	t.Run("configured duration is used", func(t *testing.T) {
+		orderRepo := &mockOrderRepo{}
+		shiftRepo := &mockShiftRepo{}
+		settings := &mockSettingsRepo{settings: map[string]string{SettingAutoShiftDurationHours: "3"}}
+		srv := NewOrderService(orderRepo, testLedger(), settings, newMockUserRepo(), shiftRepo, nil, newMockCatalogRepo(), nil)
+
+		executorID := uuid.New()
+		if err := srv.Accept(context.Background(), newOrder(orderRepo), executorID); err != nil {
+			t.Fatalf("unexpected accept error: %v", err)
+		}
+		shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+		if shift == nil || shift.DurationHours != 3 {
+			t.Errorf("expected a 3 h auto shift, got %+v", shift)
+		}
+	})
+
+	// Длительность вне разрешённого списка — это настройка, которую исполнитель
+	// не смог бы выбрать сам, поэтому она игнорируется, а не открывает смену.
+	t.Run("invalid duration falls back to the default", func(t *testing.T) {
+		orderRepo := &mockOrderRepo{}
+		shiftRepo := &mockShiftRepo{}
+		settings := &mockSettingsRepo{settings: map[string]string{SettingAutoShiftDurationHours: "7"}}
+		srv := NewOrderService(orderRepo, testLedger(), settings, newMockUserRepo(), shiftRepo, nil, newMockCatalogRepo(), nil)
+
+		executorID := uuid.New()
+		if err := srv.Accept(context.Background(), newOrder(orderRepo), executorID); err != nil {
+			t.Fatalf("unexpected accept error: %v", err)
+		}
+		shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+		if shift == nil || shift.DurationHours != defaultAutoShiftDurationHours {
+			t.Errorf("expected the default auto shift duration, got %+v", shift)
+		}
+	})
+}
+
+// Заказ, который успел уйти другому исполнителю, не должен оставлять за собой
+// смену: за досрочный выход из неё берут штраф, а открывал её не исполнитель.
+func TestOrderService_AcceptRollsBackAutoShiftWhenOrderIsGone(t *testing.T) {
+	orderRepo := &mockOrderRepo{}
+	shiftRepo := &mockShiftRepo{}
+	settings := &mockSettingsRepo{settings: map[string]string{}}
+	srv := NewOrderService(orderRepo, testLedger(), settings, newMockUserRepo(), shiftRepo, nil, newMockCatalogRepo(), nil)
+
+	orderID := uuid.New()
+	orderRepo.orders = append(orderRepo.orders, &repository.Order{
+		ID:     orderID,
+		Status: repository.OrderStatusSearching,
+	})
+	// Назначение проигрывает гонку: заказ уже забрал другой исполнитель.
+	orderRepo.assignErr = repository.ErrConflict
+
+	executorID := uuid.New()
+	err := srv.Accept(context.Background(), orderID, executorID)
+	if err == nil {
+		t.Fatal("expected accepting an already assigned order to fail")
+	}
+
+	shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+	if shift != nil {
+		t.Errorf("expected the auto-opened shift to be closed again, got %+v", shift)
+	}
 }

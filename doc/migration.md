@@ -44,6 +44,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `043_service_behaviors.sql` | Scripted services: `service_nodes.behavior_code` / `behavior_config`, the `domain_events` outbox, `user_service_claims`, `behavior_effects`, the `BONUSES` account and the `BONUS` transaction type. Seeds the verification service switched off. See [`service_behaviors.md`](./service_behaviors.md). |
 | `044_service_node_scripts.sql` | A special service carries its own script: `service_nodes.behavior_constants` and `behavior_source`, edited in the admin panel's service constructor. |
 | `045_order_submissions.sql` | Data an executor submits for checking (`order_submissions`) and the cases a behaviour hands to an administrator (`behavior_escalations`), with one open escalation per order. |
+| `046_auto_shift_on_accept.sql` | Auto-opening a shift for an executor who takes an order without one: `auto_shift_on_accept_enabled` (on by default) and `auto_shift_duration_hours` (1 h by default, limited to the durations a manual start accepts). See [`order_lifecycle.md`](./order_lifecycle.md#3-автооткрытие-смены-при-взятии-заказа). |
 
 ## How to run manually
 

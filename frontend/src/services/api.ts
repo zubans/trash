@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { Capacitor } from '@capacitor/core'
 import { debugConsoleEnabled, pushLog, updateLog, snippet } from './debugLog'
+import { clearCachedData } from './cache'
 
 function resolveApiUrl(): string {
   const isNative = Capacitor.isNativePlatform()
@@ -293,6 +294,10 @@ function setSessionCookie(name: string, value: string) {
 }
 
 export function clearSession() {
+  // Кэш экранов уходит вместе с сессией: заказы и профиль привязаны к
+  // пользователю, и на общем устройстве следующий вошедший не должен увидеть их
+  // даже мельком, пока идёт первый запрос.
+  clearCachedData()
   if (proactiveTimer) {
     clearTimeout(proactiveTimer)
     proactiveTimer = null
