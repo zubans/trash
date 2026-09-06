@@ -105,12 +105,29 @@
               <i class="ph-bold ph-plus-circle"></i>
             </button>
 
-            <!-- Выпадающее меню-кебаб -->
+            <!-- Выпадающее меню-кебаб.
+                 Открывается по клику и рисуется в фиксированных координатах, а
+                 не по :hover внутри ячейки. Ячейка, таблица и карточка страницы
+                 — все три с overflow, поэтому позиционированное внутри них меню
+                 обрезалось до полоски в высоту строки: оно «выпадало», но его
+                 не было видно. Фиксированное позиционирование выводит его из-под
+                 всех трёх, а клик вместо наведения заодно делает меню
+                 предсказуемым на тачпаде. -->
             <div class="dropdown-wrapper">
-              <button class="btn-ghost" data-tooltip="Меню">
+              <button
+                class="btn-ghost"
+                data-tooltip="Меню"
+                :class="{ active: openMenuId === u.id }"
+                @click.stop="toggleRowMenu(u, $event)"
+              >
                 <i class="ph-bold ph-dots-three-vertical"></i>
               </button>
-              <div class="dropdown-menu">
+              <div
+                v-if="openMenuId === u.id"
+                class="dropdown-menu"
+                :style="menuStyle"
+                @click="closeRowMenu"
+              >
                 <button class="dropdown-item" @click="openNameModal(u)">
                   <i class="ph-bold ph-user"></i> Личные данные
                 </button>
@@ -370,7 +387,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted, computed } from 'vue'
+import { defineComponent, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
@@ -386,6 +403,80 @@ export default defineComponent({
     const authStore = useAuthStore()
 
     const users = ref<any[]>([])
+
+    // Меню строки в десктопной таблице: какой открыт и где его рисовать.
+    // Координаты держатся здесь, потому что меню позиционируется фиксированно —
+    // иначе его обрезали бы overflow ячейки, таблицы и карточки страницы.
+    const openMenuId = ref<string | null>(null)
+    const menuPos = ref({ top: 0, left: 0 })
+
+    const menuStyle = computed(() => ({
+      position: 'fixed' as const,
+      top: `${menuPos.value.top}px`,
+      left: `${menuPos.value.left}px`,
+      right: 'auto',
+    }))
+
+    const MENU_WIDTH = 220
+    const MENU_MAX_HEIGHT = 420
+
+    const toggleRowMenu = (user: any, event: MouseEvent) => {
+      if (openMenuId.value === user.id) {
+        openMenuId.value = null
+        return
+      }
+      const button = event.currentTarget as HTMLElement
+      const rect = button.getBoundingClientRect()
+
+      // Правый край меню совмещается с правым краем кнопки, но меню не должно
+      // уезжать за левый край окна на узком экране.
+      const left = Math.max(8, rect.right - MENU_WIDTH)
+      // Снизу не хватает места — открываем вверх. Это единственная причина
+      // считать высоту заранее: содержимое меню фиксировано.
+      //
+      // Высота окна берётся из documentElement: window.innerHeight в некоторых
+      // встроенных webview равен нулю, и тогда меню «не помещалось» бы всегда и
+      // раскрывалось вверх на пустом месте. Ноль здесь означает «не знаю» —
+      // раскрываем вниз, как обычно.
+      const viewportHeight = document.documentElement?.clientHeight || window.innerHeight || 0
+      const spaceBelow = viewportHeight > 0 ? viewportHeight - rect.bottom : Number.POSITIVE_INFINITY
+      const top = spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow
+        ? Math.max(8, rect.top - Math.min(MENU_MAX_HEIGHT, rect.top - 8))
+        : rect.bottom + 6
+
+      menuPos.value = { top, left }
+      openMenuId.value = user.id
+    }
+
+    const closeRowMenu = () => {
+      openMenuId.value = null
+    }
+
+    // Меню живёт в фиксированных координатах, поэтому оно не поедет за строкой
+    // при прокрутке — вместо этого закрывается. Клик мимо и Escape тоже
+    // закрывают: обычное поведение выпадающего меню.
+    const onDocumentClick = () => closeRowMenu()
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeRowMenu()
+    }
+    const onScrollOrResize = () => {
+      if (openMenuId.value) closeRowMenu()
+    }
+
+    onMounted(() => {
+      document.addEventListener('click', onDocumentClick)
+      document.addEventListener('keydown', onKeydown)
+      window.addEventListener('resize', onScrollOrResize)
+      // capture: прокрутка идёт во внутренних контейнерах, а не в окне.
+      window.addEventListener('scroll', onScrollOrResize, true)
+    })
+
+    onUnmounted(() => {
+      document.removeEventListener('click', onDocumentClick)
+      document.removeEventListener('keydown', onKeydown)
+      window.removeEventListener('resize', onScrollOrResize)
+      window.removeEventListener('scroll', onScrollOrResize, true)
+    })
 
     // История пользователя. Оба пункта меню открывают одно окно, отличается
     // лишь вкладка, на которой оно открывается.
@@ -783,6 +874,10 @@ export default defineComponent({
     return {
       users,
       cardMenuId,
+      openMenuId,
+      menuStyle,
+      toggleRowMenu,
+      closeRowMenu,
       showHistoryModal,
       historyUser,
       historyTab,
@@ -1259,13 +1354,17 @@ export default defineComponent({
 }
 
 /* Действия и выпадающее меню-кебаб */
-.cell-actions {
+.grid-row > div.cell-actions {
   display: flex;
   gap: 4px;
   padding-left: 8px;
   justify-content: flex-end;
   align-items: center;
-  /* overflow:hidden из общего правила ячейки обрезал бы меню-кебаб */
+  /* Селектор с элементом намеренно: у `.grid-row > div { overflow: hidden }`
+     специфичность выше, чем у одного класса, поэтому прежнее
+     `.cell-actions { overflow: visible }` не действовало ни разу. Само по себе
+     оно меню и не спасало бы — его обрезали бы ещё таблица и карточка
+     страницы, — но ячейка не должна резать хотя бы всплывающую подсказку. */
   overflow: visible;
 }
 
@@ -1340,10 +1439,14 @@ export default defineComponent({
   border-radius: 12px;
   padding: 8px;
   box-shadow: 0 10px 40px -10px rgba(15, 23, 42, 0.15), 0 1px 3px rgba(15, 23, 42, 0.05);
-  min-width: 200px;
-  display: none;
+  /* Ширина совпадает с MENU_WIDTH в скрипте: по ней считается left. */
+  width: 220px;
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Длинное меню не должно уходить за край экрана. */
+  max-height: 420px;
+  overflow-y: auto;
   transform-origin: top right;
   animation: scaleIn 0.2s ease-out;
 }
@@ -1353,10 +1456,8 @@ export default defineComponent({
   to { opacity: 1; transform: scale(1); }
 }
 
-.dropdown-wrapper:hover .dropdown-menu,
-.dropdown-wrapper:focus-within .dropdown-menu {
-  display: flex;
-}
+/* Показом управляет v-if, а не :hover: меню рисуется в фиксированных
+   координатах и должно закрываться по клику мимо, прокрутке и Escape. */
 
 .dropdown-item {
   padding: 8px 12px;
