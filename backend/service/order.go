@@ -533,6 +533,9 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	if err := s.checkExecutorEligibility(ctx, executorID, order); err != nil {
 		return err
 	}
+	if err := s.checkAcceptRadius(ctx, executorID, order); err != nil {
+		return err
+	}
 
 	balance, err := s.ledger.GetBalance(ctx, executorID)
 	if err != nil {
@@ -651,6 +654,50 @@ func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID 
 	}
 	customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
 	return canViewOrTakeOrder(ctx, s.behaviors, viewer, customer, variant)
+}
+
+// checkAcceptRadius не даёт взять заказ дальше радиуса взятия.
+//
+// Радиус существовал только на клиенте: карта считала can_accept и прятала
+// кнопку, а сервер расстояние не смотрел вовсе. Кнопка — не ограничение:
+// список «Заказы поблизости» на дашборде показывал её безусловно на радиусе в
+// 5 км, и заказ за пределами круга брался обычным нажатием, не говоря уже о
+// прямом вызове эндпоинта.
+//
+// Радиус тот же, что рисует карта (resolveAcceptRadiusKM), и позиция та же,
+// авторитетная серверная, — иначе проверка расходилась бы с тем, что видит
+// исполнитель.
+//
+// Автоподбор эта проверка не трогает: воркер назначает заказы через
+// orderRepo.Assign, минуя Accept, и живёт по своему auto_match_radius_km.
+func (s *OrderService) checkAcceptRadius(ctx context.Context, executorID uuid.UUID, order *repository.Order) error {
+	// Без хранилища позиций проверять нечего: так собран сервис в тестах, где
+	// география не участвует. В main.go оно подключено всегда (WithExecutorGeo),
+	// и именно поэтому проверка там работает.
+	if s.executorGeoRepo == nil {
+		return nil
+	}
+	// Заказ без координат к точке на карте не привязан, и мерить до него нечего.
+	// Такие заказы не попадают ни в один гео-список, но взять по прямой ссылке
+	// их можно, и отказывать здесь было бы отказом по причине, которой нет.
+	if order.PickupLat == nil || order.PickupLon == nil {
+		return nil
+	}
+
+	lat, lon, _, err := s.executorGeoRepo.GetExecutorLocation(ctx, executorID)
+	if err != nil {
+		return err
+	}
+	if lat == nil || lon == nil {
+		return errors.New("рабочая позиция не задана: откройте карту и выберите район, чтобы брать заказы")
+	}
+
+	radiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
+	distanceKM := HaversineDistanceKM(*lat, *lon, *order.PickupLat, *order.PickupLon)
+	if distanceKM > radiusKM {
+		return fmt.Errorf("заказ вне зоны взятия: до него %.1f км, разрешено %.1f км", distanceKM, radiusKM)
+	}
+	return nil
 }
 
 // settingsFloat читает числовую системную настройку со значением по умолчанию.
@@ -1160,13 +1207,22 @@ func (s *OrderService) FindNearbyOrders(ctx context.Context, lat, lon float64, r
 	return orders, nil
 }
 
-// FindNearbyOrdersForExecutor возвращает обычные/крупные заказы в поиске рядом с координатами, отфильтрованные для исполнителя.
-func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
+// FindNearbyOrdersForExecutor возвращает обычные/крупные заказы в поиске рядом
+// с координатами, отфильтрованные для исполнителя.
+//
+// Каждый заказ несёт can_accept и distance_km — ровно те же поля и с тем же
+// смыслом, что и на карте. Раньше список их не отдавал, и дашборд рисовал
+// кнопку взятия на каждой строке, не имея, чем её ограничить: радиус списка (5
+// км) молча расходился с радиусом взятия, и заказ вне круга брался обычным
+// нажатием. Поля добавлены к прежнему ответу, а не заменяют его, поэтому
+// установленные APK, которые о них не знают, продолжают работать как прежде.
+func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.MapOrder, error) {
 	// Привязываем поиск к авторитетной сохранённой позиции исполнителя — той же
 	// точке, что используют карта и проверка радиуса принятия. Координаты клиента
 	// (GPS устройства, который может отсутствовать или падать в базовую точку) —
 	// лишь запасной вариант, когда хранилище не подключено, и это не даёт списку
 	// разойтись с тем, что исполнитель реально может принять.
+	positionKnown := false
 	if s.executorGeoRepo != nil {
 		storedLat, storedLon, _, err := s.executorGeoRepo.GetExecutorLocation(ctx, executorID)
 		if err != nil {
@@ -1174,9 +1230,10 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		}
 		if storedLat == nil || storedLon == nil {
 			// Рабочая позиция ещё не задана: принять нечего, поэтому и в списке ничего нет.
-			return []*repository.Order{}, nil
+			return []*repository.MapOrder{}, nil
 		}
 		lat, lon = *storedLat, *storedLon
+		positionKnown = true
 	}
 
 	// Что смотрящему можно видеть, решают его набор ролей и верификация; роли
@@ -1191,7 +1248,9 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 	s.hydrateServiceVariants(ctx, orders)
 	customers := s.customersOf(ctx, orders)
 
-	filtered := []*repository.Order{}
+	radiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
+
+	filtered := []*repository.MapOrder{}
 	for _, o := range orders {
 		// Один предикат и для карты, и для этого списка, и тот же, что применяет
 		// путь принятия: заказы только для модераторов идут модераторам; обычные
@@ -1201,7 +1260,16 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 			continue
 		}
 
-		filtered = append(filtered, o)
+		item := &repository.MapOrder{Order: *o}
+		// Считать расстояние можно только от известной позиции. Когда хранилище
+		// не подключено, точка отсчёта — координаты клиента, которым доверять
+		// нельзя, поэтому can_accept остаётся выключенным, а решает всё равно
+		// сервер на пути принятия.
+		if positionKnown && o.PickupLat != nil && o.PickupLon != nil {
+			item.DistanceKM = HaversineDistanceKM(lat, lon, *o.PickupLat, *o.PickupLon)
+			item.CanAccept = item.DistanceKM <= radiusKM
+		}
+		filtered = append(filtered, item)
 	}
 
 	return filtered, nil

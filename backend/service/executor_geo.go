@@ -64,14 +64,43 @@ type SetLocationResponse struct {
 	Lon                      float64 `json:"lon"`
 }
 
-func getAcceptRadiusKM() float64 {
+// SettingAcceptRadiusKM — радиус, внутри которого исполнителю разрешено взять
+// заказ, в километрах. Настройка живёт в админке, потому что это рабочий
+// параметр рынка, а не свойство сборки: он зависит от плотности исполнителей в
+// городе и меняется чаще, чем выкатывается образ.
+const SettingAcceptRadiusKM = "accept_radius_km"
+
+// defaultAcceptRadiusKM — значение, когда не задано ни настройки, ни переменной
+// окружения.
+const defaultAcceptRadiusKM = 0.5
+
+// resolveAcceptRadiusKM возвращает действующий радиус взятия заказа.
+//
+// Источник один на всех: и флаг can_accept на карте, и проверка на сервере при
+// взятии заказа читают эту функцию. Разойтись они не могут — а разойдясь,
+// давали бы ровно ту картину, с которой всё началось: карта пишет «нельзя
+// взять», а сервер заказ отдаёт.
+//
+// Порядок источников: настройка из админки, затем ACCEPT_RADIUS_KM из
+// окружения, затем умолчание. Окружение остаётся ради установок, поднятых до
+// появления настройки.
+func resolveAcceptRadiusKM(ctx context.Context, settings repository.SettingsRepository) float64 {
+	if settings != nil {
+		if v := settingFloat(ctx, settings, SettingAcceptRadiusKM, 0); v > 0 {
+			return v
+		}
+	}
+	return acceptRadiusFromEnv()
+}
+
+func acceptRadiusFromEnv() float64 {
 	valStr := os.Getenv("ACCEPT_RADIUS_KM")
 	if valStr == "" {
-		return 0.5
+		return defaultAcceptRadiusKM
 	}
 	var val float64
 	if _, err := fmt.Sscanf(valStr, "%f", &val); err != nil || val <= 0 {
-		return 0.5
+		return defaultAcceptRadiusKM
 	}
 	return val
 }
@@ -87,7 +116,7 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}
 
 	now := time.Now()
-	acceptRadiusKM := getAcceptRadiusKM()
+	acceptRadiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
 
 	// Проверяем дистанцию ручного сдвига смены
 	var shiftDist float64
@@ -273,7 +302,7 @@ func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.U
 func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
 	// Ищем ожидающие заказы в радиусе 10 км
 	const overviewRadiusKM = 10.0
-	acceptRadiusKM := getAcceptRadiusKM()
+	acceptRadiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
 
 	// Ограничиваем поиск в базе, а не в этом цикле. Чтение каждого заказа в
 	// поиске по всей стране с отбрасыванием всех, кроме ближних, делало стоимость

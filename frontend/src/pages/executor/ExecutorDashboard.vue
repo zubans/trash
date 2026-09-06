@@ -547,10 +547,24 @@
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
                 </div>
               </div>
+              <!-- Кнопка есть только у того, что действительно можно взять.
+                   Радиус взятия считает сервер и присылает в can_accept — тот
+                   же флаг, по которому прячет кнопку карта. Раньше кнопка
+                   стояла на каждой строке списка, а список шире круга взятия,
+                   поэтому заказ вне зоны брался обычным нажатием. -->
               <div class="o-actions item-actions">
-                <button type="button" class="btn-action success" :title="$t('common.accept')" @click="acceptOrder(order.id)">
+                <button
+                  v-if="order.can_accept !== false"
+                  type="button"
+                  class="btn-action success"
+                  :title="$t('common.accept')"
+                  @click="acceptOrder(order.id)"
+                >
                   <i class="ph-bold ph-check"></i>
                 </button>
+                <span v-else class="o-far-tag" :title="'До заказа ' + formatDistance(order.distance_km) + ', это вне зоны взятия'">
+                  {{ formatDistance(order.distance_km) }}
+                </span>
               </div>
             </div>
           </div>
@@ -1685,6 +1699,14 @@ export default defineComponent({
 
     const getOrderTitles = (order: any) => orderTitle(order, serviceLookup.value)
 
+    // Расстояние до заказа: метрами вблизи, километрами дальше. Показывается
+    // вместо кнопки у заказов вне зоны взятия, чтобы отказ был понятен на месте,
+    // а не только после нажатия.
+    const formatDistance = (km: number | undefined) => {
+      if (typeof km !== 'number' || !isFinite(km)) return ''
+      return km < 1 ? `${Math.round(km * 1000)} м` : `${km.toFixed(1)} км`
+    }
+
     const formatOrderType = (order: any) => orderTitleLine(order, serviceLookup.value)
 
     const getStatusColor = (statusStr: string) => {
@@ -1907,6 +1929,7 @@ export default defineComponent({
       onChatImgError,
       openFinancialHistoryModal,
       formatOrderType,
+      formatDistance,
       getOrderTitles,
       getStatusColor,
       formatDate,
@@ -2753,6 +2776,20 @@ export default defineComponent({
 .o-actions {
   display: flex;
   gap: 8px;
+}
+
+/* Метка расстояния на месте кнопки у заказов вне зоны взятия. */
+.o-far-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 40px;
+  border-radius: 12px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .btn-chat-toggle {

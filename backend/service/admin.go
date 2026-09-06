@@ -772,6 +772,12 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 		"min_balance_limit":      true,
 		// Как далеко может дотянуться автоматический подбор при назначении заказа.
 		"auto_match_radius_km": true,
+		// Как далеко исполнитель может взять заказ руками. Отдельная величина от
+		// auto_match_radius_km и обычно заметно меньше: автоподбор сам привозит
+		// заказ тому, кто согласился работать, а здесь исполнитель выбирает, куда
+		// ехать. Ноль или пусто означает «не задано» — тогда действует
+		// ACCEPT_RADIUS_KM из окружения, а за ним умолчание.
+		SettingAcceptRadiusKM: true,
 	}
 	numericKeys["shift_early_exit_penalty"] = true
 	// Включение этого заставляет приложения исполнителей сообщать своё положение,

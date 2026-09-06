@@ -104,7 +104,10 @@
           <div class="op-header">
             <span class="op-price">{{ Number(selectedOrder.hold_amount).toFixed(0) }} {{ currencySymbol }}</span>
             <span class="op-accept-tag" :class="selectedOrder.can_accept ? 'ok' : 'far'">
-              {{ selectedOrder.can_accept ? 'Можно взять' : '> 2 км' }}
+              <!-- Расстояние, а не зашитое число: подпись говорила «> 2 км»,
+                   когда радиус взятия был 0.5 км, и исполнителю показывалась
+                   граница, которой нет. -->
+              {{ selectedOrder.can_accept ? 'Можно взять' : 'Далеко: ' + selectedOrder.distance_km.toFixed(1) + ' км' }}
             </span>
           </div>
           <div class="op-address">
