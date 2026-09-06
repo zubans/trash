@@ -260,16 +260,9 @@ jobs:
             echo "Restarting services via make restart..."
             make restart
             
-            echo "Building and releasing new Android APK on server..."
-            # Заголовок коммита (%s), а не всё сообщение (%B). Эти заметки
-            # показываются пользователю в диалоге обновления, и там нужна одна
-            # строка о том, что изменилось, а не разбор причин на тридцать строк.
-            COMMIT_MSG=$(git log -1 --pretty=%s)
-            make release-android RELEASE_NOTES="${COMMIT_MSG}" || echo "Notice: Android release build skipped or failed on server."
-            
             echo "Cleaning up old images..."
             docker image prune -af --filter "until=168h"
-            
+
             echo "Deployment finished successfully."
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
@@ -283,6 +276,62 @@ jobs:
           CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL || secrets.APP_BASE_URL }}
           DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
+
+      # Релиз APK — отдельный шаг, а не хвост деплоя.
+      #
+      # Раньше он стоял последней командой того же скрипта и заканчивался
+      # `|| echo "Notice: ..."`, то есть провал выглядел как успешный деплой.
+      # Ровно поэтому сломанная регистрация релиза прожила незамеченной:
+      # сервисы обновлялись, галочка была зелёной, а обновление до клиентов не
+      # доходило. Теперь у шага своя строка в списке, и он падает.
+      #
+      # Сервисы к этому моменту уже перезапущены и работают: красный шаг здесь
+      # означает «сервер обновлён, приложение — нет», а не «деплой не удался».
+      # Это и есть то различие, которого раньше не было видно.
+      - name: Release Android APK
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
+
+            # Заголовок коммита (%s), а не всё сообщение (%B). Эти заметки
+            # показываются пользователю в диалоге обновления, и там нужна одна
+            # строка о том, что изменилось, а не разбор причин на тридцать строк.
+            COMMIT_MSG=$(git log -1 --pretty=%s)
+            echo "Building and releasing new Android APK: ${COMMIT_MSG}"
+
+            # set -e здесь не нужен: код возврата ловится руками, чтобы попасть
+            # в сообщение об ошибке.
+            make release-android RELEASE_NOTES="${COMMIT_MSG}"
+            STATUS=$?
+
+            if [ "${STATUS}" -ne 0 ]; then
+              echo ""
+              echo "==================================================================="
+              echo " ОШИБКА: релиз Android-приложения не выполнен"
+              echo " Код возврата make: ${STATUS}"
+              echo ""
+              echo " Сервер обновлён и работает — не выполнен только выпуск APK."
+              echo " Если упал шаг регистрации, APK мог собраться, но строки в"
+              echo " app_releases нет, и клиенты обновление не увидят."
+              echo ""
+              echo " Проверить вручную на сервере:"
+              echo "   cd /home/user/.openclaw/workspace/worktrees/trash"
+              echo "   make release-android RELEASE_NOTES=\"проверка\""
+              echo "==================================================================="
+              echo ""
+              # Строка ::error:: превращается в аннотацию GitHub на вкладке
+              # запуска: в логе на несколько тысяч строк баннер выше легко
+              # пролистать, аннотацию — нет.
+              echo "::error title=Android release failed::Релиз APK не выполнен (make вернул ${STATUS}). Сервер обновлён, приложение — нет."
+              exit "${STATUS}"
+            fi
+
+            echo "Android release registered successfully."
 
   # Monitoring is deployed by its own job, in parallel with `deploy`.
   #
