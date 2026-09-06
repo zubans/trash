@@ -27,14 +27,19 @@
       <!-- Прокручивается только навигация: логотип остаётся на месте, а нижний
            блок под ним — досягаемым, в чём весь смысл на телефоне. -->
       <div class="sidebar-scroll">
-        <div v-if="!sidebarMinimized || isMobile" class="nav-section">Управление</div>
+        <div v-if="(!sidebarMinimized || isMobile) && showManagementSection" class="nav-section">Управление</div>
         <div class="nav-list">
-          <router-link to="/admin/users" class="nav-item" :class="{ active: currentRouteName === 'admin-users' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('users.view')" to="/admin/users" class="nav-item" :class="{ active: currentRouteName === 'admin-users' }" @click="closeSidebarOnMobile">
             <i class="ph ph-users"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.users') }}</span>
           </router-link>
 
-          <router-link to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('roles.view')" to="/admin/roles" class="nav-item" :class="{ active: currentRouteName === 'admin-roles' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-shield-check"></i>
+            <span v-if="!sidebarMinimized || isMobile">Роли и права</span>
+          </router-link>
+
+          <router-link v-if="can('support_chats.view')" to="/admin/support-chats" class="nav-item" :class="{ active: currentRouteName === 'admin-support-chats' }" @click="closeSidebarOnMobile">
             <div class="nav-icon-wrap">
               <i class="ph ph-chats-teardrop"></i>
               <span v-if="unreadSupportCount > 0 && sidebarMinimized && !isMobile" class="nav-dot-badge"></span>
@@ -43,27 +48,27 @@
             <span v-if="unreadSupportCount > 0 && (!sidebarMinimized || isMobile)" class="nav-badge">{{ unreadSupportCount }}</span>
           </router-link>
 
-          <router-link to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('topups.view')" to="/admin/topups" class="nav-item" :class="{ active: currentRouteName === 'admin-topups' }" @click="closeSidebarOnMobile">
             <i class="ph-fill ph-wallet"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.topups') }}</span>
           </router-link>
 
-          <router-link to="/admin/withdrawals" class="nav-item" :class="{ active: currentRouteName === 'admin-withdrawals' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('withdrawals.view')" to="/admin/withdrawals" class="nav-item" :class="{ active: currentRouteName === 'admin-withdrawals' }" @click="closeSidebarOnMobile">
             <i class="ph ph-bank"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.withdrawals') }}</span>
           </router-link>
 
-          <router-link to="/admin/commission" class="nav-item" :class="{ active: currentRouteName === 'admin-commission' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('commission.view')" to="/admin/commission" class="nav-item" :class="{ active: currentRouteName === 'admin-commission' }" @click="closeSidebarOnMobile">
             <i class="ph ph-percent"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.commission') }}</span>
           </router-link>
 
-          <router-link to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('transactions.view')" to="/admin/transactions" class="nav-item" :class="{ active: currentRouteName === 'admin-transactions' }" @click="closeSidebarOnMobile">
             <i class="ph ph-arrows-left-right"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.transactions') }}</span>
           </router-link>
 
-          <router-link to="/admin/reconciliation" class="nav-item" :class="{ active: currentRouteName === 'admin-reconciliation' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('reconciliation.view')" to="/admin/reconciliation" class="nav-item" :class="{ active: currentRouteName === 'admin-reconciliation' }" @click="closeSidebarOnMobile">
             <i class="ph ph-scales"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.reconciliation') }}</span>
           </router-link>
@@ -71,55 +76,55 @@
           <!-- Инциденты стоят рядом со сверкой намеренно: сверка ищет
                разъехавшиеся книги, а это — то, что код успел зажать до того,
                как они разъехались. -->
-          <router-link to="/admin/incidents" class="nav-item" :class="{ active: currentRouteName === 'admin-incidents' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('incidents.view')" to="/admin/incidents" class="nav-item" :class="{ active: currentRouteName === 'admin-incidents' }" @click="closeSidebarOnMobile">
             <i class="ph ph-warning-octagon"></i>
             <span v-if="!sidebarMinimized || isMobile">Инциденты</span>
           </router-link>
 
-          <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('broadcasts.view')" to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
             <i class="ph ph-megaphone"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>
           </router-link>
         </div>
 
-        <div v-if="!sidebarMinimized || isMobile" class="nav-section">Система</div>
+        <div v-if="(!sidebarMinimized || isMobile) && showSystemSection" class="nav-section">Система</div>
         <div class="nav-list">
-          <router-link to="/admin/shifts" class="nav-item" :class="{ active: currentRouteName === 'admin-shifts' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('shifts.view')" to="/admin/shifts" class="nav-item" :class="{ active: currentRouteName === 'admin-shifts' }" @click="closeSidebarOnMobile">
             <i class="ph ph-clock-user"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeShifts') }}</span>
           </router-link>
 
-          <router-link to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('orders.view')" to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
             <i class="ph ph-package"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeOrders') }}</span>
           </router-link>
 
-          <router-link to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('orders.view')" to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
             <i class="ph ph-check-circle"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.completedOrders') }}</span>
           </router-link>
 
-          <router-link to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('service_catalog.view')" to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
             <i class="ph ph-list-dashes"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.serviceCatalog') }}</span>
           </router-link>
 
-          <router-link to="/admin/achievements" class="nav-item" :class="{ active: currentRouteName === 'admin-achievements' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('achievements.view')" to="/admin/achievements" class="nav-item" :class="{ active: currentRouteName === 'admin-achievements' }" @click="closeSidebarOnMobile">
             <i class="ph ph-trophy"></i>
             <span v-if="!sidebarMinimized || isMobile">Ачивки</span>
           </router-link>
 
-          <router-link to="/admin/gifts" class="nav-item" :class="{ active: currentRouteName === 'admin-gifts' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('gifts.view')" to="/admin/gifts" class="nav-item" :class="{ active: currentRouteName === 'admin-gifts' }" @click="closeSidebarOnMobile">
             <i class="ph ph-gift"></i>
             <span v-if="!sidebarMinimized || isMobile">Подарки</span>
           </router-link>
 
-          <router-link to="/admin/escalations" class="nav-item" :class="{ active: currentRouteName === 'admin-escalations' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('escalations.view')" to="/admin/escalations" class="nav-item" :class="{ active: currentRouteName === 'admin-escalations' }" @click="closeSidebarOnMobile">
             <i class="ph ph-shield-warning"></i>
             <span v-if="!sidebarMinimized || isMobile">Модерация проверок</span>
           </router-link>
 
-          <router-link to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('settings.view')" to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
             <i class="ph ph-gear"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
           </router-link>
@@ -186,7 +191,27 @@ export default defineComponent({
     const unreadSupportCount = ref(0)
     let unreadTimer: any = null
 
+    // can решает, показывать ли пункт меню. Права приходят с /auth/me и
+    // повторяют то, что охраняет маршруты на бэкенде, поэтому спрятанный пункт
+    // и запрещённый запрос — это всегда одно и то же право.
+    const can = (permission: string) => authStore.can(permission)
+
+    // Заголовок группы прячется вместе с последним её пунктом, иначе у роли с
+    // одним разделом остались бы подписи над пустотой.
+    const showManagementSection = computed(() =>
+      ['users.view', 'roles.view', 'support_chats.view', 'topups.view', 'withdrawals.view',
+       'commission.view', 'transactions.view', 'reconciliation.view', 'incidents.view',
+       'broadcasts.view'].some(can),
+    )
+    const showSystemSection = computed(() =>
+      ['shifts.view', 'orders.view', 'service_catalog.view', 'achievements.view',
+       'gifts.view', 'escalations.view', 'settings.view'].some(can),
+    )
+
     const fetchUnreadSupport = async () => {
+      // Без права на чаты поддержки бейджа нет, а значит нет и опроса: иначе
+      // роль без доступа получала бы 403 каждые 15 секунд.
+      if (!can('support_chats.view')) return
       try {
         const res = await api.get('/admin/support/unread-summary')
         if (res.data && res.data.unread_count !== undefined) {
@@ -231,6 +256,7 @@ export default defineComponent({
     const pageTitle = computed(() => {
       switch (route.name) {
         case 'admin-users': return 'Пользователи'
+        case 'admin-roles': return 'Роли и права'
         case 'admin-topups': return 'Запросы на пополнение'
         case 'admin-withdrawals': return 'Запросы на вывод'
         case 'admin-commission': return 'Комиссия платформы'
@@ -259,6 +285,9 @@ export default defineComponent({
     }
 
     return {
+      can,
+      showManagementSection,
+      showSystemSection,
       phone,
       isMobile,
       unreadSupportCount,

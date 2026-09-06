@@ -15,11 +15,20 @@ import (
 // PublicHandler хранит публичные HTTP-обработчики (health, регистрация, вход).
 type PublicHandler struct {
 	authService *service.AuthService
+	// permissions даёт /auth/me список действующих прав пользователя. Интерфейс
+	// строит по нему меню и прячет кнопки, а не гадает по названию роли.
+	permissions *service.Permissions
 }
 
 // NewPublicHandler создаёт PublicHandler с переданным AuthService.
 func NewPublicHandler(authService *service.AuthService) *PublicHandler {
 	return &PublicHandler{authService: authService}
+}
+
+// WithPermissions подключает службу прав к ответу /auth/me.
+func (h *PublicHandler) WithPermissions(permissions *service.Permissions) *PublicHandler {
+	h.permissions = permissions
+	return h
 }
 
 // AuthRequest используется для входа.
@@ -220,9 +229,20 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Права отдаются вместе с профилем, а не отдельным запросом: меню рисуется
+	// в тот же момент, что и остальная шапка, и второй круг ожидания сделал бы
+	// его мигающим.
+	permissions := []string{}
+	if h.permissions != nil {
+		if effective := h.permissions.Effective(r.Context(), user); effective != nil {
+			permissions = effective
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":            user.ID,
+		"permissions":   permissions,
 		"phone":         user.Phone,
 		"email":         user.Email,
 		"role":          user.Role,

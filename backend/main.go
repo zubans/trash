@@ -72,6 +72,9 @@ func main() {
 	// Репозитории
 	userRepo := repository.New(db)
 	adminRepo := repository.NewAdminRepository(db)
+	// Справочник ролей и их прав. На него опираются и назначение ролей, и охрана
+	// каждого админского маршрута.
+	roleRepo := repository.NewRoleRepository(db)
 	// system_settings — несколько строк, читаемых на путях ценообразования,
 	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
 	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
@@ -197,7 +200,13 @@ func main() {
 		WithLedger(ledger).
 		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo).
-		WithEvents(eventRepo)
+		WithEvents(eventRepo).
+		WithRoles(roleRepo)
+	// Права: что разрешено роли, отличной от ADMIN. Кэш карты «роль → права»
+	// сбрасывается тем же, что её меняет, — страницей ролей.
+	permissions := service.NewPermissions(roleRepo)
+	roleService := service.NewRoleService(roleRepo, userRepo, adminRepo, permissions).
+		WithSessions(authService)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo).
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
@@ -300,11 +309,13 @@ func main() {
 	}()
 
 	// Middleware
-	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret)
+	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret).
+		WithPermissions(permissions)
 
 	// Обработчики
-	ph := handler.NewPublicHandler(authService)
+	ph := handler.NewPublicHandler(authService).WithPermissions(permissions)
 	ah := handler.NewAdminHandler(adminService)
+	rolh := handler.NewRoleHandler(roleService)
 	oh := handler.NewOrderHandler(orderService)
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
@@ -469,65 +480,87 @@ func main() {
 			r.Post("/executor/gifts/{id}/reveal", ach.RevealGift)
 		})
 
-		// Аутентифицированные маршруты админа
+		// Аутентифицированные маршруты админа.
+		//
+		// Группу открывает не роль ADMIN, а наличие хоть одного права в разделах
+		// панели: роль «финансист» с одной галочкой «сверка» обязана дойти до
+		// своей страницы. Что именно ей там можно, решает право на каждом
+		// маршруте — раздел плюс действие, из каталога service/permission.go.
+		// Администратор проходит любую из этих проверок: он суперпользователь, и
+		// снятая где-то галочка не должна уметь запереть его снаружи панели.
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
-			r.Use(authMiddleware.RequireAdmin)
-			r.Get("/admin/geo-alerts", egh.GetGeoAlerts)
-			r.Get("/admin/users", ah.GetUsersHandler)
-			r.Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
-			r.Post("/admin/users/{id}/verified", ah.UpdateUserVerifiedHandler)
-			r.Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
-			r.Post("/admin/users/{id}/roles", ah.UpdateUserRolesHandler)
-			r.Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
-			r.Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
-			r.Post("/admin/users/{id}/birth-date", ah.UpdateUserBirthDateHandler)
-			r.Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
-			r.Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
-			r.Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
-			r.Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)
-			r.Get("/admin/finances/withdrawals", ah.GetWithdrawalRequestsHandler)
-			r.Post("/admin/finances/withdrawals/{id}/approve", ah.ApproveWithdrawalRequestsHandler)
-			r.Post("/admin/finances/withdrawals/{id}/reject", ah.RejectWithdrawalRequestsHandler)
-			r.Get("/admin/finances/commission", ah.GetCommissionHandler)
-			r.Post("/admin/finances/commission/payout", ah.PayoutCommissionHandler)
-			r.Get("/admin/transactions", ah.GetTransactionsHandler)
-			r.Get("/admin/finances/reconciliation", ah.GetReconciliationHandler)
-			r.Get("/admin/settings", ah.GetSettingsHandler)
-			r.Post("/admin/settings", ah.UpdateSettingsHandler)
-			r.Get("/admin/support/chats", ch.GetAdminSupportChatListHandler)
-			r.Get("/admin/support/unread-summary", ch.GetAdminSupportUnreadSummaryHandler)
-			r.Post("/admin/support/chats/{chat_id}/ban", ch.BanSupportChatHandler)
-			r.Post("/admin/support/chats/{chat_id}/unban", ch.UnbanSupportChatHandler)
-			r.Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
-			r.Get("/admin/orders/active", ah.GetActiveOrdersHandler)
-			r.Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
-			r.Get("/admin/escalations", bhh.ListEscalations)
-			r.Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
-			r.Get("/admin/service-behaviors", sch.AdminListBehaviors)
-			r.Get("/admin/service-nodes", sch.AdminListNodes)
-			r.Get("/admin/service-nodes/{id}", sch.AdminGetNode)
-			r.Post("/admin/service-nodes", sch.AdminCreateNode)
-			r.Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
-			r.Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
-			r.Post("/admin/service-nodes/{id}/restore", sch.AdminRestoreNode)
-			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
-			r.Post("/admin/broadcast-email", ah.SendBroadcastEmailHandler)
-			r.Get("/admin/achievements", ach.AdminListAchievements)
-			r.Post("/admin/achievements", ach.AdminCreateAchievement)
-			r.Put("/admin/achievements/{code}", ach.AdminUpdateAchievement)
-			r.Delete("/admin/achievements/{code}", ach.AdminDeleteAchievement)
-			r.Post("/admin/achievements/{code}/restore", ach.AdminRestoreAchievement)
-			r.Post("/admin/achievements/grants/{id}/revoke", ach.AdminRevokeAchievement)
-			r.Get("/admin/users/{id}/achievements", ach.AdminUserAchievements)
-			r.Post("/admin/users/{id}/stats/recalculate", ach.AdminRecalculateStats)
-			r.Get("/admin/gifts", ach.AdminListGifts)
-			r.Put("/admin/gifts/{code}", ach.AdminSaveGift)
-			r.Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
-			r.Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
-			r.Post("/admin/mail/broadcast", ach.AdminBroadcastMail)
-			r.Get("/admin/finances/incidents", ach.AdminListIncidents)
-			r.Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
+			r.Use(authMiddleware.RequireAdminPanel)
+			can := authMiddleware.RequirePermission
+
+			r.With(can("shifts.view")).Get("/admin/geo-alerts", egh.GetGeoAlerts)
+			r.With(can("users.view")).Get("/admin/users", ah.GetUsersHandler)
+			r.With(can("users.edit")).Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
+			r.With(can("users.edit")).Post("/admin/users/{id}/verified", ah.UpdateUserVerifiedHandler)
+			// Роль пользователя меняется на его карточке, но это раздача прав,
+			// поэтому охраняется правом на роли, а не правом на пользователей.
+			r.With(can("roles.edit")).Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
+			r.With(can("roles.edit")).Post("/admin/users/{id}/roles", ah.UpdateUserRolesHandler)
+			r.With(can("users.edit")).Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
+			r.With(can("users.edit")).Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
+			r.With(can("users.edit")).Post("/admin/users/{id}/birth-date", ah.UpdateUserBirthDateHandler)
+			r.With(can("users.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
+
+			// Роли и права.
+			r.Get("/admin/permissions", rolh.GetPermissionCatalog)
+			r.With(can("roles.view")).Get("/admin/roles", rolh.ListRoles)
+			r.With(can("roles.create")).Post("/admin/roles", rolh.CreateRole)
+			r.With(can("roles.edit")).Put("/admin/roles/{code}", rolh.UpdateRole)
+			r.With(can("roles.delete")).Delete("/admin/roles/{code}", rolh.DeleteRole)
+			r.With(can("roles.view")).Get("/admin/roles/{code}/users", rolh.ListRoleUsers)
+			r.With(can("roles.edit")).Post("/admin/roles/{code}/users", rolh.AssignRole)
+			r.With(can("roles.edit")).Delete("/admin/roles/{code}/users/{user_id}", rolh.UnassignRole)
+
+			r.With(can("topups.view")).Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
+			r.With(can("topups.edit")).Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
+			r.With(can("topups.edit")).Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)
+			r.With(can("withdrawals.view")).Get("/admin/finances/withdrawals", ah.GetWithdrawalRequestsHandler)
+			r.With(can("withdrawals.edit")).Post("/admin/finances/withdrawals/{id}/approve", ah.ApproveWithdrawalRequestsHandler)
+			r.With(can("withdrawals.edit")).Post("/admin/finances/withdrawals/{id}/reject", ah.RejectWithdrawalRequestsHandler)
+			r.With(can("commission.view")).Get("/admin/finances/commission", ah.GetCommissionHandler)
+			r.With(can("commission.edit")).Post("/admin/finances/commission/payout", ah.PayoutCommissionHandler)
+			r.With(can("transactions.view")).Get("/admin/transactions", ah.GetTransactionsHandler)
+			r.With(can("reconciliation.view")).Get("/admin/finances/reconciliation", ah.GetReconciliationHandler)
+			r.With(can("settings.view")).Get("/admin/settings", ah.GetSettingsHandler)
+			r.With(can("settings.edit")).Post("/admin/settings", ah.UpdateSettingsHandler)
+			r.With(can("support_chats.view")).Get("/admin/support/chats", ch.GetAdminSupportChatListHandler)
+			r.With(can("support_chats.view")).Get("/admin/support/unread-summary", ch.GetAdminSupportUnreadSummaryHandler)
+			r.With(can("support_chats.edit")).Post("/admin/support/chats/{chat_id}/ban", ch.BanSupportChatHandler)
+			r.With(can("support_chats.edit")).Post("/admin/support/chats/{chat_id}/unban", ch.UnbanSupportChatHandler)
+			r.With(can("shifts.view")).Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
+			r.With(can("orders.view")).Get("/admin/orders/active", ah.GetActiveOrdersHandler)
+			r.With(can("orders.view")).Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
+			r.With(can("escalations.view")).Get("/admin/escalations", bhh.ListEscalations)
+			r.With(can("escalations.edit")).Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
+			r.With(can("service_catalog.view")).Get("/admin/service-behaviors", sch.AdminListBehaviors)
+			r.With(can("service_catalog.view")).Get("/admin/service-nodes", sch.AdminListNodes)
+			r.With(can("service_catalog.view")).Get("/admin/service-nodes/{id}", sch.AdminGetNode)
+			r.With(can("service_catalog.create")).Post("/admin/service-nodes", sch.AdminCreateNode)
+			r.With(can("service_catalog.edit")).Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
+			r.With(can("service_catalog.delete")).Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
+			r.With(can("service_catalog.edit")).Post("/admin/service-nodes/{id}/restore", sch.AdminRestoreNode)
+			r.With(can("releases.create")).Post("/admin/app-releases", arh.UploadReleaseHandler)
+			r.With(can("broadcasts.create")).Post("/admin/broadcast-email", ah.SendBroadcastEmailHandler)
+			r.With(can("achievements.view")).Get("/admin/achievements", ach.AdminListAchievements)
+			r.With(can("achievements.create")).Post("/admin/achievements", ach.AdminCreateAchievement)
+			r.With(can("achievements.edit")).Put("/admin/achievements/{code}", ach.AdminUpdateAchievement)
+			r.With(can("achievements.delete")).Delete("/admin/achievements/{code}", ach.AdminDeleteAchievement)
+			r.With(can("achievements.edit")).Post("/admin/achievements/{code}/restore", ach.AdminRestoreAchievement)
+			r.With(can("achievements.delete")).Post("/admin/achievements/grants/{id}/revoke", ach.AdminRevokeAchievement)
+			r.With(can("achievements.view")).Get("/admin/users/{id}/achievements", ach.AdminUserAchievements)
+			r.With(can("achievements.edit")).Post("/admin/users/{id}/stats/recalculate", ach.AdminRecalculateStats)
+			r.With(can("gifts.view")).Get("/admin/gifts", ach.AdminListGifts)
+			r.With(can("gifts.edit")).Put("/admin/gifts/{code}", ach.AdminSaveGift)
+			r.With(can("gifts.create")).Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
+			r.With(can("gifts.edit")).Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
+			r.With(can("broadcasts.create")).Post("/admin/mail/broadcast", ach.AdminBroadcastMail)
+			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
+			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
 		})
 	}
 

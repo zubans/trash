@@ -42,6 +42,16 @@ type AdminService struct {
 	// админа, — сегодня только user.verified, которое закрывает заказ верификации
 	// и оплачивает выполнившему его модератору.
 	events repository.EventRepository
+	// roleRepo — справочник ролей. Через него проверяется, что назначаемая роль
+	// вообще существует; nil означает «справочник не подключён», и тогда
+	// допустимы только четыре системные роли.
+	roleRepo repository.RoleRepository
+}
+
+// WithRoles подключает справочник ролей к назначению ролей пользователю.
+func (s *AdminService) WithRoles(roles repository.RoleRepository) *AdminService {
+	s.roleRepo = roles
+	return s
 }
 
 // WithEvents подключает outbox доменных событий к тем действиям админа, на
@@ -269,8 +279,8 @@ func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid
 // UpdateUserRole меняет роль пользователя. Смена роли вступает в силу на
 // следующем запросе, потому что авторизация читает роль из базы.
 func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.UUID, role string) error {
-	if role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
-		return errors.New("invalid role")
+	if !s.knownRole(ctx, role) {
+		return fmt.Errorf("роль не найдена: %s", role)
 	}
 
 	current, err := s.userRepo.FindByID(ctx, userID)
@@ -301,12 +311,30 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	return nil
 }
 
-// validRoles — закрытый набор ролей, которые админ может назначать.
-var validRoles = map[string]struct{}{
+// systemRoles — роли, которые есть всегда, независимо от справочника. Они
+// остаются запасным набором для процесса, поднятого без него: назначить роль,
+// которой нет в базе, нельзя, но четыре базовые обязаны работать и тогда.
+var systemRoles = map[string]struct{}{
 	repository.RoleCustomer:  {},
 	repository.RoleExecutor:  {},
 	repository.RoleModerator: {},
 	repository.RoleAdmin:     {},
+}
+
+// knownRole сообщает, есть ли такая роль в справочнике. Набор допустимых ролей
+// больше не зашит в код: администратор заводит их на странице ролей, и
+// назначение обязано следовать за справочником, а не за константами.
+func (s *AdminService) knownRole(ctx context.Context, role string) bool {
+	if s.roleRepo == nil {
+		_, ok := systemRoles[role]
+		return ok
+	}
+	if _, err := s.roleRepo.Get(ctx, role); err != nil {
+		// Роли нет — отказ. Ошибка чтения тоже приводит сюда, и это верно:
+		// назначить роль вслепую хуже, чем не назначить.
+		return false
+	}
+	return true
 }
 
 // UpdateUserRoles заменяет полный набор ролей пользователя. Он повторяет
@@ -318,8 +346,8 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 	seen := map[string]struct{}{}
 	clean := make([]string, 0, len(roles))
 	for _, role := range roles {
-		if _, ok := validRoles[role]; !ok {
-			return fmt.Errorf("invalid role: %s", role)
+		if !s.knownRole(ctx, role) {
+			return fmt.Errorf("роль не найдена: %s", role)
 		}
 		if _, dup := seen[role]; dup {
 			continue

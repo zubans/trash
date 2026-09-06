@@ -54,6 +54,11 @@ type AuthMiddleware struct {
 	// интервала опроса клиента, чтобы окно было крошечным; AUTH_CACHE_TTL_SEC=0 выключает кэш.
 	userCacheTTL time.Duration
 	userCache    sync.Map // userID -> cachedUser
+
+	// permissions решает, что разрешено роли, отличной от ADMIN. nil означает
+	// «справочник ролей не подключён»: тогда админские маршруты охраняет одна
+	// только роль ADMIN, как было до него.
+	permissions PermissionChecker
 }
 
 type cachedUser struct {
@@ -306,9 +311,70 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdmin ограничивает доступ пользователями с ролью ADMIN.
-func (m *AuthMiddleware) RequireAdmin(next http.Handler) http.Handler {
-	return RequireRole("ADMIN")(next)
+// PermissionChecker отвечает, разрешено ли пользователю действие. Ему
+// удовлетворяет *service.Permissions; middleware нужно ровно столько.
+type PermissionChecker interface {
+	Can(ctx context.Context, user *repository.User, permission string) bool
+	CanAny(ctx context.Context, user *repository.User) bool
+}
+
+// WithPermissions подключает проверку прав. Без неё RequirePermission пускает
+// только администратора — то же, что охраняло эти маршруты до появления ролей,
+// поэтому процесс, поднятый без справочника ролей, теряет гибкость, но не
+// открывается наружу.
+func (m *AuthMiddleware) WithPermissions(checker PermissionChecker) *AuthMiddleware {
+	m.permissions = checker
+	return m
+}
+
+// RequirePermission пропускает запрос, если у пользователя есть это право.
+//
+// Право — это пара «раздел панели + действие» (users.edit, gifts.create);
+// каталог живёт в service/permission.go. Администратор проходит всегда: он
+// суперпользователь, и снятая где-то галочка не должна уметь запереть его
+// снаружи собственной панели.
+func (m *AuthMiddleware) RequirePermission(permission string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := r.Context().Value(UserKey).(*repository.User)
+			if !ok || user == nil {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if user.HasRole(repository.RoleAdmin) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if m.permissions == nil || !m.permissions.Can(r.Context(), user, permission) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAdminPanel пускает к админским маршрутам всех, у кого есть хоть одно
+// право в разделах панели, а не только роль ADMIN: роль «финансист» с одной
+// галочкой «сверка» обязана дойти до своей страницы. Что именно ей там можно,
+// решает RequirePermission на каждом маршруте.
+func (m *AuthMiddleware) RequireAdminPanel(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*repository.User)
+		if !ok || user == nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if user.HasRole(repository.RoleAdmin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if m.permissions == nil || !m.permissions.CanAny(r.Context(), user) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // UserFrom возвращает аутентифицированного пользователя, сохранённого RequireAuth.

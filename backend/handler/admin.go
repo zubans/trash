@@ -498,8 +498,8 @@ func (h *AdminHandler) GetCommissionHandler(w http.ResponseWriter, r *http.Reque
 }
 
 // PayoutCommissionHandler выводит собранную комиссию из системы. Маршрут стоит
-// за RequireAdmin, поэтому вызывающий всегда админ; именно админ из запроса и
-// записывается против этой выплаты.
+// за правом commission.edit, поэтому вызывающий всегда аутентифицирован; именно
+// он из запроса и записывается против этой выплаты.
 func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Request) {
 	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {

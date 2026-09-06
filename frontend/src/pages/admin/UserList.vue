@@ -352,6 +352,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
+import { getRoles } from '../../api/roles'
 
 export default defineComponent({
   name: 'UserList',
@@ -372,18 +373,17 @@ export default defineComponent({
     const selectedRole = ref('')
     const selectedStatus = ref('')
 
+    // Фильтр и выбор основной роли берут те же роли, что и модальное окно
+    // мультиролей, — иначе роль, заведённую администратором, можно было бы
+    // подключить, но не найти по ней в списке.
     const roleOptions = computed(() => [
       { text: t('roles.all'), value: '' },
-      { text: t('roles.customer'), value: 'CUSTOMER' },
-      { text: t('roles.executor'), value: 'EXECUTOR' },
-      { text: t('roles.admin'), value: 'ADMIN' },
+      ...allRoles.value.map((role) => ({ text: role.label, value: role.value })),
     ])
 
-    const editableRoleOptions = computed(() => [
-      { text: t('roles.customer'), value: 'CUSTOMER' },
-      { text: t('roles.executor'), value: 'EXECUTOR' },
-      { text: t('roles.admin'), value: 'ADMIN' },
-    ])
+    const editableRoleOptions = computed(() =>
+      allRoles.value.map((role) => ({ text: role.label, value: role.value })),
+    )
 
     const statusOptions = computed(() => [
       { text: t('statuses.all'), value: '' },
@@ -471,13 +471,33 @@ export default defineComponent({
     const selectedUser = ref<any>(null)
     const newRole = ref<{ text: string; value: string } | string>('CUSTOMER')
 
-    // Редактирование мультиролей.
-    const allRoles = [
+    // Редактирование мультиролей. Список ролей приходит из справочника, а не
+    // зашит здесь: администратор заводит роли на странице «Роли и права», и
+    // назначать их надо там же, где назначают четыре базовые. Четвёрка ниже —
+    // запасной вариант на случай, когда справочник недоступен (нет права
+    // roles.view или упал запрос): без неё карточка пользователя осталась бы
+    // вовсе без ролей.
+    const fallbackRoles = [
       { value: 'CUSTOMER', label: 'Заказчик' },
       { value: 'EXECUTOR', label: 'Исполнитель' },
       { value: 'MODERATOR', label: 'Модератор' },
       { value: 'ADMIN', label: 'Администратор' },
     ]
+    const allRoles = ref(fallbackRoles)
+
+    const fetchRoles = async () => {
+      if (!authStore.can('roles.view')) return
+      try {
+        const loaded = await getRoles()
+        if (loaded.length) {
+          allRoles.value = loaded.map((role) => ({ value: role.code, label: role.name }))
+        }
+      } catch (err) {
+        // Оставляем запасной список: карточка пользователя должна работать и
+        // тогда, когда справочник не прочитался.
+      }
+    }
+
     const showRolesModal = ref(false)
     const newRoles = ref<string[]>([])
 
@@ -698,6 +718,7 @@ export default defineComponent({
 
     onMounted(() => {
       fetchUsers()
+      fetchRoles()
     })
 
     const getAvatarClass = (role: string) => {

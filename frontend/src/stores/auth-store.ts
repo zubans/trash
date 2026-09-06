@@ -10,6 +10,10 @@ export interface CurrentUser {
   email: string
   role: string
   roles?: string[]
+  // Действующие права — объединение прав всех ролей пользователя. Меню и
+  // кнопки строятся по ним, а не по названию роли: роли заводит администратор,
+  // и зашивать их имена в интерфейс значит ломать его при каждой новой.
+  permissions?: string[]
   status: string
   balance: number
   first_name: string
@@ -64,6 +68,20 @@ function getStoredItem(name: string): string {
 }
 
 
+// readStoredPermissions поднимает сохранённые права. Испорченное значение
+// читается как «прав нет»: меню тогда пусто до ответа /auth/me, что заметно, но
+// безопасно.
+function readStoredPermissions(): string[] {
+  try {
+    const raw = getStoredItem('permissions')
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => {
     // localStorage проверяется первым, чтобы мобильное приложение могло
@@ -87,6 +105,10 @@ export const useAuthStore = defineStore('auth', {
       // Роль, чей дашборд сейчас показан; пользователь переключает её в интерфейсе.
       activeRole: getStoredItem('activeRole') || role,
       phone: getStoredItem('phone') || getCookie('phone') || '',
+      // Права держатся и в localStorage: без этого первая отрисовка после
+      // перезагрузки страницы шла бы с пустым меню и мигала бы, когда ответ
+      // /auth/me возвращает те же права обратно.
+      permissions: readStoredPermissions(),
       currency: 'RUB',
       // null означает «ещё не загружено» и намеренно отличается от нулевого
       // баланса, чтобы интерфейс показывал заглушку, а не неверный 0.
@@ -123,6 +145,19 @@ export const useAuthStore = defineStore('auth', {
     isModerator(): boolean {
       return this.roleSet.includes('MODERATOR')
     },
+    // can отвечает на вопрос «можно ли показывать этот пункт меню, эту кнопку».
+    // Администратор проходит всё: он суперпользователь и на бэкенде тоже,
+    // поэтому интерфейс не должен прятать от него раздел, до которого он дойдёт.
+    can(): (permission: string) => boolean {
+      const isAdmin = this.roleSet.includes('ADMIN')
+      const granted = this.permissions
+      return (permission: string) => isAdmin || granted.includes(permission)
+    },
+    // Есть ли у пользователя хоть одно право в разделах панели. Именно это, а не
+    // роль ADMIN, открывает саму панель.
+    hasAdminAccess(): boolean {
+      return this.roleSet.includes('ADMIN') || this.permissions.length > 0
+    },
     // Роли, между дашбордами которых пользователь может переключаться (MODERATOR
     // делит дашборд с исполнителем, поэтому отдельной целью переключения не служит).
     switchableRoles(): string[] {
@@ -140,6 +175,10 @@ export const useAuthStore = defineStore('auth', {
       this.activeRole = role
       this.phone = phone
       this.user = null
+      // Права приходят из fetchMe; до него их нет, и старые от предыдущего
+      // пользователя показывать нельзя.
+      this.permissions = []
+      setStoredItem('permissions', '')
       storeSession(token, refreshToken)
       setCookie('token', token, 1)
       setCookie('userID', userID, 1)
@@ -161,6 +200,8 @@ export const useAuthStore = defineStore('auth', {
       this.phone = ''
       this.currency = 'RUB'
       this.user = null
+      this.permissions = []
+      setStoredItem('permissions', '')
       setStoredItem('roles', '')
       setStoredItem('activeRole', '')
       clearSession()
@@ -192,6 +233,9 @@ export const useAuthStore = defineStore('auth', {
         const loaded = this.user.roles && this.user.roles.length ? this.user.roles : this.role ? [this.role] : []
         this.roles = loaded
         setStoredItem('roles', JSON.stringify(loaded))
+        const permissions = this.user.permissions || []
+        this.permissions = permissions
+        setStoredItem('permissions', JSON.stringify(permissions))
         if (!loaded.includes(this.activeRole)) {
           this.activeRole = this.role
           setStoredItem('activeRole', this.activeRole)
