@@ -38,3 +38,14 @@ export async function getEscalations(status = 'OPEN'): Promise<BehaviorEscalatio
 export async function resolveEscalation(id: string): Promise<void> {
   await api.post(`/admin/escalations/${id}/resolve`)
 }
+
+// Верификация заказчика прямо из карточки случая — то самое решение, ради
+// которого случай и передан администратору.
+//
+// Отдельного эндпоинта у неё нет намеренно: это обычная отметка о верификации,
+// та же, что на карточке пользователя. Она публикует user.verified, а скрипт
+// услуги по этому событию закрывает заказ, платит исполнителю и снимает случай
+// с модерации — поэтому здесь нечего закрывать вручную после успеха.
+export async function verifyEscalationCustomer(customerID: string): Promise<void> {
+  await api.post(`/admin/users/${customerID}/verified`, { verified: true })
+}

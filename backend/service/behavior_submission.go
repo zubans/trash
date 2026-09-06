@@ -125,8 +125,17 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		if err := d.submissions.Record(ctx, tx, submission); err != nil {
 			return err
 		}
+		// Скрипту сообщается номер попытки в текущем круге, а не сквозной.
+		// Круг начинается заново каждый раз, когда администратор снимает заказ с
+		// модерации: в этом и смысл снятия — вернуть заказ исполнителю с полным
+		// набором попыток. Сквозной номер остаётся в строке, его читает
+		// администратор, разбирающий всю историю ввода.
+		roundAttempt, err := d.submissions.AttemptsSinceEscalation(ctx, tx, orderID)
+		if err != nil {
+			return err
+		}
 		event.Payload = map[string]interface{}{
-			"attempt":    submission.Attempt,
+			"attempt":    roundAttempt,
 			"matched":    submission.Matched,
 			"matches":    matches,
 			"mismatches": mismatched,

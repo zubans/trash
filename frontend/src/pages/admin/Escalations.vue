@@ -38,14 +38,31 @@
             {{ formatDate(item.created_at) }}
           </div>
         </div>
-        <button
-          v-if="item.status === 'OPEN'"
-          type="button"
-          class="btn-resolve"
-          @click="resolve(item)"
-        >
-          Снять с модерации
-        </button>
+        <!-- Два разных решения, поэтому две кнопки. «Верифицировать» — это
+             «документ в порядке»: заказчик подтверждается, заказ закрывается и
+             исполнитель получает вознаграждение. «Снять с модерации» ничего не
+             подтверждает — оно возвращает заказ исполнителю с новым кругом
+             попыток. -->
+        <div v-if="item.status === 'OPEN'" class="case-actions">
+          <button
+            v-if="canVerify"
+            type="button"
+            class="btn-verify"
+            :disabled="busyId === item.id"
+            @click="verify(item)"
+          >
+            <i class="ph-bold ph-seal-check"></i>
+            Верифицировать
+          </button>
+          <button
+            type="button"
+            class="btn-resolve"
+            :disabled="busyId === item.id"
+            @click="resolve(item)"
+          >
+            Снять с модерации
+          </button>
+        </div>
       </div>
 
       <p class="case-reason">{{ item.reason }}</p>
@@ -72,22 +89,25 @@
       </table>
 
       <p class="case-hint">
-        Красным — поля, не совпавшие с аккаунтом. Чтобы завершить проверку,
-        подтвердите пользователя в разделе «Пользователи»: заказ закроется сам, а
-        исполнитель получит вознаграждение. Если проверка не прошла — отмените
-        заказ.
+        Красным — поля, не совпавшие с аккаунтом. <strong>Верифицировать</strong> —
+        документ в порядке: заказчик подтверждается, заказ закрывается сам,
+        исполнитель получает вознаграждение. <strong>Снять с модерации</strong>
+        ничего не подтверждает: заказ возвращается исполнителю, и попытки ввода
+        начинаются заново. Если проверка не прошла совсем — отмените заказ.
       </p>
     </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, onMounted, ref } from 'vue'
+import { computed, defineComponent, onMounted, ref } from 'vue'
 import {
   getEscalations,
   resolveEscalation,
+  verifyEscalationCustomer,
   type BehaviorEscalation,
 } from '../../api/escalations'
+import { useAuthStore } from '../../stores/auth-store'
 
 const LABELS: Record<string, string> = {
   last_name: 'Фамилия',
@@ -99,11 +119,22 @@ const LABELS: Record<string, string> = {
 export default defineComponent({
   name: 'AdminEscalations',
   setup() {
+    const authStore = useAuthStore()
+
     const escalations = ref<BehaviorEscalation[]>([])
     const status = ref('OPEN')
     const loading = ref(false)
     const errorMsg = ref('')
     const successMsg = ref('')
+    // Какой случай сейчас в работе: обе кнопки на карточке блокируются вместе,
+    // чтобы двойной клик не отправил и верификацию, и снятие.
+    const busyId = ref('')
+
+    // Верификация — это правка пользователя, и охраняется она правом на
+    // пользователей, а не правом на модерацию. У модератора, которому выдали
+    // только разбор проверок, кнопки не будет: сервер такой запрос всё равно
+    // отклонит, и показывать её значило бы обещать несуществующее.
+    const canVerify = computed(() => authStore.can('users.edit'))
 
     const load = async () => {
       loading.value = true
@@ -120,12 +151,38 @@ export default defineComponent({
     const resolve = async (item: BehaviorEscalation) => {
       successMsg.value = ''
       errorMsg.value = ''
+      busyId.value = item.id
       try {
         await resolveEscalation(item.id)
-        successMsg.value = 'Случай снят с модерации'
+        successMsg.value = 'Случай снят с модерации: заказ вернулся исполнителю, попытки начинаются заново'
         await load()
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Не удалось закрыть случай'
+      } finally {
+        busyId.value = ''
+      }
+    }
+
+    // Верифицировать — решение по существу: документ в порядке. Дальше всё
+    // делает скрипт услуги по событию user.verified: закрывает заказ, платит
+    // исполнителю и снимает случай с модерации, поэтому отдельно закрывать его
+    // здесь не нужно — список просто перезагружается.
+    const verify = async (item: BehaviorEscalation) => {
+      successMsg.value = ''
+      errorMsg.value = ''
+      const name = item.customer_name || 'заказчика'
+      if (!window.confirm(`Верифицировать ${name}? Заказ закроется, исполнитель получит вознаграждение.`)) {
+        return
+      }
+      busyId.value = item.id
+      try {
+        await verifyEscalationCustomer(item.customer_id)
+        successMsg.value = 'Заказчик верифицирован, заказ закрыт'
+        await load()
+      } catch (err: any) {
+        errorMsg.value = err.response?.data || 'Не удалось верифицировать заказчика'
+      } finally {
+        busyId.value = ''
       }
     }
 
@@ -146,7 +203,21 @@ export default defineComponent({
 
     onMounted(load)
 
-    return { escalations, status, loading, errorMsg, successMsg, load, resolve, fieldsOf, labelFor, formatDate }
+    return {
+      escalations,
+      status,
+      loading,
+      errorMsg,
+      successMsg,
+      busyId,
+      canVerify,
+      load,
+      resolve,
+      verify,
+      fieldsOf,
+      labelFor,
+      formatDate,
+    }
   },
 })
 </script>
@@ -267,6 +338,13 @@ export default defineComponent({
   color: #64748b;
 }
 
+.case-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
 .btn-resolve {
   border: 1px solid #e2e8f0;
   background: #fff;
@@ -277,6 +355,29 @@ export default defineComponent({
   color: #475569;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* Заливкой выделена именно верификация: из двух решений это то, ради которого
+   случай попал к администратору. */
+.btn-verify {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: #047857;
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-verify:disabled,
+.btn-resolve:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .case-reason {

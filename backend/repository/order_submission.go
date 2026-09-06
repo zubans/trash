@@ -63,6 +63,16 @@ type SubmissionRepository interface {
 	Record(ctx context.Context, q Querier, submission *OrderSubmission) error
 	CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error)
 	ListForOrder(ctx context.Context, orderID uuid.UUID) ([]*OrderSubmission, error)
+	// AttemptsSinceEscalation — сколько попыток сделано после последней
+	// закрытой администратором эскалации, считая текущую.
+	//
+	// Это номер попытки «в текущем круге», и именно его видит скрипт. Сама
+	// строка хранит сквозной номер: он нужен администратору, который смотрит
+	// всю историю ввода по заказу. Без разделения снятие с модерации не
+	// возвращало заказ исполнителю по-настоящему — сквозной счётчик уже
+	// перевалил за предел попыток, и первая же следующая отправка уходила на
+	// модерацию снова.
+	AttemptsSinceEscalation(ctx context.Context, q Querier, orderID uuid.UUID) (int, error)
 
 	// Escalate открывает эскалацию по заказу или ничего не делает, когда одна уже
 	// открыта: поведение, спрашивающее дважды, описывает тот же случай.
@@ -111,6 +121,23 @@ func (r *submissionRepo) Record(ctx context.Context, q Querier, submission *Orde
     `, submission.ID, submission.OrderID, submission.ExecutorID,
 		submission.Matched, fields, pq.Array(submission.Mismatches),
 	).Scan(&submission.Attempt, &submission.CreatedAt)
+}
+
+// AttemptsSinceEscalation считает отправки, сделанные после того, как
+// администратор в последний раз снял заказ с модерации. Пока модерации не было,
+// это все отправки по заказу, поэтому первый круг ничем не отличается от
+// прежнего поведения.
+func (r *submissionRepo) AttemptsSinceEscalation(ctx context.Context, q Querier, orderID uuid.UUID) (int, error) {
+	var count int
+	err := r.exec(q).QueryRowContext(ctx, `
+        SELECT COUNT(*) FROM order_submissions
+        WHERE order_id = $1
+          AND created_at > COALESCE(
+              (SELECT MAX(resolved_at) FROM behavior_escalations
+                WHERE order_id = $1 AND status = 'RESOLVED' AND resolved_at IS NOT NULL),
+              '-infinity'::timestamptz)
+    `, orderID).Scan(&count)
+	return count, err
 }
 
 func (r *submissionRepo) CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error) {

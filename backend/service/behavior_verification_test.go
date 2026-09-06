@@ -249,6 +249,24 @@ func (s *verificationSubmissions) Record(ctx context.Context, q repository.Queri
 	return nil
 }
 
+// AttemptsSinceEscalation повторяет правило хранилища: круг попыток начинается
+// заново после того, как администратор снял заказ с модерации.
+func (s *verificationSubmissions) AttemptsSinceEscalation(ctx context.Context, q repository.Querier, orderID uuid.UUID) (int, error) {
+	var since time.Time
+	for _, e := range s.escalations {
+		if e.OrderID == orderID && e.Status == repository.EscalationResolved && e.ResolvedAt != nil && e.ResolvedAt.After(since) {
+			since = *e.ResolvedAt
+		}
+	}
+	count := 0
+	for _, existing := range s.submissions {
+		if existing.OrderID == orderID && existing.CreatedAt.After(since) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (s *verificationSubmissions) CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error) {
 	count := 0
 	for _, submission := range s.submissions {
@@ -294,10 +312,15 @@ func (s *verificationSubmissions) ListEscalations(ctx context.Context, status st
 	return s.escalations, nil
 }
 
+// Отметка времени ставится так же, как её ставит SQL (resolved_at = now()): по
+// ней считается круг попыток, поэтому фейк без неё показывал бы поведение,
+// которого у хранилища нет.
 func (s *verificationSubmissions) ResolveEscalation(ctx context.Context, id, adminID uuid.UUID) error {
 	for _, escalation := range s.escalations {
 		if escalation.ID == id {
 			escalation.Status = repository.EscalationResolved
+			now := time.Now()
+			escalation.ResolvedAt = &now
 			return nil
 		}
 	}
@@ -308,6 +331,8 @@ func (s *verificationSubmissions) ResolveByOrder(ctx context.Context, q reposito
 	for _, escalation := range s.escalations {
 		if escalation.OrderID == orderID {
 			escalation.Status = repository.EscalationResolved
+			now := time.Now()
+			escalation.ResolvedAt = &now
 		}
 	}
 	return nil
@@ -794,6 +819,109 @@ func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
 	}
 	if w.customer.Verified {
 		t.Error("the customer was verified while the case was with an administrator")
+	}
+}
+
+// Снятие с модерации возвращает заказ исполнителю по-настоящему: круг попыток
+// начинается заново.
+//
+// Раньше номер попытки был сквозным по заказу, поэтому после снятия он уже
+// превышал предел, и первая же следующая отправка уходила на модерацию снова —
+// «возврат исполнителю» существовал только на бумаге. Модератор получал одну
+// попытку вместо полного круга, а верные данные с первого раза всё равно
+// закрывали заказ, из-за чего дефект и не бросался в глаза.
+func TestResolvingEscalationGivesTheExecutorAFreshRound(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+
+	order := w.acceptedVerificationOrder(t)
+	wrong := passportOf(w.customer)
+	wrong["birth_date"] = "1980-01-01"
+
+	// Круг первый: предупреждение, затем модерация.
+	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	escalating, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	if err != nil {
+		t.Fatalf("second submit: %v", err)
+	}
+	if !escalating.Escalated {
+		t.Fatal("the case was not handed to an administrator")
+	}
+
+	// Администратор снимает заказ с модерации, не верифицируя заказчика:
+	// «разберитесь и введите заново».
+	escalations, _ := w.submissions.ListEscalations(ctx, repository.EscalationOpen, 0)
+	if len(escalations) == 0 {
+		t.Fatal("no escalation to resolve")
+	}
+	if err := w.submissions.ResolveEscalation(ctx, escalations[0].ID, uuid.New()); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// Круг второй. Первая попытка обязана быть предупреждением, а не мгновенной
+	// повторной эскалацией: иначе снятие с модерации ничего не даёт.
+	again, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	if err != nil {
+		t.Fatalf("submit after resolve: %v", err)
+	}
+	if again.Escalated {
+		t.Fatal("после снятия с модерации первая же попытка снова ушла администратору: круг попыток не начался заново")
+	}
+	if again.Attempt != 3 {
+		t.Errorf("сквозной номер попытки = %d, ожидался 3: история ввода должна остаться сплошной", again.Attempt)
+	}
+
+	// А вторая — снова модерация: предел попыток действует в каждом круге.
+	repeated, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	if err != nil {
+		t.Fatalf("second submit after resolve: %v", err)
+	}
+	if !repeated.Escalated {
+		t.Error("во втором круге предел попыток не сработал")
+	}
+
+	// Вся история ввода на месте — её и разбирает администратор.
+	attempts, _ := w.submissions.ListForOrder(ctx, order.ID)
+	if len(attempts) != 4 {
+		t.Errorf("stored %d attempts, want 4", len(attempts))
+	}
+}
+
+// Верные данные, введённые в новом круге, закрывают заказ без подтверждения
+// заказчиком: подтверждает совпадение с учётной записью, а не заказчик.
+func TestFreshRoundStillCompletesTheOrderOnMatch(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+
+	order := w.acceptedVerificationOrder(t)
+	wrong := passportOf(w.customer)
+	wrong["birth_date"] = "1980-01-01"
+	for i := 0; i < 2; i++ {
+		if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+			t.Fatalf("submit %d: %v", i+1, err)
+		}
+	}
+	escalations, _ := w.submissions.ListEscalations(ctx, repository.EscalationOpen, 0)
+	if err := w.submissions.ResolveEscalation(ctx, escalations[0].ID, uuid.New()); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer))
+	if err != nil {
+		t.Fatalf("submit correct data: %v", err)
+	}
+	if !result.Matched {
+		t.Fatal("верные данные не совпали")
+	}
+
+	closed, _ := w.orders.GetOrderByID(ctx, order.ID)
+	if closed.Status != repository.OrderStatusCompleted {
+		t.Errorf("order status = %s, want COMPLETED: заказчик ничего не подтверждает", closed.Status)
+	}
+	if !w.customer.Verified {
+		t.Error("заказчик не верифицирован")
 	}
 }
 
