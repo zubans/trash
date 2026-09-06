@@ -88,6 +88,18 @@ type AdminRepository interface {
 	CountAdmins(ctx context.Context) (int, error)
 	GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error)
 	TransactionFacets(ctx context.Context) (TransactionFacets, error)
+	// GetUserTransactions — проводки одного пользователя, новые сверху.
+	//
+	// Отдельный метод, а не GetTransactions с поиском по телефону: поиск там
+	// нестрогий (LIKE по цифрам), поэтому «792» подтянул бы чужие проводки, а
+	// на карточке пользователя показывать чужие деньги нельзя. Здесь отбор идёт
+	// по user_id.
+	GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, int, error)
+	// GetUserOrders — заказы пользователя в обеих ролях и всех статусах, новые
+	// сверху. Тот, кто и заказывает, и исполняет, видит здесь одну общую ленту:
+	// на карточке спрашивают «что у этого человека было», а не «что у него было
+	// в роли заказчика».
+	GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*AdminOrder, int, error)
 	GetActiveShifts(ctx context.Context) ([]*AdminShift, error)
 	GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
 	GetCompletedOrders(ctx context.Context, f CompletedOrdersFilter) ([]*AdminOrder, int, error)
@@ -614,12 +626,113 @@ func (r *adminRepo) GetActiveShifts(ctx context.Context) ([]*AdminShift, error) 
 	return shifts, rows.Err()
 }
 
+// GetUserTransactions отдаёт проводки одного пользователя. Отбор строгий, по
+// user_id: карточка пользователя показывает его деньги и только его.
+func (r *adminRepo) GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, int, error) {
+	limit, offset = clampPage(limit, offset)
+
+	var total int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM transactions WHERE user_id = $1`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount,
+		       COALESCE(t.counterparty, ''), t.admin_id, t.created_at
+		FROM transactions t
+		JOIN users u ON t.user_id = u.id
+		WHERE t.user_id = $1
+		ORDER BY t.created_at DESC
+		LIMIT $2 OFFSET $3`, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	txs := make([]*Transaction, 0, limit)
+	for rows.Next() {
+		var tx Transaction
+		if err := rows.Scan(&tx.ID, &tx.UserID, &tx.UserPhone, &tx.OrderID, &tx.Type, &tx.Amount,
+			&tx.Counterparty, &tx.AdminID, &tx.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		// Знак берётся из единственного объявления соглашения, а не выводится
+		// на клиенте заново.
+		tx.Direction, _ = LedgerSign(TransactionType(tx.Type))
+		txs = append(txs, &tx)
+	}
+	return txs, total, rows.Err()
+}
+
+// GetUserOrders отдаёт заказы пользователя в обеих ролях и всех статусах.
+//
+// Телефон исполнителя приходит через LEFT JOIN и у заказа в поиске равен NULL,
+// поэтому он сводится к пустой строке в самом запросе: NULL, прочитанный в
+// обычную строку, — ошибка драйвера, а не пустое значение.
+func (r *adminRepo) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*AdminOrder, int, error) {
+	limit, offset = clampPage(limit, offset)
+
+	var total int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM orders WHERE customer_id = $1 OR executor_id = $1`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
+		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
+		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
+		       cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)
+		FROM orders o
+		JOIN users cu ON o.customer_id = cu.id
+		LEFT JOIN users eu ON o.executor_id = eu.id
+		JOIN service_nodes sn ON sn.id = o.service_variant_id
+		WHERE o.customer_id = $1 OR o.executor_id = $1
+		ORDER BY o.created_at DESC
+		LIMIT $2 OFFSET $3`, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	orders := make([]*AdminOrder, 0, limit)
+	for rows.Next() {
+		var o AdminOrder
+		if err := rows.Scan(
+			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
+			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
+			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
+			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
+		); err != nil {
+			return nil, 0, err
+		}
+		orders = append(orders, &o)
+	}
+	return orders, total, rows.Err()
+}
+
+// clampPage приводит страницу к разумным границам: без верхнего предела один
+// запрос мог бы попросить всю историю пользователя целиком.
+func clampPage(limit, offset int) (int, int) {
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 func (r *adminRepo) GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error) {
 	query := `
 		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
 		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, eu.phone, COALESCE(sn.name->>'ru', sn.code)
+		       cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)
 		FROM orders o
 		JOIN users cu ON o.customer_id = cu.id
 		LEFT JOIN users eu ON o.executor_id = eu.id

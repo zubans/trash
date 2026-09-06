@@ -505,6 +505,11 @@ func main() {
 			r.With(can("users.edit")).Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
 			r.With(can("users.edit")).Post("/admin/users/{id}/birth-date", ah.UpdateUserBirthDateHandler)
 			r.With(can("users.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
+			// Истории с карточки пользователя. Охраняются правом на тот раздел,
+			// который они показывают, а не правом на пользователей: кто не допущен
+			// к журналу проводок, не должен читать его и здесь.
+			r.With(can("transactions.view")).Get("/admin/users/{id}/transactions", ah.GetUserTransactionsHandler)
+			r.With(can("orders.view")).Get("/admin/users/{id}/orders", ah.GetUserOrdersHandler)
 
 			// Роли и права.
 			r.Get("/admin/permissions", rolh.GetPermissionCatalog)

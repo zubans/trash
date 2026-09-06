@@ -124,6 +124,16 @@
                   <i class="ph-bold ph-map-pin"></i> Редактировать адрес
                 </button>
                 <div class="menu-divider"></div>
+                <!-- История. Пункты гейтятся правом на тот раздел, который они
+                     показывают: сервер откажет тому, кто не допущен к журналу
+                     проводок, и обещать ему пункт меню незачем. -->
+                <button v-if="canSeeTransactions" class="dropdown-item" @click="openHistory(u, 'transactions')">
+                  <i class="ph-bold ph-arrows-left-right"></i> История проводок
+                </button>
+                <button v-if="canSeeOrders" class="dropdown-item" @click="openHistory(u, 'orders')">
+                  <i class="ph-bold ph-package"></i> История заказов
+                </button>
+                <div v-if="canSeeTransactions || canSeeOrders" class="menu-divider"></div>
                 <button class="dropdown-item" @click="toggleUserVerified(u)">
                   <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
                   {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
@@ -201,6 +211,12 @@
           <button @click="openNameModal(u); cardMenuId = null"><i class="ph-bold ph-user"></i> ФИО</button>
           <button @click="openRolesModal(u); cardMenuId = null"><i class="ph-bold ph-user-gear"></i> Роли</button>
           <button @click="openAddressModal(u); cardMenuId = null"><i class="ph-bold ph-map-pin"></i> Адрес</button>
+          <button v-if="canSeeTransactions" @click="openHistory(u, 'transactions'); cardMenuId = null">
+            <i class="ph-bold ph-arrows-left-right"></i> Проводки
+          </button>
+          <button v-if="canSeeOrders" @click="openHistory(u, 'orders'); cardMenuId = null">
+            <i class="ph-bold ph-package"></i> Заказы
+          </button>
           <button @click="toggleUserVerified(u); cardMenuId = null">
             <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
             {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
@@ -343,6 +359,13 @@
         />
       </div>
     </va-modal>
+
+    <!-- История пользователя: проводки и заказы, с переключением вкладок. -->
+    <UserHistoryModal
+      v-model="showHistoryModal"
+      :user="historyUser"
+      :initial-tab="historyTab"
+    />
   </div>
 </template>
 
@@ -353,15 +376,33 @@ import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import { getRoles } from '../../api/roles'
+import UserHistoryModal from './UserHistoryModal.vue'
 
 export default defineComponent({
   name: 'UserList',
-  components: { AddressAutocomplete },
+  components: { AddressAutocomplete, UserHistoryModal },
   setup() {
     const { t } = useI18n()
     const authStore = useAuthStore()
 
     const users = ref<any[]>([])
+
+    // История пользователя. Оба пункта меню открывают одно окно, отличается
+    // лишь вкладка, на которой оно открывается.
+    const showHistoryModal = ref(false)
+    const historyUser = ref<any | null>(null)
+    const historyTab = ref<'transactions' | 'orders'>('transactions')
+
+    // Права те же, что охраняют эндпоинты историй: раздел проводок и раздел
+    // заказов, а не право на пользователей.
+    const canSeeTransactions = computed(() => authStore.can('transactions.view'))
+    const canSeeOrders = computed(() => authStore.can('orders.view'))
+
+    const openHistory = (user: any, tab: 'transactions' | 'orders') => {
+      historyUser.value = user
+      historyTab.value = tab
+      showHistoryModal.value = true
+    }
     // Панель действий какой мобильной карточки открыта (null — ни одной).
     const cardMenuId = ref<string | null>(null)
     const totalUsers = ref(0)
@@ -742,6 +783,12 @@ export default defineComponent({
     return {
       users,
       cardMenuId,
+      showHistoryModal,
+      historyUser,
+      historyTab,
+      canSeeTransactions,
+      canSeeOrders,
+      openHistory,
       totalUsers,
       page,
       limit,

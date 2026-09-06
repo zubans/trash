@@ -526,6 +526,54 @@ func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Re
 }
 
 // GetTransactionsHandler отдаёт аудит-логи транзакций.
+// GetUserTransactionsHandler отдаёт проводки одного пользователя — историю,
+// которую открывают с его карточки.
+func (h *AdminHandler) GetUserTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+	limit, offset := pageParams(r)
+	txs, total, err := h.adminService.GetUserTransactions(r.Context(), userID, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if txs == nil {
+		txs = []*repository.Transaction{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"transactions": txs,
+		"total":        total,
+	})
+}
+
+// GetUserOrdersHandler отдаёт заказы пользователя в обеих ролях — историю,
+// которую открывают с его карточки.
+func (h *AdminHandler) GetUserOrdersHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid user ID", http.StatusBadRequest)
+		return
+	}
+	limit, offset := pageParams(r)
+	orders, total, err := h.adminService.GetUserOrders(r.Context(), userID, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if orders == nil {
+		orders = []*repository.AdminOrder{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"orders": orders,
+		"total":  total,
+	})
+}
+
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	q := r.URL.Query()

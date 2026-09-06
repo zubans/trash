@@ -679,6 +679,18 @@ func (s *AdminService) GetTransactions(ctx context.Context, f repository.Transac
 	return s.adminRepo.GetTransactions(ctx, f)
 }
 
+// GetUserTransactions возвращает проводки одного пользователя для его карточки.
+func (s *AdminService) GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Transaction, int, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetUserTransactions(ctx, userID, limit, offset)
+}
+
+// GetUserOrders возвращает заказы пользователя в обеих ролях для его карточки.
+func (s *AdminService) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.AdminOrder, int, error) {
+	limit, offset = page(limit, offset)
+	return s.adminRepo.GetUserOrders(ctx, userID, limit, offset)
+}
+
 // TransactionFacets возвращает значения, которые предлагают фильтры журнала.
 func (s *AdminService) TransactionFacets(ctx context.Context) (repository.TransactionFacets, error) {
 	return s.adminRepo.TransactionFacets(ctx)

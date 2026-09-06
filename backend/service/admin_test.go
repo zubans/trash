@@ -73,6 +73,14 @@ func (m *mockAdminRepo) GetTransactions(ctx context.Context, f repository.Transa
 	return nil, 0, nil
 }
 
+func (m *mockAdminRepo) GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Transaction, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockAdminRepo) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.AdminOrder, int, error) {
+	return nil, 0, nil
+}
+
 func (m *mockAdminRepo) TransactionFacets(ctx context.Context) (repository.TransactionFacets, error) {
 	return repository.TransactionFacets{}, nil
 }
