@@ -894,11 +894,12 @@ export default defineComponent({
       initial: [],
       fetcher: async () => {
         // Сервер привязывает поиск к сохранённой рабочей позиции исполнителя;
-        // lat/lon шлются только как запасной вариант. `radius` (а не
-        // `radius_meters`) — то имя, которое читает бэкенд, иначе он молча
-        // откатывается к умолчанию в 2 км.
+        // lat/lon шлются только как запасной вариант. Радиус не передаётся
+        // намеренно: его задаёт настройка map_overview_radius_km, та же, по
+        // которой строится карта. Раньше здесь стояли зашитые 5 км, и список
+        // молча расходился с зоной взятия — заказ вне круга брался нажатием.
         const res = await api.get('/executor/orders/nearby', {
-          params: { lat: currentLat.value, lon: currentLon.value, radius: 5000 },
+          params: { lat: currentLat.value, lon: currentLon.value },
         })
         return res.data || []
       },

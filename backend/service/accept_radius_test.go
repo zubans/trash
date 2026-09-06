@@ -219,16 +219,49 @@ func TestAcceptRadiusFollowsSetting(t *testing.T) {
 	if err := settingsRepo.UpdateSettings(ctx, map[string]string{service.SettingAcceptRadiusKM: "10"}); err != nil {
 		t.Fatalf("update setting: %v", err)
 	}
-	// Возврат именно в «0», а не в пустую строку: UpdateSettings пустые значения
-	// пропускает. Ноль читается как «не задано» — действует ACCEPT_RADIUS_KM, а
-	// за ним умолчание.
+	// Возврат к посеянному миграцией значению, а не к пустой строке или нулю:
+	// пустое значение UpdateSettings пропускает, а ноль запрещён (он читался бы
+	// как «не задано» и расходился бы с тем, что показано в поле). Без возврата
+	// 10 км осели бы в общей базе и уронили соседние тесты на следующем прогоне.
 	t.Cleanup(func() {
-		if err := settingsRepo.UpdateSettings(ctx, map[string]string{service.SettingAcceptRadiusKM: "0"}); err != nil {
+		if err := settingsRepo.UpdateSettings(ctx, map[string]string{service.SettingAcceptRadiusKM: "0.5"}); err != nil {
 			t.Errorf("не удалось вернуть %s: %v", service.SettingAcceptRadiusKM, err)
 		}
 	})
 
 	if err := f.orderService.Accept(ctx, f.orderID, f.executorID); err != nil {
 		t.Fatalf("с радиусом 10 км заказ в %.2f км должен браться, получено: %v", f.distanceKM, err)
+	}
+}
+
+// Радиусы в админке обязаны быть положительными: ноль читался бы кодом как «не
+// задано», поле показывало бы 0, а действовало бы умолчание. Настройка, которой
+// нельзя верить на слово, хуже отсутствующей.
+func TestRadiusSettingsRejectZero(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	adminService := service.NewAdminService(
+		repository.New(db),
+		repository.NewAdminRepository(db),
+		repository.NewSettingsRepository(db),
+		"test-secret-key-12345",
+		nil,
+	)
+
+	for _, key := range []string{service.SettingAcceptRadiusKM, service.SettingMapOverviewRadiusKM} {
+		if err := adminService.UpdateSettings(ctx, map[string]string{key: "0"}); err == nil {
+			t.Fatalf("нулевой %s должен быть отвергнут", key)
+		}
+		if err := adminService.UpdateSettings(ctx, map[string]string{key: "-1"}); err == nil {
+			t.Fatalf("отрицательный %s должен быть отвергнут", key)
+		}
+	}
+
+	// Обзор сверху ограничен: круг в тысячу километров превратил бы экран,
+	// открытый у каждого исполнителя, в чтение всей таблицы заказов.
+	if err := adminService.UpdateSettings(ctx, map[string]string{service.SettingMapOverviewRadiusKM: "500"}); err == nil {
+		t.Fatal("обзор в 500 км должен быть отвергнут")
 	}
 }

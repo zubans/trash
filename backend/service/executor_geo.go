@@ -64,26 +64,38 @@ type SetLocationResponse struct {
 	Lon                      float64 `json:"lon"`
 }
 
-// SettingAcceptRadiusKM — радиус, внутри которого исполнителю разрешено взять
-// заказ, в километрах. Настройка живёт в админке, потому что это рабочий
-// параметр рынка, а не свойство сборки: он зависит от плотности исполнителей в
-// городе и меняется чаще, чем выкатывается образ.
-const SettingAcceptRadiusKM = "accept_radius_km"
+// Гео-радиусы — настройки, а не константы сборки. Оба заводит миграция 049,
+// оба правятся в админке: это рабочие параметры рынка, они зависят от плотности
+// исполнителей в городе и меняются чаще, чем выкатывается образ.
+const (
+	// SettingAcceptRadiusKM — насколько далеко исполнитель может взять заказ.
+	SettingAcceptRadiusKM = "accept_radius_km"
+	// SettingMapOverviewRadiusKM — что показывать вокруг: радиус, в котором
+	// заказы попадают на карту и в список «Заказы поблизости».
+	SettingMapOverviewRadiusKM = "map_overview_radius_km"
+)
 
-// defaultAcceptRadiusKM — значение, когда не задано ни настройки, ни переменной
-// окружения.
-const defaultAcceptRadiusKM = 0.5
+// Умолчания — последний рубеж, если строки настройки нет (база старше миграции
+// 049) и окружение молчит. Они повторяют значения, действовавшие до переноса.
+const (
+	defaultAcceptRadiusKM      = 0.5
+	defaultMapOverviewRadiusKM = 10.0
+	// maxMapOverviewRadiusKM ограничивает обзор сверху: запрос читает заказы в
+	// круге, и настройка в тысячу километров превратила бы экран, открытый у
+	// каждого исполнителя, в чтение всей таблицы заказов.
+	maxMapOverviewRadiusKM = 50.0
+)
 
 // resolveAcceptRadiusKM возвращает действующий радиус взятия заказа.
 //
-// Источник один на всех: и флаг can_accept на карте, и проверка на сервере при
-// взятии заказа читают эту функцию. Разойтись они не могут — а разойдясь,
-// давали бы ровно ту картину, с которой всё началось: карта пишет «нельзя
-// взять», а сервер заказ отдаёт.
+// Источник один на всех: и флаг can_accept на карте, и такой же флаг в списке
+// на дашборде, и проверка на сервере при взятии заказа читают эту функцию.
+// Разойтись они не могут — а разойдясь, давали бы ровно ту картину, с которой
+// всё началось: карта пишет «нельзя взять», а сервер заказ отдаёт.
 //
 // Порядок источников: настройка из админки, затем ACCEPT_RADIUS_KM из
 // окружения, затем умолчание. Окружение остаётся ради установок, поднятых до
-// появления настройки.
+// появления настройки, и однажды его можно будет убрать.
 func resolveAcceptRadiusKM(ctx context.Context, settings repository.SettingsRepository) float64 {
 	if settings != nil {
 		if v := settingFloat(ctx, settings, SettingAcceptRadiusKM, 0); v > 0 {
@@ -103,6 +115,25 @@ func acceptRadiusFromEnv() float64 {
 		return defaultAcceptRadiusKM
 	}
 	return val
+}
+
+// resolveMapOverviewRadiusKM возвращает радиус обзора — тот, в котором заказы
+// показываются. Он всегда не меньше радиуса взятия: обзор уже зоны взятия
+// означал бы, что исполнителю не показывают то, что ему разрешено брать.
+func resolveMapOverviewRadiusKM(ctx context.Context, settings repository.SettingsRepository) float64 {
+	radius := defaultMapOverviewRadiusKM
+	if settings != nil {
+		if v := settingFloat(ctx, settings, SettingMapOverviewRadiusKM, 0); v > 0 {
+			radius = v
+		}
+	}
+	if radius > maxMapOverviewRadiusKM {
+		radius = maxMapOverviewRadiusKM
+	}
+	if accept := resolveAcceptRadiusKM(ctx, settings); radius < accept {
+		radius = accept
+	}
+	return radius
 }
 
 func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UUID, req SetLocationRequest) (*SetLocationResponse, error) {
@@ -300,8 +331,8 @@ func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.U
 }
 
 func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
-	// Ищем ожидающие заказы в радиусе 10 км
-	const overviewRadiusKM = 10.0
+	// Ищем ожидающие заказы в радиусе обзора (настройка map_overview_radius_km).
+	overviewRadiusKM := resolveMapOverviewRadiusKM(ctx, s.settingsRepo)
 	acceptRadiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
 
 	// Ограничиваем поиск в базе, а не в этом цикле. Чтение каждого заказа в

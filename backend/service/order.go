@@ -1216,7 +1216,12 @@ func (s *OrderService) FindNearbyOrders(ctx context.Context, lat, lon float64, r
 // км) молча расходился с радиусом взятия, и заказ вне круга брался обычным
 // нажатием. Поля добавлены к прежнему ответу, а не заменяют его, поэтому
 // установленные APK, которые о них не знают, продолжают работать как прежде.
-func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64, radiusMeters int) ([]*repository.MapOrder, error) {
+// Радиус задаёт сервер, а не запрос: это настройка map_overview_radius_km, та
+// же, по которой строится карта. Клиент раньше присылал своё число (дашборд —
+// зашитые 5 км, а принять эндпоинт был готов до 50), и именно поэтому список
+// показывал то, чего взять нельзя.
+func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]*repository.MapOrder, error) {
+	radiusMeters := int(resolveMapOverviewRadiusKM(ctx, s.settingsRepo) * 1000)
 	// Привязываем поиск к авторитетной сохранённой позиции исполнителя — той же
 	// точке, что используют карта и проверка радиуса принятия. Координаты клиента
 	// (GPS устройства, который может отсутствовать или падать в базовую точку) —

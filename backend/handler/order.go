@@ -254,7 +254,13 @@ func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(orders)
 }
 
-// GetNearbyOrdersHandler обслуживает GET /executor/orders/nearby?lat=...&lon=...&radius=2000.
+// GetNearbyOrdersHandler обслуживает GET /executor/orders/nearby?lat=...&lon=...
+//
+// Параметр radius больше не читается: радиус обзора задаёт настройка
+// map_overview_radius_km, та же, по которой строится карта. Установленные APK
+// продолжают его присылать — он просто игнорируется, и это не ломает их, а
+// приводит к тому же ответу, что у свежего клиента. Координаты из запроса тоже
+// лишь запасной вариант: сервис берёт сохранённую рабочую позицию.
 func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
@@ -262,13 +268,13 @@ func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	lat, lon, radius, err := parseCoords(r)
+	lat, lon, err := parseCoords(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	orders, err := h.orderService.FindNearbyOrdersForExecutor(r.Context(), user.ID, lat, lon, radius)
+	orders, err := h.orderService.FindNearbyOrdersForExecutor(r.Context(), user.ID, lat, lon)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -278,22 +284,15 @@ func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(orders)
 }
 
-func parseCoords(r *http.Request) (float64, float64, int, error) {
+func parseCoords(r *http.Request) (float64, float64, error) {
 	var lat, lon float64
-	var radius int
 	if _, err := fmt.Sscanf(r.URL.Query().Get("lat"), "%f", &lat); err != nil {
-		return 0, 0, 0, fmt.Errorf("invalid lat")
+		return 0, 0, fmt.Errorf("invalid lat")
 	}
 	if _, err := fmt.Sscanf(r.URL.Query().Get("lon"), "%f", &lon); err != nil {
-		return 0, 0, 0, fmt.Errorf("invalid lon")
+		return 0, 0, fmt.Errorf("invalid lon")
 	}
-	if _, err := fmt.Sscanf(r.URL.Query().Get("radius"), "%d", &radius); err != nil {
-		radius = 2000
-	}
-	if radius <= 0 || radius > 50000 {
-		radius = 2000
-	}
-	return lat, lon, radius, nil
+	return lat, lon, nil
 }
 
 // Псевдонимы имён методов, которых ожидает main.go.

@@ -123,7 +123,89 @@
           </div>
         </div>
 
-        <!-- Карточка 2: SLA и Лимиты (Исправлено выравнивание инпутов!) -->
+        <!-- Карточка 2: Гео и радиусы. Отдельно от штрафов намеренно: это три
+             разные величины, которые постоянно путают между собой, и стоять они
+             должны рядом, чтобы разницу было видно. -->
+        <div class="settings-card">
+          <div class="section-header">
+            <div class="section-icon icon-neutral">
+              <i class="ph-fill ph-map-pin-area"></i>
+            </div>
+            <div class="section-title-group">
+              <div class="section-title">Гео и радиусы</div>
+              <div class="section-desc">
+                Три независимых расстояния: как далеко платформа сама назначает заказ,
+                как далеко исполнитель может взять его руками и что ему показывать вокруг.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">{{ $t('settings.autoMatchRadiusKm') }}</label>
+                <div class="input-hint">
+                  Насколько далеко платформа сама назначает заказ исполнителю. С радиусом
+                  взятия не связан: здесь работу привозят, там исполнитель едет сам.
+                </div>
+              </div>
+              <div class="input-wrapper has-prefix">
+                <span class="input-prefix">км</span>
+                <input
+                  v-model="values.auto_match_radius_km"
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">{{ $t('settings.acceptRadiusKm') }}</label>
+                <div class="input-hint">
+                  Насколько далеко исполнитель может взять заказ руками. Проверяет сервер:
+                  заказ дальше не берётся ни с карты, ни из списка.
+                </div>
+              </div>
+              <div class="input-wrapper has-prefix">
+                <span class="input-prefix">км</span>
+                <input
+                  v-model="values.accept_radius_km"
+                  type="number"
+                  step="0.5"
+                  min="0.1"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">{{ $t('settings.mapOverviewRadiusKm') }}</label>
+                <div class="input-hint">
+                  Что исполнителю показывать вокруг — на карте и в списке «Заказы поблизости».
+                  Обычно больше радиуса взятия: видно дальше, чем можно взять. Ниже него не
+                  опустится, максимум 50 км.
+                </div>
+              </div>
+              <div class="input-wrapper has-prefix">
+                <span class="input-prefix">км</span>
+                <input
+                  v-model="values.map_overview_radius_km"
+                  type="number"
+                  step="1"
+                  min="0.5"
+                  max="50"
+                  required
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Карточка 3: SLA и Лимиты -->
         <div class="settings-card">
           <div class="section-header">
             <div class="section-icon icon-warning">
@@ -138,22 +220,6 @@
           </div>
 
           <div class="form-grid">
-            <div class="input-group">
-              <div class="input-header">
-                <label class="input-label">{{ $t('settings.autoMatchRadiusKm') }}</label>
-              </div>
-              <div class="input-wrapper has-prefix">
-                <span class="input-prefix">км</span>
-                <input
-                  v-model="values.auto_match_radius_km"
-                  type="number"
-                  step="0.5"
-                  min="0.5"
-                  required
-                />
-              </div>
-            </div>
-
             <div class="input-group">
               <div class="input-header">
                 <label class="input-label">{{ $t('settings.minBalanceLimit') }}</label>
@@ -173,7 +239,7 @@
           </div>
         </div>
 
-        <!-- Карточка 3: Технические параметры -->
+        <!-- Карточка 4: Технические параметры -->
         <div class="settings-card">
           <div class="section-header">
             <div class="section-icon icon-neutral">
@@ -321,6 +387,10 @@ export default defineComponent({
       asap_tariff_coeff: '8.0',
       order_commission_percent: '0',
       auto_match_radius_km: '10',
+      // Гео-радиусы. Значения повторяют то, что заводит миграция 049; настоящие
+      // приходят с сервера при загрузке страницы.
+      accept_radius_km: '0.5',
+      map_overview_radius_km: '10',
       min_balance_limit: '0',
       currency: 'RUB',
       executor_location_send_interval_seconds: '5',

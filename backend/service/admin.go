@@ -778,6 +778,8 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 		// ехать. Ноль или пусто означает «не задано» — тогда действует
 		// ACCEPT_RADIUS_KM из окружения, а за ним умолчание.
 		SettingAcceptRadiusKM: true,
+		// Радиус обзора: что исполнителю показывают на карте и в списке рядом.
+		SettingMapOverviewRadiusKM: true,
 	}
 	numericKeys["shift_early_exit_penalty"] = true
 	// Включение этого заставляет приложения исполнителей сообщать своё положение,
@@ -833,6 +835,22 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 			}
 			if key == "reject_penalty_share" && v > 1 {
 				return errors.New("setting reject_penalty_share must be between 0 and 1")
+			}
+			// Радиусы обязаны быть положительными. Ноль читался бы кодом как «не
+			// задано» и молча уводил на умолчание — то есть поле показывало бы 0,
+			// а действовало бы 0.5. Настройка, которой нельзя верить на слово,
+			// хуже отсутствующей, поэтому ноль отвергается сразу.
+			if (key == SettingAcceptRadiusKM || key == SettingMapOverviewRadiusKM) && v <= 0 {
+				return errors.New("setting " + key + " must be greater than zero")
+			}
+			// Верхняя граница обзора: запрос читает заказы в круге, и радиус в
+			// тысячу километров превратил бы экран, открытый у каждого
+			// исполнителя, в чтение всей таблицы заказов. Нижнюю границу здесь не
+			// проверяем — радиусы можно менять по одному, и пара «обзор меньше
+			// взятия» на мгновение допустима; на чтении resolveMapOverviewRadiusKM
+			// всё равно поднимет обзор до зоны взятия.
+			if key == SettingMapOverviewRadiusKM && v > maxMapOverviewRadiusKM {
+				return fmt.Errorf("setting %s must not exceed %.0f km", key, maxMapOverviewRadiusKM)
 			}
 			if key == SettingOrderCommissionPercent && v > 100 {
 				return errors.New("setting " + SettingOrderCommissionPercent + " must be between 0 and 100")

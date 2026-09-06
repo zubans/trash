@@ -180,6 +180,8 @@
     "urgentTariffCoeff": "Urgent Tariff Coefficient (x)",
     "asapTariffCoeff": "ASAP Tariff Coefficient (x)",
     "autoMatchRadiusKm": "Automatic assignment radius",
+    "acceptRadiusKm": "Order accept radius",
+    "mapOverviewRadiusKm": "Order overview radius",
     "minBalanceLimit": "Maximum Allowed Negative Balance Limit",
     "currency": "Currency",
     "executorLocationInterval": "GPS location send interval (sec)",

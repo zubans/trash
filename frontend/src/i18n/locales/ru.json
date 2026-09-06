@@ -180,6 +180,8 @@
     "urgentTariffCoeff": "Коэффициент срочного тарифа (x)",
     "asapTariffCoeff": "Коэффициент ASAP-тарифа (x)",
     "autoMatchRadiusKm": "Радиус автоназначения заказов",
+    "acceptRadiusKm": "Радиус взятия заказа",
+    "mapOverviewRadiusKm": "Радиус обзора заказов",
     "minBalanceLimit": "Максимально допустимый лимит ухода в минус (₽)",
     "currency": "Валюта",
     "executorLocationInterval": "Интервал отправки GPS координат (сек)",
