@@ -217,10 +217,29 @@ jobs:
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
             echo "Fetching latest repository files..."
+            # This checkout is a mirror of origin, not a branch with its own
+            # history, so it is forced to match rather than merged.
+            #
+            # `git pull` required the server's main to be a fast-forward of
+            # origin's, and two ordinary situations break that. Local commits on
+            # the server make the branches divergent, and pull refuses to guess
+            # between merge and rebase — that is what stopped this deploy. A
+            # failed `make release-android` is the other way in: it aborts
+            # before restoring frontend/android/app/build.gradle from its .bak,
+            # and pull then refuses to overwrite the local change. Neither is
+            # something to reconcile, because the server has nothing to
+            # contribute back.
+            #
             # The monitoring deploy runs at the same time and shares this
-            # checkout. Two concurrent pulls fight over index.lock, so the pull
-            # — and only the pull — is serialised between the two jobs.
-            flock /tmp/healthlogin-deploy-git.lock git pull origin main
+            # checkout, so the update — and only the update — is serialised
+            # between the two jobs. Fetch and reset go under one lock, so the
+            # other job can never land between them.
+            #
+            # Discarded commits stay recoverable: the pre-reset SHA is printed
+            # here and kept in the reflog.
+            echo "Server checkout was at $(git rev-parse HEAD)"
+            flock /tmp/healthlogin-deploy-git.lock sh -c 'git fetch origin main && git reset --hard FETCH_HEAD'
+            echo "Server checkout now at $(git rev-parse HEAD)"
             
             # Write production .env file from GitHub Actions secrets & variables
             echo "Writing production .env file from GitHub Secrets..."
@@ -289,7 +308,11 @@ jobs:
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
             echo "Fetching latest repository files..."
-            flock /tmp/healthlogin-deploy-git.lock git pull origin main
+            # Same forced update as the application deploy, under the same lock —
+            # see the comment there for why this is a reset and not a pull.
+            echo "Server checkout was at $(git rev-parse HEAD)"
+            flock /tmp/healthlogin-deploy-git.lock sh -c 'git fetch origin main && git reset --hard FETCH_HEAD'
+            echo "Server checkout now at $(git rev-parse HEAD)"
 
             # The monitoring stack reads the database password and the endpoint
             # keys from the application's .env. It is written by the deploy job
