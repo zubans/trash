@@ -17,6 +17,8 @@ import (
 
 	_ "net/http/pprof"
 
+	"healthlogin/backend/achievement"
+	"healthlogin/backend/achievements"
 	"healthlogin/backend/behavior"
 	"healthlogin/backend/behaviors"
 	"healthlogin/backend/handler"
@@ -106,11 +108,21 @@ func main() {
 	// Данные, отправляемые исполнителем на проверку, и случаи, которые поведение
 	// передаёт администратору при несовпадении.
 	submissionRepo := repository.NewSubmissionRepository(db)
+	// Геймификация: каталог ачивок и выдачи, агрегаты исполнителя, подарки,
+	// внутренняя почта. Денежные инциденты живут рядом с ними, но существуют
+	// сами по себе: они охраняют распределение заказа и нужны, даже когда ни
+	// одна ачивка не включена.
+	achievementRepo := repository.NewAchievementRepository(db)
+	executorStatsRepo := repository.NewExecutorStatsRepository(db)
+	giftRepo := repository.NewGiftRepository(db)
+	mailRepo := repository.NewMailRepository(db)
+	incidentRepo := repository.NewMoneyIncidentRepository(db)
 
 	// Сервисы
 	// Любое движение денег идёт через реестр, который всегда затрагивает и баланс
 	// пользователя, и системный счёт.
-	ledger := service.NewLedger(transactionRepo, systemAccountRepo)
+	ledger := service.NewLedger(transactionRepo, systemAccountRepo).
+		WithIncidents(incidentRepo)
 
 	// Скрипты поведений несут правила услуг, чьи условия не укладываются во флаги
 	// каталога (см. doc/service_behaviors.md). Первыми загружаются копии,
@@ -136,6 +148,28 @@ func main() {
 	if err := serviceBehaviors.SyncAll(context.Background()); err != nil {
 		log.Printf("[behavior] WARNING: %v", err)
 	}
+
+	// Ачивки читаются тем же способом и с теми же оговорками, что и поведения:
+	// сперва копии, встроенные в бинарник, затем каталог поверх них — чтобы
+	// правило можно было поправить на работающем деплое без пересборки.
+	achievementEngine := achievement.New(achievement.DefaultLimits)
+	if err := achievementEngine.Load(achievements.FS, "embedded"); err != nil {
+		log.Printf("[achievement] WARNING: %v", err)
+	}
+	if dir := getEnv("ACHIEVEMENTS_DIR", ""); dir != "" {
+		if err := achievementEngine.Load(os.DirFS(dir), dir); err != nil {
+			log.Printf("[achievement] WARNING: %v", err)
+		}
+	}
+	// Собственные ачивки, написанные в админ-панели, компилируются из базы —
+	// при старте, чтобы не ждать первого события, и дальше по таймеру, чтобы
+	// правка на другой реплике дошла и сюда.
+	achievementScripts := service.NewAchievements(achievementEngine, achievementRepo)
+	if err := achievementScripts.SyncAll(context.Background()); err != nil {
+		log.Printf("[achievement] WARNING: %v", err)
+	}
+	// Уровни — единственное место, где баллы превращаются в ставку комиссии.
+	levels := service.NewLevels(achievementRepo, settingsRepo)
 
 	// DaData — единственный источник адресных данных: и подсказок, и разрешения
 	// координат. Запасного варианта намеренно нет: у альтернативы не было данных о
@@ -166,7 +200,8 @@ func main() {
 		WithEvents(eventRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo).
-		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo)
+		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
+		WithAchievements(levels, executorStatsRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors)
@@ -182,7 +217,8 @@ func main() {
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo).
 		WithBehaviors(serviceBehaviors, eventRepo)
 	chatService := service.NewChatService(chatRepo, orderRepo)
-	reviewService := service.NewReviewService(reviewRepo, orderRepo)
+	reviewService := service.NewReviewService(reviewRepo, orderRepo).
+		WithExecutorStats(executorStatsRepo)
 
 	// Каждая периодическая задача ниже меняет состояние, которое должно измениться
 	// один раз: возврат, штраф, назначение. Защита лидером заставляет каждый тик
@@ -232,6 +268,22 @@ func main() {
 	// этого в течение минуты.
 	behaviorWorker.StartScriptSync(1 * time.Minute)
 
+	// Ачивки читают тот же outbox, что и поведения, но со своим курсором.
+	// Интервал длиннее: значок вполне может появиться минутой позже, а каждый
+	// тик читает агрегаты по каждому субъекту события.
+	achievementDispatcher := service.NewAchievementDispatcher(
+		eventRepo, orderRepo, userRepo, achievementRepo, executorStatsRepo,
+		giftRepo, mailRepo, incidentRepo, ledger, levels, achievementEngine,
+	)
+	achievementWorker := worker.NewAchievementWorker(achievementDispatcher).
+		WithIncidents(incidentRepo).
+		WithScriptSync(achievementScripts).
+		WithLeader(leader, "achievement_dispatch")
+	achievementWorker.Start(15 * time.Second)
+	// Скрипты, отредактированные на другом процессе или прямо в базе, доходят до
+	// этого в течение минуты — как и скрипты особых услуг.
+	achievementWorker.StartScriptSync(1 * time.Minute)
+
 	// Ночная проверка книг. Она только сообщает и никогда не чинит: баланс,
 	// разошедшийся со своим реестром, — это баг, который надо видеть, а не число, которое надо переписать.
 	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
@@ -263,6 +315,8 @@ func main() {
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
+	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, mailRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
+		WithScripts(achievementScripts)
 
 	// Ограничители частоты для эндпоинтов, которые есть смысл перебирать.
 	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
@@ -364,6 +418,14 @@ func main() {
 			r.Post("/chats/{order_id}/upload", ch.UploadAttachmentHandler)
 			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)
 			r.Get("/chats/unread-summary", ch.GetUnreadSummaryHandler)
+			// Внутренняя почта: сюда приходят выданные ачивки, купоны на
+			// подарки, акции и новости. Она есть у всех ролей, потому что
+			// новость адресуется человеку, а не его роли в заказе.
+			r.Get("/user/mail", ach.GetMail)
+			r.Get("/user/mail/unread", ach.GetMailUnread)
+			r.Post("/user/mail/read-all", ach.MarkAllMailRead)
+			r.Post("/user/mail/{id}/read", ach.MarkMailRead)
+			r.Delete("/user/mail/{id}", ach.DeleteMail)
 			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
 			r.Get("/support/chat", ch.GetUserSupportChatHandler)
 			r.Get("/support/chats/{chat_id}/messages", ch.GetSupportMessagesHandler)
@@ -400,6 +462,11 @@ func main() {
 			// проверка личности в заказе верификации.
 			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
+			// Геймификация: значки, уровень со ставкой комиссии и подарки.
+			r.Get("/executor/achievements", ach.GetAchievements)
+			r.Get("/executor/level", ach.GetLevel)
+			r.Get("/executor/gifts", ach.GetGifts)
+			r.Post("/executor/gifts/{id}/reveal", ach.RevealGift)
 		})
 
 		// Аутентифицированные маршруты админа
@@ -446,6 +513,21 @@ func main() {
 			r.Post("/admin/service-nodes/{id}/restore", sch.AdminRestoreNode)
 			r.Post("/admin/app-releases", arh.UploadReleaseHandler)
 			r.Post("/admin/broadcast-email", ah.SendBroadcastEmailHandler)
+			r.Get("/admin/achievements", ach.AdminListAchievements)
+			r.Post("/admin/achievements", ach.AdminCreateAchievement)
+			r.Put("/admin/achievements/{code}", ach.AdminUpdateAchievement)
+			r.Delete("/admin/achievements/{code}", ach.AdminDeleteAchievement)
+			r.Post("/admin/achievements/{code}/restore", ach.AdminRestoreAchievement)
+			r.Post("/admin/achievements/grants/{id}/revoke", ach.AdminRevokeAchievement)
+			r.Get("/admin/users/{id}/achievements", ach.AdminUserAchievements)
+			r.Post("/admin/users/{id}/stats/recalculate", ach.AdminRecalculateStats)
+			r.Get("/admin/gifts", ach.AdminListGifts)
+			r.Put("/admin/gifts/{code}", ach.AdminSaveGift)
+			r.Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
+			r.Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
+			r.Post("/admin/mail/broadcast", ach.AdminBroadcastMail)
+			r.Get("/admin/finances/incidents", ach.AdminListIncidents)
+			r.Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
 		})
 	}
 

@@ -774,6 +774,15 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	// числовыми настройками, а сверху — прямо здесь, потому что доля выше 100%
 	// платила бы исполнителю отрицательное вознаграждение.
 	numericKeys[SettingOrderCommissionPercent] = true
+	// Настройки геймификации. Каждая из них так или иначе превращается в деньги:
+	// шаг скидки за уровень — прямо, потолки — тем, насколько дорого обойдётся
+	// ошибка. Поэтому у всех есть границы, а не только неотрицательность.
+	numericKeys[SettingAchievementLevelPoints] = true
+	numericKeys[SettingAchievementLevelDiscountPP] = true
+	numericKeys[SettingAchievementDefaultWeight] = true
+	numericKeys[SettingAchievementMaxPointsPerDay] = true
+	numericKeys[SettingAchievementMaxBonus] = true
+	numericKeys[SettingAchievementMinOrderAmount] = true
 	positiveIntKeys := map[string]bool{
 		"executor_location_send_interval_seconds": true,
 		"max_active_orders":                       true,
@@ -793,6 +802,18 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 			}
 			if key == SettingOrderCommissionPercent && v > 100 {
 				return errors.New("setting " + SettingOrderCommissionPercent + " must be between 0 and 100")
+			}
+			// Шаг скидки за уровень выше базовой ставки означал бы, что первый же
+			// уровень обнуляет комиссию, а второй уводит её в минус. Зажим в
+			// расчёте это переживёт, но настройка, которую зажимают молча, —
+			// это настройка, которой никто не верит.
+			if key == SettingAchievementLevelDiscountPP && v > 100 {
+				return errors.New("setting " + SettingAchievementLevelDiscountPP + " must be between 0 and 100")
+			}
+			// Ноль баллов на уровень — это деление на ноль в буквальном смысле:
+			// любой набор баллов давал бы бесконечный уровень.
+			if key == SettingAchievementLevelPoints && v < 1 {
+				return errors.New("setting " + SettingAchievementLevelPoints + " must be at least 1")
 			}
 		}
 		if positiveIntKeys[key] {

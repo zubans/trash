@@ -83,6 +83,10 @@ type OrderRepository interface {
 	Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error
 	Execute(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
+	// SetCommission сохраняет ставку, по которой заказ закрыли, и уровень
+	// исполнителя на тот момент. Ставка стала персональной, и без этой записи
+	// разницу между двумя одинаковыми заказами объяснить нечем.
+	SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int) error
 	Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Unassign(ctx context.Context, q Querier, orderID uuid.UUID) error
 	LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error)
@@ -384,6 +388,13 @@ func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, f
 		 WHERE id = $4 AND status IN ($5, $6)`,
 		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted, OrderStatusAssigned,
 	)
+}
+
+func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int) error {
+	_, err := r.exec(ctx, q).ExecContext(ctx,
+		`UPDATE orders SET commission_percent = $2, commission_level = $3 WHERE id = $1`,
+		orderID, percent, level)
+	return err
 }
 
 // Cancel аннулирует ещё не выполненный заказ. Принимаются и SEARCHING, и

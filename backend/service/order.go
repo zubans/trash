@@ -40,6 +40,20 @@ type OrderService struct {
 	behaviors *Behaviors
 	claimRepo repository.ServiceClaimRepository
 	events    repository.EventRepository
+	// levels выводит ставку комиссии из уровня исполнителя, а stats копит
+	// агрегаты, по которым ачивки решают. Оба необязательны: без них комиссия
+	// одна на всех, ровно как до появления геймификации.
+	levels *Levels
+	stats  repository.ExecutorStatsRepository
+}
+
+// WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
+// берётся общая, а счётчики исполнителя не ведутся, — то есть ровно то
+// поведение, какое сервис имел до геймификации.
+func (s *OrderService) WithAchievements(levels *Levels, stats repository.ExecutorStatsRepository) *OrderService {
+	s.levels = levels
+	s.stats = stats
+	return s
 }
 
 // WithBehaviors подключает скриптовые услуги к жизненному циклу заказа: хуки
@@ -66,8 +80,10 @@ func (s *OrderService) publishOrderEvent(ctx context.Context, tx *sql.Tx, eventT
 	if s.events == nil || order == nil {
 		return nil
 	}
-	if variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID); err == nil && !s.behaviors.governs(variant) {
-		return nil
+	if !eventsForEveryOrder[eventType] {
+		if variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID); err == nil && !s.behaviors.governs(variant) {
+			return nil
+		}
 	}
 	return s.events.Publish(ctx, tx, &repository.DomainEvent{
 		Type:        eventType,
@@ -75,6 +91,20 @@ func (s *OrderService) publishOrderEvent(ctx context.Context, tx *sql.Tx, eventT
 		SubjectID:   order.ID,
 		ActorID:     actorID,
 	})
+}
+
+// eventsForEveryOrder — события, которые публикуются по любому заказу, а не
+// только по заказу скриптовой услуги.
+//
+// Правило выше — «событие обычной услуги ничего бы не сделало» — было верно,
+// пока у outbox был один читатель. У ачивок другой субъект: они про человека, а
+// не про услугу, и «этот исполнитель закрыл заказ за двадцать минут» одинаково
+// важно на любой услуге. Остальные события по-прежнему публикуются только там,
+// где их кто-то ждёт: по одному на каждый шаг каждого заказа — это таблица,
+// чьё единственное будущее пометка «обработано».
+var eventsForEveryOrder = map[string]bool{
+	repository.EventOrderConfirmed: true,
+	repository.EventOrderCanceled:  true,
 }
 
 // NewOrderService создаёт OrderService.
@@ -115,7 +145,25 @@ const SettingOrderCommissionPercent = "order_commission_percent"
 // к строке настроек. Округление происходит один раз, в Scale, а остаток
 // достаётся исполнителю.
 func commissionOn(amount money.Amount, settings map[string]float64) money.Amount {
+	return commissionAt(amount, commissionPercent(settings))
+}
+
+// commissionPercent достаёт базовую ставку из настроек и ужимает её в 0..100.
+func commissionPercent(settings map[string]float64) float64 {
 	percent := settings[SettingOrderCommissionPercent]
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
+}
+
+// commissionAt считает долю по уже выбранной ставке. Отделена от чтения
+// настройки, потому что ставка теперь бывает персональной: уровень исполнителя
+// снижает её, и та же арифметика обязана применяться к обеим.
+func commissionAt(amount money.Amount, percent float64) money.Amount {
 	if percent <= 0 {
 		return money.Zero
 	}
@@ -729,29 +777,26 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 		}
 	}
 
+	// Ставка платформы теперь персональная: уровень исполнителя снимает с неё
+	// по проценту за уровень, до нуля. Уровень читается внутри этой же
+	// транзакции, поэтому баллы, начисленные параллельно, не могут применить
+	// себя к заказу задним числом.
+	level := s.commissionLevel(ctx, tx, *order.ExecutorID)
+	commission := commissionAt(finalAmount, level.Percent)
+
 	// Эскроу держит по этому заказу ровно order.HoldAmount, и здесь он
-	// опустошается полностью: неизрасходованная часть обратно заказчику,
-	// остальное — исполнителю.
-	refund := order.HoldAmount.Sub(finalAmount)
-	if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, refund, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
-		return err
-	}
-
-	// Деньги заказчика ушли с баланса в момент удержания; эта проводка
-	// фиксирует расход удержания, а не второе списание.
-	if err := s.ledger.Note(ctx, tx, order.CustomerID, repository.AccountEscrow, finalAmount, repository.TransactionTypePayment, &order.ID); err != nil {
-		return err
-	}
-
-	// Платформа оставляет себе свою долю от уплаченного заказчиком, а остальное
-	// получает исполнитель. Эскроу по этому заказу всё равно опустошается ровно
-	// в ноль: возврат + комиссия + вознаграждение = удержание.
-	commission := commissionOn(finalAmount, s.loadSettings(ctx))
-	if err := s.ledger.Commission(ctx, tx, *order.ExecutorID, commission, &order.ID); err != nil {
-		return err
-	}
-
-	if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, *order.ExecutorID, finalAmount.Sub(commission), repository.TransactionTypeReward, &order.ID, nil); err != nil {
+	// опустошается полностью: возврат заказчику + комиссия + вознаграждение.
+	// Распределение целиком делает реестр — он единственный, кому видно все три
+	// части сразу и кто поэтому может проверить, что исполнителю не досталось
+	// больше уплаченного заказчиком.
+	if err := s.ledger.SettleOrder(ctx, tx, OrderSettlement{
+		OrderID:    order.ID,
+		CustomerID: order.CustomerID,
+		ExecutorID: *order.ExecutorID,
+		Hold:       order.HoldAmount,
+		Paid:       finalAmount,
+		Commission: commission,
+	}); err != nil {
 		return err
 	}
 
@@ -761,7 +806,45 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 	if err := s.orderRepo.Confirm(ctx, tx, orderID, finalAmount, isDowngraded); err != nil {
 		return err
 	}
+	// Ставка и уровень сохраняются в заказе: без них через месяц никто не
+	// объяснит, почему по двум одинаковым заказам разная комиссия.
+	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level); err != nil {
+		return err
+	}
+	if err := s.recordCompletion(ctx, tx, order, finalAmount); err != nil {
+		return err
+	}
 	return s.publishOrderEvent(ctx, tx, repository.EventOrderConfirmed, order, nil)
+}
+
+// commissionLevel читает уровень исполнителя внутри транзакции подтверждения.
+// Без подключённых уровней это нулевой уровень, то есть базовая ставка.
+func (s *OrderService) commissionLevel(ctx context.Context, tx *sql.Tx, executorID uuid.UUID) Level {
+	if s.levels == nil {
+		base := commissionPercent(s.loadSettings(ctx))
+		return Level{BasePercent: base, Percent: base}
+	}
+	return s.levels.For(ctx, tx, executorID)
+}
+
+// recordCompletion пополняет агрегаты исполнителя в той же транзакции, что и
+// подтверждение. Отдельным проходом их считать нельзя: агрегат, посчитанный
+// позже, расходится с заказами ровно в тот момент, когда проход упал, — а по
+// нему решают, выдать ли ачивку.
+func (s *OrderService) recordCompletion(ctx context.Context, tx *sql.Tx, order *repository.Order, finalAmount money.Amount) error {
+	if s.stats == nil || order.ExecutorID == nil {
+		return nil
+	}
+	minutes := 0
+	if !order.CreatedAt.IsZero() {
+		minutes = int(time.Since(order.CreatedAt).Minutes())
+	}
+	return s.stats.RecordCompletion(ctx, tx, repository.CompletedOrder{
+		ExecutorID: *order.ExecutorID,
+		CustomerID: order.CustomerID,
+		Minutes:    minutes,
+		Earned:     finalAmount,
+	})
 }
 
 // maxTipAmount — потолок от промаха пальцем на одни чаевые. Настоящее
@@ -898,6 +981,14 @@ func (s *OrderService) cancelTx(ctx context.Context, tx *sql.Tx, orderID uuid.UU
 			if err := s.claimRepo.ReleaseByOrder(ctx, tx, orderID); err != nil {
 				return err
 			}
+		}
+	}
+	// Отмена засчитывается исполнителю, если он у заказа был: ачивки смотрят на
+	// неё так же, как на выполнение, и агрегат должен меняться там же, где
+	// меняется сам заказ.
+	if s.stats != nil && order.ExecutorID != nil {
+		if err := s.stats.RecordCancel(ctx, tx, *order.ExecutorID); err != nil {
+			return err
 		}
 	}
 	return s.publishOrderEvent(ctx, tx, repository.EventOrderCanceled, order, nil)

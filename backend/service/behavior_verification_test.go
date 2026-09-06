@@ -191,7 +191,9 @@ func (e *verificationEvents) Publish(ctx context.Context, q repository.Querier, 
 	return nil
 }
 
-func (e *verificationEvents) ClaimPending(ctx context.Context, limit, maxAttempts int) ([]*repository.DomainEvent, error) {
+// Курсор здесь один на всех потребителей: в этих тестах диспетчер поведений
+// единственный, и различать их незачем.
+func (e *verificationEvents) ClaimPending(ctx context.Context, consumer string, limit, maxAttempts int) ([]*repository.DomainEvent, error) {
 	var pending []*repository.DomainEvent
 	for _, event := range e.published {
 		if !e.processed[event.ID] {
@@ -201,12 +203,12 @@ func (e *verificationEvents) ClaimPending(ctx context.Context, limit, maxAttempt
 	return pending, nil
 }
 
-func (e *verificationEvents) MarkProcessed(ctx context.Context, id uuid.UUID) error {
+func (e *verificationEvents) MarkProcessed(ctx context.Context, consumer string, id uuid.UUID) error {
 	e.processed[id] = true
 	return nil
 }
 
-func (e *verificationEvents) MarkFailed(ctx context.Context, id uuid.UUID, reason string) error {
+func (e *verificationEvents) MarkFailed(ctx context.Context, consumer string, id uuid.UUID, reason string) error {
 	return nil
 }
 
@@ -223,7 +225,7 @@ func (e *verificationEvents) PurgeProcessed(ctx context.Context, olderThan time.
 	return 0, nil
 }
 
-func (e *verificationEvents) CountPending(ctx context.Context) (int, error) {
+func (e *verificationEvents) CountPending(ctx context.Context, consumer string) (int, error) {
 	return len(e.published) - len(e.processed), nil
 }
 

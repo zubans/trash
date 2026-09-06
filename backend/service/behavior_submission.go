@@ -142,10 +142,10 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 	// поэтому о сбое сообщается.
 	messages, err := d.dispatch(ctx, event)
 	if err != nil {
-		_ = d.events.MarkFailed(ctx, event.ID, err.Error())
+		_ = d.events.MarkFailed(ctx, repository.ConsumerBehaviors, event.ID, err.Error())
 		return nil, err
 	}
-	if err := d.events.MarkProcessed(ctx, event.ID); err != nil {
+	if err := d.events.MarkProcessed(ctx, repository.ConsumerBehaviors, event.ID); err != nil {
 		return nil, err
 	}
 

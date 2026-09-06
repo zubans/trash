@@ -68,6 +68,14 @@
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.reconciliation') }}</span>
           </router-link>
 
+          <!-- Инциденты стоят рядом со сверкой намеренно: сверка ищет
+               разъехавшиеся книги, а это — то, что код успел зажать до того,
+               как они разъехались. -->
+          <router-link to="/admin/incidents" class="nav-item" :class="{ active: currentRouteName === 'admin-incidents' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-warning-octagon"></i>
+            <span v-if="!sidebarMinimized || isMobile">Инциденты</span>
+          </router-link>
+
           <router-link to="/admin/broadcasts" class="nav-item" :class="{ active: currentRouteName === 'admin-broadcasts' }" @click="closeSidebarOnMobile">
             <i class="ph ph-megaphone"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>
@@ -94,6 +102,16 @@
           <router-link to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
             <i class="ph ph-list-dashes"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.serviceCatalog') }}</span>
+          </router-link>
+
+          <router-link to="/admin/achievements" class="nav-item" :class="{ active: currentRouteName === 'admin-achievements' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-trophy"></i>
+            <span v-if="!sidebarMinimized || isMobile">Ачивки</span>
+          </router-link>
+
+          <router-link to="/admin/gifts" class="nav-item" :class="{ active: currentRouteName === 'admin-gifts' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-gift"></i>
+            <span v-if="!sidebarMinimized || isMobile">Подарки</span>
           </router-link>
 
           <router-link to="/admin/escalations" class="nav-item" :class="{ active: currentRouteName === 'admin-escalations' }" @click="closeSidebarOnMobile">

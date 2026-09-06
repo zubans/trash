@@ -103,7 +103,7 @@ func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
 	if d == nil || d.events == nil || d.behaviors == nil {
 		return nil
 	}
-	events, err := d.events.ClaimPending(ctx, d.batchSize, d.maxAttempts)
+	events, err := d.events.ClaimPending(ctx, repository.ConsumerBehaviors, d.batchSize, d.maxAttempts)
 	if err != nil {
 		return err
 	}
@@ -114,15 +114,15 @@ func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
 			// Намеренно оставлено необработанным: следующий тик повторит, вплоть до
 			// maxAttempts. Причина сохраняется, чтобы её можно было прочитать, не
 			// копаясь в логах.
-			_ = d.events.MarkFailed(ctx, event.ID, err.Error())
+			_ = d.events.MarkFailed(ctx, repository.ConsumerBehaviors, event.ID, err.Error())
 			continue
 		}
 		metrics.BehaviorEvent(event.Type, "processed")
-		if err := d.events.MarkProcessed(ctx, event.ID); err != nil {
+		if err := d.events.MarkProcessed(ctx, repository.ConsumerBehaviors, event.ID); err != nil {
 			log.Printf("[behavior] event %s applied but not marked processed: %v", event.ID, err)
 		}
 	}
-	if pending, err := d.events.CountPending(ctx); err == nil {
+	if pending, err := d.events.CountPending(ctx, repository.ConsumerBehaviors); err == nil {
 		metrics.SetBehaviorBacklog(pending)
 	}
 	d.purge(ctx)

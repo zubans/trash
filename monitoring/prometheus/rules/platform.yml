@@ -205,6 +205,40 @@ groups:
           summary: "Сверка балансов не может отработать"
           description: "Проход завершается ошибкой, поэтому расхождений не видно — не потому, что их нет, а потому, что их никто не искал. Смотрите логи бэкенда: [ReconcileWorker] reconciliation failed."
 
+      # A clamp fired on a money path: the calculation asked for more than the
+      # customer paid, or for a gift that is not there. The books are still
+      # square — the movement was written with the clamped numbers, and
+      # LedgerDrift would be the alert if they were not — but somebody got
+      # something other than what the rules say, and the cause is in the code
+      # that produced the original number.
+      #
+      # Watched on the gauge, not on the counter next to it. The counter is
+      # incremented in-process, so a rolled-back transaction over-counts it;
+      # the gauge is read from the table by the dispatcher worker and therefore
+      # only ever speaks about rows that committed. An alert about money that
+      # cries wolf is worse than no alert at all.
+      - alert: MoneyIncident
+        expr: healthlogin_money_incidents_open > 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Незакрытый денежный инцидент"
+          description: "{{ $value }} инцидент(ов) без разбора: /admin/finances/incidents. Движение записано по зажатым числам — ищите расчёт, который дал исходное."
+
+      # The achievement dispatcher is the one thing that turns confirmed orders
+      # into points, and points into a lower commission. A backlog here does not
+      # cost anybody money, so it is a ticket and not a page — but a backlog
+      # that keeps growing means levels have quietly stopped moving.
+      - alert: AchievementBacklogGrowing
+        expr: healthlogin_achievement_events_pending > 500
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Ачивки не разбирают очередь событий"
+          description: "{{ $value }} событий ждут диспетчера ачивок больше получаса. Баллы и уровни не начисляются: смотрите логи [achievement]."
+
       - alert: LedgerWriteErrors
         expr: sum(rate(healthlogin_ledger_errors_total[10m])) > 0
         for: 10m

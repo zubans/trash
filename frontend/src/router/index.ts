@@ -7,6 +7,9 @@ import CustomerDashboardV2View from '../pages/customer/CustomerDashboardV2.vue'
 import CustomerProfilePageView from '../pages/customer/CustomerProfilePage.vue'
 import ExecutorDashboardView from '../pages/executor/ExecutorDashboard.vue'
 import ExecutorProfilePageView from '../pages/executor/ExecutorProfilePage.vue'
+import AchievementsPageView from '../pages/executor/AchievementsPage.vue'
+import GiftsPageView from '../pages/executor/GiftsPage.vue'
+import MailPageView from '../pages/MailPage.vue'
 
 const routes: Array<RouteRecordRaw> = [
   {
@@ -99,6 +102,21 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/Escalations.vue'),
       },
       {
+        path: 'achievements',
+        name: 'admin-achievements',
+        component: () => import('../pages/admin/Achievements.vue'),
+      },
+      {
+        path: 'gifts',
+        name: 'admin-gifts',
+        component: () => import('../pages/admin/Gifts.vue'),
+      },
+      {
+        path: 'incidents',
+        name: 'admin-incidents',
+        component: () => import('../pages/admin/MoneyIncidents.vue'),
+      },
+      {
         // Справочник для редактора скриптов в конструкторе услуг. Не в меню: до него
         // добираются по ссылке «как писать скрипты» рядом с редактором, там, где
         // вопрос и возникает.
@@ -137,6 +155,26 @@ const routes: Array<RouteRecordRaw> = [
     name: 'executor-profile',
     component: ExecutorProfilePageView,
     meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    path: '/executor/achievements',
+    name: 'executor-achievements',
+    component: AchievementsPageView,
+    meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    path: '/executor/gifts',
+    name: 'executor-gifts',
+    component: GiftsPageView,
+    meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    // Почта без требования роли: новость адресуется человеку, а не его роли в
+    // заказе, и ящик один на все роли, между которыми он переключается.
+    path: '/mail',
+    name: 'mail',
+    component: MailPageView,
+    meta: { requiresAuth: true },
   },
   {
     path: '/:pathMatch(.*)*',

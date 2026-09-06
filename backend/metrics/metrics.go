@@ -259,10 +259,40 @@ var (
 		Help:      "Effects a behaviour asked for, by kind and outcome (applied, duplicate, refused).",
 	}, []string{"kind", "result"})
 
+	moneyIncidents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "money_incidents_total",
+		Help:      "Clamps that fired on a money path, by kind. A frequency estimate: the transaction can still roll back.",
+	}, []string{"kind"})
+
+	moneyIncidentsOpen = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "money_incidents_open",
+		Help:      "Unresolved money incidents, read from the table. This is what the alert watches: it only ever speaks about committed rows.",
+	})
+
 	behaviorBacklog = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: Namespace,
 		Name:      "behavior_events_pending",
 		Help:      "Unprocessed domain events. A backlog that grows means rewards and auto-completions are not happening.",
+	})
+
+	achievementEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "achievement_events_total",
+		Help:      "Domain events handed to the achievement dispatcher, by outcome.",
+	}, []string{"event", "result"})
+
+	achievementGrants = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "achievement_grants_total",
+		Help:      "Achievement grants, by code and outcome (granted, duplicate, refused).",
+	}, []string{"code", "result"})
+
+	achievementBacklog = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "achievement_events_pending",
+		Help:      "Domain events the achievement dispatcher has not read yet.",
 	})
 )
 
@@ -290,6 +320,8 @@ func init() {
 		mailSends, mailDuration,
 		chatConnections, chatMessages,
 		behaviorHookErrors, behaviorEvents, behaviorEffects, behaviorBacklog,
+		moneyIncidents, moneyIncidentsOpen,
+		achievementEvents, achievementGrants, achievementBacklog,
 	)
 }
 
@@ -307,6 +339,26 @@ func BehaviorEvent(event, result string) { behaviorEvents.WithLabelValues(event,
 // BehaviorEffect считает один эффект: «applied», «duplicate» (ключ
 // идемпотентности уже использован) или «refused» (проверка в ядре отказала).
 func BehaviorEffect(kind, result string) { behaviorEffects.WithLabelValues(kind, result).Inc() }
+
+// MoneyIncident считает одно сработавшее зажатие суммы. Считается в процессе,
+// поэтому откат транзакции его переоценивает — та же оговорка, что у записи в
+// журнал выше. Авторитетное число публикует SetMoneyIncidentsOpen, и алерт
+// повешен именно на него: алерт про деньги обязан говорить только о том, что
+// закоммичено.
+func MoneyIncident(kind string) { moneyIncidents.WithLabelValues(kind).Inc() }
+
+// SetMoneyIncidentsOpen публикует число неразобранных инцидентов из таблицы.
+func SetMoneyIncidentsOpen(open int) { moneyIncidentsOpen.Set(float64(open)) }
+
+// AchievementEvent считает одно доставленное ачивкам событие: «processed» или «failed».
+func AchievementEvent(event, result string) { achievementEvents.WithLabelValues(event, result).Inc() }
+
+// AchievementGrant считает одну выдачу: «granted», «duplicate» (ключ выдачи уже
+// занят) или «refused» (проверка в ядре отказала).
+func AchievementGrant(code, result string) { achievementGrants.WithLabelValues(code, result).Inc() }
+
+// SetAchievementBacklog публикует число событий, ещё не разобранных ачивками.
+func SetAchievementBacklog(pending int) { achievementBacklog.Set(float64(pending)) }
 
 // SetBehaviorBacklog публикует число необработанных доменных событий.
 func SetBehaviorBacklog(pending int) { behaviorBacklog.Set(float64(pending)) }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 
@@ -26,6 +28,15 @@ import (
 type Ledger struct {
 	transactions repository.TransactionRepository
 	accounts     repository.SystemAccountRepository
+	// incidents хранит срабатывания зажимов. Необязателен: установка без него
+	// ведёт себя так же, только след остаётся лишь в логе и в счётчике.
+	incidents repository.MoneyIncidentRepository
+}
+
+// WithIncidents подключает журнал денежных инцидентов.
+func (l *Ledger) WithIncidents(incidents repository.MoneyIncidentRepository) *Ledger {
+	l.incidents = incidents
+	return l
 }
 
 // NewLedger создаёт Ledger поверх хранилищ баланса и счетов.
@@ -257,6 +268,128 @@ func (l *Ledger) Bonus(ctx context.Context, tx *sql.Tx, userID uuid.UUID, gross,
 		}
 	}
 	return l.Release(ctx, tx, repository.AccountBonuses, userID, gross.Sub(commission), repository.TransactionTypeBonus, orderID, nil)
+}
+
+// OrderSettlement — распределение удержания по завершённому заказу целиком:
+// сколько вернуть заказчику, сколько оставить платформе и сколько отдать
+// исполнителю.
+type OrderSettlement struct {
+	OrderID    uuid.UUID
+	CustomerID uuid.UUID
+	ExecutorID uuid.UUID
+	// Hold — то, что эскроу держит по этому заказу. Распределение обязано
+	// опустошить его ровно в ноль.
+	Hold money.Amount
+	// Paid — то, что заказчик за заказ действительно заплатил: остаток
+	// удержания возвращается ему.
+	Paid money.Amount
+	// Commission — доля платформы, как её посчитал вызывающий. Именно её здесь
+	// зажимают: всё остальное считается от неё.
+	Commission money.Amount
+}
+
+// SettleOrder распределяет удержание по заказу: возврат заказчику, комиссия
+// платформе, вознаграждение исполнителю.
+//
+// Существует ради инварианта, который нельзя проверить по частям. Раньше эти
+// три движения были тремя вызовами подряд, и ни одному из них не было видно
+// целого — значит, «исполнителю досталось не больше уплаченного» и «эскроу
+// опустошён ровно в ноль» негде было проверить. Теперь есть где, и это
+// единственная причина, по которой метод один.
+//
+// Зажим, а не отказ. Комиссия зажимается в [0, Paid] до всякого движения, а
+// вознаграждение считается остатком, поэтому исполнитель не может получить
+// больше, чем заплатил заказчик, какой бы ни оказалась ставка. Отказ здесь был
+// бы хуже: он оставил бы заказ подтверждённым в одной половине системы и
+// неоплаченным в другой, а повтор упёрся бы в ту же ошибку. По той же логике
+// Bonus давно зажимает commission > gross.
+//
+// Каждый сработавший зажим пишет инцидент — в этой же транзакции, поэтому
+// инцидент не может закоммититься без движения, а движение без инцидента.
+func (l *Ledger) SettleOrder(ctx context.Context, tx *sql.Tx, s OrderSettlement) error {
+	zero := money.Zero
+	paid := s.Paid
+	if paid.IsNegative() {
+		l.incident(ctx, tx, &repository.MoneyIncident{
+			Kind: repository.IncidentCommissionOutOfRange, OrderID: &s.OrderID, UserID: &s.ExecutorID,
+			Actual: &paid, Applied: &zero,
+			Details: map[string]interface{}{"reason": "отрицательная сумма к оплате"},
+		})
+		paid = money.Zero
+	}
+	if paid > s.Hold {
+		// Заплатить из эскроу больше, чем он держит, — это чужие деньги: эскроу
+		// общий, и лишнее было бы взято из удержаний по другим заказам.
+		before := paid
+		paid = s.Hold
+		l.incident(ctx, tx, &repository.MoneyIncident{
+			Kind: repository.IncidentRewardExceedsPayment, OrderID: &s.OrderID, UserID: &s.ExecutorID,
+			Expected: &s.Hold, Actual: &before, Applied: &paid,
+			Details: map[string]interface{}{"reason": "к оплате больше, чем держит эскроу по заказу"},
+		})
+	}
+
+	commission := s.Commission
+	if commission.IsNegative() || commission > paid {
+		before := commission
+		if commission.IsNegative() {
+			commission = money.Zero
+		} else {
+			commission = paid
+		}
+		l.incident(ctx, tx, &repository.MoneyIncident{
+			Kind: repository.IncidentCommissionOutOfRange, OrderID: &s.OrderID, UserID: &s.ExecutorID,
+			Expected: &paid, Actual: &before, Applied: &commission,
+			Details: map[string]interface{}{"reason": "доля платформы вне [0, уплаченного заказчиком]"},
+		})
+	}
+
+	reward := paid.Sub(commission)
+	refund := s.Hold.Sub(paid)
+
+	// Последняя проверка — сложением. Она не должна срабатывать никогда: выше
+	// каждое слагаемое уже зажато. Но именно эту сумму обязана видеть база, и
+	// стоит она одного сравнения.
+	if refund.Add(commission).Add(reward) != s.Hold {
+		total := refund.Add(commission).Add(reward)
+		l.incident(ctx, tx, &repository.MoneyIncident{
+			Kind: repository.IncidentSettlementMismatch, OrderID: &s.OrderID, UserID: &s.ExecutorID,
+			Expected: &s.Hold, Actual: &total,
+			Details: map[string]interface{}{
+				"refund": refund.String(), "commission": commission.String(), "reward": reward.String(),
+			},
+		})
+		return fmt.Errorf("settlement of order %s does not drain escrow: %s + %s + %s != %s",
+			s.OrderID, refund, commission, reward, s.Hold)
+	}
+
+	if err := l.Release(ctx, tx, repository.AccountEscrow, s.CustomerID, refund, repository.TransactionTypeRefund, &s.OrderID, nil); err != nil {
+		return err
+	}
+	// Деньги заказчика ушли с баланса в момент удержания; эта проводка
+	// фиксирует расход удержания, а не второе списание.
+	if err := l.Note(ctx, tx, s.CustomerID, repository.AccountEscrow, paid, repository.TransactionTypePayment, &s.OrderID); err != nil {
+		return err
+	}
+	if err := l.Commission(ctx, tx, s.ExecutorID, commission, &s.OrderID); err != nil {
+		return err
+	}
+	return l.Release(ctx, tx, repository.AccountEscrow, s.ExecutorID, reward, repository.TransactionTypeReward, &s.OrderID, nil)
+}
+
+// incident записывает срабатывание зажима. Сбой самой записи не отменяет
+// движения: инцидент — это след, а не условие, и потеря следа не повод оставить
+// заказ незакрытым. Он всё равно попадёт в лог и в счётчик.
+func (l *Ledger) incident(ctx context.Context, tx *sql.Tx, incident *repository.MoneyIncident) {
+	log.Printf("[AUDIT] money incident %s on order %v: expected=%v actual=%v applied=%v %v",
+		incident.Kind, incident.OrderID, incident.Expected, incident.Actual, incident.Applied, incident.Details)
+	metrics.MoneyIncident(incident.Kind)
+	if l.incidents == nil {
+		return
+	}
+	if err := l.incidents.Record(ctx, tx, incident); err != nil {
+		log.Printf("[ledger] cannot record money incident %s: %v", incident.Kind, err)
+	}
 }
 
 // Note записывает проводку, которая не двигает денег, — для шага, который стоит

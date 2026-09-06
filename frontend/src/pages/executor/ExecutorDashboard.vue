@@ -40,6 +40,16 @@
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/profile')">
               <i class="ph-fill ph-user-circle"></i> Профиль
             </button>
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/achievements')">
+              <i class="ph-fill ph-trophy"></i> Достижения
+            </button>
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/gifts')">
+              <i class="ph-fill ph-gift"></i> Подарки
+            </button>
+            <button type="button" class="nav-item position-relative" @click="menuOpen = false; $router.push('/mail')">
+              <i class="ph-fill ph-envelope-simple"></i> Почта
+              <span v-if="mailUnread > 0" class="support-unread-dot nav-dot"></span>
+            </button>
           </div>
 
           <div class="nav-section">Помощь</div>
@@ -713,6 +723,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { cameraPromptLabels } from '../../utils/cameraLabels'
 import { getCurrentCoordinates, geolocationMessage } from '../../services/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
+import { getMailUnread } from '../../api/achievements'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import RoleSwitcher from '../../components/RoleSwitcher.vue'
@@ -1063,6 +1074,10 @@ export default defineComponent({
     }
 
     const hasUnreadSupport = ref(false)
+    // Непрочитанная внутренняя почта: сюда падают выданные ачивки, купоны на
+    // подарки и акции. Счётчик нужен только для точки в меню, поэтому берётся
+    // отдельным лёгким запросом, а не вместе со всем ящиком.
+    const mailUnread = ref(0)
     const lastSupportMsgText = ref('')
     const showExecutorMapModal = ref(false)
     const showSupportChatModal = ref(false)
@@ -1074,6 +1089,16 @@ export default defineComponent({
     const openSupportChat = () => {
       hasUnreadSupport.value = false
       showSupportChatModal.value = true
+    }
+
+    // Ачивку выдаёт фоновый диспетчер, а не действие на этом экране, поэтому о
+    // ней узнают тем же опросом, что и об остальном изменившемся без спроса.
+    const checkMail = async () => {
+      try {
+        mailUnread.value = await getMailUnread()
+      } catch {
+        /* точка в меню не стоит того, чтобы о ней сообщать */
+      }
     }
 
     const checkSupportNotification = async () => {
@@ -1758,6 +1783,7 @@ export default defineComponent({
         availableResource.refresh()
         fetchUnreadSummary()
         checkSupportNotification()
+        checkMail()
         // Баланс двигается без всякого действия с этого экрана: заказ, который
         // подтвердил заказчик, штраф, одобренный вывод. Опрашиваем его вместе с
         // остальным, а не оставляем на экране число с момента открытия.
@@ -1812,6 +1838,7 @@ export default defineComponent({
       showExecutorMapModal,
       showSupportChatModal,
       hasUnreadSupport,
+      mailUnread,
       openSupportChat,
       showOrderDetailsModal,
       selectedOrderDetails,

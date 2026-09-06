@@ -92,7 +92,7 @@ func TestDomainEventsAreClaimedOnceAndEffectsAreIdempotent(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 
-	pending, err := events.ClaimPending(ctx, 50, 10)
+	pending, err := events.ClaimPending(ctx, repository.ConsumerBehaviors, 50, 10)
 	if err != nil {
 		t.Fatalf("claim pending: %v", err)
 	}
@@ -111,10 +111,10 @@ func TestDomainEventsAreClaimedOnceAndEffectsAreIdempotent(t *testing.T) {
 		t.Fatalf("second effect returned %v, want ErrEffectAlreadyApplied", err)
 	}
 
-	if err := events.MarkProcessed(ctx, event.ID); err != nil {
+	if err := events.MarkProcessed(ctx, repository.ConsumerBehaviors, event.ID); err != nil {
 		t.Fatalf("mark processed: %v", err)
 	}
-	pending, err = events.ClaimPending(ctx, 50, 10)
+	pending, err = events.ClaimPending(ctx, repository.ConsumerBehaviors, 50, 10)
 	if err != nil {
 		t.Fatalf("claim pending after processing: %v", err)
 	}
@@ -144,19 +144,19 @@ func TestFailingEventStopsAfterMaxAttempts(t *testing.T) {
 
 	const maxAttempts = 3
 	for i := 0; i < maxAttempts; i++ {
-		pending, err := events.ClaimPending(ctx, 50, maxAttempts)
+		pending, err := events.ClaimPending(ctx, repository.ConsumerBehaviors, 50, maxAttempts)
 		if err != nil {
 			t.Fatalf("claim pending: %v", err)
 		}
 		if !containsEvent(pending, event.ID) {
 			t.Fatalf("event stopped being retried after %d attempts, want %d", i, maxAttempts)
 		}
-		if err := events.MarkFailed(ctx, event.ID, "boom"); err != nil {
+		if err := events.MarkFailed(ctx, repository.ConsumerBehaviors, event.ID, "boom"); err != nil {
 			t.Fatalf("mark failed: %v", err)
 		}
 	}
 
-	pending, err := events.ClaimPending(ctx, 50, maxAttempts)
+	pending, err := events.ClaimPending(ctx, repository.ConsumerBehaviors, 50, maxAttempts)
 	if err != nil {
 		t.Fatalf("claim pending: %v", err)
 	}

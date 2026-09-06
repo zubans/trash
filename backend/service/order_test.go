@@ -20,6 +20,9 @@ type mockOrderRepo struct {
 	// assignErr, когда задан, отдаётся вместо назначения: так тест
 	// воспроизводит проигранную гонку за заказ.
 	assignErr error
+	// Ставка и уровень, с которыми заказ закрыли, — для тестов комиссии.
+	commissionPercent map[uuid.UUID]float64
+	commissionLevel   map[uuid.UUID]int
 }
 
 func (m *mockOrderRepo) CreateOrderWithHold(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount money.Amount, lastGeo string) (*repository.Order, error) {
@@ -314,6 +317,18 @@ func (m *mockOrderRepo) Confirm(ctx context.Context, q repository.Querier, order
 		}
 	}
 	return errors.New("not found")
+}
+
+// SetCommission запоминает ставку, по которой заказ закрыли: тесты комиссии
+// сверяют её с уровнем исполнителя.
+func (m *mockOrderRepo) SetCommission(ctx context.Context, q repository.Querier, orderID uuid.UUID, percent float64, level int) error {
+	if m.commissionPercent == nil {
+		m.commissionPercent = map[uuid.UUID]float64{}
+		m.commissionLevel = map[uuid.UUID]int{}
+	}
+	m.commissionPercent[orderID] = percent
+	m.commissionLevel[orderID] = level
+	return nil
 }
 
 func (m *mockOrderRepo) Cancel(ctx context.Context, q repository.Querier, orderID uuid.UUID) error {

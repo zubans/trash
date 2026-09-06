@@ -5,7 +5,8 @@ import (
 	"sort"
 
 	"go.starlark.net/starlark"
-	"go.starlark.net/starlarkstruct"
+
+	"healthlogin/backend/script"
 )
 
 // factsValue превращает Facts в аргумент `f`, который получает каждый хук.
@@ -14,7 +15,7 @@ import (
 func factsValue(f Facts) starlark.Value {
 	d := starlark.StringDict{
 		"event":      starlark.String(f.Event),
-		"config":     configValue(f.Config),
+		"config":     script.Dict(f.Config),
 		"user":       actorValue(f.User),
 		"viewer":     actorValue(f.Viewer),
 		"customer":   actorValue(f.Customer),
@@ -24,7 +25,7 @@ func factsValue(f Facts) starlark.Value {
 		"submission": submissionValue(f.Submission),
 		"now":        starlark.MakeInt64(f.Now.Unix()),
 	}
-	return starlarkstruct.FromStringDict(starlark.String("facts"), d)
+	return script.Struct("facts", d)
 }
 
 // submissionValue отдаёт исход проверки данных. Только исход: значения, с
@@ -42,7 +43,7 @@ func submissionValue(s *SubmissionFacts) starlark.Value {
 	for _, field := range keys {
 		_ = matches.SetKey(starlark.String(field), starlark.Bool(s.Matches[field]))
 	}
-	return starlarkstruct.FromStringDict(starlark.String("submission"), starlark.StringDict{
+	return script.Struct("submission", starlark.StringDict{
 		"attempt":   starlark.MakeInt(s.Attempt),
 		"all_match": starlark.Bool(s.AllMatch),
 		"matches":   matches,
@@ -58,7 +59,7 @@ func actorValue(a *Actor) starlark.Value {
 	for _, r := range a.Roles {
 		roles = append(roles, starlark.String(r))
 	}
-	return starlarkstruct.FromStringDict(starlark.String("actor"), starlark.StringDict{
+	return script.Struct("actor", starlark.StringDict{
 		"id":          starlark.String(a.ID),
 		"role":        starlark.String(a.Role),
 		"roles":       starlark.NewList(roles),
@@ -76,7 +77,7 @@ func orderValue(o *OrderFacts) starlark.Value {
 	if o.ExecutorID != "" {
 		executor = starlark.String(o.ExecutorID)
 	}
-	return starlarkstruct.FromStringDict(starlark.String("order"), starlark.StringDict{
+	return script.Struct("order", starlark.StringDict{
 		"id":          starlark.String(o.ID),
 		"status":      starlark.String(o.Status),
 		"customer_id": starlark.String(o.CustomerID),
@@ -91,88 +92,11 @@ func variantValue(v *VariantFacts) starlark.Value {
 	if v == nil {
 		return starlark.None
 	}
-	return starlarkstruct.FromStringDict(starlark.String("variant"), starlark.StringDict{
+	return script.Struct("variant", starlark.StringDict{
 		"id":         starlark.String(v.ID),
 		"code":       starlark.String(v.Code),
 		"base_price": starlark.Float(v.BasePrice),
 	})
-}
-
-// configValue отдаёт конфигурацию узла словарём, чтобы скрипт мог писать
-// f.config.get("reward", 0) и продолжал работать, когда ключ так и не задали.
-func configValue(cfg map[string]interface{}) starlark.Value {
-	d := starlark.NewDict(len(cfg))
-	keys := make([]string, 0, len(cfg))
-	for k := range cfg {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		_ = d.SetKey(starlark.String(k), goToStarlark(cfg[k]))
-	}
-	return d
-}
-
-// goToStarlark конвертирует значение, разобранное из JSON. Всё, чего он не
-// распознал, становится строковым Go-представлением, а не ошибкой: ключ
-// конфигурации, который скрипт не использует, не должен ломать хук.
-func goToStarlark(v interface{}) starlark.Value {
-	switch t := v.(type) {
-	case nil:
-		return starlark.None
-	case bool:
-		return starlark.Bool(t)
-	case string:
-		return starlark.String(t)
-	case float64:
-		return starlark.Float(t)
-	case int:
-		return starlark.MakeInt(t)
-	case int64:
-		return starlark.MakeInt64(t)
-	case []interface{}:
-		items := make([]starlark.Value, 0, len(t))
-		for _, item := range t {
-			items = append(items, goToStarlark(item))
-		}
-		return starlark.NewList(items)
-	case map[string]interface{}:
-		return configValue(t)
-	default:
-		return starlark.String(fmt.Sprint(t))
-	}
-}
-
-// starlarkToGo конвертирует обратно — для манифеста, читаемого при загрузке.
-func starlarkToGo(v starlark.Value) interface{} {
-	switch t := v.(type) {
-	case starlark.NoneType:
-		return nil
-	case starlark.Bool:
-		return bool(t)
-	case starlark.String:
-		return string(t)
-	case starlark.Int:
-		i, _ := t.Int64()
-		return float64(i)
-	case starlark.Float:
-		return float64(t)
-	case *starlark.List:
-		out := make([]interface{}, 0, t.Len())
-		for i := 0; i < t.Len(); i++ {
-			out = append(out, starlarkToGo(t.Index(i)))
-		}
-		return out
-	case *starlark.Dict:
-		out := make(map[string]interface{}, t.Len())
-		for _, k := range t.Keys() {
-			value, _, _ := t.Get(k)
-			out[fmt.Sprint(starlarkToGo(k))] = starlarkToGo(value)
-		}
-		return out
-	default:
-		return v.String()
-	}
 }
 
 // effectValue — это Effect, пока он внутри скрипта: непрозрачный, нехешируемый и
@@ -248,35 +172,6 @@ func predeclared() starlark.StringDict {
 			}
 			return &effectValue{Effect{Kind: EffectEscalate, OrderID: orderID, Reason: reason}}, nil
 		}),
-		"has_role": starlark.NewBuiltin("has_role", func(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			var actor starlark.Value
-			var role string
-			if err := starlark.UnpackArgs(b.Name(), args, kwargs, "actor", &actor, "role", &role); err != nil {
-				return nil, err
-			}
-			s, ok := actor.(*starlarkstruct.Struct)
-			if !ok {
-				return starlark.False, nil
-			}
-			if primary, err := s.Attr("role"); err == nil {
-				if str, ok := primary.(starlark.String); ok && string(str) == role {
-					return starlark.True, nil
-				}
-			}
-			rolesAttr, err := s.Attr("roles")
-			if err != nil {
-				return starlark.False, nil
-			}
-			list, ok := rolesAttr.(*starlark.List)
-			if !ok {
-				return starlark.False, nil
-			}
-			for i := 0; i < list.Len(); i++ {
-				if str, ok := list.Index(i).(starlark.String); ok && string(str) == role {
-					return starlark.True, nil
-				}
-			}
-			return starlark.False, nil
-		}),
+		"has_role": script.HasRole(),
 	}
 }

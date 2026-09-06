@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -14,10 +15,21 @@ import (
 type ReviewService struct {
 	reviewRepo repository.ReviewRepository
 	orderRepo  repository.OrderRepository
+	// stats копит агрегаты исполнителя, по которым решают ачивки. Необязателен:
+	// без него серия пятёрок просто не ведётся.
+	stats repository.ExecutorStatsRepository
 }
 
 func NewReviewService(reviewRepo repository.ReviewRepository, orderRepo repository.OrderRepository) *ReviewService {
 	return &ReviewService{reviewRepo: reviewRepo, orderRepo: orderRepo}
+}
+
+// WithExecutorStats подключает счётчики исполнителя: оценка либо продолжает
+// серию пятёрок, либо обрывает её, и ачивке «безупречный» нужна именно эта
+// серия, а не средняя оценка.
+func (s *ReviewService) WithExecutorStats(stats repository.ExecutorStatsRepository) *ReviewService {
+	s.stats = stats
+	return s
 }
 
 type CreateReviewDTO struct {
@@ -118,6 +130,16 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 	}
 
 	_ = s.reviewRepo.UpdateUserRating(ctx, targetID, targetRole)
+
+	// Серия считается только для исполнителя: ачивки уровня — его, и оценка,
+	// которую он поставил заказчику, к ней отношения не имеет.
+	if s.stats != nil && targetRole == "EXECUTOR" {
+		if err := s.stats.RecordRating(ctx, nil, targetID, dto.Rating); err != nil {
+			// Сбой счётчика не повод отклонить отзыв: отзыв уже записан, а
+			// агрегат восстанавливается админским пересчётом.
+			log.Printf("[review] cannot record rating for %s: %v", targetID, err)
+		}
+	}
 
 	return review, nil
 }

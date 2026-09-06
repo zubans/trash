@@ -3,14 +3,13 @@ package behavior
 import (
 	"fmt"
 	"io/fs"
-	"log"
-	"path"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"go.starlark.net/starlark"
+
+	"healthlogin/backend/script"
 )
 
 // Имена хуков. Скрипт определяет те, что ему нужны, и не больше; неопределённый
@@ -25,22 +24,23 @@ const (
 
 var hookNames = []string{HookVisible, HookCanOrder, HookCanViewOrTake, HookPrice, HookOnEvent}
 
-// Limits ограничивают один вызов хука. Они нужны потому, что хук выполняется на
-// пути запроса: скрипт с зациклившимся циклом должен уронить свой вызов, а не процесс.
-type Limits struct {
-	MaxSteps uint64
-	Timeout  time.Duration
-}
+// Рантайм у поведений общий с остальными скриптовыми областями (см.
+// backend/script): здесь остаётся только то, что знает про услуги — факты
+// заказа, эффекты и хуки.
+type (
+	// Limits ограничивают один вызов хука.
+	Limits = script.Limits
+	// SourceFile — один файл поведения.
+	SourceFile = script.SourceFile
+)
 
-// DefaultLimits щедры для решений, которые принимают эти скрипты (несколько
-// сравнений), и достаточно малы, чтобы ошибка оборачивалась провалом хука.
-var DefaultLimits = Limits{MaxSteps: 200_000, Timeout: 100 * time.Millisecond}
+// DefaultLimits щедры для решений, которые принимают эти скрипты, и достаточно
+// малы, чтобы ошибка оборачивалась провалом хука.
+var DefaultLimits = script.DefaultLimits
 
-type script struct {
-	code     string
-	globals  starlark.StringDict
-	manifest Manifest
-}
+// ConfigFile выполняется раньше остального поведения, и его глобалы видны
+// каждому последующему файлу.
+const ConfigFile = script.ConfigFile
 
 // NodeCodePrefix помечает поведение, принадлежащее одному узлу каталога, —
 // скрипт, написанный в админ-панели, а не поставленный файлом. Префикс разводит
@@ -54,120 +54,27 @@ func NodeCode(nodeID string) string { return NodeCodePrefix + nodeID }
 // IsNodeCode сообщает, принадлежит ли код собственному скрипту узла.
 func IsNodeCode(code string) bool { return strings.HasPrefix(code, NodeCodePrefix) }
 
-// Engine хранит скомпилированные скрипты поведений. Компиляция происходит один
-// раз при старте; после этого глобалы замораживаются — именно это делает
-// безопасными параллельные вызовы из обработчиков запросов.
+// Engine — рантайм скриптов, настроенный под услуги: его встроенные функции
+// строят эффекты заказа, а манифесты разбираются в Manifest этого пакета.
 type Engine struct {
-	limits Limits
+	runtime *script.Engine
 
-	mu      sync.RWMutex
-	scripts map[string]*script
+	mu        sync.RWMutex
+	manifests map[string]Manifest
 }
 
 // New создаёт пустой движок.
 func New(limits Limits) *Engine {
-	if limits.MaxSteps == 0 {
-		limits.MaxSteps = DefaultLimits.MaxSteps
+	return &Engine{
+		runtime:   script.New(limits, script.Options{Builtins: predeclared, Hooks: hookNames}),
+		manifests: map[string]Manifest{},
 	}
-	if limits.Timeout <= 0 {
-		limits.Timeout = DefaultLimits.Timeout
-	}
-	return &Engine{limits: limits, scripts: map[string]*script{}}
-}
-
-// ConfigFile выполняется раньше остального поведения, и его глобалы видны
-// каждому последующему файлу. Именно это позволяет поведению держать свои
-// константы — суммы, роли, имена событий, сообщения — в одном файле, отдельно
-// от логики, которая их читает.
-const ConfigFile = "config.star"
-
-// SourceFile — один файл поведения, в том порядке, в котором он должен выполняться.
-type SourceFile struct {
-	Name string
-	Src  []byte
 }
 
 // Load компилирует каждый каталог поведения в корне fsys. Имя каталога — это код
-// поведения, на который ссылается service_nodes.behavior_code, а лежащие внутри
-// файлы *.star и составляют поведение: сперва ConfigFile, затем остальные в
-// порядке имён, каждый видит глобалы предыдущих.
-//
-// Повторная загрузка того же кода заменяет предыдущую — так каталог на диске
-// перекрывает копию, встроенную в бинарник.
-//
-// Поведение, которое не компилируется, логируется и пропускается, а не роняет
-// процесс: одно сломанное поведение не должно мешать сервису стартовать. Узлы,
-// ссылающиеся на него, откатываются к встроенным правилам и отклоняют заказы
-// (см. слой сервисов) — это безопасное направление.
+// поведения, на который ссылается service_nodes.behavior_code.
 func (e *Engine) Load(fsys fs.FS, label string) error {
-	entries, err := fs.ReadDir(fsys, ".")
-	if err != nil {
-		return fmt.Errorf("read behaviors from %s: %w", label, err)
-	}
-	var failed []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			if strings.HasSuffix(entry.Name(), ".star") {
-				// Скрипт вне каталога поведения не принадлежит ни одному
-				// поведению и молча никогда бы не выполнился.
-				log.Printf("[behavior] %s/%s: ignored, a behaviour must live in its own directory", label, entry.Name())
-			}
-			continue
-		}
-		code := entry.Name()
-		files, err := readBehaviorDir(fsys, code)
-		if err != nil {
-			failed = append(failed, code)
-			log.Printf("[behavior] %s/%s: %v", label, code, err)
-			continue
-		}
-		if len(files) == 0 {
-			continue
-		}
-		if err := e.CompileFiles(code, files); err != nil {
-			failed = append(failed, code)
-			log.Printf("[behavior] %s/%s: %v", label, code, err)
-			continue
-		}
-		log.Printf("[behavior] loaded %q from %s", code, label)
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("behaviors failed to load: %s", strings.Join(failed, ", "))
-	}
-	return nil
-}
-
-// readBehaviorDir собирает файлы одного поведения в порядке выполнения.
-func readBehaviorDir(fsys fs.FS, dir string) ([]SourceFile, error) {
-	entries, err := fs.ReadDir(fsys, dir)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".star") {
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	sort.Slice(names, func(i, j int) bool {
-		// Файл конфигурации первым, как бы он ни сортировался; всё остальное по имени,
-		// чтобы порядок был одинаковым на любой машине.
-		if (names[i] == ConfigFile) != (names[j] == ConfigFile) {
-			return names[i] == ConfigFile
-		}
-		return names[i] < names[j]
-	})
-
-	files := make([]SourceFile, 0, len(names))
-	for _, name := range names {
-		src, err := fs.ReadFile(fsys, path.Join(dir, name))
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", name, err)
-		}
-		files = append(files, SourceFile{Name: path.Join(dir, name), Src: src})
-	}
-	return files, nil
+	return script.Load(fsys, label, e)
 }
 
 // Compile разбирает однофайловое поведение. Существует для тестов и для самого
@@ -177,51 +84,18 @@ func (e *Engine) Compile(code, filename string, src []byte) error {
 }
 
 // CompileFiles разбирает файлы одного поведения по порядку и регистрирует его
-// под кодом code. Каждый файл выполняется со встроенными функциями плюс всем,
-// что определили предыдущие файлы, поэтому константы config.star для идущей
-// следом логики — обычные глобалы.
+// под кодом code, разбирая заодно поля манифеста, которые есть только у услуг.
 func (e *Engine) CompileFiles(code string, files []SourceFile) error {
-	if len(files) == 0 {
-		return fmt.Errorf("behavior %s has no scripts", code)
-	}
-
-	thread := &starlark.Thread{Name: "load:" + code}
-	thread.SetMaxExecutionSteps(e.limits.MaxSteps)
-
-	env := predeclared()
-	globals := starlark.StringDict{}
-	for _, file := range files {
-		// Код верхнего уровня выполняется во время компиляции: он может определять
-		// константы и функции, и больше ничего ему недоступно.
-		defined, err := starlark.ExecFile(thread, file.Name, file.Src, env)
-		if err != nil {
-			return err
-		}
-		for name, value := range defined {
-			globals[name] = value
-			env[name] = value
-		}
-	}
-	globals.Freeze()
-
-	manifest, err := readManifest(code, globals)
-	if err != nil {
+	if err := e.runtime.CompileFiles(code, files); err != nil {
 		return err
 	}
-
-	// Исходники путешествуют вместе со скомпилированным поведением, чтобы
-	// админ-панель показывала поставляемый скрипт как стартовый шаблон для нового.
-	for _, file := range files {
-		if path.Base(file.Name) == ConfigFile {
-			manifest.ConstantsSource = string(file.Src)
-		} else if manifest.Source == "" {
-			manifest.Source = string(file.Src)
-		}
+	raw, ok := e.runtime.Manifest(code)
+	if !ok {
+		return fmt.Errorf("behavior %s compiled but has no manifest", code)
 	}
-
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.scripts[code] = &script{code: code, globals: globals, manifest: manifest}
+	e.manifests[code] = manifestFrom(raw)
 	return nil
 }
 
@@ -231,9 +105,50 @@ func (e *Engine) Remove(code string) {
 	if e == nil {
 		return
 	}
+	e.runtime.Remove(code)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	delete(e.scripts, code)
+	delete(e.manifests, code)
+}
+
+// Validate компилирует кандидата, не регистрируя его, чтобы админ-панель могла
+// отклонить сломанный скрипт при сохранении, а не снимать услугу с продажи во
+// время работы.
+func (e *Engine) Validate(files []SourceFile) error {
+	return e.runtime.Validate(files)
+}
+
+// Has сообщает, загружено ли поведение с таким кодом.
+func (e *Engine) Has(code string) bool {
+	if e == nil {
+		return false
+	}
+	return e.runtime.Has(code)
+}
+
+// Manifest возвращает статическое объявление поведения.
+func (e *Engine) Manifest(code string) (Manifest, bool) {
+	if e == nil {
+		return Manifest{}, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	m, ok := e.manifests[code]
+	return m, ok
+}
+
+// Manifests перечисляет все загруженные поведения — для выбора в админ-панели.
+func (e *Engine) Manifests() []Manifest {
+	if e == nil {
+		return nil
+	}
+	out := make([]Manifest, 0)
+	for _, raw := range e.runtime.Manifests() {
+		if m, ok := e.Manifest(raw.Code); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Library перечисляет поведения, поставляемые со сборкой, — всё, кроме скриптов
@@ -249,111 +164,23 @@ func (e *Engine) Library() []Manifest {
 	return out
 }
 
-// Validate компилирует кандидата, не регистрируя его, чтобы админ-панель могла
-// отклонить сломанный скрипт при сохранении, а не снимать услугу с продажи во
-// время работы. Ошибка — это ошибка Starlark, называющая файл, строку и суть
-// проблемы.
-func (e *Engine) Validate(files []SourceFile) error {
-	probe := New(e.limits)
-	return probe.CompileFiles("candidate", files)
-}
-
-func readManifest(code string, globals starlark.StringDict) (Manifest, error) {
-	m := Manifest{Code: code, ReleaseClaimOnCancel: true, Defaults: map[string]interface{}{}}
-	for _, hook := range hookNames {
-		if _, ok := globals[hook].(starlark.Callable); ok {
-			m.Hooks = append(m.Hooks, hook)
-		}
+// manifestFrom достраивает общий манифест рантайма полями, которые есть только
+// у услуги: однократностью, полями проверки и сокрытием контактов заказчика.
+func manifestFrom(raw script.Manifest) Manifest {
+	return Manifest{
+		Code:                 raw.Code,
+		Name:                 raw.Name,
+		Description:          raw.Description,
+		Events:               raw.Events,
+		Defaults:             raw.Defaults,
+		Hooks:                raw.Hooks,
+		ConstantsSource:      raw.ConstantsSource,
+		Source:               raw.Source,
+		OncePerUser:          raw.Bool("once_per_user", false),
+		ReleaseClaimOnCancel: raw.Bool("release_claim_on_cancel", true),
+		CheckFields:          raw.Strings("check_fields"),
+		HideCustomerContacts: raw.Bool("hide_customer_contacts", false),
 	}
-
-	raw, ok := globals["MANIFEST"]
-	if !ok {
-		return m, fmt.Errorf("script %s defines no MANIFEST", code)
-	}
-	dict, ok := raw.(*starlark.Dict)
-	if !ok {
-		return m, fmt.Errorf("script %s: MANIFEST must be a dict", code)
-	}
-	values, _ := starlarkToGo(dict).(map[string]interface{})
-	for key, value := range values {
-		switch key {
-		case "name":
-			m.Name, _ = value.(string)
-		case "description":
-			m.Description, _ = value.(string)
-		case "once_per_user":
-			m.OncePerUser, _ = value.(bool)
-		case "release_claim_on_cancel":
-			if b, ok := value.(bool); ok {
-				m.ReleaseClaimOnCancel = b
-			}
-		case "check_fields":
-			items, _ := value.([]interface{})
-			for _, item := range items {
-				if s, ok := item.(string); ok {
-					m.CheckFields = append(m.CheckFields, s)
-				}
-			}
-		case "hide_customer_contacts":
-			m.HideCustomerContacts, _ = value.(bool)
-		case "events":
-			items, _ := value.([]interface{})
-			for _, item := range items {
-				if s, ok := item.(string); ok {
-					m.Events = append(m.Events, s)
-				}
-			}
-		case "defaults":
-			if defaults, ok := value.(map[string]interface{}); ok {
-				m.Defaults = defaults
-			}
-		}
-	}
-	if m.Name == "" {
-		m.Name = code
-	}
-	sort.Strings(m.Events)
-	return m, nil
-}
-
-// Has сообщает, загружено ли поведение с таким кодом.
-func (e *Engine) Has(code string) bool {
-	if e == nil || code == "" {
-		return false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	_, ok := e.scripts[code]
-	return ok
-}
-
-// Manifest возвращает статическое объявление поведения.
-func (e *Engine) Manifest(code string) (Manifest, bool) {
-	if e == nil {
-		return Manifest{}, false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	s, ok := e.scripts[code]
-	if !ok {
-		return Manifest{}, false
-	}
-	return s.manifest, true
-}
-
-// Manifests перечисляет все загруженные поведения — для выбора в админ-панели.
-func (e *Engine) Manifests() []Manifest {
-	if e == nil {
-		return nil
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	out := make([]Manifest, 0, len(e.scripts))
-	for _, s := range e.scripts {
-		out = append(out, s.manifest)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
-	return out
 }
 
 // Visible отвечает, можно ли показывать узел каталога. Скрипт без хука
@@ -451,51 +278,18 @@ func (e *Engine) OnEvent(code string, f Facts) ([]Effect, error) {
 	}
 }
 
-// call выполняет один хук. Возвращает (nil, nil), когда поведение его не
-// определяет, чтобы любой вызывающий мог откатиться к собственному правилу ядра.
+// call готовит факты и выполняет один хук. Ошибка о незагруженном поведении
+// переводится в собственный тип пакета: вызывающие уже различают его.
 func (e *Engine) call(code, hook string, f Facts) (starlark.Value, error) {
 	if e == nil || code == "" {
 		return nil, nil
 	}
-	e.mu.RLock()
-	s, ok := e.scripts[code]
-	e.mu.RUnlock()
-	if !ok {
+	if !e.runtime.Has(code) {
 		return nil, &ErrUnknownBehavior{Code: code}
 	}
-	fn, ok := s.globals[hook].(starlark.Callable)
-	if !ok {
-		return nil, nil
-	}
-
-	f.Config = mergeConfig(s.manifest.Defaults, f.Config)
+	f.Config = e.runtime.MergeConfig(code, f.Config)
 	if f.Now.IsZero() {
 		f.Now = time.Now()
 	}
-
-	thread := &starlark.Thread{Name: code + ":" + hook}
-	thread.SetMaxExecutionSteps(e.limits.MaxSteps)
-	// Лимит шагов останавливает бесконечный цикл; таймер останавливает всё
-	// остальное, включая скрипт, который просто медлит на нагруженной машине.
-	timer := time.AfterFunc(e.limits.Timeout, func() { thread.Cancel("timeout") })
-	defer timer.Stop()
-
-	result, err := starlark.Call(thread, fn, starlark.Tuple{factsValue(f)}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("behavior %s: %s: %w", code, hook, err)
-	}
-	return result, nil
-}
-
-// mergeConfig накладывает конфигурацию узла поверх умолчаний скрипта, чтобы узлу
-// достаточно было указать только то, что он меняет.
-func mergeConfig(defaults, node map[string]interface{}) map[string]interface{} {
-	merged := make(map[string]interface{}, len(defaults)+len(node))
-	for k, v := range defaults {
-		merged[k] = v
-	}
-	for k, v := range node {
-		merged[k] = v
-	}
-	return merged
+	return e.runtime.CallHook(code, hook, factsValue(f))
 }
