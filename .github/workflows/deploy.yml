@@ -261,7 +261,10 @@ jobs:
             make restart
             
             echo "Building and releasing new Android APK on server..."
-            COMMIT_MSG=$(git log -1 --pretty=%B)
+            # Заголовок коммита (%s), а не всё сообщение (%B). Эти заметки
+            # показываются пользователю в диалоге обновления, и там нужна одна
+            # строка о том, что изменилось, а не разбор причин на тридцать строк.
+            COMMIT_MSG=$(git log -1 --pretty=%s)
             make release-android RELEASE_NOTES="${COMMIT_MSG}" || echo "Notice: Android release build skipped or failed on server."
             
             echo "Cleaning up old images..."

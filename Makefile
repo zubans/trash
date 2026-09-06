@@ -140,6 +140,21 @@ sign-apk: $(KEYSTORE_FILE)
 
 release: release-android
 
+# Заметки о релизе уходят в рецепт через окружение, а не подстановкой make.
+#
+# Раньше в команде стояло "$(RELEASE_NOTES)", то есть значение попадало прямо в
+# текст команды, склеенной обратными слэшами. Однострочное сообщение это
+# переживало, а многострочное рвало команду посередине: /bin/sh падал с
+# «unexpected EOF while looking for matching "», регистрация релиза не
+# выполнялась, и — из-за `|| echo` в деплое — молча. APK при этом собирался:
+# ломался только шаг записи в базу, поэтому у клиентов просто не появлялось
+# обновление.
+#
+# Через окружение значение не проходит через разбор командной строки вовсе,
+# поэтому ни переводы строк, ни кавычки, ни бэктики в сообщении коммита больше
+# ничего не ломают.
+export RELEASE_NOTES
+
 release-android: build-android-release
 	@echo "Registering APK release in database..."
 	@BUILT_VERSION_CODE=$$(node -e "const fs=require('fs'); const c=fs.readFileSync('frontend/android/app/build.gradle','utf8'); const m=c.match(/versionCode\\s+(\\d+)/); console.log(m ? m[1] : '');"); \
@@ -156,7 +171,7 @@ release-android: build-android-release
 		-version-name "$$BUILT_VERSION_NAME" \
 		-version-code "$$BUILT_VERSION_CODE" \
 		-releases-dir ../releases \
-		-release-notes "$(RELEASE_NOTES)" \
+		-release-notes "$$RELEASE_NOTES" \
 		$(if $(FORCE_UPDATE),-force-update)
 	@echo "Release registered successfully."
 	@echo "Restoring original build.gradle..."
