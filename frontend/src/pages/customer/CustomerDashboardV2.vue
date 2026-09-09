@@ -213,7 +213,7 @@
                   type="button"
                   class="btn-action success confirm-btn"
                   :title="order.status === 'EXECUTED' ? 'Подтвердить выполнение и закрыть заказ' : 'Принять заказ досрочно и закрыть его'"
-                  @click="confirmOrder(order.id, order.status)"
+                  @click="confirmOrder(order)"
                 >
                   <i class="ph-bold ph-check"></i>
                 </button>
@@ -901,10 +901,16 @@ export default defineComponent({
       }
     }
 
-    const confirmOrder = async (orderId: string, status?: string) => {
+    const confirmOrder = async (orderOrId: any, status?: string) => {
+      const order = typeof orderOrId === 'object' && orderOrId !== null
+        ? orderOrId
+        : orders.value.find((o: any) => o.id === orderOrId)
+      const orderId = order ? order.id : orderOrId
+      const orderStatus = status || order?.status
+
       // Подтверждение заказа, который исполнитель ещё не отметил выполненным,
       // закрывает его и сразу выплачивает, поэтому страхуем случай раннего одобрения.
-      if (status === 'ASSIGNED' &&
+      if (orderStatus === 'ASSIGNED' &&
           !confirm('Исполнитель ещё не отметил заказ выполненным. Подтвердить и закрыть заказ досрочно? Средства спишутся исполнителю.')) {
         return
       }
@@ -912,6 +918,9 @@ export default defineComponent({
         await api.post(`/customer/orders/${orderId}/confirm`)
         successMsg.value = 'Заказ подтвержден'
         await fetchOrders()
+        if (order) {
+          openReviewModal(order)
+        }
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка подтверждения'
       }
