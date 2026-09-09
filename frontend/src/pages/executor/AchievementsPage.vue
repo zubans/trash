@@ -87,13 +87,15 @@
               <div v-if="card.expires_at" class="shelf-note warn">
                 баллы сгорят {{ formatDate(card.expires_at) }}
               </div>
-              <!-- Повторяемая ачивка на полке продолжает считать: полоса здесь
-                   про следующую выдачу, а не про полученную. -->
+              <!-- Повторяемую ачивку её скрипт продолжает считать и после
+                   выдачи. Что именно значит полоса, решает он же — у одной это
+                   путь к следующей выдаче, у другой близость к попаданию, —
+                   поэтому подпись нейтральная, а не выдуманная экраном. -->
               <div v-if="card.repeatable && card.progress !== undefined" class="shelf-progress">
                 <div class="progress-track slim">
                   <div class="progress-fill" :style="{ width: Math.round(card.progress * 100) + '%' }"></div>
                 </div>
-                <span class="shelf-note">до следующей</span>
+                <span class="shelf-note">прогресс</span>
               </div>
               <div v-else-if="!card.available" class="shelf-note">акция завершена</div>
             </div>

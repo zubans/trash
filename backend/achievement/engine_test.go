@@ -82,7 +82,7 @@ func TestFastestGunGrantsInsideTheWindow(t *testing.T) {
 	}
 }
 
-func TestFastestGunIgnoresSlowAndCheapOrders(t *testing.T) {
+func TestFastestGunIgnoresSlowOrders(t *testing.T) {
 	e := engineWithLibrary(t)
 	now := time.Now()
 
@@ -92,10 +92,21 @@ func TestFastestGunIgnoresSlowAndCheapOrders(t *testing.T) {
 		t.Errorf("a forty-minute order was granted: grant=%v err=%v", grant, err)
 	}
 
+	// Порога суммы у поставляемой ачивки больше нет: единственный на платформе
+	// живёт в настройке и проверяется ядром. Дешёвый заказ скрипт пропускает.
 	cheap := executorFacts("order.confirmed", now)
 	cheap.Order.Amount = 100
-	if grant, err := e.Check("fastest_gun", cheap); err != nil || grant != nil {
-		t.Errorf("a 100 ruble order was granted: grant=%v err=%v", grant, err)
+	if grant, err := e.Check("fastest_gun", cheap); err != nil || grant == nil {
+		t.Errorf("a cheap order was refused by the script: grant=%v err=%v", grant, err)
+	}
+
+	// А вот админ вправе быть строже ядра — тем же ключом, каким настраивает
+	// любую другую константу ачивки.
+	guarded := executorFacts("order.confirmed", now)
+	guarded.Order.Amount = 100
+	guarded.Config = map[string]interface{}{"min_order_amount": 300}
+	if grant, err := e.Check("fastest_gun", guarded); err != nil || grant != nil {
+		t.Errorf("the configured floor was ignored: grant=%v err=%v", grant, err)
 	}
 
 	// Заказ, где этот человек — заказчик, а не исполнитель.
