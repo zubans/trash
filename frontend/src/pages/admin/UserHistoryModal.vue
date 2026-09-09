@@ -31,11 +31,20 @@
         >
           Заказы<span v-if="tab === 'orders' && total"> · {{ total }}</span>
         </button>
+        <button
+          v-if="canSeeAchievements"
+          type="button"
+          class="tab"
+          :class="{ active: tab === 'achievements' }"
+          @click="switchTo('achievements')"
+        >
+          Ачивки<span v-if="tab === 'achievements' && total"> · {{ total }}</span>
+        </button>
       </div>
 
       <p v-if="errorMsg" class="alert error">{{ errorMsg }}</p>
 
-      <div class="table-scroll">
+      <div v-if="tab !== 'achievements'" class="table-scroll">
         <table v-if="tab === 'transactions'" class="history-table">
           <thead>
             <tr>
@@ -62,7 +71,7 @@
           </tbody>
         </table>
 
-        <table v-else class="history-table">
+        <table v-else-if="tab === 'orders'" class="history-table">
           <thead>
             <tr>
               <th>Дата</th>
@@ -90,13 +99,116 @@
         </table>
       </div>
 
+      <!-- Ачивки. Две кнопки закрывают две разные ситуации, и путать их не
+           нужно: пересчёт повторяет правило по истории, ручная выдача правило
+           обходит. -->
+      <div v-if="tab === 'achievements'" class="achievements">
+        <div class="level-line">
+          <span class="level-badge">{{ level?.level ?? 0 }}</span>
+          <span>
+            уровень · {{ level?.points ?? 0 }} действующих балл(ов) · комиссия
+            {{ level?.percent ?? 0 }}%
+          </span>
+        </div>
+
+        <div class="ach-actions">
+          <button type="button" class="btn-action" :disabled="busy" @click="recheck">
+            <i class="ph-bold ph-arrows-clockwise"></i>
+            Пересчитать условия
+          </button>
+          <button type="button" class="btn-action" :disabled="busy" @click="recalcStats">
+            <i class="ph-bold ph-calculator"></i>
+            Пересчитать агрегаты
+          </button>
+        </div>
+        <p class="hint">
+          Пересчёт повторяет подтверждённые заказы и выдаёт то, что выдало бы
+          правило: он нужен, когда ачивку включили после того, как человек уже
+          отработал. Незаслуженного он не выдаёт.
+        </p>
+
+        <div v-if="grantable.length" class="ach-grant">
+          <select v-model="grantCode" class="grant-select">
+            <option value="">— выдать вручную —</option>
+            <option v-for="item in grantable" :key="item.code" :value="item.code">
+              {{ item.title || item.code }} · {{ item.effective_weight }} б.
+            </option>
+          </select>
+          <input v-model="grantReason" class="grant-reason" placeholder="причина (в аудит)" />
+          <button
+            type="button"
+            class="btn-action primary"
+            :disabled="busy || !grantCode"
+            @click="grant"
+          >
+            Выдать
+          </button>
+        </div>
+
+        <p v-if="actionMsg" class="alert success">{{ actionMsg }}</p>
+
+        <!-- Вес выдачи и начисленные по ней баллы — разные числа, и расходятся
+             они законно: суточный потолок ужимает начисление, а выдача помнит,
+             сколько ачивка стоила. Уровень считается по начисленному. -->
+        <p v-if="weightSum !== (level?.points ?? 0)" class="hint">
+          Сумма весов — {{ weightSum }}, действующих баллов — {{ level?.points ?? 0 }}.
+          Разницу съедает суточный потолок начисления или истёкший срок баллов.
+        </p>
+
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Ачивка</th>
+              <th class="num">Вес</th>
+              <th>Состояние</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="g in grants" :key="g.id" :class="{ revoked: g.revoked_at }">
+              <td class="nowrap">{{ formatDate(g.granted_at) }}</td>
+              <td>
+                {{ achievementTitle(g.code) }}
+                <div class="muted mono">{{ g.code }}</div>
+              </td>
+              <td class="num">{{ g.points }}</td>
+              <td>
+                <template v-if="g.revoked_at">
+                  отозвана {{ formatDate(g.revoked_at) }}
+                  <div v-if="g.revoke_reason" class="muted">{{ g.revoke_reason }}</div>
+                </template>
+                <template v-else-if="g.expires_at">
+                  баллы до {{ formatDate(g.expires_at) }}
+                </template>
+                <template v-else>действует</template>
+              </td>
+              <td>
+                <button
+                  v-if="!g.revoked_at && canRevoke"
+                  type="button"
+                  class="btn-link danger"
+                  :disabled="busy"
+                  @click="revoke(g)"
+                >
+                  Отозвать
+                </button>
+              </td>
+            </tr>
+            <tr v-if="!loading && !grants.length">
+              <td colspan="5" class="empty">Ачивок нет.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="history-foot">
         <span class="muted">
           <template v-if="total">Показано {{ shown }} из {{ total }}</template>
         </span>
         <div class="foot-actions">
           <button
-            v-if="shown < total"
+            v-if="tab !== 'achievements' && shown < total"
             type="button"
             class="btn-more"
             :disabled="loading"
@@ -121,6 +233,18 @@ import {
   type UserOrder,
   type UserTransaction,
 } from '../../api/user-history'
+import {
+  adminGetAchievements,
+  adminGetUserAchievements,
+  adminGrantAchievement,
+  adminRecalculateStats,
+  adminRecheckUserAchievements,
+  adminRevokeGrant,
+  type AdminAchievement,
+  type ExecutorLevel,
+  type UserGrant,
+} from '../../api/achievements'
+import { useAuthStore } from '../../stores/auth-store'
 
 const PAGE_SIZE = 20
 
@@ -140,6 +264,8 @@ const TYPE_LABELS: Record<string, string> = {
   BONUS: 'Бонус',
 }
 
+type Tab = 'transactions' | 'orders' | 'achievements'
+
 const STATUS_LABELS: Record<string, string> = {
   SEARCHING: 'в поиске',
   ASSIGNED: 'у исполнителя',
@@ -154,16 +280,47 @@ export default defineComponent({
     modelValue: { type: Boolean, default: false },
     user: { type: Object as PropType<any | null>, default: null },
     // С какой вкладки открыть: пункты меню на карточке ведут каждый на свою.
-    initialTab: { type: String as PropType<'transactions' | 'orders'>, default: 'transactions' },
+    initialTab: {
+      type: String as PropType<Tab>,
+      default: 'transactions',
+    },
   },
   emits: ['update:modelValue'],
   setup(props) {
-    const tab = ref<'transactions' | 'orders'>(props.initialTab)
+    const authStore = useAuthStore()
+    const tab = ref<Tab>(props.initialTab)
     const transactions = ref<UserTransaction[]>([])
     const orders = ref<UserOrder[]>([])
     const total = ref(0)
     const loading = ref(false)
     const errorMsg = ref('')
+
+    // Ачивки. Каталог нужен ради двух вещей: названий в таблице выдач (в самой
+    // выдаче лежит только код) и списка того, что вообще можно выдать вручную.
+    const grants = ref<UserGrant[]>([])
+    const level = ref<ExecutorLevel | null>(null)
+    const catalog = ref<AdminAchievement[]>([])
+    const grantCode = ref('')
+    const grantReason = ref('')
+    const busy = ref(false)
+    const actionMsg = ref('')
+
+    const canSeeAchievements = computed(() => authStore.can('achievements.view'))
+    const canGrant = computed(() => authStore.can('achievements.create'))
+    const canRevoke = computed(() => authStore.can('achievements.delete'))
+
+    // Выдать вручную можно только включённую ачивку с загруженным скриптом —
+    // ровно то, что разрешает сервер. Предлагать в списке большее значило бы
+    // обещать кнопку, которая ответит отказом.
+    const grantable = computed(() =>
+      canGrant.value
+        ? catalog.value.filter((item) => item.is_active && item.script_loaded && !item.deleted_at)
+        : [],
+    )
+
+    const weightSum = computed(() =>
+      grants.value.reduce((sum, g) => (g.revoked_at ? sum : sum + (g.points || 0)), 0),
+    )
 
     const shown = computed(() =>
       tab.value === 'transactions' ? transactions.value.length : orders.value.length,
@@ -175,9 +332,34 @@ export default defineComponent({
       return [u.last_name, u.first_name, u.patronymic].filter(Boolean).join(' ')
     })
 
-    const title = computed(() =>
-      tab.value === 'transactions' ? 'История проводок' : 'История заказов',
-    )
+    const TITLES: Record<Tab, string> = {
+      transactions: 'История проводок',
+      orders: 'История заказов',
+      achievements: 'Ачивки пользователя',
+    }
+    const title = computed(() => TITLES[tab.value])
+
+    const achievementTitle = (code: string) =>
+      catalog.value.find((item) => item.code === code)?.title || code
+
+    const fail = (err: any, fallback: string) => {
+      const data = err?.response?.data
+      errorMsg.value = (typeof data === 'string' ? data : data?.error) || fallback
+    }
+
+    const loadAchievements = async () => {
+      if (!props.user) return
+      const [user, list] = await Promise.all([
+        adminGetUserAchievements(props.user.id),
+        // Каталог читается тем же правом, что и вкладка. Отказ по нему не должен
+        // прятать выдачи: названия станут кодами, и это лучше пустого экрана.
+        adminGetAchievements().catch(() => [] as AdminAchievement[]),
+      ])
+      grants.value = user.grants
+      level.value = user.level
+      catalog.value = list
+      total.value = user.grants.length
+    }
 
     const load = async (append = false) => {
       if (!props.user) return
@@ -185,7 +367,9 @@ export default defineComponent({
       errorMsg.value = ''
       try {
         const offset = append ? shown.value : 0
-        if (tab.value === 'transactions') {
+        if (tab.value === 'achievements') {
+          await loadAchievements()
+        } else if (tab.value === 'transactions') {
           const res = await getUserTransactions(props.user.id, { limit: PAGE_SIZE, offset })
           transactions.value = append ? [...transactions.value, ...res.transactions] : res.transactions
           total.value = res.total
@@ -195,15 +379,62 @@ export default defineComponent({
           total.value = res.total
         }
       } catch (err: any) {
-        const data = err?.response?.data
-        errorMsg.value =
-          (typeof data === 'string' ? data : data?.error) || 'Не удалось загрузить историю'
+        fail(err, 'Не удалось загрузить историю')
       } finally {
         loading.value = false
       }
     }
 
-    const switchTo = (next: 'transactions' | 'orders') => {
+    // Действия вкладки ачивок. Каждое кончается перечитыванием выдач: результат
+    // кнопки — это новая строка в таблице под ней, и показывать его иначе, чем
+    // тем, что реально записалось, незачем.
+    const runAction = async (job: () => Promise<string>) => {
+      if (!props.user || busy.value) return
+      busy.value = true
+      errorMsg.value = ''
+      actionMsg.value = ''
+      try {
+        actionMsg.value = await job()
+        await loadAchievements()
+      } catch (err: any) {
+        fail(err, 'Действие не удалось')
+      } finally {
+        busy.value = false
+      }
+    }
+
+    const recheck = () =>
+      runAction(async () => {
+        const result = await adminRecheckUserAchievements(props.user.id)
+        if (!result.granted.length) {
+          return `Прогнано заказов: ${result.orders_replayed}. Новых ачивок нет — условия не выполнены.`
+        }
+        const names = result.granted.map(achievementTitle).join(', ')
+        return `Прогнано заказов: ${result.orders_replayed}. Выдано: ${names}.`
+      })
+
+    const recalcStats = () =>
+      runAction(async () => {
+        await adminRecalculateStats(props.user.id)
+        return 'Агрегаты пересчитаны по журналу заказов. Теперь можно пересчитать условия.'
+      })
+
+    const grant = () =>
+      runAction(async () => {
+        const code = grantCode.value
+        await adminGrantAchievement(props.user.id, code, grantReason.value)
+        grantCode.value = ''
+        grantReason.value = ''
+        return `Ачивка «${achievementTitle(code)}» выдана вручную.`
+      })
+
+    const revoke = (row: UserGrant) =>
+      runAction(async () => {
+        await adminRevokeGrant(row.id, 'отозвана администратором')
+        return `Выдача «${achievementTitle(row.code)}» отозвана, её баллы больше не считаются.`
+      })
+
+    const switchTo = (next: Tab) => {
       if (tab.value === next) return
       tab.value = next
       total.value = 0
@@ -222,6 +453,10 @@ export default defineComponent({
         tab.value = props.initialTab
         transactions.value = []
         orders.value = []
+        grants.value = []
+        actionMsg.value = ''
+        grantCode.value = ''
+        grantReason.value = ''
         total.value = 0
         load()
       },
@@ -256,6 +491,21 @@ export default defineComponent({
       tab,
       transactions,
       orders,
+      grants,
+      level,
+      weightSum,
+      grantable,
+      grantCode,
+      grantReason,
+      busy,
+      actionMsg,
+      canSeeAchievements,
+      canRevoke,
+      achievementTitle,
+      recheck,
+      recalcStats,
+      grant,
+      revoke,
       total,
       shown,
       loading,
@@ -316,6 +566,114 @@ export default defineComponent({
 .alert.error {
   background: #fef2f2;
   color: #b91c1c;
+}
+
+.alert.success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+/* --- Вкладка ачивок --- */
+
+.achievements {
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.level-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #4b5563;
+  margin-bottom: 12px;
+}
+
+.level-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #111827;
+  color: #f59e0b;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ach-actions,
+.ach-grant {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.btn-action {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-action.primary {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+
+.grant-select,
+.grant-reason {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.grant-select {
+  flex: 1 1 220px;
+}
+
+.grant-reason {
+  flex: 1 1 180px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 0 0 12px;
+}
+
+.btn-link {
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #4b5563;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-link.danger {
+  color: #b91c1c;
+}
+
+/* Отозванная выдача остаётся в таблице: карточка — это история, а не витрина. */
+.history-table tr.revoked td {
+  opacity: 0.55;
+  text-decoration: line-through;
 }
 
 /* История длиннее экрана — прокручивается таблица, а не всё окно. */

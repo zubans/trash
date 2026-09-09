@@ -150,7 +150,17 @@
                 <button v-if="canSeeOrders" class="dropdown-item" @click="openHistory(u, 'orders')">
                   <i class="ph-bold ph-package"></i> История заказов
                 </button>
-                <div v-if="canSeeTransactions || canSeeOrders" class="menu-divider"></div>
+                <button
+                  v-if="canSeeAchievements"
+                  class="dropdown-item"
+                  @click="openHistory(u, 'achievements')"
+                >
+                  <i class="ph-bold ph-trophy"></i> Ачивки
+                </button>
+                <div
+                  v-if="canSeeTransactions || canSeeOrders || canSeeAchievements"
+                  class="menu-divider"
+                ></div>
                 <button class="dropdown-item" @click="toggleUserVerified(u)">
                   <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
                   {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
@@ -233,6 +243,9 @@
           </button>
           <button v-if="canSeeOrders" @click="openHistory(u, 'orders'); cardMenuId = null">
             <i class="ph-bold ph-package"></i> Заказы
+          </button>
+          <button v-if="canSeeAchievements" @click="openHistory(u, 'achievements'); cardMenuId = null">
+            <i class="ph-bold ph-trophy"></i> Ачивки
           </button>
           <button @click="toggleUserVerified(u); cardMenuId = null">
             <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
@@ -482,14 +495,15 @@ export default defineComponent({
     // лишь вкладка, на которой оно открывается.
     const showHistoryModal = ref(false)
     const historyUser = ref<any | null>(null)
-    const historyTab = ref<'transactions' | 'orders'>('transactions')
+    const historyTab = ref<'transactions' | 'orders' | 'achievements'>('transactions')
 
     // Права те же, что охраняют эндпоинты историй: раздел проводок и раздел
     // заказов, а не право на пользователей.
     const canSeeTransactions = computed(() => authStore.can('transactions.view'))
     const canSeeOrders = computed(() => authStore.can('orders.view'))
+    const canSeeAchievements = computed(() => authStore.can('achievements.view'))
 
-    const openHistory = (user: any, tab: 'transactions' | 'orders') => {
+    const openHistory = (user: any, tab: 'transactions' | 'orders' | 'achievements') => {
       historyUser.value = user
       historyTab.value = tab
       showHistoryModal.value = true
@@ -883,6 +897,7 @@ export default defineComponent({
       historyTab,
       canSeeTransactions,
       canSeeOrders,
+      canSeeAchievements,
       openHistory,
       totalUsers,
       page,

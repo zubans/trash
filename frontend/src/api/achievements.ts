@@ -203,6 +203,70 @@ export async function adminRestoreAchievement(code: string): Promise<void> {
   await api.post(`/admin/achievements/${code}/restore`)
 }
 
+// --- Ачивки на карточке пользователя -----------------------------------------
+
+// UserGrant — одна выдача, как её видит администратор. От карточки исполнителя
+// отличается тем, что показывает и отозванные: карточка — это история, а не
+// витрина.
+export interface UserGrant {
+  id: string
+  code: string
+  grant_key: string
+  points: number
+  order_id?: string
+  granted_at: string
+  expires_at?: string
+  revoked_at?: string
+  revoke_reason?: string
+}
+
+export interface RecheckResult {
+  orders_replayed: number
+  granted: string[]
+}
+
+export async function adminGetUserAchievements(
+  userId: string,
+): Promise<{ grants: UserGrant[]; level: ExecutorLevel }> {
+  const response = await api.get(`/admin/users/${userId}/achievements`)
+  return {
+    grants: Array.isArray(response.data?.grants) ? response.data.grants : [],
+    level: response.data?.level,
+  }
+}
+
+// Пересчёт повторяет подтверждённые заказы пользователя и выдаёт то, что выдало
+// бы правило. Он ничего не обходит: заказ, не подходящий под условие, ачивкой не
+// станет оттого, что нажали кнопку.
+export async function adminRecheckUserAchievements(userId: string): Promise<RecheckResult> {
+  const response = await api.post(`/admin/users/${userId}/achievements/recheck`)
+  return {
+    orders_replayed: response.data?.orders_replayed ?? 0,
+    granted: Array.isArray(response.data?.granted) ? response.data.granted : [],
+  }
+}
+
+// Выдача вручную правило обходит — в этом её смысл. Выдать можно только
+// включённую ачивку.
+export async function adminGrantAchievement(
+  userId: string,
+  code: string,
+  reason: string,
+): Promise<void> {
+  await api.post(`/admin/users/${userId}/achievements/${code}`, { reason })
+}
+
+export async function adminRevokeGrant(grantId: string, reason: string): Promise<void> {
+  await api.post(`/admin/achievements/grants/${grantId}/revoke`, { reason })
+}
+
+// Пересчёт агрегатов по журналу заказов. Стоит рядом с пересчётом ачивок, потому
+// что чинит соседнюю поломку: правило смотрит на эти счётчики, и разошедшийся
+// счётчик — вторая причина, по которой заслуженный значок не выдался.
+export async function adminRecalculateStats(userId: string): Promise<void> {
+  await api.post(`/admin/users/${userId}/stats/recalculate`)
+}
+
 export async function adminGetGifts(): Promise<(Gift & { free_codes: number })[]> {
   const response = await api.get('/admin/gifts')
   return Array.isArray(response.data) ? response.data : []

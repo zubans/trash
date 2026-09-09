@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -522,8 +523,8 @@ def check(f):
 	}
 }
 
-// Порог суммы держит ядро, а не только скрипты: заказ в рубль не должен
-// приносить баллы из-за того, что в одном из скриптов о пороге забыли.
+// Порог суммы держит ядро: это единственное место, где он проверяется, и
+// заказ ниже него не приносит баллов, что бы ни решил скрипт.
 func TestOrderBelowTheFloorEarnsNothing(t *testing.T) {
 	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
 	h.order.FinalAmount = money.FromRubles(1)
@@ -532,4 +533,129 @@ func TestOrderBelowTheFloorEarnsNothing(t *testing.T) {
 	if len(h.achievements.granted) != 0 {
 		t.Errorf("granted %d achievements for a 1 ruble order, want none", len(h.achievements.granted))
 	}
+}
+
+// --- Админские кнопки ---------------------------------------------------------
+
+// Пересчёт существует ради одного случая, и он же самый частый: ачивку включили
+// после того, как человек выполнил заказы. События по ним давно обработаны и
+// второй раз не придут, поэтому единственный способ выдать заслуженное —
+// повторить заказы.
+func TestRecheckGrantsWhatTheEventNeverSaw(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
+
+	result, err := h.dispatcher.RecheckUser(context.Background(), h.executorID)
+	if err != nil {
+		t.Fatalf("recheck: %v", err)
+	}
+	if result.OrdersReplayed != 1 {
+		t.Errorf("replayed %d orders, want 1", result.OrdersReplayed)
+	}
+	if len(result.Granted) != 1 || result.Granted[0] != "test_award" {
+		t.Errorf("granted = %v, want [test_award]", result.Granted)
+	}
+	if len(h.achievements.granted) != 1 || h.achievements.granted[0].UserID != h.executorID {
+		t.Errorf("grants = %+v, want one for the executor", h.achievements.granted)
+	}
+	if len(h.mail.sent) != 1 {
+		t.Errorf("mail = %+v, want one letter", h.mail.sent)
+	}
+}
+
+// Пересчёт нажимают дважды — потому что не помнят, нажимали ли. Второй раз он
+// не должен ничего начислять: ключа идемпотентности события у него нет, и от
+// повтора защищает та же уникальность выдачи, что и всегда.
+func TestRecheckDoesNotGrantTwice(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
+
+	for i := 0; i < 2; i++ {
+		if _, err := h.dispatcher.RecheckUser(context.Background(), h.executorID); err != nil {
+			t.Fatalf("recheck %d: %v", i, err)
+		}
+	}
+	if len(h.achievements.granted) != 1 {
+		t.Errorf("granted %d times, want exactly 1", len(h.achievements.granted))
+	}
+	if len(h.achievements.points) != 1 {
+		t.Errorf("points credited %d times, want exactly 1", len(h.achievements.points))
+	}
+}
+
+// Пересчёт не выдаёт того, что не заслужено: он повторяет правило, а не обходит
+// его. Заказ ниже порога не станет ачивкой оттого, что админ нажал кнопку.
+func TestRecheckRespectsTheRule(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
+	h.order.FinalAmount = money.FromRubles(1)
+
+	result, err := h.dispatcher.RecheckUser(context.Background(), h.executorID)
+	if err != nil {
+		t.Fatalf("recheck: %v", err)
+	}
+	if result.OrdersReplayed != 0 || len(result.Granted) != 0 {
+		t.Errorf("result = %+v, want nothing replayed and nothing granted", result)
+	}
+}
+
+// Выдача вручную правило обходит — в этом её смысл: причина выдать значок
+// руками лежит вне того, что скрипт видит в фактах.
+func TestManualGrantBypassesTheRule(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{}, "500")
+	h.dispatcher.engine = engineRefusingEverything(t)
+
+	row, err := h.dispatcher.GrantManually(context.Background(), h.executorID, "test_award", "разобранная жалоба")
+	if err != nil {
+		t.Fatalf("manual grant: %v", err)
+	}
+	if row == nil || row.Code != "test_award" {
+		t.Fatalf("row = %+v, want the granted achievement", row)
+	}
+	if len(h.achievements.granted) != 1 || h.achievements.granted[0].Points != 25 {
+		t.Errorf("grants = %+v, want one worth the achievement's weight", h.achievements.granted)
+	}
+	// Письмо приходит и при ручной выдаче: человек узнаёт о значке одинаково,
+	// кем бы тот ни был выдан.
+	if len(h.mail.sent) != 1 || h.mail.sent[0].Kind != repository.MailKindAchievement {
+		t.Errorf("mail = %+v, want one achievement letter", h.mail.sent)
+	}
+
+	// Разовая ачивка вторым нажатием не удваивается.
+	if _, err := h.dispatcher.GrantManually(context.Background(), h.executorID, "test_award", ""); !errors.Is(err, repository.ErrAchievementAlreadyGranted) {
+		t.Errorf("second manual grant returned %v, want ErrAchievementAlreadyGranted", err)
+	}
+}
+
+// Выключенную ачивку вручную не выдать: выключенная — это правило, которое
+// администратор счёл неготовым, а её баллы всё так же снижают комиссию.
+func TestManualGrantRefusesDisabledAchievement(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{}, "500")
+	h.achievements.rows[0].IsActive = false
+
+	if _, err := h.dispatcher.GrantManually(context.Background(), h.executorID, "test_award", ""); !errors.Is(err, ErrAchievementNotGrantable) {
+		t.Errorf("granted a disabled achievement: err = %v", err)
+	}
+	if len(h.achievements.granted) != 0 {
+		t.Errorf("grants = %+v, want none", h.achievements.granted)
+	}
+}
+
+// engineRefusingEverything — та же ачивка, чьё правило не срабатывает никогда.
+func engineRefusingEverything(t *testing.T) *achievement.Engine {
+	t.Helper()
+	engine := achievement.New(achievement.DefaultLimits)
+	if err := engine.Compile("test_award", "achievement.star", []byte(`
+MANIFEST = {
+    "title": "Тестовая ачивка",
+    "description": "Условие, которое не выполняется никогда.",
+    "audience": "EXECUTOR",
+    "events": ["order.confirmed"],
+    "once_per_user": True,
+    "weight": 25,
+}
+
+def check(f):
+    return None
+`)); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	return engine
 }

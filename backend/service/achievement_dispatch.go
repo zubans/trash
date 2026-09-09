@@ -170,7 +170,7 @@ func (d *AchievementDispatcher) dispatch(ctx context.Context, event *repository.
 			if grant == nil {
 				continue
 			}
-			if err := d.apply(ctx, event, s, row, manifest, grant, now); err != nil {
+			if _, err := d.apply(ctx, &event.ID, s, row, manifest, grant, now); err != nil {
 				return err
 			}
 		}
@@ -351,11 +351,18 @@ func orderFactsFor(o *repository.Order) *achievement.OrderFacts {
 // apply записывает выдачу и всё, что с ней связано, в одной транзакции: либо
 // ачивка выдана, баллы начислены и подарок занят, либо ничего этого не
 // произошло и событие будет повторено.
+//
+// eventID пуст, когда выдачу просит не событие, а администратор: пересчёт по
+// истории или выдача вручную. Тогда ключ идемпотентности outbox не занимается —
+// занимать его нечем, его строка ссылается на событие, — и от повтора защищает
+// та же уникальность (пользователь, код, ключ), что и всегда. Это не ослабление:
+// именно она и есть настоящая защита, а ключ эффекта лишь останавливает
+// переотправленное событие раньше, до открытия транзакции.
 func (d *AchievementDispatcher) apply(
-	ctx context.Context, event *repository.DomainEvent, s subject,
+	ctx context.Context, eventID *uuid.UUID, s subject,
 	row *repository.Achievement, manifest achievement.Manifest,
 	grant *achievement.Grant, now time.Time,
-) error {
+) (bool, error) {
 	key := grant.Key
 	if manifest.OncePerUser || key == "" {
 		// Разовая ачивка ключа не называет: им становится её код, и уникальный
@@ -373,22 +380,25 @@ func (d *AchievementDispatcher) apply(
 	}
 
 	var mails []repository.Mail
+	issued := false
 
 	err := d.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		// Ключ идемпотентности занимается первым — в той же таблице, что и
 		// эффекты поведений: у платформы одно пространство ключей, и выдача,
 		// пришедшая дважды, спотыкается о него так же, как дважды пришедшая
 		// выплата.
-		effectKey := fmt.Sprintf("achievement:%s:%s:%s", row.Code, s.user.ID, key)
-		err := d.events.RecordEffect(ctx, tx, effectKey, event.ID, row.Code, "grant", map[string]interface{}{
-			"user_id": s.user.ID.String(), "points": points, "key": key,
-		})
-		if errors.Is(err, repository.ErrEffectAlreadyApplied) {
-			metrics.AchievementGrant(row.Code, "duplicate")
-			return nil
-		}
-		if err != nil {
-			return err
+		if eventID != nil {
+			effectKey := fmt.Sprintf("achievement:%s:%s:%s", row.Code, s.user.ID, key)
+			err := d.events.RecordEffect(ctx, tx, effectKey, *eventID, row.Code, "grant", map[string]interface{}{
+				"user_id": s.user.ID.String(), "points": points, "key": key,
+			})
+			if errors.Is(err, repository.ErrEffectAlreadyApplied) {
+				metrics.AchievementGrant(row.Code, "duplicate")
+				return nil
+			}
+			if err != nil {
+				return err
+			}
 		}
 
 		granted := &repository.UserAchievement{
@@ -436,24 +446,25 @@ func (d *AchievementDispatcher) apply(
 		}
 		metrics.AchievementGrant(row.Code, "granted")
 		log.Printf("[AUDIT] achievement %s granted to %s (%d points, key %s)", row.Code, s.user.ID, points, key)
+		issued = true
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Почта — после коммита, как и любое другое уведомление: неотправленное
 	// письмо не должно откатывать выдачу, а откаченная выдача не должна была о
 	// себе объявлять.
 	if d.mail == nil {
-		return nil
+		return issued, nil
 	}
 	for i := range mails {
 		if err := d.mail.Send(ctx, nil, &mails[i]); err != nil {
 			log.Printf("[achievement] cannot post mail to %s: %v", s.user.ID, err)
 		}
 	}
-	return nil
+	return issued, nil
 }
 
 // capPoints ужимает начисление суточным потолком. Потолок — это цена накрутки:

@@ -315,12 +315,23 @@ func (r *achievementRepo) Grant(ctx context.Context, q Querier, grant *UserAchie
 	if grant.ID == uuid.Nil {
 		grant.ID = uuid.New()
 	}
+	// ON CONFLICT, а не пойманное нарушение уникальности: повторная выдача —
+	// нормальный исход, а нарушение ограничения обрывает транзакцию целиком.
+	// Пойманное и переведённое в «уже выдана», оно оставляло бы вызывающего с
+	// транзакцией, в которой больше ничего нельзя сделать, и следующей же
+	// строкой был бы «could not complete operation in a failed transaction» —
+	// вместо спокойного «эта ачивка у него уже есть».
 	err := r.exec(q).QueryRowContext(ctx, `
         INSERT INTO user_achievements (id, user_id, code, grant_key, points, order_id, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (user_id, code, grant_key) DO NOTHING
         RETURNING granted_at
     `, grant.ID, grant.UserID, grant.Code, grant.GrantKey, grant.Points, grant.OrderID, grant.ExpiresAt).
 		Scan(&grant.GrantedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Ничего не вставилось — строка с таким ключом уже есть.
+		return ErrAchievementAlreadyGranted
+	}
 	var pgErr *pq.Error
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrAchievementAlreadyGranted

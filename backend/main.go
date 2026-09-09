@@ -327,7 +327,8 @@ func main() {
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, mailRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
-		WithScripts(achievementScripts)
+		WithScripts(achievementScripts).
+		WithDispatcher(achievementDispatcher)
 
 	// Ограничители частоты для эндпоинтов, которые есть смысл перебирать.
 	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
@@ -559,6 +560,11 @@ func main() {
 			r.With(can("achievements.delete")).Post("/admin/achievements/grants/{id}/revoke", ach.AdminRevokeAchievement)
 			r.With(can("achievements.view")).Get("/admin/users/{id}/achievements", ach.AdminUserAchievements)
 			r.With(can("achievements.edit")).Post("/admin/users/{id}/stats/recalculate", ach.AdminRecalculateStats)
+			// Пересчёт — правка: он ничего не придумывает, а доводит выданное до
+			// того, что и так следует из правил. Выдача вручную — создание: она
+			// правило обходит.
+			r.With(can("achievements.edit")).Post("/admin/users/{id}/achievements/recheck", ach.AdminRecheckUserAchievements)
+			r.With(can("achievements.create")).Post("/admin/users/{id}/achievements/{code}", ach.AdminGrantAchievement)
 			r.With(can("gifts.view")).Get("/admin/gifts", ach.AdminListGifts)
 			r.With(can("gifts.edit")).Put("/admin/gifts/{code}", ach.AdminSaveGift)
 			r.With(can("gifts.create")).Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)

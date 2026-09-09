@@ -648,7 +648,16 @@ func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID
 }
 
 func (m *mockOrderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]repository.Order, error) {
-	return nil, nil
+	// Как в базе: сначала свежие. Пересчёт ачивок переворачивает этот порядок
+	// сам, и тест обязан давать ему тот же вход, что и хранилище.
+	out := []repository.Order{}
+	for i := len(m.orders) - 1; i >= 0; i-- {
+		o := m.orders[i]
+		if o.ExecutorID != nil && *o.ExecutorID == executorID {
+			out = append(out, *o)
+		}
+	}
+	return out, nil
 }
 
 type mockTransactionRepo struct {

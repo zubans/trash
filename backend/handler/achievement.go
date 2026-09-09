@@ -33,11 +33,22 @@ type AchievementHandler struct {
 	// прямо здесь. Без него редактор работает как читалка: сохранить можно
 	// только то, что не меняет правил.
 	scripts *service.Achievements
+	// dispatcher выдаёт ачивки — и по событию, и по кнопке администратора.
+	dispatcher *service.AchievementDispatcher
 }
 
 // WithScripts подключает компиляцию собственных скриптов ачивок.
 func (h *AchievementHandler) WithScripts(scripts *service.Achievements) *AchievementHandler {
 	h.scripts = scripts
+	return h
+}
+
+// WithDispatcher подключает диспетчер — тот самый, что разбирает события. Через
+// него идут обе админские кнопки выдачи: пересчёт по истории и выдача вручную.
+// Своей копии этой логики у обработчика нет намеренно — разойдясь, она начала
+// бы платить по другим правилам, чем обычная выдача.
+func (h *AchievementHandler) WithDispatcher(dispatcher *service.AchievementDispatcher) *AchievementHandler {
+	h.dispatcher = dispatcher
 	return h
 }
 
@@ -661,6 +672,73 @@ func (h *AchievementHandler) AdminUserAchievements(w http.ResponseWriter, r *htt
 		"grants": grants,
 		"level":  h.levels.For(r.Context(), nil, userID),
 	})
+}
+
+// AdminRecheckUserAchievements обслуживает
+// POST /admin/users/{id}/achievements/recheck.
+//
+// Кнопка отвечает на вопрос «почему у него нет значка, который он заслужил».
+// Причин ровно две, и обе лечатся пересчётом: ачивку включили после того, как
+// человек выполнил заказы, или событие в своё время не дошло. Пересчёт
+// повторяет его подтверждённые заказы и выдаёт то, что выдало бы правило.
+func (h *AchievementHandler) AdminRecheckUserAchievements(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseUUIDParam(r, "id")
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	if h.dispatcher == nil {
+		http.Error(w, "achievement dispatcher is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := h.dispatcher.RecheckUser(r.Context(), userID)
+	if err != nil {
+		log.Printf("[achievement] recheck of %s failed: %v", userID, err)
+		http.Error(w, "не удалось пересчитать ачивки", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[AUDIT] admin %v rechecked achievements of %s", adminID(userFromContext(r)), userID)
+	writeJSON(w, result)
+}
+
+// AdminGrantAchievement обслуживает POST /admin/users/{id}/achievements/{code}:
+// выдача вручную, минуя правило ачивки.
+func (h *AchievementHandler) AdminGrantAchievement(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseUUIDParam(r, "id")
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	code := strings.TrimSpace(chi.URLParam(r, "code"))
+	if code == "" {
+		http.Error(w, "invalid code", http.StatusBadRequest)
+		return
+	}
+	if h.dispatcher == nil {
+		http.Error(w, "achievement dispatcher is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	row, err := h.dispatcher.GrantManually(r.Context(), userID, code, body.Reason)
+	switch {
+	case errors.Is(err, service.ErrAchievementNotGrantable):
+		http.Error(w, "ачивку нельзя выдать: она выключена, удалена или её скрипт не загружен", http.StatusConflict)
+		return
+	case errors.Is(err, repository.ErrAchievementAlreadyGranted):
+		http.Error(w, "разовая ачивка у этого пользователя уже есть", http.StatusConflict)
+		return
+	case err != nil:
+		log.Printf("[achievement] manual grant of %s to %s failed: %v", code, userID, err)
+		http.Error(w, "не удалось выдать ачивку", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[AUDIT] admin %v granted achievement %s to %s by hand: %s",
+		adminID(userFromContext(r)), code, userID, body.Reason)
+	writeJSON(w, row)
 }
 
 // AdminListGifts обслуживает GET /admin/gifts вместе с остатком пула кодов.

@@ -77,7 +77,9 @@ var permissionCatalog = []PermissionSection{
 	{Key: "service_catalog", Label: "Конструктор услуг", Group: "Система", Route: "/admin/service-catalog",
 		Actions: []string{ActionView, ActionCreate, ActionEdit, ActionDelete}},
 	{Key: "achievements", Label: "Ачивки", Group: "Система", Route: "/admin/achievements",
-		Actions: []string{ActionView, ActionCreate, ActionEdit, ActionDelete}},
+		Actions: []string{ActionView, ActionCreate, ActionEdit, ActionDelete},
+		Hint: "Создание — новая ачивка и выдача значка пользователю вручную. " +
+			"Правка — включение, настройка и пересчёт условий по истории."},
 	{Key: "gifts", Label: "Подарки", Group: "Система", Route: "/admin/gifts",
 		Actions: []string{ActionView, ActionCreate, ActionEdit},
 		Hint:    "Правка — в том числе погашение купона на пункте выдачи."},
