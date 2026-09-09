@@ -23,6 +23,9 @@ export interface AchievementCard {
   expires_at?: string
   progress?: number
   available_to?: string
+  // Ачивку ещё можно заслужить. У полученной это отдельный от granted вопрос:
+  // значок с закрытой акции остаётся на полке, но повторить его уже нельзя.
+  available: boolean
 }
 
 export interface ExecutorLevel {

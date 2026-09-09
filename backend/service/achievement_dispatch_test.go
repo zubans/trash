@@ -86,12 +86,20 @@ type dispatchAchievements struct {
 	points  []int
 	daily   int
 	revoked int
+	// hideSummary заставляет свод молчать о выданном. Так проверяется вторая
+	// линия защиты от повторной выдачи — ключ идемпотентности и уникальный
+	// индекс: при живом своде до неё дело не доходит, потому что разовая
+	// ачивка, которая у человека уже есть, скрипту больше не показывается.
+	hideSummary bool
 }
 
 func (a *dispatchAchievements) List(ctx context.Context) ([]*repository.Achievement, error) {
 	return a.rows, nil
 }
 func (a *dispatchAchievements) ListActive(ctx context.Context) ([]*repository.Achievement, error) {
+	return a.rows, nil
+}
+func (a *dispatchAchievements) ListAll(ctx context.Context) ([]*repository.Achievement, error) {
 	return a.rows, nil
 }
 func (a *dispatchAchievements) Get(ctx context.Context, code string) (*repository.Achievement, error) {
@@ -160,6 +168,9 @@ func (a *dispatchAchievements) ListForUser(ctx context.Context, userID uuid.UUID
 
 func (a *dispatchAchievements) SummaryForUser(ctx context.Context, userID uuid.UUID) (map[string]repository.GrantSummary, error) {
 	out := map[string]repository.GrantSummary{}
+	if a.hideSummary {
+		return out, nil
+	}
 	for _, g := range a.granted {
 		if g.UserID != userID || g.RevokedAt != nil {
 			continue
@@ -348,11 +359,43 @@ func TestDispatcherGrantsOnceAndWritesMail(t *testing.T) {
 	}
 }
 
+// Разовая ачивка, которая у человека уже есть, до скрипта не доходит вовсе:
+// иначе каждый следующий заказ каждого исполнителя открывал бы транзакцию ради
+// выдачи, которую тут же отклонит ключ.
+func TestOncePerUserIsNotOfferedTwice(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
+	h.confirm(t)
+
+	// Второй заказ того же исполнителя — новое событие, а не переотправка.
+	second := *h.order
+	second.ID = uuid.New()
+	h.orders.orders = append(h.orders.orders, &second)
+	if err := h.events.Publish(context.Background(), nil, &repository.DomainEvent{
+		Type:        repository.EventOrderConfirmed,
+		SubjectType: repository.EventSubjectOrder,
+		SubjectID:   second.ID,
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := h.dispatcher.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	if len(h.achievements.granted) != 1 {
+		t.Errorf("granted %d times, want exactly 1", len(h.achievements.granted))
+	}
+	if len(h.achievements.points) != 1 {
+		t.Errorf("points credited %d times, want exactly 1", len(h.achievements.points))
+	}
+}
+
 // Переотправленное событие — обычное дело: воркер повторяет то, что не смог
-// доотметить обработанным. Оно не должно начислять баллы второй раз.
+// доотметить обработанным. Оно не должно начислять баллы второй раз даже тогда,
+// когда свод выданного о первой выдаче почему-то не знает.
 func TestRedeliveredEventDoesNotGrantTwice(t *testing.T) {
 	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
 	h.confirm(t)
+	h.achievements.hideSummary = true
 
 	// Тот же заказ, новое событие — так выглядит и переотправка, и второе
 	// событие, описывающее тот же исход.

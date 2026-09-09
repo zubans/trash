@@ -148,6 +148,16 @@ func (d *AchievementDispatcher) dispatch(ctx context.Context, event *repository.
 			if !row.AvailableAt(now) {
 				continue
 			}
+			// Разовая ачивка, которая у человека уже есть, скрипту не
+			// показывается вовсе. Защита от второй выдачи и без того стоит в
+			// базе — уникальный ключ, — но она срабатывает после вызова хука и
+			// после открытия транзакции, а это работа на каждый заказ каждого
+			// исполнителя до конца времён.
+			if manifest.OncePerUser {
+				if _, has := facts.Granted[row.Code]; has {
+					continue
+				}
+			}
 			facts.Config = row.Config
 			grant, err := d.engine.Check(row.Code, facts)
 			if err != nil {

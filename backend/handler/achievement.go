@@ -78,6 +78,10 @@ type achievementCard struct {
 	Progress *float64 `json:"progress,omitempty"`
 	// AvailableTo — конец окна акции.
 	AvailableTo *time.Time `json:"available_to,omitempty"`
+	// Available — ачивку ещё можно заслужить. У полученной это отдельный от
+	// Granted вопрос: значок с закрытой акции остаётся на полке, но повторить
+	// его уже нельзя, и повторяемая ачивка не должна обещать обратное.
+	Available bool `json:"available"`
 }
 
 // GetAchievements обслуживает GET /executor/achievements.
@@ -89,7 +93,11 @@ func (h *AchievementHandler) GetAchievements(w http.ResponseWriter, r *http.Requ
 	}
 	ctx := r.Context()
 
-	rows, err := h.achievements.ListActive(ctx)
+	// Каталог целиком, а не только действующая его часть: полка значков хранит
+	// заслуженное, а выданную ачивку админ вправе потом выключить, закрыть
+	// акцию или заархивировать. Что показать из невыданного, решает
+	// AvailableAt ниже.
+	rows, err := h.achievements.ListAll(ctx)
 	if err != nil {
 		http.Error(w, "cannot load achievements", http.StatusInternalServerError)
 		return
@@ -104,11 +112,21 @@ func (h *AchievementHandler) GetAchievements(w http.ResponseWriter, r *http.Requ
 	cards := make([]achievementCard, 0, len(rows))
 	now := time.Now()
 	for _, row := range rows {
+		granted, has := summary[row.Code]
 		manifest, ok := h.engine.Manifest(row.Code)
-		if !ok || manifest.Audience != achievement.AudienceExecutor {
+		if !ok {
+			// Скрипта нет: собственную ачивку заархивировали, и компилировать её
+			// больше некому. Витрине показывать нечего, а полке есть — значок
+			// заслужен, и исчезнуть он не должен оттого, что правило убрали.
+			if !has {
+				continue
+			}
+			cards = append(cards, shelvedCard(row, granted))
 			continue
 		}
-		granted, has := summary[row.Code]
+		if manifest.Audience != achievement.AudienceExecutor {
+			continue
+		}
 		// Ачивка вне окна акции показывается только тому, кто её уже получил:
 		// закончившаяся акция — не витрина, а полученный значок остаётся.
 		if !row.AvailableAt(now) && !has {
@@ -123,6 +141,7 @@ func (h *AchievementHandler) GetAchievements(w http.ResponseWriter, r *http.Requ
 			Icon: manifest.Icon, Repeatable: !manifest.OncePerUser,
 			Weight:      h.levels.Weight(ctx, row, manifest, 0),
 			AvailableTo: row.AvailableTo,
+			Available:   row.AvailableAt(now),
 		}
 		if has {
 			card.Granted = true
@@ -130,13 +149,30 @@ func (h *AchievementHandler) GetAchievements(w http.ResponseWriter, r *http.Requ
 			card.Points = granted.Points
 			card.GrantedAt = &granted.GrantedAt
 			card.ExpiresAt = granted.ExpiresAt
-		} else if value, ok, err := h.engine.Progress(row.Code, facts); err == nil && ok {
-			progress := value
-			card.Progress = &progress
+		}
+		// Полоса рисуется и у полученной повторяемой ачивки: она считает путь к
+		// следующей выдаче, а не к первой, и на полке это единственное, что
+		// говорит, сколько осталось. У разовой полученной считать нечего.
+		if !has || (card.Repeatable && card.Available) {
+			if value, ok, err := h.engine.Progress(row.Code, facts); err == nil && ok {
+				progress := value
+				card.Progress = &progress
+			}
 		}
 		cards = append(cards, card)
 	}
 	writeJSON(w, cards)
+}
+
+// shelvedCard рисует значок, скрипта которого больше нет. Заголовком становится
+// код: он же стоит в выдаче, по нему ачивку и найдут в админке, если понадобится
+// объяснить, за что она была.
+func shelvedCard(row *repository.Achievement, granted repository.GrantSummary) achievementCard {
+	return achievementCard{
+		Code: row.Code, Title: row.Code, Granted: true,
+		Count: granted.Count, Points: granted.Points,
+		GrantedAt: &granted.GrantedAt, ExpiresAt: granted.ExpiresAt,
+	}
 }
 
 // GetLevel обслуживает GET /executor/level: баллы, уровень и ставка комиссии,

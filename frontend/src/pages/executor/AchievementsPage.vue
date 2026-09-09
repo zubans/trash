@@ -59,48 +59,86 @@
 
       <div v-if="loading" class="state-note">Загружаем достижения…</div>
       <div v-else-if="error" class="state-note error">{{ error }}</div>
-      <div v-else-if="!cards.length" class="state-note">
+
+      <div v-else-if="!shelf.length && !locked.length" class="state-note">
         Пока ни одной доступной ачивки. Загляните позже — их включает администратор.
       </div>
 
-      <div v-else class="cards-grid">
-        <div
-          v-for="card in cards"
-          :key="card.code"
-          class="achievement-card"
-          :class="{ granted: card.granted }"
-        >
-          <div class="card-icon"><i :class="iconClass(card)"></i></div>
-          <div class="card-body">
-            <div class="card-title">
-              {{ card.title }}
-              <span v-if="card.count > 1" class="card-count">×{{ card.count }}</span>
-            </div>
-            <div class="card-description">{{ card.description }}</div>
+      <template v-else>
+        <!-- Полка. Заслуженное лежит здесь и остаётся здесь: значок не исчезает
+             оттого, что акцию закрыли, ачивку выключили или её правило убрали. -->
+        <section class="section">
+          <div class="section-head">
+            <h2 class="section-title">Полка достижений</h2>
+            <span class="section-count">{{ shelf.length }}</span>
+          </div>
 
-            <div class="card-meta">
-              <span class="chip points">+{{ card.weight }} {{ pointWord(card.weight) }}</span>
-              <span v-if="card.repeatable" class="chip">повторяемая</span>
-              <span v-if="card.available_to" class="chip warn">
-                до {{ formatDate(card.available_to) }}
-              </span>
-            </div>
-
-            <div v-if="card.granted" class="card-granted">
-              <i class="ph-fill ph-check-circle"></i>
-              Получено {{ formatDate(card.granted_at) }}
-              <template v-if="card.points"> · {{ card.points }} {{ pointWord(card.points) }} в зачёт</template>
-              <template v-if="card.expires_at"> · сгорает {{ formatDate(card.expires_at) }}</template>
-            </div>
-            <div v-else-if="card.progress !== undefined" class="card-progress">
-              <div class="progress-track slim">
-                <div class="progress-fill" :style="{ width: Math.round(card.progress * 100) + '%' }"></div>
+          <div v-if="shelf.length" class="shelf">
+            <div v-for="card in shelf" :key="card.code" class="shelf-item">
+              <div class="shelf-figure">
+                <PixelAchievementIcon :name="card.icon" :size="56" :title="card.title" />
+                <span v-if="card.count > 1" class="shelf-count">×{{ card.count }}</span>
               </div>
-              <span>{{ Math.round(card.progress * 100) }}%</span>
+              <div class="shelf-title">{{ card.title }}</div>
+              <div class="shelf-note">{{ formatDate(card.granted_at) }}</div>
+              <div v-if="card.points" class="shelf-points">
+                +{{ card.points }} {{ pointWord(card.points) }}
+              </div>
+              <div v-if="card.expires_at" class="shelf-note warn">
+                баллы сгорят {{ formatDate(card.expires_at) }}
+              </div>
+              <!-- Повторяемая ачивка на полке продолжает считать: полоса здесь
+                   про следующую выдачу, а не про полученную. -->
+              <div v-if="card.repeatable && card.progress !== undefined" class="shelf-progress">
+                <div class="progress-track slim">
+                  <div class="progress-fill" :style="{ width: Math.round(card.progress * 100) + '%' }"></div>
+                </div>
+                <span class="shelf-note">до следующей</span>
+              </div>
+              <div v-else-if="!card.available" class="shelf-note">акция завершена</div>
             </div>
           </div>
-        </div>
-      </div>
+          <div v-else class="state-note">
+            Полка пока пуста. Первый значок появится здесь сразу после того, как заказчик
+            подтвердит выполненный заказ.
+          </div>
+        </section>
+
+        <!-- Витрина: то, что ещё можно заслужить. -->
+        <section v-if="locked.length" class="section">
+          <div class="section-head">
+            <h2 class="section-title">Ещё не получены</h2>
+            <span class="section-count">{{ locked.length }}</span>
+          </div>
+
+          <div class="cards-grid">
+            <div v-for="card in locked" :key="card.code" class="achievement-card">
+              <div class="card-icon">
+                <PixelAchievementIcon :name="card.icon" :size="40" locked :title="card.title" />
+              </div>
+              <div class="card-body">
+                <div class="card-title">{{ card.title }}</div>
+                <div class="card-description">{{ card.description }}</div>
+
+                <div class="card-meta">
+                  <span class="chip points">+{{ card.weight }} {{ pointWord(card.weight) }}</span>
+                  <span v-if="card.repeatable" class="chip">повторяемая</span>
+                  <span v-if="card.available_to" class="chip warn">
+                    до {{ formatDate(card.available_to) }}
+                  </span>
+                </div>
+
+                <div v-if="card.progress !== undefined" class="card-progress">
+                  <div class="progress-track slim">
+                    <div class="progress-fill" :style="{ width: Math.round(card.progress * 100) + '%' }"></div>
+                  </div>
+                  <span>{{ Math.round(card.progress * 100) }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </template>
     </div>
   </div>
 </template>
@@ -109,6 +147,7 @@
 import { computed, defineComponent, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import PixelAchievementIcon from '../../components/PixelAchievementIcon.vue'
 import {
   getAchievements,
   getLevel,
@@ -116,18 +155,9 @@ import {
   type ExecutorLevel,
 } from '../../api/achievements'
 
-// Иконки скрипта — короткие имена вроде "revolver": сопоставление с набором
-// Phosphor живёт здесь, чтобы скрипт не знал ничего о том, чем его рисуют.
-const ICONS: Record<string, string> = {
-  trophy: 'ph-fill ph-trophy',
-  revolver: 'ph-fill ph-crosshair',
-  medal: 'ph-fill ph-medal',
-  star: 'ph-fill ph-star',
-  fire: 'ph-fill ph-fire',
-}
-
 export default defineComponent({
   name: 'AchievementsPage',
+  components: { PixelAchievementIcon },
   setup() {
     const router = useRouter()
 
@@ -176,6 +206,12 @@ export default defineComponent({
       return Math.max(0, Math.min(100, Math.round((inLevel / perLevel) * 100)))
     })
 
+    // Полка и витрина — один список, разделённый по одному признаку: значок
+    // либо заслужен, либо нет. Порядок внутри приходит с сервера (sort_order),
+    // и переставлять его здесь не за чем.
+    const shelf = computed(() => cards.value.filter((card) => card.granted))
+    const locked = computed(() => cards.value.filter((card) => !card.granted))
+
     const expiring = computed(() =>
       cards.value
         .filter((card) => card.granted && card.expires_at)
@@ -205,14 +241,14 @@ export default defineComponent({
     const formatPercent = (value: number) =>
       Number.isInteger(value) ? String(value) : value.toFixed(1)
 
-    const iconClass = (card: AchievementCard) => ICONS[card.icon] ?? 'ph-fill ph-seal-check'
-
     const goBack = () => router.push('/executor')
 
     onMounted(load)
 
     return {
       cards,
+      shelf,
+      locked,
       level,
       loading,
       error,
@@ -223,7 +259,6 @@ export default defineComponent({
       pointWord,
       formatDate,
       formatPercent,
-      iconClass,
       goBack,
     }
   },
@@ -395,6 +430,104 @@ export default defineComponent({
   color: #b91c1c;
 }
 
+.section {
+  margin-bottom: 24px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.section-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #e5e7eb;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* Полка. Значки стоят в ячейках одной высоты, и нижняя грань ячейки — это доска:
+   у соседей по строке грани сходятся, поэтому ряд читается полкой, а не списком
+   карточек, при любом числе колонок. */
+.shelf {
+  background: #fff;
+  border-radius: 14px;
+  padding: 12px 12px 0;
+  border: 1px solid #eef0f4;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+}
+
+.shelf-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 10px 6px 14px;
+  margin-bottom: 12px;
+  border-bottom: 4px solid #d9c3a1;
+  border-radius: 2px;
+  min-width: 0;
+}
+
+.shelf-figure {
+  position: relative;
+  /* Значок стоит на доске, а не парит над ней. */
+  margin-bottom: 8px;
+}
+
+.shelf-count {
+  position: absolute;
+  right: -6px;
+  bottom: -2px;
+  background: #059669;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.shelf-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.shelf-note {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.shelf-note.warn {
+  color: #b45309;
+}
+
+.shelf-points {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-top: 2px;
+}
+
+.shelf-progress {
+  width: 100%;
+  margin-top: 6px;
+}
+
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -410,26 +543,15 @@ export default defineComponent({
   border: 1px solid #eef0f4;
 }
 
-.achievement-card.granted {
-  border-color: #34d399;
-}
-
 .card-icon {
   width: 44px;
   height: 44px;
   border-radius: 12px;
   background: #f3f4f6;
-  color: #9ca3af;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
   flex-shrink: 0;
-}
-
-.achievement-card.granted .card-icon {
-  background: #ecfdf5;
-  color: #059669;
 }
 
 .card-body {
@@ -441,12 +563,6 @@ export default defineComponent({
   font-weight: 600;
   color: #111827;
   font-size: 15px;
-}
-
-.card-count {
-  color: #059669;
-  font-size: 13px;
-  margin-left: 4px;
 }
 
 .card-description {
@@ -478,16 +594,6 @@ export default defineComponent({
 .chip.warn {
   background: #fef3c7;
   color: #92400e;
-}
-
-.card-granted {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #059669;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .card-progress {

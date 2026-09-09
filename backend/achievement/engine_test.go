@@ -106,7 +106,7 @@ func TestFastestGunIgnoresSlowAndCheapOrders(t *testing.T) {
 	}
 }
 
-func TestFirstOrderGrantsOnlyOnTheFirst(t *testing.T) {
+func TestFirstOrderNeedsACompletedOrder(t *testing.T) {
 	e := engineWithLibrary(t)
 	now := time.Now()
 
@@ -125,10 +125,22 @@ func TestFirstOrderGrantsOnlyOnTheFirst(t *testing.T) {
 		t.Errorf("key = %q, want empty for a once-per-user achievement", grant.Key)
 	}
 
-	second := executorFacts("order.confirmed", now)
-	second.Stats.OrdersCompleted = 2
-	if grant, err := e.Check("first_order", second); err != nil || grant != nil {
-		t.Errorf("the second order was granted: grant=%v err=%v", grant, err)
+	// Счётчик, ушедший дальше единицы, ачивку не отменяет: ачивку могли включить
+	// человеку с историей или пересчитать ему агрегаты. Один раз она всё равно
+	// выдастся один — это решают ключ выдачи и уникальный индекс, а не правило.
+	veteran := executorFacts("order.confirmed", now)
+	veteran.Stats.OrdersCompleted = 42
+	if grant, err := e.Check("first_order", veteran); err != nil || grant == nil {
+		t.Errorf("a veteran's first grant was refused: grant=%v err=%v", grant, err)
+	}
+
+	// А вот заказов вовсе без единого выполненного не бывает: событие о
+	// подтверждении уже учтено в агрегате, и ноль здесь означает, что считает
+	// его кто-то другой.
+	fresh := executorFacts("order.confirmed", now)
+	fresh.Stats.OrdersCompleted = 0
+	if grant, err := e.Check("first_order", fresh); err != nil || grant != nil {
+		t.Errorf("granted without a completed order: grant=%v err=%v", grant, err)
 	}
 }
 

@@ -109,6 +109,11 @@ type AchievementRepository interface {
 	List(ctx context.Context) ([]*Achievement, error)
 	ListDeleted(ctx context.Context) ([]*Achievement, error)
 	ListActive(ctx context.Context) ([]*Achievement, error)
+	// ListAll возвращает каталог целиком, вместе с выключенными и
+	// заархивированными. Он нужен полке значков: выданная ачивка остаётся у
+	// человека и после того, как её выключили или сняли с раздачи, — иначе
+	// экран отбирал бы уже заслуженное всякий раз, когда админ закрывает акцию.
+	ListAll(ctx context.Context) ([]*Achievement, error)
 	// ListWithScript возвращает ачивки с собственным скриптом — их компилирует
 	// движок при старте и по таймеру.
 	ListWithScript(ctx context.Context) ([]*Achievement, error)
@@ -180,6 +185,10 @@ func (r *achievementRepo) ListDeleted(ctx context.Context) ([]*Achievement, erro
 
 func (r *achievementRepo) ListActive(ctx context.Context) ([]*Achievement, error) {
 	return r.list(ctx, `WHERE is_active AND deleted_at IS NULL`)
+}
+
+func (r *achievementRepo) ListAll(ctx context.Context) ([]*Achievement, error) {
+	return r.list(ctx, ``)
 }
 
 func (r *achievementRepo) ListWithScript(ctx context.Context) ([]*Achievement, error) {

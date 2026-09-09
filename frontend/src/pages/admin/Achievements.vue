@@ -90,7 +90,12 @@
 
     <div v-for="item in items" :key="item.code" class="achievement-card">
       <div class="card-head">
-        <div>
+        <!-- Значок показан таким, каким его увидит исполнитель: иконку скрипт
+             называет словом, и без картинки рядом это слово ни о чём не говорит
+             тому, кто ачивку настраивает. -->
+        <div class="card-ident">
+          <PixelAchievementIcon :name="item.icon" :size="40" :title="item.title || item.code" />
+          <div>
           <div class="card-title">
             {{ item.title || item.code }}
             <span class="code-badge">{{ item.code }}</span>
@@ -102,6 +107,7 @@
           <div class="card-sub">{{ item.description }}</div>
           <div class="card-meta">
             аудитория {{ item.audience || '—' }} · события: {{ item.events?.join(', ') || '—' }}
+          </div>
           </div>
         </div>
 
@@ -207,6 +213,7 @@
 <script lang="ts">
 import { computed, defineComponent, onMounted, reactive, ref } from 'vue'
 
+import PixelAchievementIcon from '../../components/PixelAchievementIcon.vue'
 import {
   adminCreateAchievement,
   adminDeleteAchievement,
@@ -235,6 +242,7 @@ const fromLocalInput = (value: string) => (value ? new Date(value).toISOString()
 const BLANK_SOURCE = `MANIFEST = {
     "title": "Название ачивки",
     "description": "Условие, за которое она выдаётся.",
+    # trophy, revolver, medal, star, fire — иначе рисуется печать с галочкой.
     "icon": "star",
     # EXECUTOR или CUSTOMER — кому она адресована.
     "audience": "EXECUTOR",
@@ -263,6 +271,7 @@ def check(f):
 
 export default defineComponent({
   name: 'AdminAchievements',
+  components: { PixelAchievementIcon },
   setup() {
     const items = ref<AdminAchievement[]>([])
     const drafts = reactive<Record<string, Draft>>({})
@@ -561,6 +570,13 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+}
+
+.card-ident {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
 }
 
 .card-title {
