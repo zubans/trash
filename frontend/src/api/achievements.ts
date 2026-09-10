@@ -1,6 +1,7 @@
 import api from '../services/api'
 
-// Геймификация исполнителя: значки, уровень, подарки и внутренняя почта.
+// Геймификация исполнителя: значки, уровень и подарки. Письма, которыми о них
+// сообщают, живут в api/mail.ts.
 //
 // Уровень здесь — не украшение, а ставка комиссии: баллы всех действующих
 // ачивок складываются, каждые level_points баллов дают уровень, каждый уровень
@@ -66,17 +67,6 @@ export interface UserGift {
   secret?: string
 }
 
-export interface MailMessage {
-  id: string
-  kind: 'ACHIEVEMENT' | 'GIFT' | 'PROMO' | 'NEWS' | 'SYSTEM'
-  subject: string
-  body: string
-  ref_type?: string
-  ref_id?: string
-  created_at: string
-  read_at?: string
-}
-
 export async function getAchievements(): Promise<AchievementCard[]> {
   const response = await api.get('/executor/achievements')
   return Array.isArray(response.data) ? response.data : []
@@ -95,28 +85,6 @@ export async function getGifts(): Promise<UserGift[]> {
 export async function revealGift(id: string): Promise<UserGift> {
   const response = await api.post(`/executor/gifts/${id}/reveal`)
   return response.data
-}
-
-export async function getMail(): Promise<{ messages: MailMessage[]; unread: number }> {
-  const response = await api.get('/user/mail')
-  return { messages: response.data?.messages ?? [], unread: response.data?.unread ?? 0 }
-}
-
-export async function getMailUnread(): Promise<number> {
-  const response = await api.get('/user/mail/unread')
-  return response.data?.unread ?? 0
-}
-
-export async function markMailRead(id: string): Promise<void> {
-  await api.post(`/user/mail/${id}/read`)
-}
-
-export async function markAllMailRead(): Promise<void> {
-  await api.post('/user/mail/read-all')
-}
-
-export async function deleteMail(id: string): Promise<void> {
-  await api.delete(`/user/mail/${id}`)
 }
 
 // --- Админ -------------------------------------------------------------------
@@ -284,16 +252,6 @@ export async function adminAddGiftCodes(code: string, codes: string[]): Promise<
 export async function adminRedeemCoupon(coupon: string): Promise<UserGift> {
   const response = await api.post(`/admin/gifts/coupons/${coupon}/redeem`)
   return response.data
-}
-
-export async function adminBroadcastMail(payload: {
-  kind: 'NEWS' | 'PROMO'
-  role?: string
-  subject: string
-  body: string
-}): Promise<number> {
-  const response = await api.post('/admin/mail/broadcast', payload)
-  return response.data?.sent ?? 0
 }
 
 export async function adminGetIncidents(all = false): Promise<MoneyIncident[]> {

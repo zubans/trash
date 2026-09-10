@@ -243,6 +243,25 @@ func (m *dispatchMail) MarkRead(ctx context.Context, id, userID uuid.UUID) error
 func (m *dispatchMail) MarkAllRead(ctx context.Context, userID uuid.UUID) error        { return nil }
 func (m *dispatchMail) Delete(ctx context.Context, id, userID uuid.UUID) error         { return nil }
 
+// Переписка диспетчеру не нужна: он пишет письма, а не читает ответы.
+func (m *dispatchMail) Get(ctx context.Context, id uuid.UUID) (*repository.Mail, error) {
+	return nil, sql.ErrNoRows
+}
+func (m *dispatchMail) Thread(ctx context.Context, threadID uuid.UUID) ([]*repository.Mail, error) {
+	return nil, nil
+}
+func (m *dispatchMail) Reply(ctx context.Context, mail *repository.Mail) error { return nil }
+func (m *dispatchMail) ListDialogs(ctx context.Context, onlyUnanswered bool, limit int) ([]*repository.MailDialog, error) {
+	return nil, nil
+}
+func (m *dispatchMail) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Mail, error) {
+	return nil, nil
+}
+func (m *dispatchMail) MarkThreadReadByAdmin(ctx context.Context, threadID uuid.UUID) error {
+	return nil
+}
+func (m *dispatchMail) AdminUnreadCount(ctx context.Context) (int, error) { return 0, nil }
+
 // emptyGifts — каталог подарков, в котором ничего нет: так выглядит пустой
 // склад, и ачивка на нём обязана выдаться всё равно.
 type emptyGifts struct{ repository.GiftRepository }

@@ -48,7 +48,7 @@
             </button>
             <button type="button" class="nav-item position-relative" @click="menuOpen = false; $router.push('/mail')">
               <i class="ph-fill ph-envelope-simple"></i> Почта
-              <span v-if="mailUnread > 0" class="support-unread-dot nav-dot"></span>
+              <span v-if="mailUnread > 0" class="support-unread-dot nav-dot mail-nav-dot"></span>
             </button>
           </div>
 
@@ -134,6 +134,18 @@
             <div class="profile-phone-row">
               <div class="profile-phone">{{ phone || '79997454656' }}</div>
               <div v-if="isVerified" class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
+              <!-- Жёлтый конвертик появляется только тогда, когда письмо есть, и
+                   ничего не перекрывает: он ждёт, пока на него нажмут. -->
+              <button
+                v-if="mailUnread > 0"
+                type="button"
+                class="mail-envelope"
+                :title="`Новое письмо (${mailUnread})`"
+                @click.stop="$router.push('/mail')"
+              >
+                <i class="ph-fill ph-envelope-simple"></i>
+                <span v-if="mailUnread > 1" class="mail-envelope-count">{{ mailUnread }}</span>
+              </button>
             </div>
             <div v-if="fullName" class="profile-fullname">{{ fullName }}</div>
             <div class="badge-brand">
@@ -737,7 +749,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { cameraPromptLabels } from '../../utils/cameraLabels'
 import { getCurrentCoordinates, geolocationMessage } from '../../services/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
-import { getMailUnread } from '../../api/achievements'
+import { getMailUnread } from '../../api/mail'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import RoleSwitcher from '../../components/RoleSwitcher.vue'
@@ -1787,7 +1799,7 @@ export default defineComponent({
         //    о местоположении: решает их настройка, прочитанная на ступени 2.
         [startGeofenceReporting, availableResource.refresh, updateCurrentPosition],
         // 4. Фон экрана: непрочитанное и уведомление поддержки.
-        [fetchUnreadSummary, checkSupportNotification],
+        [fetchUnreadSummary, checkSupportNotification, checkMail],
         // 5. История — самой последней. Это справка о прошлом, к тому же секция
         //    свёрнута по умолчанию; на первом кадре она не нужна никому, а
         //    запросов за отзывами тянет за собой по одному на завершённый заказ.
@@ -2236,6 +2248,43 @@ export default defineComponent({
 .profile-info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 
 .profile-phone-row { display: flex; align-items: center; gap: 6px; }
+/* Конвертик рядом с телефоном: жёлтый, потому что это не тревога, а весть.
+   Красную точку на этом экране уже носит непрочитанный чат, и письмо не должно
+   выглядеть так же срочно. */
+.mail-envelope {
+  border: none;
+  background: #fef3c7;
+  color: #b45309;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  animation: mail-envelope-in 320ms ease-out;
+}
+.mail-envelope:hover { background: #fde68a; }
+.mail-nav-dot { background: #f59e0b !important; }
+.mail-envelope-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 999px;
+}
+@keyframes mail-envelope-in {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 .profile-phone { font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); letter-spacing: -0.5px; line-height: 1; }
 .verified-badge { color: #10b981; font-size: 20px; display: flex; align-items: center; justify-content: center; }
 

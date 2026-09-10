@@ -139,39 +139,6 @@
       </button>
     </section>
 
-    <section class="panel">
-      <h2>Рассылка во внутреннюю почту</h2>
-      <p class="panel-sub">
-        Новость или акция уходит в ящик приложения — туда же, куда приходят
-        выданные ачивки и купоны. Письма о выдачах пишет ядро; отсюда их послать
-        нельзя.
-      </p>
-      <div class="form-grid">
-        <label class="field">
-          <span>Тип</span>
-          <select v-model="mail.kind" class="input">
-            <option value="NEWS">новость</option>
-            <option value="PROMO">акция</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Кому</span>
-          <select v-model="mail.role" class="input">
-            <option value="">всем</option>
-            <option value="EXECUTOR">исполнителям</option>
-            <option value="CUSTOMER">заказчикам</option>
-          </select>
-        </label>
-        <label class="field wide">
-          <span>Тема</span>
-          <input v-model="mail.subject" class="input" />
-        </label>
-      </div>
-      <textarea v-model="mail.body" class="codes" rows="4" placeholder="Текст письма"></textarea>
-      <button type="button" class="btn-primary" :disabled="!mail.subject || sending" @click="broadcast">
-        Разослать
-      </button>
-    </section>
   </div>
 </template>
 
@@ -180,7 +147,6 @@ import { defineComponent, onMounted, reactive, ref } from 'vue'
 
 import {
   adminAddGiftCodes,
-  adminBroadcastMail,
   adminGetGifts,
   adminRedeemCoupon,
   adminSaveGift,
@@ -223,9 +189,6 @@ export default defineComponent({
       promo_code: '',
       is_active: true,
     })
-
-    const sending = ref(false)
-    const mail = reactive({ kind: 'NEWS' as 'NEWS' | 'PROMO', role: '', subject: '', body: '' })
 
     const load = async () => {
       loading.value = true
@@ -303,25 +266,6 @@ export default defineComponent({
       }
     }
 
-    const broadcast = async () => {
-      sending.value = true
-      try {
-        const sent = await adminBroadcastMail({
-          kind: mail.kind,
-          role: mail.role || undefined,
-          subject: mail.subject,
-          body: mail.body,
-        })
-        successMsg.value = `Разослано писем: ${sent}.`
-        mail.subject = ''
-        mail.body = ''
-      } catch {
-        errorMsg.value = 'Не удалось разослать.'
-      } finally {
-        sending.value = false
-      }
-    }
-
     const kindLabel = (kind: string) => KIND_LABELS[kind] ?? kind
     const formatAmount = (amount: number) => `${amount} ₽`
     const stockLabel = (gift: Gift & { free_codes: number }) => {
@@ -346,14 +290,11 @@ export default defineComponent({
       addingCodes,
       savingGift,
       draft,
-      sending,
-      mail,
       load,
       redeem,
       openCodes,
       addCodes,
       saveGift,
-      broadcast,
       kindLabel,
       formatAmount,
       stockLabel,

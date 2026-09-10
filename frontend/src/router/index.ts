@@ -120,6 +120,12 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'broadcasts.view' },
       },
       {
+        path: 'mail',
+        name: 'admin-mail',
+        component: () => import('../pages/admin/Mail.vue'),
+        meta: { permission: 'mail.view' },
+      },
+      {
         path: 'escalations',
         name: 'admin-escalations',
         component: () => import('../pages/admin/Escalations.vue'),
@@ -264,6 +270,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/reconciliation', permission: 'reconciliation.view' },
   { path: '/admin/incidents', permission: 'incidents.view' },
   { path: '/admin/broadcasts', permission: 'broadcasts.view' },
+  { path: '/admin/mail', permission: 'mail.view' },
   { path: '/admin/shifts', permission: 'shifts.view' },
   { path: '/admin/orders/active', permission: 'orders.view' },
   { path: '/admin/orders/completed', permission: 'orders.view' },

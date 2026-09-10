@@ -34,6 +34,7 @@
     "transactions": "Transactions",
     "settings": "Settings",
     "broadcasts": "Broadcasts",
+    "internalMail": "Internal mail",
     "activeShifts": "Active Shifts",
     "activeOrders": "Active Orders",
     "completedOrders": "Completed Orders",

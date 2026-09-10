@@ -19,12 +19,12 @@ import (
 )
 
 // AchievementHandler обслуживает геймификацию: значки и уровень исполнителя,
-// его подарки и купоны, внутреннюю почту, а на стороне админа — каталог ачивок,
-// склад подарков и разбор денежных инцидентов.
+// его подарки и купоны, а на стороне админа — каталог ачивок, склад подарков и
+// разбор денежных инцидентов. Почта, в которую всё это приходит письмами,
+// живёт в MailHandler.
 type AchievementHandler struct {
 	achievements repository.AchievementRepository
 	gifts        repository.GiftRepository
-	mail         repository.MailRepository
 	stats        repository.ExecutorStatsRepository
 	incidents    repository.MoneyIncidentRepository
 	levels       *service.Levels
@@ -56,14 +56,13 @@ func (h *AchievementHandler) WithDispatcher(dispatcher *service.AchievementDispa
 func NewAchievementHandler(
 	achievements repository.AchievementRepository,
 	gifts repository.GiftRepository,
-	mail repository.MailRepository,
 	stats repository.ExecutorStatsRepository,
 	incidents repository.MoneyIncidentRepository,
 	levels *service.Levels,
 	engine *achievement.Engine,
 ) *AchievementHandler {
 	return &AchievementHandler{
-		achievements: achievements, gifts: gifts, mail: mail, stats: stats,
+		achievements: achievements, gifts: gifts, stats: stats,
 		incidents: incidents, levels: levels, engine: engine,
 	}
 }
@@ -279,91 +278,6 @@ func (h *AchievementHandler) RevealGift(w http.ResponseWriter, r *http.Request) 
 	}
 	log.Printf("[AUDIT] user %s revealed gift %s (coupon %s)", user.ID, gift.GiftCode, gift.CouponCode)
 	writeJSON(w, gift)
-}
-
-// GetMail обслуживает GET /user/mail.
-func (h *AchievementHandler) GetMail(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	mail, err := h.mail.ListForUser(r.Context(), user.ID, 100)
-	if err != nil {
-		http.Error(w, "cannot load mail", http.StatusInternalServerError)
-		return
-	}
-	unread, _ := h.mail.UnreadCount(r.Context(), user.ID)
-	writeJSON(w, map[string]interface{}{"messages": mail, "unread": unread})
-}
-
-// GetMailUnread обслуживает GET /user/mail/unread — счётчик для значка в меню.
-func (h *AchievementHandler) GetMailUnread(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	unread, err := h.mail.UnreadCount(r.Context(), user.ID)
-	if err != nil {
-		http.Error(w, "cannot count mail", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, map[string]int{"unread": unread})
-}
-
-// MarkMailRead обслуживает POST /user/mail/{id}/read.
-func (h *AchievementHandler) MarkMailRead(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	id, err := parseUUIDParam(r, "id")
-	if err != nil {
-		http.Error(w, "invalid mail id", http.StatusBadRequest)
-		return
-	}
-	if err := h.mail.MarkRead(r.Context(), id, user.ID); err != nil {
-		http.Error(w, "cannot mark as read", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// MarkAllMailRead обслуживает POST /user/mail/read-all.
-func (h *AchievementHandler) MarkAllMailRead(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if err := h.mail.MarkAllRead(r.Context(), user.ID); err != nil {
-		http.Error(w, "cannot mark as read", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// DeleteMail обслуживает DELETE /user/mail/{id}. Удаление мягкое: письмо о
-// выданном подарке — след выдачи, и он не должен исчезать из базы оттого, что
-// получатель смахнул карточку.
-func (h *AchievementHandler) DeleteMail(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	id, err := parseUUIDParam(r, "id")
-	if err != nil {
-		http.Error(w, "invalid mail id", http.StatusBadRequest)
-		return
-	}
-	if err := h.mail.Delete(r.Context(), id, user.ID); err != nil {
-		http.Error(w, "cannot delete", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Админ -------------------------------------------------------------------
@@ -833,51 +747,6 @@ func (h *AchievementHandler) AdminRedeemCoupon(w http.ResponseWriter, r *http.Re
 	}
 	log.Printf("[AUDIT] admin %s redeemed coupon %s of user %s", admin.ID, coupon, gift.UserID)
 	writeJSON(w, gift)
-}
-
-// AdminBroadcastMail обслуживает POST /admin/mail/broadcast — новость или акция
-// во внутренние ящики.
-func (h *AchievementHandler) AdminBroadcastMail(w http.ResponseWriter, r *http.Request) {
-	admin := userFromContext(r)
-	if admin == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	var body struct {
-		Kind    string `json:"kind"`
-		Role    string `json:"role"`
-		Subject string `json:"subject"`
-		Body    string `json:"body"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	if strings.TrimSpace(body.Subject) == "" {
-		http.Error(w, "subject is required", http.StatusBadRequest)
-		return
-	}
-	kind := body.Kind
-	if kind != repository.MailKindPromo && kind != repository.MailKindNews {
-		// Рассылкой можно послать только новость или акцию: письма о выдачах
-		// пишет ядро, и подделывать их вручную незачем.
-		kind = repository.MailKindNews
-	}
-
-	recipients, err := h.mail.RecipientsByRole(r.Context(), body.Role)
-	if err != nil {
-		http.Error(w, "cannot resolve recipients", http.StatusInternalServerError)
-		return
-	}
-	sent, err := h.mail.Broadcast(r.Context(), &repository.Mail{
-		Kind: kind, Subject: body.Subject, Body: body.Body, SenderID: &admin.ID,
-	}, recipients)
-	if err != nil {
-		http.Error(w, "cannot send", http.StatusInternalServerError)
-		return
-	}
-	log.Printf("[AUDIT] admin %s broadcast %s mail to %d users (role %q)", admin.ID, kind, sent, body.Role)
-	writeJSON(w, map[string]int{"sent": sent})
 }
 
 // AdminListIncidents обслуживает GET /admin/finances/incidents.

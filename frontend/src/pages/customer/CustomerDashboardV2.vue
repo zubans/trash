@@ -43,6 +43,10 @@
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/profile')">
               <i class="ph-fill ph-user-circle"></i> Профиль и адреса
             </button>
+            <button type="button" class="nav-item position-relative" @click="menuOpen = false; $router.push('/mail')">
+              <i class="ph-fill ph-envelope-simple"></i> Почта
+              <span v-if="mailUnread > 0" class="support-unread-dot nav-dot mail-nav-dot"></span>
+            </button>
           </div>
 
           <div class="nav-section">Помощь</div>
@@ -82,6 +86,18 @@
               <div v-if="isVerified" class="verified-badge" title="Верифицирован">
                 <i class="ph-fill ph-check-circle"></i>
               </div>
+              <!-- Жёлтый конвертик появляется только тогда, когда письмо есть, и
+                   ничего не перекрывает: он ждёт, пока на него нажмут. -->
+              <button
+                v-if="mailUnread > 0"
+                type="button"
+                class="mail-envelope"
+                :title="`Новое письмо (${mailUnread})`"
+                @click.stop="$router.push('/mail')"
+              >
+                <i class="ph-fill ph-envelope-simple"></i>
+                <span v-if="mailUnread > 1" class="mail-envelope-count">{{ mailUnread }}</span>
+              </button>
             </div>
             <div v-if="fullName" class="profile-fullname">{{ fullName }}</div>
             <div class="badge-brand" @click.stop="$router.push('/customer/profile')">
@@ -501,6 +517,7 @@ import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { pollIntervalMs } from '../../services/api'
+import { getMailUnread } from '../../api/mail'
 import { useCachedResource } from '../../composables/useCachedResource'
 import { loadByPriority } from '../../utils/loadPriority'
 import {
@@ -1049,6 +1066,17 @@ export default defineComponent({
     }
 
     const hasUnreadSupport = ref(false)
+    // Непрочитанная внутренняя почта: письма о подарках, акции, новости и
+    // письма от службы поддержки. Счётчик нужен только конвертику у телефона,
+    // поэтому берётся отдельным лёгким запросом, а не вместе со всем ящиком.
+    const mailUnread = ref(0)
+    const checkMail = async () => {
+      try {
+        mailUnread.value = await getMailUnread()
+      } catch {
+        /* конвертик не стоит того, чтобы о нём сообщать */
+      }
+    }
     const lastSupportMsgText = ref('')
 
     watch(showSupportChatModal, (val) => {
@@ -1562,7 +1590,7 @@ export default defineComponent({
         ],
         // 2. История — последней: оценки к завершённым заказам стоят по запросу
         //    на каждый заказ и нужны только значку с рейтингом.
-        [loadHistoryReviews],
+        [loadHistoryReviews, checkMail],
         // 3. Прогрев фотографий активных заказов. Идёт после всего, потому что
         //    это подготовка к будущему нажатию, а не содержимое экрана: чат
         //    открывают ради фотографий, и ждать их в момент открытия не должен
@@ -1573,6 +1601,7 @@ export default defineComponent({
       intervalId = setInterval(() => {
         fetchProfile(false)
         ordersResource.refresh()
+        checkMail()
       }, pollIntervalMs)
     })
 
@@ -1620,6 +1649,7 @@ export default defineComponent({
       showSupportChatModal,
       menuOpen,
       hasUnreadSupport,
+      mailUnread,
       openSupportChat,
       selectedOrderDetails,
       topUpAmount,
@@ -1857,6 +1887,44 @@ export default defineComponent({
 }
 
 .profile-info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+/* Конвертик рядом с телефоном: жёлтый, потому что это не тревога, а весть.
+   Красную точку на этом экране уже носит непрочитанный чат, и письмо не должно
+   выглядеть так же срочно. */
+.mail-envelope {
+  border: none;
+  background: #fef3c7;
+  color: #b45309;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  animation: mail-envelope-in 320ms ease-out;
+}
+.mail-envelope:hover { background: #fde68a; }
+.mail-envelope-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 999px;
+}
+.mail-nav-dot { background: #f59e0b !important; }
+@keyframes mail-envelope-in {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 
 .profile-phone-row {
   display: flex; align-items: center; gap: 6px;

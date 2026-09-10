@@ -85,6 +85,15 @@
             <i class="ph ph-megaphone"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.broadcasts') }}</span>
           </router-link>
+
+          <router-link v-if="can('mail.view')" to="/admin/mail" class="nav-item" :class="{ active: currentRouteName === 'admin-mail' }" @click="closeSidebarOnMobile">
+            <div class="nav-icon-wrap">
+              <i class="ph ph-envelope-simple"></i>
+              <span v-if="unreadMailCount > 0 && sidebarMinimized && !isMobile" class="nav-dot-badge"></span>
+            </div>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.internalMail') }}</span>
+            <span v-if="unreadMailCount > 0 && (!sidebarMinimized || isMobile)" class="nav-badge">{{ unreadMailCount }}</span>
+          </router-link>
         </div>
 
         <div v-if="(!sidebarMinimized || isMobile) && showSystemSection" class="nav-section">Система</div>
@@ -174,6 +183,7 @@ import { defineComponent, computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
+import { adminGetMailUnread } from './api/mail'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import AppLogo from './components/AppLogo.vue'
 
@@ -189,6 +199,7 @@ export default defineComponent({
     const isMobile = computed(() => windowWidth.value < 768)
     const sidebarMinimized = ref(window.innerWidth < 768)
     const unreadSupportCount = ref(0)
+    const unreadMailCount = ref(0)
     let unreadTimer: any = null
 
     // can решает, показывать ли пункт меню. Права приходят с /auth/me и
@@ -201,12 +212,21 @@ export default defineComponent({
     const showManagementSection = computed(() =>
       ['users.view', 'roles.view', 'support_chats.view', 'topups.view', 'withdrawals.view',
        'commission.view', 'transactions.view', 'reconciliation.view', 'incidents.view',
-       'broadcasts.view'].some(can),
+       'broadcasts.view', 'mail.view'].some(can),
     )
     const showSystemSection = computed(() =>
       ['shifts.view', 'orders.view', 'service_catalog.view', 'achievements.view',
        'gifts.view', 'escalations.view', 'settings.view'].some(can),
     )
+
+    // Ответы пользователей во внутренней почте. Считается тем же редким
+    // опросом, что и поддержка: письмо ждёт ответа часами, а не секундами.
+    const fetchUnreadMail = async () => {
+      if (!can('mail.view')) return
+      try {
+        unreadMailCount.value = await adminGetMailUnread()
+      } catch (err) {}
+    }
 
     const fetchUnreadSupport = async () => {
       // Без права на чаты поддержки бейджа нет, а значит нет и опроса: иначе
@@ -231,11 +251,15 @@ export default defineComponent({
       window.addEventListener('resize', handleResize)
       window.addEventListener('support-unread-updated', fetchUnreadSupport)
       fetchUnreadSupport()
+      fetchUnreadMail()
       // 15 с, а не 3: этот бейдж считает непрочитанные сообщения поддержки по всем
       // чатам, а это скан таблицы сообщений на сервере. Ответ поддержки — не то, о
       // чём админу нужно узнать в течение трёх секунд, а платила за это каждая
       // открытая вкладка админки, постоянно.
-      unreadTimer = setInterval(fetchUnreadSupport, 15000)
+      unreadTimer = setInterval(() => {
+        fetchUnreadSupport()
+        fetchUnreadMail()
+      }, 15000)
     })
 
     onUnmounted(() => {
@@ -262,6 +286,7 @@ export default defineComponent({
         case 'admin-commission': return 'Комиссия платформы'
         case 'admin-transactions': return 'Транзакции'
         case 'admin-broadcasts': return 'Рассылки писем'
+        case 'admin-mail': return 'Внутренняя почта'
         case 'admin-shifts': return 'Активные смены'
         case 'admin-active-orders': return 'Активные заказы'
         case 'admin-completed-orders': return 'Выполненные заказы'
@@ -291,6 +316,7 @@ export default defineComponent({
       phone,
       isMobile,
       unreadSupportCount,
+      unreadMailCount,
       currentRouteName,
       sidebarMinimized,
       pageTitle,

@@ -140,6 +140,11 @@
                 <button class="dropdown-item" @click="openAddressModal(u)">
                   <i class="ph-bold ph-map-pin"></i> Редактировать адрес
                 </button>
+                <!-- Письмо человеку. Отсюда, потому что решение написать
+                     возникает над его карточкой, а не в списке переписок. -->
+                <button v-if="canSendMail" class="dropdown-item" @click="writeMail(u)">
+                  <i class="ph-bold ph-envelope-simple"></i> Написать письмо
+                </button>
                 <div class="menu-divider"></div>
                 <!-- История. Пункты гейтятся правом на тот раздел, который они
                      показывают: сервер откажет тому, кто не допущен к журналу
@@ -238,6 +243,9 @@
           <button @click="openNameModal(u); cardMenuId = null"><i class="ph-bold ph-user"></i> ФИО</button>
           <button @click="openRolesModal(u); cardMenuId = null"><i class="ph-bold ph-user-gear"></i> Роли</button>
           <button @click="openAddressModal(u); cardMenuId = null"><i class="ph-bold ph-map-pin"></i> Адрес</button>
+          <button v-if="canSendMail" @click="writeMail(u); cardMenuId = null">
+            <i class="ph-bold ph-envelope-simple"></i> Письмо
+          </button>
           <button v-if="canSeeTransactions" @click="openHistory(u, 'transactions'); cardMenuId = null">
             <i class="ph-bold ph-arrows-left-right"></i> Проводки
           </button>
@@ -402,6 +410,7 @@
 <script lang="ts">
 import { defineComponent, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
@@ -499,6 +508,15 @@ export default defineComponent({
 
     // Права те же, что охраняют эндпоинты историй: раздел проводок и раздел
     // заказов, а не право на пользователей.
+    const canSendMail = computed(() => authStore.can('mail.create'))
+
+    // Письмо пишется на странице почты: там и переписка с этим человеком, если
+    // она уже была. Карточка пользователя лишь приводит туда с готовым адресатом.
+    const router = useRouter()
+    const writeMail = (user: any) => {
+      closeRowMenu()
+      void router.push({ path: '/admin/mail', query: { user: user.id, compose: '1' } })
+    }
     const canSeeTransactions = computed(() => authStore.can('transactions.view'))
     const canSeeOrders = computed(() => authStore.can('orders.view'))
     const canSeeAchievements = computed(() => authStore.can('achievements.view'))
@@ -898,6 +916,8 @@ export default defineComponent({
       canSeeTransactions,
       canSeeOrders,
       canSeeAchievements,
+      canSendMail,
+      writeMail,
       openHistory,
       totalUsers,
       page,

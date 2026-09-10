@@ -68,6 +68,10 @@ var permissionCatalog = []PermissionSection{
 	{Key: "broadcasts", Label: "Рассылки", Group: "Управление", Route: "/admin/broadcasts",
 		Actions: []string{ActionView, ActionCreate},
 		Hint:    "Создание — отправка письма или внутренней почты списку получателей."},
+	{Key: "mail", Label: "Внутренняя почта", Group: "Управление", Route: "/admin/mail",
+		Actions: []string{ActionView, ActionCreate},
+		Hint: "Переписка с пользователем: письмо одному человеку и ответ на его ответ. " +
+			"Отдельно от рассылок: рассылка уходит списку и ответа не подразумевает."},
 
 	{Key: "shifts", Label: "Активные смены", Group: "Система", Route: "/admin/shifts",
 		Actions: []string{ActionView}},
