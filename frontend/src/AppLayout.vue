@@ -188,6 +188,31 @@ import { useI18n } from './i18n'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import AppLogo from './components/AppLogo.vue'
 
+// Карта «имя роута → ключ pageTitles.*». Заголовок живёт в локалях, чтобы
+// шапка переключалась вместе с языком интерфейса.
+const PAGE_TITLE_KEYS: Record<string, string> = {
+  'admin-users': 'users',
+  'admin-roles': 'roles',
+  'admin-support-chats': 'supportChats',
+  'admin-topups': 'topups',
+  'admin-withdrawals': 'withdrawals',
+  'admin-commission': 'commission',
+  'admin-transactions': 'transactions',
+  'admin-reconciliation': 'reconciliation',
+  'admin-broadcasts': 'broadcasts',
+  'admin-mail': 'mail',
+  'admin-shifts': 'shifts',
+  'admin-active-orders': 'activeOrders',
+  'admin-completed-orders': 'completedOrders',
+  'admin-service-catalog': 'serviceCatalog',
+  'admin-escalations': 'escalations',
+  'admin-achievements': 'achievements',
+  'admin-gifts': 'gifts',
+  'admin-incidents': 'incidents',
+  'admin-service-scripts-help': 'serviceScriptsHelp',
+  'admin-settings': 'settings',
+}
+
 export default defineComponent({
   name: 'AppLayout',
   components: { LanguageSwitcher, AppLogo },
@@ -195,6 +220,7 @@ export default defineComponent({
     const router = useRouter()
     const route = useRoute()
     const authStore = useAuthStore()
+    const { t } = useI18n()
 
     const windowWidth = ref(window.innerWidth)
     const isMobile = computed(() => windowWidth.value < 768)
@@ -288,28 +314,8 @@ export default defineComponent({
     const barePage = computed(() => !!route.meta.bare)
 
     const pageTitle = computed(() => {
-      switch (route.name) {
-        case 'admin-users': return 'Пользователи'
-        case 'admin-roles': return 'Роли и права'
-        case 'admin-support-chats': return 'Диалоги с клиентами'
-        case 'admin-topups': return 'Запросы на пополнение'
-        case 'admin-withdrawals': return 'Запросы на вывод'
-        case 'admin-commission': return 'Комиссия платформы'
-        case 'admin-transactions': return 'Транзакции'
-        case 'admin-broadcasts': return 'Рассылки писем'
-        case 'admin-mail': return 'Внутренняя почта'
-        case 'admin-shifts': return 'Активные смены'
-        case 'admin-active-orders': return 'Активные заказы'
-        case 'admin-completed-orders': return 'Выполненные заказы'
-        case 'admin-service-catalog': return 'Каталог услуг'
-        case 'admin-escalations': return 'Модерация проверок'
-        case 'admin-achievements': return 'Ачивки'
-        case 'admin-gifts': return 'Подарки'
-        case 'admin-incidents': return 'Денежные инциденты'
-        case 'admin-service-scripts-help': return 'Как писать скрипты услуг'
-        case 'admin-settings': return 'Системные настройки'
-        default: return 'Панель администратора'
-      }
+      const key = PAGE_TITLE_KEYS[route.name as string]
+      return t(key ? `pageTitles.${key}` : 'pageTitles.default')
     })
 
     const doLogout = async () => {
