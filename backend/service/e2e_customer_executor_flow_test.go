@@ -22,20 +22,40 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if dsn == "" {
 		dsn = os.Getenv("DATABASE_URL")
 	}
+	// Под `make test-db` база обязана быть: пропуск там — молча зелёный прогон.
+	skip := t.Skipf
+	if os.Getenv("TEST_DB_REQUIRED") != "" {
+		skip = t.Fatalf
+	}
 	if dsn == "" {
-		t.Skip("skipping e2e database test: DATABASE_URL / TEST_DATABASE_URL not set")
+		skip("e2e database test: DATABASE_URL / TEST_DATABASE_URL not set")
 	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)
 	}
 	if err := db.Ping(); err != nil {
-		t.Skipf("cannot ping database: %v", err)
+		skip("cannot ping database: %v", err)
 	}
 	if err := repository.Migrate(db, "../migrations"); err != nil {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 	return db
+}
+
+// findOrder достаёт заказ из ленты, как его увидело бы приложение.
+func findOrder(t *testing.T, orders []*repository.Order, err error, id uuid.UUID) *repository.Order {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("list orders: %v", err)
+	}
+	for _, o := range orders {
+		if o.ID == id {
+			return o
+		}
+	}
+	t.Fatalf("order %s is not in the list", id)
+	return nil
 }
 
 func TestE2E_CustomerExecutorFlow(t *testing.T) {
@@ -70,8 +90,9 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	// Подключено ровно так же, как в main.go: отчёты о местоположении в смене
 	// пишутся через гео-сервис — именно это делает позицию, которую читают карта и
 	// подбор, той же, что сообщило приложение исполнителя.
-	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
-		WithExecutorLocation(executorGeoService)
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
+		WithExecutorLocation(executorGeoService).
+		WithOrderHistory(orderService)
 
 	// Активный вариант с ценой, который можно заказать. Каталог хранит названия
 	// как JSONB и требует цену у VARIANT, поэтому строка собрана под оба условия.
@@ -269,6 +290,25 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 		t.Errorf("expected accepted order status ASSIGNED, got %s", acceptedOrder.Status)
 	}
 
+	// Карточка заказа одна на обе роли: вторую сторону и доступные действия
+	// сервер собирает под того, кто смотрит.
+	assigned, err := orderService.ListAssigned(ctx, executor.ID)
+	execView := findOrder(t, assigned, err, order.ID)
+	if p := execView.Counterparty; p == nil || p.Role != repository.RoleCustomer || p.Name != "Иван Иванович И." || p.Phone != "" {
+		t.Errorf("executor sees counterparty %+v, want the customer by name and without a phone", p)
+	}
+	if a := execView.Actions; a == nil || !a.Reject || a.Cancel || a.Review {
+		t.Errorf("executor actions on an assigned order = %+v, want reject only", a)
+	}
+	customerOrders, err := orderService.ListByCustomer(ctx, customer.ID)
+	custView := findOrder(t, customerOrders, err, order.ID)
+	if p := custView.Counterparty; p == nil || p.Role != repository.RoleExecutor || p.Name != "Петр Петрович П." || p.Phone != executor.Phone {
+		t.Errorf("customer sees counterparty %+v, want the executor with a phone", p)
+	}
+	if a := custView.Actions; a == nil || !a.Cancel || a.Reject || a.Review {
+		t.Errorf("customer actions on an assigned order = %+v, want cancel only", a)
+	}
+
 	// 7. Исполнитель выполняет и подтверждает заказ
 	err = orderService.ExecuteOrder(ctx, order.ID, executor.ID)
 	if err != nil {
@@ -285,6 +325,26 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	}
 	if completedOrder.Status != repository.OrderStatusCompleted {
 		t.Errorf("expected completed order status COMPLETED, got %s", completedOrder.Status)
+	}
+
+	// История исполнителя собирается так же, как его остальные ленты.
+	history, err := shiftService.GetExecutorFinancialHistory(ctx, executor.ID)
+	if err != nil {
+		t.Fatalf("executor history failed: %v", err)
+	}
+	histView := findOrder(t, history.Orders, nil, order.ID)
+	if histView.ServiceVariant == nil {
+		t.Error("history order carries no service variant")
+	}
+	if p := histView.Counterparty; p == nil || p.Name != "Иван Иванович И." {
+		t.Errorf("history counterparty = %+v, want the customer", p)
+	}
+	if a := histView.Actions; a == nil || !a.Review || a.Reject {
+		t.Errorf("executor actions on a completed order = %+v, want review only", a)
+	}
+	customerOrders, err = orderService.ListByCustomer(ctx, customer.ID)
+	if a := findOrder(t, customerOrders, err, order.ID).Actions; a == nil || !a.Review || a.Cancel {
+		t.Errorf("customer actions on a completed order = %+v, want review only", a)
 	}
 
 	// Проверяем, что баланс исполнителя пополнен
@@ -323,7 +383,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		WithExecutorGeo(executorGeoRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, nil, catalogRepo, nil).
 		WithExecutorGeo(executorGeoRepo)
-	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db)
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
 		WithGeo(executorGeoRepo, settingsRepo)
 

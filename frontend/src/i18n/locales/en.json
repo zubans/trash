@@ -197,6 +197,9 @@
   "customer": {
     "title": "Customer Dashboard",
     "subtitle": "Manage profile, wallets, and orders",
+    "customerDetails": "Customer details",
+    "customerUnknown": "Customer has not provided a name",
+    "customerHidden": "Hidden until checked against the document",
     "logout": "Logout",
     "profile": "Profile",
     "phone": "Phone",

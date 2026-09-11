@@ -89,17 +89,15 @@
           </div>
         </div>
 
-        <!-- 4. Исполнитель (Компактная карточка) -->
-        <div class="executor-card">
+        <!-- 4. Вторая сторона заказа (Компактная карточка) -->
+        <div v-if="counterparty" class="executor-card">
           <div class="exec-left">
             <div class="exec-avatar">
               <i class="ph-fill ph-user"></i>
             </div>
             <div class="exec-info">
-              <span class="exec-label">{{ $t('customer.executorDetails') }}</span>
-              <span class="exec-name">
-                {{ selectedOrderDetails.executor_name || $t('customer.notAssigned') }}
-              </span>
+              <span class="exec-label">{{ $t(counterpartyLabelKey) }}</span>
+              <span class="exec-name">{{ counterparty.name || $t(counterpartyFallbackKey) }}</span>
             </div>
           </div>
         </div>
@@ -107,7 +105,7 @@
         <!-- Действия / кнопки -->
         <div class="modal-actions-row">
           <button
-            v-if="role === 'CUSTOMER' && (selectedOrderDetails.status === 'SEARCHING' || selectedOrderDetails.status === 'ASSIGNED')"
+            v-if="actions.cancel"
             type="button"
             class="btn-danger-action"
             @click="confirmCancelOrder"
@@ -115,7 +113,7 @@
             <i class="ph ph-trash"></i> Отменить заказ
           </button>
           <button
-            v-if="role === 'EXECUTOR' && selectedOrderDetails.status === 'ASSIGNED'"
+            v-if="actions.reject"
             type="button"
             class="btn-danger-action"
             @click="confirmRejectOrder"
@@ -123,7 +121,7 @@
             <i class="ph ph-x-circle"></i> Отказаться от заказа
           </button>
           <button
-            v-if="selectedOrderDetails.status === 'COMPLETED'"
+            v-if="actions.review"
             type="button"
             :class="['btn-review-action', { disabled: hasReviewed }]"
             :disabled="hasReviewed"
@@ -140,7 +138,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted } from 'vue'
-import { checkMyOrderReview, type OrderReview } from '../../../api/review'
+import { checkMyOrderReview, type OrderReview } from '../../api/review'
 
 export default defineComponent({
   name: 'OrderDetailsModal',
@@ -151,13 +149,25 @@ export default defineComponent({
     formatOrderType: { type: Function, required: true },
     getStatusColor: { type: Function, required: true },
     formatDateFull: { type: Function, required: true },
-    role: { type: String, default: 'CUSTOMER' },
   },
   emits: ['update:modelValue', 'cancel-order', 'reject-order', 'open-review-modal'],
   setup(props, { emit }) {
     const show = computed({
       get: () => props.modelValue,
       set: (val) => emit('update:modelValue', val),
+    })
+
+    // Карточка одна на обе роли: вторую сторону и доступные действия сервер
+    // собирает под того, кто смотрит, а здесь они только рисуются.
+    const counterparty = computed(() => props.selectedOrderDetails?.counterparty ?? null)
+    const actions = computed(() => props.selectedOrderDetails?.actions ?? {})
+    const counterpartyLabelKey = computed(() =>
+      counterparty.value?.role === 'CUSTOMER' ? 'customer.customerDetails' : 'customer.executorDetails'
+    )
+    const counterpartyFallbackKey = computed(() => {
+      const party = counterparty.value
+      if (party?.hidden) return 'customer.customerHidden'
+      return party?.role === 'CUSTOMER' ? 'customer.customerUnknown' : 'customer.notAssigned'
     })
 
     // Переполнение обрабатывают родительские представления
@@ -245,6 +255,10 @@ export default defineComponent({
 
     return {
       show,
+      counterparty,
+      actions,
+      counterpartyLabelKey,
+      counterpartyFallbackKey,
       hasReviewed,
       existingReview,
       confirmCancelOrder,

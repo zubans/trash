@@ -57,6 +57,28 @@ type Order struct {
 	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит
 	// колонки, и оно никогда не несёт сами значения.
 	SubmitFields []string `json:"submit_fields,omitempty"`
+	// Counterparty и Actions собираются под того, кто смотрит на заказ
+	// (service/order_view.go); колонок за ними нет.
+	Counterparty *OrderParty   `json:"counterparty,omitempty"`
+	Actions      *OrderActions `json:"actions,omitempty"`
+}
+
+// OrderParty — вторая сторона заказа глазами смотрящего: заказчику —
+// исполнитель, исполнителю — заказчик.
+type OrderParty struct {
+	Role  string `json:"role"`
+	Name  string `json:"name,omitempty"`
+	Phone string `json:"phone,omitempty"`
+	// Hidden — сторона известна, но этому смотрящему её не показывают.
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// OrderActions — что смотрящий может сделать с заказом сейчас. Решает сервер
+// по роли и статусу; приложение только рисует кнопки.
+type OrderActions struct {
+	Cancel bool `json:"cancel"`
+	Reject bool `json:"reject"`
+	Review bool `json:"review"`
 }
 
 // OrderRepository описывает операции хранения заказов.

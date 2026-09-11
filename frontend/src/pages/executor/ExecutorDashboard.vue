@@ -641,7 +641,6 @@
       :format-order-type="formatOrderType"
       :get-status-color="getStatusColor"
       :format-date-full="formatDate"
-      role="EXECUTOR"
       @reject-order="rejectAssignedOrder"
       @open-review-modal="openReviewModal"
     />
@@ -755,7 +754,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import RoleSwitcher from '../../components/RoleSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
 import IdentityCheckModal from './components/IdentityCheckModal.vue'
-import OrderDetailsModal from '../customer/components/OrderDetailsModal.vue'
+import OrderDetailsModal from '../../components/order/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
@@ -764,6 +763,7 @@ import SkeletonList from '../../components/SkeletonList.vue'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { pollIntervalMs, getRefreshToken } from '../../services/api'
 import { useCachedResource } from '../../composables/useCachedResource'
+import { acceptPresentedOrders } from '../../components/order/cachedOrders'
 import { loadByPriority } from '../../utils/loadPriority'
 import {
   orderImageSrc,
@@ -887,6 +887,7 @@ export default defineComponent({
     const assignedResource = useCachedResource<any[]>({
       key: 'executor:orders:assigned',
       initial: [],
+      acceptCached: acceptPresentedOrders,
       fetcher: async () => (await api.get('/executor/orders/assigned')).data || [],
       // Картинки живут ровно столько, сколько открыт заказ. Список назначенных —
       // единственное место, где видно, что заказ закрылся, поэтому освобождение
@@ -904,6 +905,7 @@ export default defineComponent({
     const availableResource = useCachedResource<any[]>({
       key: 'executor:orders:available',
       initial: [],
+      acceptCached: acceptPresentedOrders,
       fetcher: async () => {
         // Сервер привязывает поиск к сохранённой рабочей позиции исполнителя;
         // lat/lon шлются только как запасной вариант. Радиус не передаётся
@@ -919,6 +921,7 @@ export default defineComponent({
     const historyResource = useCachedResource<any[]>({
       key: 'executor:history:orders',
       initial: [],
+      acceptCached: acceptPresentedOrders,
       fetcher: async () => {
         const res = await api.get('/executor/history')
         const rawOrders = res.data?.orders || res.data || []

@@ -18,15 +18,20 @@ func testDB(t *testing.T) *sql.DB {
 	if dsn == "" {
 		dsn = os.Getenv("DATABASE_URL")
 	}
+	// Под `make test-db` база обязана быть: пропуск там — молча зелёный прогон.
+	skip := t.Skipf
+	if os.Getenv("TEST_DB_REQUIRED") != "" {
+		skip = t.Fatalf
+	}
 	if dsn == "" {
-		t.Skip("skipping database test: DATABASE_URL not set")
+		skip("database test: DATABASE_URL / TEST_DATABASE_URL not set")
 	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("failed to connect to test db: %v", err)
 	}
 	if err := db.Ping(); err != nil {
-		t.Skipf("cannot ping test db: %v", err)
+		skip("cannot ping test db: %v", err)
 	}
 	if err := repository.Migrate(db, "../migrations"); err != nil {
 		t.Fatalf("failed to run migrations: %v", err)

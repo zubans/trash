@@ -509,7 +509,7 @@ import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import RoleSwitcher from '../../components/RoleSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
-import OrderDetailsModal from './components/OrderDetailsModal.vue'
+import OrderDetailsModal from '../../components/order/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
@@ -519,6 +519,7 @@ import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { pollIntervalMs } from '../../services/api'
 import { getMailUnread } from '../../api/mail'
 import { useCachedResource } from '../../composables/useCachedResource'
+import { acceptPresentedOrders } from '../../components/order/cachedOrders'
 import { loadByPriority } from '../../utils/loadPriority'
 import {
   orderImageSrc,
@@ -628,6 +629,7 @@ export default defineComponent({
     const ordersResource = useCachedResource<any[]>({
       key: 'customer:orders',
       initial: [],
+      acceptCached: acceptPresentedOrders,
       fetcher: async () => (await api.get('/customer/orders')).data || [],
       onData: (orders) => {
         fetchUnreadSummary()

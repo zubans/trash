@@ -26,6 +26,10 @@ func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("ORDER_TEST_DSN")
 	if dsn == "" {
+		// Под `make test-db` база обязана быть: пропуск там — молча зелёный прогон.
+		if os.Getenv("TEST_DB_REQUIRED") != "" {
+			t.Fatal("TEST_DB_REQUIRED is set, but ORDER_TEST_DSN is not")
+		}
 		t.Skip("set ORDER_TEST_DSN to run the order flow against a real database")
 	}
 	db, err := sql.Open("postgres", dsn)

@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check test-db
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -344,6 +344,36 @@ monitoring-check:
 		--entrypoint promtool prom/prometheus:v3.1.0 \
 		test rules $(RULE_TESTS)
 	@echo "Configuration and rules are valid."
+
+# Tests that need a real Postgres: the customer-executor e2e flow, the order
+# integration tests, money reconciliation, addresses and the worker leader.
+# Plain `go test ./...` skips them silently without a database, so they get a
+# target of their own; CI runs it as the `test-db` job.
+#
+# The database is a throwaway container on its own port: the tests write data,
+# so they never touch healthlogin_db. The container goes away on failure too.
+# TEST_DB_REQUIRED turns a database test's skip into a failure — otherwise an
+# unreachable database would give a green run that checked nothing.
+TEST_DB_CONTAINER ?= healthlogin_test_db
+TEST_DB_PORT ?= 55432
+TEST_DB_IMAGE ?= postgres:16-alpine
+TEST_DB_DSN = postgres://postgres:test@localhost:$(TEST_DB_PORT)/healthlogin?sslmode=disable
+
+test-db:
+	@docker rm -f $(TEST_DB_CONTAINER) >/dev/null 2>&1 || true
+	@echo "Starting a throwaway Postgres on port $(TEST_DB_PORT)..."
+	@docker run --rm -d --name $(TEST_DB_CONTAINER) \
+		-e POSTGRES_PASSWORD=test -e POSTGRES_DB=healthlogin \
+		-p $(TEST_DB_PORT):5432 $(TEST_DB_IMAGE) >/dev/null
+	@trap 'docker stop $(TEST_DB_CONTAINER) >/dev/null 2>&1' EXIT; \
+	cd backend && \
+	DB_HOST=localhost DB_PORT=$(TEST_DB_PORT) DB_USER=postgres DB_PASSWORD=test DB_NAME=healthlogin \
+		go run ./cmd/migrate && \
+	TEST_DB_REQUIRED=1 \
+	TEST_DATABASE_URL='$(TEST_DB_DSN)' \
+	ORDER_TEST_DSN='$(TEST_DB_DSN)' \
+	RECONCILE_TEST_DSN='$(TEST_DB_DSN)' \
+		go test -race -count=1 ./...
 
 clean:
 	rm -f healthlogin-app.apk

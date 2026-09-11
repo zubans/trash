@@ -118,7 +118,7 @@ func (m *mockShiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID u
 
 func TestShiftService_StartShift(t *testing.T) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, nil, nil, nil, nil, nil)
+	srv := NewShiftService(repo, nil, nil, nil, nil)
 
 	executorID := uuid.New()
 
@@ -205,7 +205,7 @@ func (f *fakeLocationRecorder) RecordLiveLocation(ctx context.Context, executorI
 
 func newShiftServiceForLocation(recorder ExecutorLocationRecorder) (*ShiftService, *mockShiftRepo) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil, nil, nil)
+	srv := NewShiftService(repo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil, nil)
 	if recorder != nil {
 		srv = srv.WithExecutorLocation(recorder)
 	}
@@ -291,7 +291,7 @@ func TestShiftService_RecordLocationWithoutStoreFails(t *testing.T) {
 func TestShiftService_EarlyEnd(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
-	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, nil, nil, nil)
+	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(context.Background(), executorID, 3)
@@ -321,7 +321,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
 	orderRepo := &mockOrderRepo{}
-	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, orderRepo, nil, nil)
+	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, orderRepo, nil)
 
 	executorID := uuid.New()
 	customerID := uuid.New()

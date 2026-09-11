@@ -133,6 +133,10 @@ func TestReportOKAndSummary(t *testing.T) {
 func TestReconcileAgainstDatabase(t *testing.T) {
 	dsn := os.Getenv("RECONCILE_TEST_DSN")
 	if dsn == "" {
+		// Под `make test-db` база обязана быть: пропуск там — молча зелёный прогон.
+		if os.Getenv("TEST_DB_REQUIRED") != "" {
+			t.Fatal("TEST_DB_REQUIRED is set, but RECONCILE_TEST_DSN is not")
+		}
 		t.Skip("set RECONCILE_TEST_DSN to run the reconciliation against a real database")
 	}
 

@@ -240,13 +240,11 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 		t.Errorf("expected FINE transaction created on rejection")
 	}
 
-	// ListAssigned, ListByCustomer и FindNearbyOrders
+	// ListByCustomer
 	custOrders, _ := srv.ListByCustomer(context.Background(), custID)
 	if len(custOrders) != 2 {
 		t.Errorf("expected 2 customer orders, got %d", len(custOrders))
 	}
-	_, _ = srv.FindNearbyOrders(context.Background(), 55.75, 37.61, 5000)
-	_, _ = srv.GetAvailableConstructionOrders(context.Background())
 }
 
 type mockExecutorGeoRepo struct{}
@@ -409,7 +407,7 @@ func TestChatService_Extended(t *testing.T) {
 
 func TestShiftService_Extended(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
-	srv := NewShiftService(shiftRepo, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil, nil)
+	srv := NewShiftService(shiftRepo, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil)
 
 	execID := uuid.New()
 	shift, err := srv.StartShift(context.Background(), execID, 3)

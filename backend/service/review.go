@@ -77,7 +77,7 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 	}
 
 	// Проверка 7-дневного SLA
-	if order.CompletedAt != nil && time.Since(*order.CompletedAt) > 7*24*time.Hour {
+	if order.CompletedAt != nil && time.Since(*order.CompletedAt) > ReviewWindow {
 		return nil, errors.New("review window has expired (7 days max after order completion)")
 	}
 

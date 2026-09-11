@@ -44,14 +44,20 @@ type ShiftService struct {
 	ledger       *Ledger
 	settingsRepo repository.SettingsRepository
 	orderRepo    repository.OrderRepository
-	catalogRepo  repository.ServiceCatalogRepository
 	locations    ExecutorLocationRecorder
+	history      ExecutorOrderHistory
 	db           *sql.DB
 }
 
+// ExecutorOrderHistory отдаёт заказы для экрана истории исполнителя. Как
+// выглядит заказ, решает OrderService; у смен своего представления заказа нет.
+type ExecutorOrderHistory interface {
+	ExecutorHistory(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error)
+}
+
 // NewShiftService создаёт ShiftService.
-func NewShiftService(shiftRepo repository.ShiftRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, catalogRepo repository.ServiceCatalogRepository, db *sql.DB) *ShiftService {
-	return &ShiftService{shiftRepo: shiftRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo, catalogRepo: catalogRepo, db: db}
+func NewShiftService(shiftRepo repository.ShiftRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, db *sql.DB) *ShiftService {
+	return &ShiftService{shiftRepo: shiftRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo, db: db}
 }
 
 // WithExecutorLocation присоединяет хранилище, через которое пишутся отчёты о
@@ -59,6 +65,13 @@ func NewShiftService(shiftRepo repository.ShiftRepository, ledger *Ledger, setti
 // ничего не может, вместо того чтобы принимать позиции и выбрасывать их.
 func (s *ShiftService) WithExecutorLocation(recorder ExecutorLocationRecorder) *ShiftService {
 	s.locations = recorder
+	return s
+}
+
+// WithOrderHistory присоединяет источник заказов для экрана истории. Без него
+// история отдаёт только проводки.
+func (s *ShiftService) WithOrderHistory(history ExecutorOrderHistory) *ShiftService {
+	s.history = history
 	return s
 }
 
@@ -291,47 +304,23 @@ func (s *ShiftService) RecordLocation(ctx context.Context, executorID uuid.UUID,
 
 // ExecutorHistoryResult содержит заказы и историю транзакций исполнителя.
 type ExecutorHistoryResult struct {
-	Orders       []repository.Order        `json:"orders"`
+	Orders       []*repository.Order       `json:"orders"`
 	Transactions []*repository.Transaction `json:"transactions"`
 }
 
 // GetExecutorFinancialHistory отдаёт журналы заказов и транзакций исполнителя.
-// hydrateHistoryVariants прикрепляет вариант услуги к каждому заказу страницы
-// истории, разрешая всю страницу одним запросом вместо одного на заказ.
-func (s *ShiftService) hydrateHistoryVariants(ctx context.Context, orders []repository.Order) {
-	if s.catalogRepo == nil || len(orders) == 0 {
-		return
-	}
-	ids := make([]uuid.UUID, 0, len(orders))
-	for i := range orders {
-		ids = append(ids, orders[i].ServiceVariantID)
-	}
-	variants, err := s.catalogRepo.GetNodesByIDs(ctx, ids)
-	if err != nil {
-		return
-	}
-	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
-	for i := range orders {
-		if variant := variants[orders[i].ServiceVariantID]; variant != nil {
-			orders[i].ServiceVariant = variant
-			orders[i].ServiceCategory = categoryOf(variant, categories)
-		}
-	}
-}
-
 func (s *ShiftService) GetExecutorFinancialHistory(ctx context.Context, executorID uuid.UUID) (*ExecutorHistoryResult, error) {
 	res := &ExecutorHistoryResult{
-		Orders:       []repository.Order{},
+		Orders:       []*repository.Order{},
 		Transactions: []*repository.Transaction{},
 	}
 
 	// Оба списка ограничены размером страницы по умолчанию из репозитория. Этот
 	// экран показывает недавнюю историю; исполнитель с годами заказов за спиной
 	// раньше вытягивал их все, и каждую проводку, при каждом открытии.
-	if s.orderRepo != nil {
-		orders, err := s.orderRepo.FindAllByExecutor(ctx, executorID, 0)
+	if s.history != nil {
+		orders, err := s.history.ExecutorHistory(ctx, executorID)
 		if err == nil && orders != nil {
-			s.hydrateHistoryVariants(ctx, orders)
 			res.Orders = orders
 		}
 	}

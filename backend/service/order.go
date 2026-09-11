@@ -205,20 +205,24 @@ func (s *OrderService) hydrateServiceVariant(ctx context.Context, order *reposit
 // Делать это по одному заказу стоило двух запросов на строку — вариант и, для
 // назначенных заказов, исполнитель — на каждом списковом эндпоинте, который
 // опрашивают приложения. Здесь чтения пакетные; разбор полей заказа не изменился.
-func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*repository.Order) {
+// Возвращает участников заказов — заказчиков и исполнителей одним запросом:
+// по ним собирается вторая сторона в карточке и фильтруются ленты.
+func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*repository.Order) map[uuid.UUID]*repository.User {
+	users := map[uuid.UUID]*repository.User{}
 	if len(orders) == 0 {
-		return
+		return users
 	}
 
 	variantIDs := make([]uuid.UUID, 0, len(orders))
-	executorIDs := make([]uuid.UUID, 0, len(orders))
+	userIDs := make([]uuid.UUID, 0, 2*len(orders))
 	for _, o := range orders {
 		if o == nil {
 			continue
 		}
 		variantIDs = append(variantIDs, o.ServiceVariantID)
+		userIDs = append(userIDs, o.CustomerID)
 		if o.ExecutorID != nil {
-			executorIDs = append(executorIDs, *o.ExecutorID)
+			userIDs = append(userIDs, *o.ExecutorID)
 		}
 	}
 
@@ -229,10 +233,9 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 		}
 	}
 	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
-	executors := map[uuid.UUID]*repository.User{}
-	if s.userRepo != nil && len(executorIDs) > 0 {
-		if loaded, err := s.userRepo.FindByIDs(ctx, executorIDs); err == nil {
-			executors = loaded
+	if s.userRepo != nil && len(userIDs) > 0 {
+		if loaded, err := s.userRepo.FindByIDs(ctx, userIDs); err == nil {
+			users = loaded
 		}
 	}
 
@@ -250,18 +253,21 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 				o.SubmitFields = manifest.CheckFields
 			}
 		}
+		// executor_name и executor_phone читают установленные APK заказчика;
+		// новая карточка берёт вторую сторону из counterparty.
 		if o.ExecutorID == nil {
 			continue
 		}
-		if execUser := executors[*o.ExecutorID]; execUser != nil {
+		if execUser := users[*o.ExecutorID]; execUser != nil {
 			o.ExecutorPhone = execUser.Phone
 			o.ExecutorName = shortDisplayName(execUser)
 		}
 	}
+	return users
 }
 
 // shortDisplayName отдаёт «Имя Отчество Ф.» — форму, в которой приложения
-// показывают исполнителя заказа.
+// показывают участников заказа: исполнителя заказчику и заказчика исполнителю.
 func shortDisplayName(u *repository.User) string {
 	var nameParts []string
 	if u.FirstName != "" {
@@ -724,7 +730,7 @@ func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executo
 		if err != nil {
 			return errors.New("order not found")
 		}
-		if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
+		if !executorCanReject(order, executorID) {
 			return errors.New("order is not assigned to this executor")
 		}
 
@@ -961,7 +967,7 @@ func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUI
 // Возврат и смена статуса делят одну транзакцию и одну блокировку строки, а
 // удержание обнуляется, поэтому повторная или параллельная отмена не выплатит снова.
 func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID) error {
-	return s.cancel(ctx, orderID, repository.OrderStatusSearching, repository.OrderStatusAssigned)
+	return s.cancel(ctx, orderID, customerCancelStatuses...)
 }
 
 // CancelUnclaimedAuction отменяет аукционную заявку, истёкшую без победителя.
@@ -1141,16 +1147,6 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 	return order, nil
 }
 
-// GetAvailableConstructionOrders возвращает открытые заказы на вывоз строительного мусора.
-func (s *OrderService) GetAvailableConstructionOrders(ctx context.Context) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.GetAvailableAuctionOrders(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s.hydrateServiceVariants(ctx, orders)
-	return orders, nil
-}
-
 // GetAvailableConstructionOrdersForExecutor возвращает открытые строительные заказы, отфильтрованные для исполнителя.
 func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
 	executor, _ := s.userRepo.FindByID(ctx, executorID)
@@ -1168,8 +1164,8 @@ func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Con
 
 	// Варианты, исполнители и заказчики, которых осматривает фильтр ниже, — всё за
 	// фиксированное число запросов, а не по набору на заказ.
-	s.hydrateServiceVariants(ctx, orders)
-	customers := s.customersOf(ctx, orders)
+	customers := s.hydrateServiceVariants(ctx, orders)
+	presentFor(executorViewer(executorID), orders, customers, time.Now())
 
 	filtered := []*repository.Order{}
 	for _, o := range orders {
@@ -1195,16 +1191,6 @@ func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Con
 	}
 
 	return filtered, nil
-}
-
-// FindNearbyOrders возвращает обычные/крупные заказы в поиске рядом с заданными координатами в пределах radiusMeters.
-func (s *OrderService) FindNearbyOrders(ctx context.Context, lat, lon float64, radiusMeters int) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, radiusMeters)
-	if err != nil {
-		return nil, err
-	}
-	s.hydrateServiceVariants(ctx, orders)
-	return orders, nil
 }
 
 // FindNearbyOrdersForExecutor возвращает обычные/крупные заказы в поиске рядом
@@ -1250,8 +1236,8 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		return nil, err
 	}
 
-	s.hydrateServiceVariants(ctx, orders)
-	customers := s.customersOf(ctx, orders)
+	customers := s.hydrateServiceVariants(ctx, orders)
+	presentFor(executorViewer(executorID), orders, customers, time.Now())
 
 	radiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
 
@@ -1286,30 +1272,13 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 // Неудачная загрузка даёт пустую карту, которую вызывающие читают как «нет
 // сведений о заказчике» — то же, что раньше давало неудачное чтение по одному
 // заказу, и то прочтение, которое правила допуска уже умеют обрабатывать.
-func (s *OrderService) customersOf(ctx context.Context, orders []*repository.Order) map[uuid.UUID]*repository.User {
-	if s.userRepo == nil || len(orders) == 0 {
-		return map[uuid.UUID]*repository.User{}
-	}
-	ids := make([]uuid.UUID, 0, len(orders))
-	for _, o := range orders {
-		if o != nil {
-			ids = append(ids, o.CustomerID)
-		}
-	}
-	loaded, err := s.userRepo.FindByIDs(ctx, ids)
-	if err != nil {
-		return map[uuid.UUID]*repository.User{}
-	}
-	return loaded
-}
-
 // ListAssigned возвращает заказы, назначенные исполнителю.
 func (s *OrderService) ListAssigned(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
 	orders, err := s.orderRepo.GetExecutorAssignedOrders(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
-	s.hydrateServiceVariants(ctx, orders)
+	s.presentOrders(ctx, executorViewer(executorID), orders)
 	return orders, nil
 }
 
@@ -1319,7 +1288,22 @@ func (s *OrderService) ListByCustomer(ctx context.Context, customerID uuid.UUID)
 	if err != nil {
 		return nil, err
 	}
-	s.hydrateServiceVariants(ctx, orders)
+	s.presentOrders(ctx, customerViewer(customerID), orders)
+	return orders, nil
+}
+
+// ExecutorHistory отдаёт недавние заказы исполнителя для экрана истории —
+// собранными так же, как остальные его ленты.
+func (s *OrderService) ExecutorHistory(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
+	rows, err := s.orderRepo.FindAllByExecutor(ctx, executorID, 0)
+	if err != nil {
+		return nil, err
+	}
+	orders := make([]*repository.Order, len(rows))
+	for i := range rows {
+		orders[i] = &rows[i]
+	}
+	s.presentOrders(ctx, executorViewer(executorID), orders)
 	return orders, nil
 }
 

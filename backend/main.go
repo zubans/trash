@@ -216,8 +216,9 @@ func main() {
 		WithBehaviors(serviceBehaviors)
 	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
 	// сохранённой позиции исполнителя один писатель и один набор правил.
-	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, catalogRepo, db).
-		WithExecutorLocation(executorGeoService)
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
+		WithExecutorLocation(executorGeoService).
+		WithOrderHistory(orderService)
 	// Автоматический подбор ограничен расстоянием, для чего нужны сохранённая
 	// позиция исполнителя и настроенный радиус.
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).

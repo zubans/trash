@@ -156,9 +156,30 @@ jobs:
           cd frontend
           npx vitest run
 
+  # Tests against a real Postgres, in parallel with `test`.
+  #
+  # `go test ./...` in `test` has no database, so the e2e flow, the order
+  # integration tests and the reconciliation checks skip there silently.
+  # `make test-db` starts a throwaway Postgres and requires them to run — the
+  # same command works locally. The application deploy waits for this job too:
+  # these tests catch what the mocks cannot.
+  test-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Run database tests
+        run: make test-db
+
   build-and-push:
     runs-on: ubuntu-latest
-    needs: [changes, test]
+    needs: [changes, test, test-db]
     if: needs.changes.outputs.app == 'true'
     steps:
       - name: Checkout repository

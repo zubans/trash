@@ -980,6 +980,9 @@ func TestExecutorSeesTheAddressAndNoCustomerIdentity(t *testing.T) {
 	if len(view.SubmitFields) == 0 {
 		t.Error("the moderator is not told what to submit")
 	}
+	if view.Counterparty == nil || !view.Counterparty.Hidden {
+		t.Errorf("counterparty = %+v, want the customer hidden", view.Counterparty)
+	}
 
 	rendered, err := json.Marshal(view)
 	if err != nil {
