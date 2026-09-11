@@ -171,7 +171,7 @@
       </header>
 
       <!-- Контейнер слота представления -->
-      <div class="page-card">
+      <div :class="['page-card', { 'page-card--flush': flushPage, 'page-card--bare': barePage }]">
         <router-view />
       </div>
     </main>
@@ -184,6 +184,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
 import { adminGetMailUnread } from './api/mail'
+import { useI18n } from './i18n'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import AppLogo from './components/AppLogo.vue'
 
@@ -277,10 +278,20 @@ export default defineComponent({
     const phone = computed(() => authStore.phone)
     const currentRouteName = computed(() => route.name)
 
+    // Страницы-приложения (чаты, почта) сами заведуют своей геометрией:
+    // meta.flush снимает с листа поля и отдаёт им всю поверхность.
+    const flushPage = computed(() => !!route.meta.flush)
+
+    // Страницы со своей карточной системой (панели на сером фоне):
+    // meta.bare убирает белый лист целиком, иначе их белые карточки
+    // лежали бы на белом — «карточка в карточке» без видимой границы.
+    const barePage = computed(() => !!route.meta.bare)
+
     const pageTitle = computed(() => {
       switch (route.name) {
         case 'admin-users': return 'Пользователи'
         case 'admin-roles': return 'Роли и права'
+        case 'admin-support-chats': return 'Диалоги с клиентами'
         case 'admin-topups': return 'Запросы на пополнение'
         case 'admin-withdrawals': return 'Запросы на вывод'
         case 'admin-commission': return 'Комиссия платформы'
@@ -292,6 +303,9 @@ export default defineComponent({
         case 'admin-completed-orders': return 'Выполненные заказы'
         case 'admin-service-catalog': return 'Каталог услуг'
         case 'admin-escalations': return 'Модерация проверок'
+        case 'admin-achievements': return 'Ачивки'
+        case 'admin-gifts': return 'Подарки'
+        case 'admin-incidents': return 'Денежные инциденты'
         case 'admin-service-scripts-help': return 'Как писать скрипты услуг'
         case 'admin-settings': return 'Системные настройки'
         default: return 'Панель администратора'
@@ -318,6 +332,8 @@ export default defineComponent({
       unreadSupportCount,
       unreadMailCount,
       currentRouteName,
+      flushPage,
+      barePage,
       sidebarMinimized,
       pageTitle,
       closeSidebarOnMobile,
@@ -674,6 +690,45 @@ export default defineComponent({
   min-height: calc(100vh - 160px);
 }
 
+/* Страницы, приносящие свою карточку, раньше рисовали «карточку в карточке»:
+   двойная тень, двойные скругления и поля 28 + 24px. Теперь такая карточка
+   сама становится поверхностью: растягивается на весь лист отрицательными
+   полями ровно на его паддинг (поэтому прокрутки это не добавляет — карточка
+   встаёт точно по краю padding-области), повторяет скругление листа, а тень
+   остаётся одна. */
+.page-card > :deep(* > .admin-card),
+.page-card > :deep(* > .admin-table-card),
+.page-card > :deep(* > .va-card) {
+  margin: -28px;
+  border-radius: 24px;
+  box-shadow: none;
+}
+
+/* Чаты и почта — полноэкранные приложения: белая рамка с полями вокруг них
+   давала двойной скролл и двойную рамку. meta.flush убирает поля листа,
+   и страница заполняет его целиком. */
+.page-card--flush {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.page-card--flush > :deep(*) {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Страницы со своими белыми панелями (роли, ачивки, подарки и т.п.) на белом
+   листе выглядели пятнами без границ. meta.bare убирает лист: панели ложатся
+   на серый фон приложения и читаются как положено. */
+.page-card--bare {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+}
+
 @media (max-width: 767px) {
   .admin-app {
     position: relative;
@@ -775,6 +830,26 @@ export default defineComponent({
     min-height: calc(100vh - 110px);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* Те же правила слияния, но под мобильные поля листа. */
+  .page-card > :deep(* > .admin-card),
+  .page-card > :deep(* > .admin-table-card),
+  .page-card > :deep(* > .va-card) {
+    margin: -14px -12px;
+    border-radius: 16px;
+  }
+
+  .page-card--flush {
+    padding: 0;
+  }
+
+  /* Порядок важен: мобильный .page-card выше перезаписал бы bare. */
+  .page-card--bare {
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    min-height: 0;
   }
 }
 

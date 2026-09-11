@@ -966,6 +966,9 @@ type BroadcastEmailRequest struct {
 	CustomEmails []string `json:"custom_emails,omitempty"`
 	Subject      string   `json:"subject"`
 	BodyHTML     string   `json:"body_html"`
+	// IncludeUnverified добавляет адреса, по ссылке подтверждения которых не
+	// переходили. По умолчанию выключено: см. repository.BroadcastEmails.
+	IncludeUnverified bool `json:"include_unverified"`
 }
 
 // BroadcastEmailResult содержит сводку об отправленных письмах.
@@ -991,9 +994,22 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 		if strings.ToUpper(req.TargetGroup) == "EXECUTORS" {
 			role = "EXECUTOR"
 		}
-		emails, err := s.adminRepo.BroadcastEmails(ctx, role)
+		emails, err := s.adminRepo.BroadcastEmails(ctx, role, req.IncludeUnverified)
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve recipients: %w", err)
+		}
+		if len(emails) == 0 && !req.IncludeUnverified {
+			// Самый частый случай пустой рассылки — адреса есть, но их никто не
+			// подтвердил: ссылка живёт час, и по ней переходят не все. Отказ
+			// обязан это сказать, иначе он выглядит как сломанная рассылка.
+			all, err := s.adminRepo.BroadcastEmails(ctx, role, true)
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve recipients: %w", err)
+			}
+			if len(all) > 0 {
+				return nil, fmt.Errorf("подтверждённых адресов в группе нет: почта указана у %d, но не подтверждена. "+
+					"Отметьте «Включая неподтверждённые адреса», чтобы отправить им", len(all))
+			}
 		}
 		recipientEmails = emails
 	case "CUSTOM_EMAILS":
@@ -1009,12 +1025,15 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 			}
 			recipientEmails = append(recipientEmails, trimmed)
 		}
+		if len(recipientEmails) == 0 {
+			return nil, errors.New("список адресов пуст: укажите хотя бы один адрес")
+		}
 	default:
 		return nil, errors.New("invalid target_group: must be CUSTOMERS, EXECUTORS, or CUSTOM_EMAILS")
 	}
 
 	if len(recipientEmails) == 0 {
-		return nil, errors.New("no valid recipient emails found for specified target group")
+		return nil, errors.New("у выбранной группы нет ни одного адреса электронной почты")
 	}
 
 	result := &BroadcastEmailResult{

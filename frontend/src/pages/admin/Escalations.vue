@@ -2,7 +2,6 @@
   <div class="escalations-page">
     <header class="page-head">
       <div>
-        <h1>Модерация проверок</h1>
         <p class="page-sub">
           Заказы, которые скрипт услуги передал администратору: данные, введённые
           исполнителем, не совпали с данными аккаунта.
@@ -236,12 +235,6 @@ export default defineComponent({
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
-}
-
-.page-head h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
 }
 
 .page-sub {

@@ -2,7 +2,6 @@
   <div class="roles-admin">
     <header class="page-head">
       <div>
-        <h1>Роли и права</h1>
         <p class="page-sub">
           Роль — это набор разделов панели и то, что в них разрешено делать.
           Пользователь может носить несколько ролей сразу; тогда ему доступно
@@ -615,11 +614,6 @@ export default defineComponent({
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 16px;
-}
-
-.page-head h1 {
-  font-size: 20px;
-  margin: 0 0 6px;
 }
 
 .page-sub {

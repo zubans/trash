@@ -495,5 +495,28 @@
     "loadFailed": "Не удалось загрузить данные по комиссии.",
     "payoutFailed": "Не удалось выполнить вывод.",
     "refresh": "Обновить"
+  },
+  "pageTitles": {
+    "users": "Пользователи",
+    "roles": "Роли и права",
+    "supportChats": "Диалоги с клиентами",
+    "topups": "Запросы на пополнение",
+    "withdrawals": "Запросы на вывод",
+    "commission": "Комиссия платформы",
+    "transactions": "Транзакции",
+    "reconciliation": "Финансовая сверка",
+    "broadcasts": "Рассылки писем",
+    "mail": "Внутренняя почта",
+    "shifts": "Активные смены",
+    "activeOrders": "Активные заказы",
+    "completedOrders": "Выполненные заказы",
+    "serviceCatalog": "Каталог услуг",
+    "escalations": "Модерация проверок",
+    "achievements": "Ачивки",
+    "gifts": "Подарки",
+    "incidents": "Денежные инциденты",
+    "serviceScriptsHelp": "Как писать скрипты услуг",
+    "settings": "Системные настройки",
+    "default": "Панель администратора"
   }
 }

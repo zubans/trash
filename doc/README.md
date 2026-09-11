@@ -36,6 +36,7 @@
 | **Рейтинги исполнителей** | Двусторонний рейтинг (байесовское среднее) и переход заказа в `EXECUTED`. | [`rating_system_and_order_lifecycle.md`](./rating_system_and_order_lifecycle.md) |
 | **Карта и геозоны** | Интерактивная карта Leaflet, радиусы 2/10 км, 10-минутный кулдаун и аномалии. | [`executor_map_and_geofencing.md`](./executor_map_and_geofencing.md) |
 | **Инфраструктура и деплой** | Docker-окружение, конфигурация Nginx и автоматический деплой через CI/CD. | [`deployment.md`](./deployment.md) |
+| **Локальный запуск** | Полный стек на своей машине: приложение, БД, Mailpit и мониторинг одной командой. | [`local_run.md`](./local_run.md) |
 | **Мониторинг и метрики** | Метрики бэкенда, стек Prometheus/Grafana/Alertmanager и экспортеры. | [`monitoring.md`](./monitoring.md) |
 | **Миграции БД** | Перечень SQL-миграций и регламент их применения. | [`migration.md`](./migration.md) |
 
@@ -45,10 +46,15 @@
 
 ### Локальный запуск (Docker Compose)
 ```bash
-docker compose up -d --build
+make local-up
 ```
+
+Поднимается полный стек: приложение, PostgreSQL, Mailpit (перехват почты) и
+мониторинг (Prometheus + Grafana). Подробности, адреса сервисов и настройка —
+в [`local_run.md`](./local_run.md).
 
 После запуска сервисы доступны по адресам:
 - **Веб-клиент:** `https://localhost:8443`
-- **Бэкенд API:** `http://localhost:8080/api`
-- **Мобильный порт (HTTP Cleartext):** `http://localhost:8089`
+- **Бэкенд API:** `https://localhost:8088`
+- **Почта (Mailpit):** `http://127.0.0.1:8025`
+- **Grafana:** `http://127.0.0.1:3000`

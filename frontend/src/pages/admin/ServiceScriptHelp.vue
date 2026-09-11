@@ -1,7 +1,6 @@
 <template>
   <div class="script-help">
     <header class="help-header">
-      <h1>Как писать скрипты услуг</h1>
       <p class="lead">
         Спец-услуга — это услуга, правила которой не выражаются галочками:
         кому она видна, сколько стоит, сколько раз её можно заказать и что
@@ -234,12 +233,6 @@ export default defineComponent({
   padding: 24px;
   color: #0f172a;
   line-height: 1.6;
-}
-
-.help-header h1 {
-  font-size: 26px;
-  font-weight: 700;
-  margin: 0 0 12px;
 }
 
 .lead {

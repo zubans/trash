@@ -1,4 +1,4 @@
-.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check test-db
+.PHONY: setup-android build-android build-android-release sign-apk release-android clean start start-debug stop restart logs migrate reconcile bump-android-version monitoring-up monitoring-down monitoring-logs monitoring-reload monitoring-check test-db local-certs local-up local-down local-logs local-psql
 
 ANDROID_SDK_PATH ?= $(if $(wildcard $(HOME)/Android/Sdk),$(HOME)/Android/Sdk,$(HOME)/Library/Android/sdk)
 JAVA_HOME ?= $(if $(wildcard /usr/lib/jvm/java-21-openjdk-amd64/bin/javac),/usr/lib/jvm/java-21-openjdk-amd64,$(if $(wildcard /usr/lib/jvm/java-17-openjdk-amd64/bin/javac),/usr/lib/jvm/java-17-openjdk-amd64,))
@@ -282,6 +282,74 @@ pg-top:
 reconcile:
 	@echo "Reconciling balances against the ledger..."
 	$(call compose,exec backend ./reconcile)
+
+# --- Локальный запуск ------------------------------------------------------
+#
+# Полный стек для разработки на своей машине: приложение, Postgres, Mailpit
+# вместо боевого почтового сервера и облегчённый мониторинг
+# (Prometheus + Grafana + экспортеры, без Telegram и ops-бота).
+#
+# Отдельный compose-проект (healthlogin-local), но порты общие с прод-образным
+# стеком: одновременно они не работают, поэтому `make stop` перед `make local-up`.
+#
+# Переменные — из .env.local (шаблон: .env.local.example). Явный --env-file
+# отключает автозагрузку .env, поэтому локальный стек не подхватывает боевые
+# секреты даже когда .env лежит рядом.
+#
+# .env.local обязан существовать ДО вызова compose: без --env-file compose
+# молча подхватывает .env с боевыми секретами, и, например, Postgres
+# инициализирует volume боевым паролем. Поэтому .env.local — prerequisite
+# (prerequisite'ы выполняются до раскрытия рецепта и $(wildcard) в нём),
+# а не строчка внутри рецепта.
+LOCAL_COMPOSE = $(if $(wildcard .env.local),--env-file .env.local) -f docker-compose.local.yml
+
+# Шаблон — order-only prerequisite: он нужен, чтобы создать .env.local, но его
+# обновление (например, после git pull) не должно затирать уже настроенный файл.
+.env.local: | .env.local.example
+	@echo "Creating .env.local from .env.local.example..."
+	cp .env.local.example .env.local
+
+# Самоподписанный сертификат для localhost: им пользуются и nginx
+# (nginx.local.conf), и бэкенд (TLS_CERT_FILE/TLS_KEY_FILE). Уже существующие
+# файлы не перезаписываются — certs/ в .gitignore, у многих там лежит mkcert.
+# Без сертификатов не стартуют ни nginx, ни бэкенд, поэтому ошибка openssl
+# показывается и останавливает make, а не прячется за сообщением об успехе.
+local-certs:
+	@if [ ! -f certs/localhost-cert.pem ] || [ ! -f certs/localhost-key.pem ]; then \
+		mkdir -p certs && \
+		out=$$(openssl req -x509 -newkey rsa:2048 -nodes \
+			-keyout certs/localhost-key.pem -out certs/localhost-cert.pem \
+			-days 825 -subj "/CN=localhost" \
+			-addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>&1) || \
+			{ echo "$$out" >&2; echo "Failed to generate certs/localhost-*.pem" >&2; exit 1; }; \
+		echo "Generated self-signed certs/localhost-*.pem (CN=localhost)"; \
+	fi
+
+local-up: local-certs .env.local
+	@echo "Starting the local stack (app + db + mailpit + monitoring)..."
+	$(call compose,$(LOCAL_COMPOSE) up -d --build)
+	@echo "Local stack started:"
+	@echo "  Frontend:   https://localhost:8443  (self-signed cert, accept the warning)"
+	@echo "  Backend:    https://localhost:8088"
+	@echo "  Mailpit:    http://127.0.0.1:8025  (all outgoing mail lands here)"
+	@echo "  Grafana:    http://127.0.0.1:3000  (admin / admin from .env.local)"
+	@echo "  Prometheus: http://127.0.0.1:9090"
+	@echo "  Postgres:   127.0.0.1:$${LOCAL_DB_PORT:-5432}  (make local-psql)"
+
+local-down: .env.local
+	@echo "Stopping the local stack..."
+	$(call compose,$(LOCAL_COMPOSE) down)
+	@echo "Local stack stopped."
+
+local-logs: .env.local
+	$(call compose,$(LOCAL_COMPOSE) logs -f)
+
+# psql в локальную базу. Креды читаются из .env.local, дефолты — из
+# .env.local.example, поэтому работает и сразу после cp.
+local-psql:
+	@DB_USER=$$(grep '^DB_USER=' .env.local 2>/dev/null | cut -d= -f2-); \
+	DB_NAME=$$(grep '^DB_NAME=' .env.local 2>/dev/null | cut -d= -f2-); \
+	docker exec -it healthlogin_local_db psql -U $${DB_USER:-healthlogin} -d $${DB_NAME:-healthlogin}
 
 # --- Monitoring -----------------------------------------------------------
 #

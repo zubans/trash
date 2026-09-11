@@ -1,0 +1,15 @@
+# Провайдер дашбордов — идентичен продовому: те же файлы из
+# monitoring/grafana/dashboards монтируются в /var/lib/grafana/dashboards.
+apiVersion: 1
+
+providers:
+  - name: healthlogin
+    orgId: 1
+    folder: healthlogin
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

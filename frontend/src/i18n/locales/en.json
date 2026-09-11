@@ -462,5 +462,28 @@
     "loadFailed": "Could not load the commission data.",
     "payoutFailed": "The withdrawal failed.",
     "refresh": "Refresh"
+  },
+  "pageTitles": {
+    "users": "Users",
+    "roles": "Roles & permissions",
+    "supportChats": "Customer conversations",
+    "topups": "Top-up requests",
+    "withdrawals": "Withdrawal requests",
+    "commission": "Platform commission",
+    "transactions": "Transactions",
+    "reconciliation": "Financial reconciliation",
+    "broadcasts": "Email broadcasts",
+    "mail": "Internal mail",
+    "shifts": "Active shifts",
+    "activeOrders": "Active orders",
+    "completedOrders": "Completed orders",
+    "serviceCatalog": "Service catalog",
+    "escalations": "Verification review",
+    "achievements": "Achievements",
+    "gifts": "Gifts",
+    "incidents": "Money incidents",
+    "serviceScriptsHelp": "Writing service scripts",
+    "settings": "System settings",
+    "default": "Admin panel"
   }
 }

@@ -1,9 +1,8 @@
 <template>
   <div class="transactions-history">
     <div class="admin-card">
-      <!-- Шапка страницы -->
+      <!-- Действия страницы; заголовок выводит шапка раскладки -->
       <div class="page-header">
-        <h1 class="page-title">{{ $t('transactions.title') }}</h1>
         <button
           type="button"
           class="btn-primary"

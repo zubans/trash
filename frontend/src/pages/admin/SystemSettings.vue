@@ -1,13 +1,5 @@
 <template>
   <div class="system-settings-page">
-    <!-- Шапка -->
-    <div class="settings-page-header mb-4">
-      <h1 class="page-title">
-        <i class="ph-fill ph-gear" style="color: #5c60f5;"></i>
-        {{ $t('settings.title') }}
-      </h1>
-    </div>
-
     <!-- Уведомления -->
     <div v-if="successMsg" class="settings-alert alert-success mb-4">
       <i class="ph-bold ph-check-circle alert-icon"></i>
@@ -493,21 +485,6 @@ export default defineComponent({
   color: #0f172a;
   position: relative;
   padding-bottom: 24px;
-}
-
-.settings-page-header {
-  margin-bottom: 24px;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: -0.5px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0;
 }
 
 .settings-cards-stack {

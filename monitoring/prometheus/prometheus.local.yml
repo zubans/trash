@@ -1,0 +1,37 @@
+# Локальный scrape-конфиг для docker-compose.local.yml.
+#
+# Урезанная версия prometheus.yml: нет alertmanager (в локальном стеке его нет),
+# нет rule_files (правила алертов про продакшен), нет blackbox-проверок боевого
+# домена и нет node/cadvisor — локально достаточно метрик приложения, базы
+# и nginx. Дашборды Grafana общие с продом; панели по отсутствующим job'ам
+# будут просто пустыми.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # The application itself: HTTP, the ledger, the workers and the endpoint list.
+  - job_name: backend
+    static_configs:
+      - targets: ['backend:9091']
+        labels:
+          service: backend
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: database
+
+  - job_name: nginx
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+        labels:
+          service: frontend

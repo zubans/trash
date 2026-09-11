@@ -1,7 +1,6 @@
 <template>
   <div class="admin-mail">
     <div class="mail-page-header">
-      <h1 class="page-title">Внутренняя почта</h1>
       <span v-if="unread" class="header-unread">{{ unread }} без ответа</span>
       <button type="button" class="btn-secondary" @click="broadcastOpen = true">
         <i class="ph-bold ph-megaphone"></i> Рассылка
@@ -583,11 +582,15 @@ export default defineComponent({
 </script>
 
 <style scoped>
+/* Страница работает в режиме flush: лист page-card отдал ей всю поверхность
+   без полей, поэтому свои поля она задаёт сама. */
 .admin-mail {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  padding: 16px 20px;
+  box-sizing: border-box;
 }
 
 .mail-page-header {
@@ -596,13 +599,6 @@ export default defineComponent({
   gap: 12px;
   margin-bottom: 12px;
   flex-wrap: wrap;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: #111827;
-  margin: 0;
 }
 
 .header-unread {
@@ -657,7 +653,6 @@ export default defineComponent({
   gap: 12px;
   flex: 1;
   min-height: 0;
-  height: 70vh;
 }
 
 .dialog-list-pane {

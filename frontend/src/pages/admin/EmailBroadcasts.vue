@@ -38,6 +38,19 @@
           </div>
         </div>
 
+        <!-- Неподтверждённые адреса — по явной отметке: регистрация пишет адрес
+             сразу, а подтверждённым он становится только после перехода по
+             ссылке из письма. В неподтверждённом бывает опечатка или чужой ящик. -->
+        <div v-if="targetGroup !== 'CUSTOM_EMAILS'" class="mb-4">
+          <va-checkbox
+            v-model="includeUnverified"
+            label="Включая неподтверждённые адреса"
+          />
+          <span class="text--secondary text-small mt-1 d-block">
+            Без отметки письмо уйдёт только тем, кто подтвердил почту по ссылке.
+          </span>
+        </div>
+
         <!-- Поле произвольного списка адресов, когда выбрана цель CUSTOM_EMAILS -->
         <div v-if="targetGroup === 'CUSTOM_EMAILS'" class="mb-4">
           <va-input
@@ -117,6 +130,7 @@ import api from '../../services/api'
 
 const targetGroup = ref<'CUSTOMERS' | 'EXECUTORS' | 'CUSTOM_EMAILS'>('CUSTOMERS')
 const customEmailsInput = ref('')
+const includeUnverified = ref(false)
 const subject = ref('')
 const bodyHTML = ref('<div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">\n  <h2 style="color: #4f46e5;">Уважаемый клиент!</h2>\n  <p>Рады сообщить о новых возможностях сервиса moya-usluga.ru</p>\n</div>')
 
@@ -156,6 +170,8 @@ async function sendBroadcast() {
     }
     if (targetGroup.value === 'CUSTOM_EMAILS') {
       payload.custom_emails = parsedCustomEmails.value
+    } else {
+      payload.include_unverified = includeUnverified.value
     }
 
     const response = await api.post('/admin/broadcast-email', payload)

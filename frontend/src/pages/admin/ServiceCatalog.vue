@@ -3,10 +3,6 @@
     <!-- Шапка -->
     <div class="page-header">
       <div>
-        <h1 class="page-title">
-          <i class="ph-fill ph-list-dashes" style="color: #5c60f5;"></i>
-          Каталог услуг
-        </h1>
         <div class="page-subtitle">Управление категориями и вариантами оказываемых услуг</div>
       </div>
       <div class="header-actions">
@@ -266,17 +262,6 @@ export default defineComponent({
   margin-bottom: 24px;
   max-width: 1200px;
   margin-inline: auto;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: -0.5px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0;
 }
 
 .page-subtitle {

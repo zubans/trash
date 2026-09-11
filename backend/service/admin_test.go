@@ -24,10 +24,10 @@ func (m *mockAdminRepo) GetUsers(ctx context.Context, page, limit int, role, sta
 	return m.users, len(m.users), nil
 }
 
-func (m *mockAdminRepo) BroadcastEmails(ctx context.Context, role string) ([]string, error) {
+func (m *mockAdminRepo) BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error) {
 	emails := make([]string, 0)
 	for _, u := range m.users {
-		if u.Role == role && u.Email != "" && u.EmailVerified {
+		if u.Role == role && u.Email != "" && (includeUnverified || u.EmailVerified) {
 			emails = append(emails, u.Email)
 		}
 	}

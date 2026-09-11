@@ -1,0 +1,19 @@
+# Локальный provisioning Grafana для docker-compose.local.yml.
+# Только Prometheus: Alertmanager-источник из продового provisioning здесь
+# не объявлен, потому что самого Alertmanager в локальном стеке нет —
+# иначе Grafana на каждый запрос рисовала бы ошибку недоступного источника.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches Prometheus' scrape_interval; a smaller value makes graphs
+      # interpolate gaps that are not really there.
+      timeInterval: 15s
+      httpMethod: POST

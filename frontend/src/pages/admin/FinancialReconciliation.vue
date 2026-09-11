@@ -3,7 +3,6 @@
     <!-- Верхняя панель действий -->
     <div class="page-toolbar mb-4">
       <div class="toolbar-info">
-        <h2 class="toolbar-title">{{ $t('reconciliation.title') }}</h2>
         <span v-if="lastUpdatedText" class="last-updated">
           <i class="ph ph-clock"></i> {{ lastUpdatedText }}
         </span>

@@ -1,7 +1,5 @@
 <template>
   <div class="active-shifts">
-    <h1 class="va-h3 mb-4">{{ $t('admin.activeShifts') }}</h1>
-
     <va-data-table :items="shifts" :columns="columns" :loading="loading">
       <template #cell(status)="{ value }">
         <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>

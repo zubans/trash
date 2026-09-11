@@ -1,7 +1,5 @@
 <template>
   <div class="withdrawal-requests">
-    <h1 class="va-h3 mb-4">{{ $t('withdrawals.title') }}</h1>
-
     <!-- Таблица заявок -->
     <va-data-table :items="requests" :columns="columns" :loading="loading" class="mb-4">
       <template #cell(amount)="{ value }">

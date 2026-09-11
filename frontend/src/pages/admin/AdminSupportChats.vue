@@ -1,10 +1,5 @@
 <template>
   <div class="admin-support-chats">
-    <!-- Шапка -->
-    <div class="chat-page-header">
-      <h1 class="page-title">Диалоги с клиентами</h1>
-    </div>
-
     <!-- Контейнер чат-приложения -->
     <div class="chat-container">
       <!-- Левая панель: список контактов -->
@@ -560,8 +555,10 @@ export default defineComponent({
 </script>
 
 <style scoped>
+/* Высоту даёт лист page-card в режиме flush: он занимает остаток экрана под
+   шапкой, поэтому вычитать шапку и поля из 100vh здесь не нужно. */
 .admin-support-chats {
-  height: calc(100vh - 135px);
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -569,28 +566,14 @@ export default defineComponent({
   color: #0f172a;
 }
 
-.chat-page-header {
-  flex-shrink: 0;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #0f172a;
-  margin: 0;
-  letter-spacing: -0.5px;
-}
-
-/* Контейнер чат-приложения */
+/* Контейнер чат-приложения. Своя белая подложка, тень и рамка убраны:
+   страница работает в режиме flush и поверхность ей даёт лист page-card,
+   иначе получалась «карточка в карточке». */
 .chat-container {
-  background: #ffffff;
-  border-radius: 24px;
-  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.04);
   display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 /* Левая панель: контакты */

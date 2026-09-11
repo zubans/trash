@@ -22,5 +22,10 @@ healthlogin-app.apk
 .env
 .env.*
 !.env.deploy.example
+!.env.local.example
 # APK signature metadata
 *.apk.idsig
+
+# VLESS client config: client ids are access credentials. The config lives in
+# feature/vpn-proxy-fallback and must not come back to main.
+vless-endpoints.json

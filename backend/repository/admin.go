@@ -72,8 +72,9 @@ type AdminOrder struct {
 // AdminRepository описывает операции админа с базой.
 type AdminRepository interface {
 	GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error)
-	// BroadcastEmails перечисляет подтверждённые адреса для рассылки по роли.
-	BroadcastEmails(ctx context.Context, role string) ([]string, error)
+	// BroadcastEmails перечисляет адреса для рассылки по роли: подтверждённые,
+	// а с includeUnverified — и те, по ссылке подтверждения которых не переходили.
+	BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error)
 	GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error)
 	GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*TopUpRequest, error)
 	CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
@@ -265,15 +266,19 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 // роли. Отдельный запрос, а не админский список: тот постраничен, не выбирает
 // почту вовсе и смотрит только на основную роль, поэтому рассылка через него
 // находила ноль получателей.
-func (r *adminRepo) BroadcastEmails(ctx context.Context, role string) ([]string, error) {
+//
+// Неподтверждённые адреса отдаются только по явной просьбе: регистрация пишет
+// адрес сразу, но подтверждённым он становится лишь после перехода по ссылке,
+// а в неподтверждённом бывает опечатка или чужой ящик.
+func (r *adminRepo) BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
         SELECT DISTINCT u.email
         FROM users u
         WHERE u.status::text <> 'BANNED'
-          AND u.email_verified
+          AND ($2 OR u.email_verified)
           AND COALESCE(u.email, '') <> ''
           AND (u.role = $1::text OR EXISTS (
-              SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = $1::text))`, role)
+              SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = $1::text))`, role, includeUnverified)
 	if err != nil {
 		return nil, err
 	}
