@@ -986,26 +986,16 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 
 	var recipientEmails []string
 	switch strings.ToUpper(req.TargetGroup) {
-	case "CUSTOMERS":
-		users, _, err := s.adminRepo.GetUsers(ctx, 1, 10000, "CUSTOMER", "", "")
+	case "CUSTOMERS", "EXECUTORS":
+		role := "CUSTOMER"
+		if strings.ToUpper(req.TargetGroup) == "EXECUTORS" {
+			role = "EXECUTOR"
+		}
+		emails, err := s.adminRepo.BroadcastEmails(ctx, role)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("cannot resolve recipients: %w", err)
 		}
-		for _, u := range users {
-			if u.Email != "" && u.EmailVerified {
-				recipientEmails = append(recipientEmails, u.Email)
-			}
-		}
-	case "EXECUTORS":
-		users, _, err := s.adminRepo.GetUsers(ctx, 1, 10000, "EXECUTOR", "", "")
-		if err != nil {
-			return nil, err
-		}
-		for _, u := range users {
-			if u.Email != "" && u.EmailVerified {
-				recipientEmails = append(recipientEmails, u.Email)
-			}
-		}
+		recipientEmails = emails
 	case "CUSTOM_EMAILS":
 		for _, email := range req.CustomEmails {
 			trimmed := strings.TrimSpace(email)

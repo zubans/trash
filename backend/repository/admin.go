@@ -72,6 +72,8 @@ type AdminOrder struct {
 // AdminRepository описывает операции админа с базой.
 type AdminRepository interface {
 	GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error)
+	// BroadcastEmails перечисляет подтверждённые адреса для рассылки по роли.
+	BroadcastEmails(ctx context.Context, role string) ([]string, error)
 	GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error)
 	GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*TopUpRequest, error)
 	CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
@@ -257,6 +259,35 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	r.attachRoles(ctx, users)
 
 	return users, total, nil
+}
+
+// BroadcastEmails отдаёт подтверждённые адреса незаблокированных пользователей
+// роли. Отдельный запрос, а не админский список: тот постраничен, не выбирает
+// почту вовсе и смотрит только на основную роль, поэтому рассылка через него
+// находила ноль получателей.
+func (r *adminRepo) BroadcastEmails(ctx context.Context, role string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT DISTINCT u.email
+        FROM users u
+        WHERE u.status::text <> 'BANNED'
+          AND u.email_verified
+          AND COALESCE(u.email, '') <> ''
+          AND (u.role = $1::text OR EXISTS (
+              SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = $1::text))`, role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	emails := make([]string, 0)
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		emails = append(emails, email)
+	}
+	return emails, rows.Err()
 }
 
 // attachRoles заполняет набор мультиролей каждого пользователя из user_roles.

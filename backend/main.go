@@ -435,15 +435,7 @@ func main() {
 			// Внутренняя почта: сюда приходят выданные ачивки, купоны на
 			// подарки, акции и новости. Она есть у всех ролей, потому что
 			// новость адресуется человеку, а не его роли в заказе.
-			r.Get("/user/mail", mh.GetMail)
-			r.Get("/user/mail/unread", mh.GetMailUnread)
-			r.Post("/user/mail/read-all", mh.MarkAllMailRead)
-			r.Post("/user/mail/{id}/read", mh.MarkMailRead)
-			r.Delete("/user/mail/{id}", mh.DeleteMail)
-			// Переписка: ветка письма целиком и ответ в неё. Отвечать можно
-			// только в адресное письмо администрации — см. ReplyMail.
-			r.Get("/user/mail/{id}/thread", mh.GetMailThread)
-			r.Post("/user/mail/{id}/reply", mh.ReplyMail)
+			mh.RegisterUserRoutes(r)
 			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
 			r.Get("/support/chat", ch.GetUserSupportChatHandler)
 			r.Get("/support/chats/{chat_id}/messages", ch.GetSupportMessagesHandler)
@@ -575,14 +567,7 @@ func main() {
 			r.With(can("gifts.edit")).Put("/admin/gifts/{code}", ach.AdminSaveGift)
 			r.With(can("gifts.create")).Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
 			r.With(can("gifts.edit")).Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
-			r.With(can("broadcasts.create")).Post("/admin/mail/broadcast", mh.AdminBroadcastMail)
-			// Адресная переписка с пользователем. Отдельный раздел прав, а не
-			// рассылки: рассылка уходит списку и ответа не подразумевает, а
-			// здесь администратор разговаривает с человеком.
-			r.With(can("mail.view")).Get("/admin/mail/dialogs", mh.AdminListMailDialogs)
-			r.With(can("mail.view")).Get("/admin/mail/unread", mh.AdminMailUnread)
-			r.With(can("mail.view")).Get("/admin/mail/users/{id}", mh.AdminUserMail)
-			r.With(can("mail.create")).Post("/admin/mail/users/{id}", mh.AdminSendMail)
+			mh.RegisterAdminRoutes(r, can)
 			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
 			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
 		})

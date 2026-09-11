@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"healthlogin/backend/repository"
@@ -26,6 +27,34 @@ type MailHandler struct {
 // NewMailHandler создаёт MailHandler.
 func NewMailHandler(mail repository.MailRepository, users repository.UserRepository) *MailHandler {
 	return &MailHandler{mail: mail, users: users}
+}
+
+// RegisterUserRoutes подключает ящик пользователя. Маршруты описаны здесь, а не
+// в main.go, чтобы e2e-тест поднимал ровно ту же разводку, что и сервер: копия
+// маршрутов в тесте проверяла бы копию.
+func (h *MailHandler) RegisterUserRoutes(r chi.Router) {
+	r.Get("/user/mail", h.GetMail)
+	r.Get("/user/mail/unread", h.GetMailUnread)
+	r.Post("/user/mail/read-all", h.MarkAllMailRead)
+	r.Post("/user/mail/{id}/read", h.MarkMailRead)
+	r.Delete("/user/mail/{id}", h.DeleteMail)
+	// Переписка: ветка письма целиком и ответ в неё. Отвечать можно только в
+	// адресное письмо администрации — см. ReplyMail.
+	r.Get("/user/mail/{id}/thread", h.GetMailThread)
+	r.Post("/user/mail/{id}/reply", h.ReplyMail)
+}
+
+// RegisterAdminRoutes подключает админскую часть почты. can — проверка права,
+// та же, что охраняет остальную панель.
+func (h *MailHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("broadcasts.create")).Post("/admin/mail/broadcast", h.AdminBroadcastMail)
+	// Адресная переписка с пользователем. Отдельный раздел прав, а не рассылки:
+	// рассылка уходит списку и ответа не подразумевает, а здесь администратор
+	// разговаривает с человеком.
+	r.With(can("mail.view")).Get("/admin/mail/dialogs", h.AdminListMailDialogs)
+	r.With(can("mail.view")).Get("/admin/mail/unread", h.AdminMailUnread)
+	r.With(can("mail.view")).Get("/admin/mail/users/{id}", h.AdminUserMail)
+	r.With(can("mail.create")).Post("/admin/mail/users/{id}", h.AdminSendMail)
 }
 
 // maxMailBody ограничивает письмо. Ограничение есть потому, что тело письма
@@ -255,6 +284,7 @@ func (h *MailHandler) AdminBroadcastMail(w http.ResponseWriter, r *http.Request)
 
 	recipients, err := h.mail.RecipientsByRole(r.Context(), body.Role)
 	if err != nil {
+		log.Printf("[mail] cannot resolve broadcast recipients (role %q): %v", body.Role, err)
 		http.Error(w, "cannot resolve recipients", http.StatusInternalServerError)
 		return
 	}

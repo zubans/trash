@@ -191,12 +191,14 @@ func (r *mailRepo) Broadcast(ctx context.Context, mail *Mail, userIDs []uuid.UUI
 }
 
 func (r *mailRepo) RecipientsByRole(ctx context.Context, role string) ([]uuid.UUID, error) {
-	query := `SELECT id FROM users WHERE status <> 'BANNED'`
+	query := `SELECT u.id FROM users u WHERE u.status::text <> 'BANNED'`
 	args := []interface{}{}
 	if role != "" {
-		// Роль может лежать и в основной колонке, и в списке ролей — так же, как
-		// её читает HasRole.
-		query += ` AND (role = $1 OR $1 = ANY(roles))`
+		// Роль может лежать и в основной колонке, и в таблице мультиролей
+		// user_roles — отдельной колонки со списком ролей у users нет. Исполнитель,
+		// заведённый заказчиком и получивший роль позже, записан только во второй.
+		query += ` AND (u.role = $1::text OR EXISTS (
+            SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = $1::text))`
 		args = append(args, role)
 	}
 	rows, err := r.db.QueryContext(ctx, query, args...)

@@ -154,6 +154,16 @@ func (m *mockAdminRepository) GetUsers(ctx context.Context, page, limit int, rol
 	return m.users, len(m.users), nil
 }
 
+func (m *mockAdminRepository) BroadcastEmails(ctx context.Context, role string) ([]string, error) {
+	emails := make([]string, 0)
+	for _, u := range m.users {
+		if u.Role == role && u.Email != "" && u.EmailVerified {
+			emails = append(emails, u.Email)
+		}
+	}
+	return emails, nil
+}
+
 func (m *mockAdminRepository) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*repository.TopUpRequest, error) {
 	var list []*repository.TopUpRequest
 	for _, r := range m.requests {
