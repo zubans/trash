@@ -26,7 +26,10 @@ func seedSupportConversation(t *testing.T, db *sql.DB, n int) (uuid.UUID, []time
 		t.Fatalf("create support chat: %v", err)
 	}
 
-	base := time.Now().Add(-time.Duration(n) * time.Second).UTC()
+	// Postgres хранит timestamptz с точностью до микросекунды, а time.Now() на
+	// Linux несёт наносекунды. Без выравнивания прочитанная метка не равна
+	// вставленной, и сравнение падает там, где листание работает верно.
+	base := time.Now().Add(-time.Duration(n) * time.Second).UTC().Truncate(time.Microsecond)
 	times := make([]time.Time, 0, n)
 	for i := 0; i < n; i++ {
 		at := base.Add(time.Duration(i) * time.Second)
