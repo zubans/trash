@@ -13,8 +13,22 @@
       </header>
 
       <!-- --- Сайдбар (выдвижное меню) --- -->
-      <div :class="['sidebar-overlay', { open: menuOpen }]" @click="menuOpen = false"></div>
-      <aside :class="['sidebar', { open: menuOpen }]">
+      <div
+        :class="['sidebar-overlay', { open: menuOpen }]"
+        @click="menuOpen = false"
+        @touchstart.passive="sidebarSwipe.onTouchStart"
+        @touchmove.passive="sidebarSwipe.onTouchMove"
+        @touchend="sidebarSwipe.onTouchEnd"
+      ></div>
+      <!-- Закрывается свайпом вправо или тапом по затемнению — отдельного
+           крестика нет: рядом с ним стоял выход, и промахнуться было легко. -->
+      <aside
+        :class="['sidebar', { open: menuOpen }]"
+        :style="sidebarStyle"
+        @touchstart.passive="sidebarSwipe.onTouchStart"
+        @touchmove.passive="sidebarSwipe.onTouchMove"
+        @touchend="sidebarSwipe.onTouchEnd"
+      >
         <!-- Выход стоит наверху рядом с заголовком, как в админке: до него
              не нужно прокручивать меню. -->
         <div class="sidebar-header">
@@ -28,9 +42,6 @@
               @click="menuOpen = false; handleLogout()"
             >
               <i class="ph-bold ph-sign-out"></i>
-            </button>
-            <button type="button" class="close-btn" title="Закрыть" @click="menuOpen = false">
-              <i class="ph-bold ph-x"></i>
             </button>
           </div>
         </div>
@@ -748,6 +759,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { cameraPromptLabels } from '../../utils/cameraLabels'
 import { getCurrentCoordinates, geolocationMessage } from '../../services/geolocation'
 import { useAuthStore } from '../../stores/auth-store'
+import { useSwipeToClose } from '../../composables/useSwipeToClose'
 import { getMailUnread } from '../../api/mail'
 import UpdateBanner from '../../components/UpdateBanner.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
@@ -816,6 +828,10 @@ export default defineComponent({
     const status = ref('ACTIVE')
     const showProfileModal = ref(false)
     const menuOpen = ref(false)
+    // Меню закрывается свайпом вправо — см. useSwipeToClose.
+    const { style: sidebarStyle, handlers: sidebarSwipe } = useSwipeToClose(() => {
+      menuOpen.value = false
+    })
 
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
@@ -1846,6 +1862,8 @@ export default defineComponent({
     return {
       authStore,
       menuOpen,
+      sidebarStyle,
+      sidebarSwipe,
       balanceLoaded,
       isVerified,
       showProfileModal,
@@ -2182,18 +2200,14 @@ export default defineComponent({
   border-top-left-radius: 24px; border-bottom-left-radius: 24px;
 }
 .sidebar.open { transform: translateX(0); }
+/* Горизонталь отдана жесту закрытия, вертикаль — прокрутке меню. */
+.sidebar, .sidebar-overlay { touch-action: pan-y; }
 
 .sidebar-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 24px 20px; border-bottom: 1px solid #f1f5f9;
 }
 .sidebar-header h2 { font-size: 18px; font-weight: 800; color: var(--text-title, #0f172a); margin: 0; }
-.close-btn {
-  background: #f1f5f9; border: none; width: 34px; height: 34px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; font-size: 18px;
-  color: var(--text-muted, #64748b); cursor: pointer; transition: background 0.2s ease;
-}
-.close-btn:hover { background: #e2e8f0; }
 
 .sidebar-nav {
   padding: 16px; flex: 1;
@@ -3607,6 +3621,45 @@ export default defineComponent({
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 600px) {
+  /* На телефоне уведомление — узкая полоса у самого верха экрана. Правый край
+     кончается перед кнопкой меню (44px + отступ страницы): уведомление не должно
+     закрывать ни её, ни карточки профиля и баланса под шапкой. */
+  .toast-container {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: 12px;
+    right: 68px;
+    gap: 6px;
+  }
+  .toast {
+    width: 100%;
+    max-width: none;
+    padding: 8px 10px 8px 14px;
+    gap: 10px;
+    border-radius: 12px;
+    align-items: center;
+    animation: toastDropIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .toast-icon { width: 24px; height: 24px; font-size: 13px; }
+  .toast-content { gap: 0; padding-top: 0; min-width: 0; }
+  .toast-title { font-size: 12px; line-height: 1.25; margin-bottom: 0; }
+  /* Больше двух строк полоса не растёт: длинный текст обрезается, а не
+     опускает уведомление на кнопки. */
+  .toast-message {
+    font-size: 12px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .toast-close { font-size: 14px; padding: 2px; margin: 0; }
+  @keyframes toastDropIn {
+    from { transform: translateY(-120%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
 }
 
 /* Название заказа: категория крупно, конкретная услуга под ней. */
