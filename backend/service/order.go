@@ -45,6 +45,9 @@ type OrderService struct {
 	// одна на всех, ровно как до появления геймификации.
 	levels *Levels
 	stats  repository.ExecutorStatsRepository
+	// disputes — споры по исполненным заказам. Без них заказ нельзя оспорить,
+	// а в остальном сервис работает как до появления споров.
+	disputes repository.DisputeRepository
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
@@ -810,8 +813,14 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 	// EXECUTED, и раньше, пока он ещё ASSIGNED, — раннее одобрение просто
 	// закрывает заказ и платит исполнителю удержанную сумму, так же как путь
 	// EXECUTED ниже.
-	if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned {
+	if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned &&
+		order.Status != repository.OrderStatusDisputed {
 		return errors.New("order must be assigned or marked as executed before confirmation")
+	}
+	// Оспоренный заказ закрывается только вместе со спором: вызывающий обязан
+	// закрыть спор в этой же транзакции раньше, чем платить.
+	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
+		return err
 	}
 	if order.ExecutorID == nil {
 		return errors.New("order has no executor")
@@ -951,16 +960,32 @@ func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UU
 	return err
 }
 
-// Confirm завершает заказ конкретного заказчика (псевдоним, совместимый с обработчиком).
+// Confirm завершает заказ конкретного заказчика. Подтверждение оспоренного
+// заказа закрывает его спор: заказчик и исполнитель договорились, и арбитру
+// решать больше нечего.
 func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
-	if err != nil {
-		return errors.New("order not found")
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.CustomerID != customerID {
+			return errors.New("forbidden")
+		}
+		if order.Status == repository.OrderStatusDisputed {
+			if err := s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
+				Closure:  repository.DisputeClosureCustomerConfirmed,
+				ClosedBy: &customerID,
+			}); err != nil {
+				return err
+			}
+		}
+		return s.confirmTx(ctx, tx, orderID)
+	})
+	if err == nil {
+		metrics.OrderEvent("confirmed")
 	}
-	if order.CustomerID != customerID {
-		return errors.New("forbidden")
-	}
-	return s.ConfirmOrder(ctx, orderID)
+	return err
 }
 
 // CancelOrder отменяет активный заказ и возвращает удержание ровно один раз.
@@ -1012,6 +1037,9 @@ func (s *OrderService) cancelTx(ctx context.Context, tx *sql.Tx, orderID uuid.UU
 	}
 	if !permitted {
 		return errors.New("order cannot be canceled")
+	}
+	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
+		return err
 	}
 
 	if order.HoldAmount.IsPositive() {

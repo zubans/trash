@@ -773,11 +773,13 @@ func (r *adminRepo) GetActiveOrders(ctx context.Context, limit, offset int) ([]*
 		JOIN users cu ON o.customer_id = cu.id
 		LEFT JOIN users eu ON o.executor_id = eu.id
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.status IN ($1, $2)
+		WHERE o.status IN ($1, $2, $3)
 		ORDER BY o.created_at DESC
-		LIMIT $3 OFFSET $4`
+		LIMIT $4 OFFSET $5`
 
-	rows, err := r.db.QueryContext(ctx, query, OrderStatusSearching, OrderStatusAssigned, limit, offset)
+	// DISPUTED — в активных: спор разбирают здесь же, и заказ не должен
+	// пропадать из списка, пока он открыт.
+	rows, err := r.db.QueryContext(ctx, query, OrderStatusSearching, OrderStatusAssigned, OrderStatusDisputed, limit, offset)
 	if err != nil {
 		return nil, err
 	}

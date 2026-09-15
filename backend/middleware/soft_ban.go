@@ -59,6 +59,7 @@ var softBanAllowedRoutes = map[string]struct{}{
 	// (чтобы вернуть деньги), оставить чаевые и отзыв.
 	"GET /customer/orders":               {},
 	"POST /customer/orders/{id}/confirm": {},
+	"POST /customer/orders/{id}/dispute": {},
 	"POST /customer/orders/{id}/cancel":  {},
 	"POST /customer/orders/{id}/tip":     {},
 	"POST /orders/{id}/reviews":          {},

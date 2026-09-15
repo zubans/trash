@@ -24,6 +24,8 @@ const (
 	// EventOrderSubmission несёт данные, отправленные исполнителем на проверку, и
 	// то, как они сравнились, — но никогда значения, с которыми сравнивали.
 	EventOrderSubmission = "order.submission"
+	// EventDisputeOpened — заказчик оспорил выполнение заказа.
+	EventDisputeOpened = "dispute.opened"
 )
 
 // Типы субъектов события. Субъект решает, кому событие доставят: событие заказа
