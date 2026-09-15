@@ -254,3 +254,125 @@ func TestConcedeDisputeIntegration(t *testing.T) {
 		t.Fatalf("second concession: %v", err)
 	}
 }
+
+// settingsOverride подменяет отдельные настройки поверх настоящих, не трогая
+// общую таблицу: тесты пакетов идут параллельно на одной базе.
+type settingsOverride struct {
+	repository.SettingsRepository
+	values map[string]string
+}
+
+func (o settingsOverride) GetSettings(ctx context.Context) (map[string]string, error) {
+	settings, err := o.SettingsRepository.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range o.values {
+		settings[k] = v
+	}
+	return settings, nil
+}
+
+// Решение «неизвестно»: заказчику возвращается всё удержанное, исполнитель
+// получает оплату за вычетом обычной комиссии, выплату финансирует DISPUTES.
+func TestSettleUnknownDisputeIntegration(t *testing.T) {
+	f := newDisputeFixture(t)
+	ctx := context.Background()
+	f.srv.settingsRepo = settingsOverride{f.srv.settingsRepo, map[string]string{SettingOrderCommissionPercent: "10"}}
+
+	if _, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли"); err != nil {
+		t.Fatalf("open dispute: %v", err)
+	}
+	var hold money.Amount
+	if err := f.db.QueryRow(`SELECT hold_amount FROM orders WHERE id = $1`, f.order.ID).Scan(&hold); err != nil {
+		t.Fatal(err)
+	}
+	var customerBefore money.Amount
+	if err := f.db.QueryRow(`SELECT balance FROM users WHERE id = $1`, f.customerID).Scan(&customerBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	// Спор ещё открыт — платить нельзя.
+	err := f.srv.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		return f.srv.settleUnknownDisputeTx(ctx, tx, f.order.ID)
+	})
+	if !errors.Is(err, ErrOrderHasOpenDispute) {
+		t.Fatalf("settle with an open dispute: %v", err)
+	}
+
+	err = f.srv.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if err := f.srv.closeOpenDisputeTx(ctx, tx, f.order.ID, repository.DisputeClosing{
+			Closure: repository.DisputeClosureArbitration, Decision: repository.DisputeDecisionUnknown,
+		}); err != nil {
+			return err
+		}
+		return f.srv.settleUnknownDisputeTx(ctx, tx, f.order.ID)
+	})
+	if err != nil {
+		t.Fatalf("settle unknown: %v", err)
+	}
+
+	commission := commissionAt(hold, 10)
+	if !commission.IsPositive() {
+		t.Fatalf("test needs a positive commission, hold %s", hold)
+	}
+	reward := hold.Sub(commission)
+
+	var customerAfter, executorAfter money.Amount
+	if err := f.db.QueryRow(`SELECT balance FROM users WHERE id = $1`, f.customerID).Scan(&customerAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.QueryRow(`SELECT balance FROM users WHERE id = $1`, f.executorID).Scan(&executorAfter); err != nil {
+		t.Fatal(err)
+	}
+	if customerAfter != customerBefore.Add(hold) {
+		t.Errorf("customer balance %s, want %s (+%s)", customerAfter, customerBefore.Add(hold), hold)
+	}
+	if executorAfter != reward {
+		t.Errorf("executor balance %s, want %s", executorAfter, reward)
+	}
+
+	// Проводки заказа: полный возврат заказчику, выплата и комиссия исполнителя.
+	type entry struct {
+		kind string
+		user uuid.UUID
+	}
+	got := map[entry]money.Amount{}
+	rows, err := f.db.Query(`SELECT type::text, user_id, amount FROM transactions WHERE order_id = $1 AND type <> 'HOLD'`, f.order.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var e entry
+		var amount money.Amount
+		if err := rows.Scan(&e.kind, &e.user, &amount); err != nil {
+			t.Fatal(err)
+		}
+		got[e] = got[e].Add(amount)
+	}
+	rows.Close()
+	want := map[entry]money.Amount{
+		{"REFUND", f.customerID}:         hold,
+		{"COMMISSION", f.executorID}:     commission,
+		{"DISPUTE_REWARD", f.executorID}: reward,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ledger entries %v, want %v", got, want)
+	}
+	for e, amount := range want {
+		if got[e] != amount {
+			t.Errorf("%v: %s, want %s", e, got[e], amount)
+		}
+	}
+
+	var status string
+	var orderHold money.Amount
+	var percent float64
+	if err := f.db.QueryRow(`SELECT status::text, hold_amount, commission_percent FROM orders WHERE id = $1`, f.order.ID).
+		Scan(&status, &orderHold, &percent); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(repository.OrderStatusCompleted) || !orderHold.IsZero() || percent != 10 {
+		t.Fatalf("order after settle: %s hold %s commission %v", status, orderHold, percent)
+	}
+}

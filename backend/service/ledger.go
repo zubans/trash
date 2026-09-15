@@ -241,17 +241,28 @@ func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uui
 // скрипт, живёт в применителе (behavior_max_bonus), где админ может его
 // прочитать и изменить.
 func (l *Ledger) Bonus(ctx context.Context, tx *sql.Tx, userID uuid.UUID, gross, commission money.Amount, orderID *uuid.UUID) error {
+	return l.payFromPlatform(ctx, tx, repository.AccountBonuses, repository.TransactionTypeBonus, userID, gross, commission, orderID)
+}
+
+// payFromPlatform платит пользователю со счёта расходов платформы (BONUSES,
+// DISPUTES), отделяя долю комиссии на COMMISSION:
+//
+//	account -gross = user +(gross - commission) + COMMISSION +commission
+//
+// Комиссия больше выплаты зажимается до выплаты: пользователь не может
+// получить отрицательную сумму.
+func (l *Ledger) payFromPlatform(ctx context.Context, tx *sql.Tx, account string, kind repository.TransactionType, userID uuid.UUID, gross, commission money.Amount, orderID *uuid.UUID) error {
 	if !gross.IsPositive() {
 		return nil
 	}
 	if commission.IsNegative() {
-		return errors.New("bonus commission must not be negative")
+		return errors.New("platform payout commission must not be negative")
 	}
 	if commission > gross {
 		commission = gross
 	}
 	if commission.IsPositive() {
-		if err := l.accounts.Debit(ctx, tx, repository.AccountBonuses, commission); err != nil {
+		if err := l.accounts.Debit(ctx, tx, account, commission); err != nil {
 			return err
 		}
 		if err := l.accounts.Credit(ctx, tx, repository.AccountCommission, commission); err != nil {
@@ -261,13 +272,42 @@ func (l *Ledger) Bonus(ctx context.Context, tx *sql.Tx, userID uuid.UUID, gross,
 			UserID:  userID,
 			OrderID: orderID,
 			Type:    repository.TransactionTypeCommission,
-			Account: repository.AccountBonuses,
+			Account: account,
 			Amount:  commission,
 		}); err != nil {
 			return err
 		}
 	}
-	return l.Release(ctx, tx, repository.AccountBonuses, userID, gross.Sub(commission), repository.TransactionTypeBonus, orderID, nil)
+	return l.Release(ctx, tx, account, userID, gross.Sub(commission), kind, orderID, nil)
+}
+
+// UnknownDisputeSettlement — деньги по спору, который арбитр решил как
+// «неизвестно»: обе стороны получают своё целиком.
+type UnknownDisputeSettlement struct {
+	OrderID    uuid.UUID
+	CustomerID uuid.UUID
+	ExecutorID uuid.UUID
+	// Hold — всё, что эскроу держит по заказу; возвращается заказчику.
+	Hold money.Amount
+	// Payout — выплата исполнителю, как при обычном подтверждении, до комиссии.
+	Payout money.Amount
+	// Commission — доля платформы с Payout, как при обычном подтверждении.
+	Commission money.Amount
+}
+
+// SettleUnknownDispute возвращает заказчику удержание целиком и платит
+// исполнителю то, что он получил бы за подтверждённый заказ, за вычетом
+// обычной комиссии. Заказчик за заказ не заплатил, поэтому выплату финансирует
+// счёт DISPUTES, уходящий в минус:
+//
+//	ESCROW  -hold   = customer +hold
+//	DISPUTES -payout = executor +(payout - commission) + COMMISSION +commission
+func (l *Ledger) SettleUnknownDispute(ctx context.Context, tx *sql.Tx, s UnknownDisputeSettlement) error {
+	if err := l.Release(ctx, tx, repository.AccountEscrow, s.CustomerID, s.Hold, repository.TransactionTypeRefund, &s.OrderID, nil); err != nil {
+		return err
+	}
+	return l.payFromPlatform(ctx, tx, repository.AccountDisputes, repository.TransactionTypeDisputeReward,
+		s.ExecutorID, s.Payout, s.Commission, &s.OrderID)
 }
 
 // OrderSettlement — распределение удержания по завершённому заказу целиком:

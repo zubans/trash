@@ -827,17 +827,9 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 		return errors.New("order has no executor")
 	}
 
-	finalAmount := order.HoldAmount
-	isDowngraded := order.IsDowngraded
-	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
-		downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
-		if err != nil {
-			return err
-		}
-		if downgraded < finalAmount {
-			isDowngraded = true
-			finalAmount = downgraded
-		}
+	finalAmount, isDowngraded, err := s.payableAmount(ctx, order)
+	if err != nil {
+		return err
 	}
 
 	// Ставка платформы теперь персональная: уровень исполнителя снимает с неё
@@ -878,6 +870,24 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 		return err
 	}
 	return s.publishOrderEvent(ctx, tx, repository.EventOrderConfirmed, order, nil)
+}
+
+// payableAmount — сколько стоит заказ на момент закрытия: удержанное, а для
+// ASAP, закрываемого после срока, — цена со сниженным тарифом, если она ниже.
+func (s *OrderService) payableAmount(ctx context.Context, order *repository.Order) (money.Amount, bool, error) {
+	finalAmount := order.HoldAmount
+	isDowngraded := order.IsDowngraded
+	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
+		downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
+		if err != nil {
+			return 0, false, err
+		}
+		if downgraded < finalAmount {
+			isDowngraded = true
+			finalAmount = downgraded
+		}
+	}
+	return finalAmount, isDowngraded, nil
 }
 
 // commissionLevel читает уровень исполнителя внутри транзакции подтверждения.

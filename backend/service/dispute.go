@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/metrics"
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -153,6 +154,56 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 	s.systemChatMessage(ctx, orderID, executorID, "Исполнитель признал, что заказ не выполнен. "+
 		"Заказ отменён, деньги возвращены заказчику. Спор закрыт.")
 	return nil
+}
+
+// settleUnknownDisputeTx закрывает оспоренный заказ по решению «неизвестно»:
+// заказчику возвращается всё удержанное, исполнитель получает оплату как за
+// подтверждённый заказ, по своей обычной ставке комиссии, со счёта DISPUTES.
+// Заказ становится COMPLETED — работа оплачена.
+//
+// Спор вызывающий обязан закрыть в этой же транзакции раньше. Событие
+// order.confirmed не публикуется: заказчик выполнение не подтверждал, и ачивки
+// за подтверждённый заказ здесь не выдаются. Агрегаты исполнителя пополняются —
+// заказ завершён и оплачен.
+func (s *OrderService) settleUnknownDisputeTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID) error {
+	order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+	if err != nil {
+		return errors.New("order not found")
+	}
+	if order.Status != repository.OrderStatusDisputed || order.ExecutorID == nil {
+		return ErrDisputeNotOpen
+	}
+	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
+		return err
+	}
+
+	payout, isDowngraded, err := s.payableAmount(ctx, order)
+	if err != nil {
+		return err
+	}
+	level := s.commissionLevel(ctx, tx, *order.ExecutorID)
+	commission := commissionAt(payout, level.Percent)
+
+	if err := s.ledger.SettleUnknownDispute(ctx, tx, UnknownDisputeSettlement{
+		OrderID:    order.ID,
+		CustomerID: order.CustomerID,
+		ExecutorID: *order.ExecutorID,
+		Hold:       order.HoldAmount,
+		Payout:     payout,
+		Commission: commission,
+	}); err != nil {
+		return err
+	}
+	if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
+		return err
+	}
+	if err := s.orderRepo.Confirm(ctx, tx, orderID, payout, isDowngraded); err != nil {
+		return err
+	}
+	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level); err != nil {
+		return err
+	}
+	return s.recordCompletion(ctx, tx, order, payout)
 }
 
 // closeOpenDisputeTx закрывает открытый спор заказа в транзакции вызывающего,
