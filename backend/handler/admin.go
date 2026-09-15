@@ -69,13 +69,15 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 
 	var req struct {
 		Status string `json:"status"`
+		// Reason — причина мягкого бана; для других статусов не используется.
+		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.adminService.UpdateUserStatus(r.Context(), userID, admin.ID, req.Status); err != nil {
+	if err := h.adminService.UpdateUserStatus(r.Context(), userID, admin.ID, req.Status, req.Reason); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

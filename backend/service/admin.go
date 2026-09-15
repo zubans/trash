@@ -46,6 +46,15 @@ type AdminService struct {
 	// вообще существует; nil означает «справочник не подключён», и тогда
 	// допустимы только четыре системные роли.
 	roleRepo repository.RoleRepository
+	// penalties записывает, кто и почему поставил мягкий бан. nil — статус
+	// SOFT_BANNED ставится без причины, как любой другой.
+	penalties repository.PenaltyRepository
+}
+
+// WithPenalties подключает штрафное состояние к смене статуса пользователя.
+func (s *AdminService) WithPenalties(penalties repository.PenaltyRepository) *AdminService {
+	s.penalties = penalties
+	return s
 }
 
 // WithRoles подключает справочник ролей к назначению ролей пользователю.
@@ -209,7 +218,7 @@ func (s *AdminService) GetUsers(ctx context.Context, page, limit int, role, stat
 	if role != "" && role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
 		return nil, 0, errors.New("invalid role filter")
 	}
-	if status != "" && status != "ACTIVE" && status != "BANNED" {
+	if status != "" && status != repository.UserStatusActive && status != repository.UserStatusSoftBanned && status != repository.UserStatusBanned {
 		return nil, 0, errors.New("invalid status filter")
 	}
 	if limit > maxAdminPageSize {
@@ -218,18 +227,51 @@ func (s *AdminService) GetUsers(ctx context.Context, page, limit int, role, stat
 	return s.adminRepo.GetUsers(ctx, page, limit, role, status, search)
 }
 
-// UpdateUserStatus обновляет статус пользователя (например, ACTIVE или BANNED).
-func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uuid.UUID, status string) error {
-	if status != "ACTIVE" && status != "BANNED" {
+// UpdateUserStatus обновляет статус пользователя: ACTIVE, SOFT_BANNED или
+// BANNED. reason — причина мягкого бана, её видит администрация в карточке.
+func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uuid.UUID, status, reason string) error {
+	switch status {
+	case repository.UserStatusActive, repository.UserStatusSoftBanned, repository.UserStatusBanned:
+	default:
 		return errors.New("invalid status")
 	}
-	if status == "BANNED" && userID == adminID {
+	if status != repository.UserStatusActive && userID == adminID {
 		return errors.New("нельзя заблокировать самого себя")
 	}
-	if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
-		return err
+
+	switch {
+	case status == repository.UserStatusSoftBanned && s.penalties != nil:
+		// Статус и причина пишутся вместе. Сессии не завершаются: мягкий бан
+		// пускает в приложение, а RequireAuth закроет всё лишнее со следующего
+		// запроса после истечения кэша пользователя.
+		if err := s.penalties.ApplySoftBan(ctx, nil, userID, &adminID, strings.TrimSpace(reason)); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errors.New("user not found")
+			}
+			return err
+		}
+	case status == repository.UserStatusActive && s.penalties != nil:
+		user, err := s.userRepo.FindByID(ctx, userID)
+		if err != nil {
+			return errors.New("user not found")
+		}
+		if user.Status == repository.UserStatusSoftBanned {
+			// Снятие мягкого бана заодно стирает его причину.
+			if err := s.penalties.LiftSoftBan(ctx, nil, userID); err != nil {
+				return err
+			}
+			break
+		}
+		if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
+			return err
+		}
+	default:
+		if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
+			return err
+		}
 	}
-	if status == "BANNED" {
+
+	if status == repository.UserStatusBanned {
 		// Бан обязан завершить и сессии: RequireAuth отвергнет забаненного на
 		// следующем запросе, но его refresh-токен иначе продолжал бы штамповать
 		// access-токены.

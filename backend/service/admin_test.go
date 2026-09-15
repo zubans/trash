@@ -178,7 +178,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	adminID := uuid.New()
 
 	// Проверяем бан
-	err := svc.UpdateUserStatus(context.Background(), user.ID, adminID, "BANNED")
+	err := svc.UpdateUserStatus(context.Background(), user.ID, adminID, "BANNED", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	}
 
 	// Проверяем недопустимый статус
-	err = svc.UpdateUserStatus(context.Background(), user.ID, adminID, "INVALID")
+	err = svc.UpdateUserStatus(context.Background(), user.ID, adminID, "INVALID", "")
 	if err == nil {
 		t.Error("expected error for invalid status")
 	}
@@ -317,4 +317,77 @@ func (m *mockAdminRepo) SetTopUpStatus(ctx context.Context, q repository.Querier
 	req.Status = status
 	req.AdminID = &adminID
 	return nil
+}
+
+// mockPenaltyRepo — мягкий бан поверх mockRepo: статус меняется в той же карте
+// пользователей, причина запоминается рядом.
+type mockPenaltyRepo struct {
+	users   *mockRepo
+	reasons map[uuid.UUID]string
+	by      map[uuid.UUID]*uuid.UUID
+}
+
+func (m *mockPenaltyRepo) ApplySoftBan(ctx context.Context, q repository.Querier, userID uuid.UUID, by *uuid.UUID, reason string) error {
+	if err := m.users.UpdateStatus(ctx, userID, repository.UserStatusSoftBanned); err != nil {
+		return err
+	}
+	m.reasons[userID] = reason
+	m.by[userID] = by
+	return nil
+}
+
+func (m *mockPenaltyRepo) LiftSoftBan(ctx context.Context, q repository.Querier, userID uuid.UUID) error {
+	u, err := m.users.FindByID(ctx, userID)
+	if err != nil || u.Status != repository.UserStatusSoftBanned {
+		return repository.ErrConflict
+	}
+	delete(m.reasons, userID)
+	delete(m.by, userID)
+	return m.users.UpdateStatus(ctx, userID, repository.UserStatusActive)
+}
+
+func (m *mockPenaltyRepo) GetFlags(ctx context.Context, q repository.Querier, userID uuid.UUID) (*repository.PenaltyFlags, error) {
+	return &repository.PenaltyFlags{UserID: userID, SoftBanReason: m.reasons[userID], SoftBannedBy: m.by[userID]}, nil
+}
+
+func TestAdminService_SoftBan(t *testing.T) {
+	userRepo := newMockRepo()
+	penalties := &mockPenaltyRepo{users: userRepo, reasons: map[uuid.UUID]string{}, by: map[uuid.UUID]*uuid.UUID{}}
+	svc := NewAdminService(userRepo, &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}, "secret", nil).
+		WithPenalties(penalties)
+	ctx := context.Background()
+
+	user := &repository.User{ID: uuid.New(), Phone: "79990001122", Status: repository.UserStatusActive}
+	userRepo.users[user.Phone] = user
+	adminID := uuid.New()
+
+	if err := svc.UpdateUserStatus(ctx, user.ID, adminID, repository.UserStatusSoftBanned, "  спор за спором  "); err != nil {
+		t.Fatalf("soft ban: %v", err)
+	}
+	if user.Status != repository.UserStatusSoftBanned {
+		t.Fatalf("status %s, want SOFT_BANNED", user.Status)
+	}
+	if penalties.reasons[user.ID] != "спор за спором" || penalties.by[user.ID] == nil || *penalties.by[user.ID] != adminID {
+		t.Fatalf("reason or author not recorded: %q %v", penalties.reasons[user.ID], penalties.by[user.ID])
+	}
+
+	if err := svc.UpdateUserStatus(ctx, user.ID, adminID, repository.UserStatusActive, ""); err != nil {
+		t.Fatalf("lift: %v", err)
+	}
+	if user.Status != repository.UserStatusActive {
+		t.Fatalf("status %s, want ACTIVE", user.Status)
+	}
+	if _, left := penalties.reasons[user.ID]; left {
+		t.Fatal("lift kept the soft ban reason")
+	}
+
+	// Себя нельзя ни забанить, ни мягко забанить.
+	if err := svc.UpdateUserStatus(ctx, adminID, adminID, repository.UserStatusSoftBanned, ""); err == nil {
+		t.Fatal("admin soft-banned themselves")
+	}
+
+	// Фильтр списка знает новый статус.
+	if _, _, err := svc.GetUsers(ctx, 1, 20, "", repository.UserStatusSoftBanned, ""); err != nil {
+		t.Fatalf("status filter SOFT_BANNED rejected: %v", err)
+	}
 }

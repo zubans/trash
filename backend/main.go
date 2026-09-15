@@ -75,6 +75,7 @@ func main() {
 	// Справочник ролей и их прав. На него опираются и назначение ролей, и охрана
 	// каждого админского маршрута.
 	roleRepo := repository.NewRoleRepository(db)
+	penaltyRepo := repository.NewPenaltyRepository(db)
 	// system_settings — несколько строк, читаемых на путях ценообразования,
 	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
 	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
@@ -201,7 +202,8 @@ func main() {
 		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo).
 		WithEvents(eventRepo).
-		WithRoles(roleRepo)
+		WithRoles(roleRepo).
+		WithPenalties(penaltyRepo)
 	// Права: что разрешено роли, отличной от ADMIN. Кэш карты «роль → права»
 	// сбрасывается тем же, что её меняет, — страницей ролей.
 	permissions := service.NewPermissions(roleRepo)
