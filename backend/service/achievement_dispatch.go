@@ -194,7 +194,11 @@ func (d *AchievementDispatcher) subjects(ctx context.Context, event *repository.
 			}
 			return nil, err
 		}
-		if err := d.eligible(ctx, order); err != nil {
+		eligible := d.eligible
+		if event.Type == repository.EventDisputeConceded {
+			eligible = eligibleForConcession
+		}
+		if err := eligible(ctx, order); err != nil {
 			log.Printf("[achievement] order %s is not eligible: %v", order.ID, err)
 			return nil, nil
 		}
@@ -260,6 +264,22 @@ func (d *AchievementDispatcher) eligible(ctx context.Context, order *repository.
 	// баллов, требование разных заказчиков у ачивок с подарком.
 	if min := money.FromRubles(d.levels.MinOrderAmount(ctx)); order.FinalAmount < min {
 		return fmt.Errorf("order paid %s, below the %s floor", order.FinalAmount, min)
+	}
+	return nil
+}
+
+// eligibleForConcession — проверки заказа для события признания в споре.
+//
+// Признанный заказ отменён и не оплачен, поэтому пороги оплаты из eligible к
+// нему не применимы: награда здесь не за заработок, а за то, что исполнитель
+// избавил обе стороны от арбитража. Остаётся проверка, которую никакое
+// событие не отменяет, — заказчик и исполнитель разные люди.
+func eligibleForConcession(_ context.Context, order *repository.Order) error {
+	if order.ExecutorID == nil {
+		return errors.New("order has no executor")
+	}
+	if *order.ExecutorID == order.CustomerID {
+		return errors.New("customer and executor are the same person")
 	}
 	return nil
 }
@@ -405,7 +425,11 @@ func (d *AchievementDispatcher) apply(
 			UserID: s.user.ID, Code: row.Code, GrantKey: key,
 			Points: points, ExpiresAt: Expiry(now, lifetime),
 		}
-		if s.order != nil {
+		// Выдача привязывается к заказу, чтобы отмена заказа её отозвала. Заказ,
+		// уже отменённый в момент выдачи (признание в споре), не привязывается:
+		// награда за само это событие, а событие order.canceled того же заказа
+		// лежит в outbox с тем же временем и может прийти после выдачи.
+		if s.order != nil && s.order.Status != repository.OrderStatusCanceled {
 			granted.OrderID = &s.order.ID
 		}
 		if err := d.achievements.Grant(ctx, tx, granted); err != nil {

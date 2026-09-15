@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/achievement"
+	"healthlogin/backend/achievements"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -677,4 +678,61 @@ def check(f):
 		t.Fatalf("compile: %v", err)
 	}
 	return engine
+}
+
+// «Первое покаяние» выдаётся за признание в споре: заказ отменён и не оплачен,
+// но ядро пропускает такое событие мимо порогов оплаты. Выдача не
+// привязывается к заказу, поэтому отмена заказа её не отзывает.
+func TestFirstRepentanceGrantedOnConcession(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{}, "500")
+
+	engine := achievement.New(achievement.DefaultLimits)
+	if err := engine.Load(achievements.FS, "embedded"); err != nil {
+		t.Fatalf("load embedded achievements: %v", err)
+	}
+	h.dispatcher.engine = engine
+	h.achievements.rows = []*repository.Achievement{{Code: "first_repentance", IsActive: true}}
+
+	h.order.Status = repository.OrderStatusCanceled
+	h.order.FinalAmount = money.Zero
+
+	for _, eventType := range []string{repository.EventOrderCanceled, repository.EventDisputeConceded} {
+		if err := h.events.Publish(context.Background(), nil, &repository.DomainEvent{
+			Type: eventType, SubjectType: repository.EventSubjectOrder, SubjectID: h.order.ID, ActorID: &h.executorID,
+		}); err != nil {
+			t.Fatalf("publish: %v", err)
+		}
+	}
+	if err := h.dispatcher.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	if len(h.achievements.granted) != 1 || h.achievements.granted[0].UserID != h.executorID ||
+		h.achievements.granted[0].Code != "first_repentance" {
+		t.Fatalf("granted = %+v, want first_repentance to the executor", h.achievements.granted)
+	}
+	if h.achievements.granted[0].OrderID != nil {
+		t.Error("the grant is tied to a canceled order and would be revoked with it")
+	}
+	if len(h.achievements.points) != 1 || h.achievements.points[0] != 5 {
+		t.Errorf("points = %v, want a single 5", h.achievements.points)
+	}
+
+	// Признание самому себе ничего не приносит.
+	self := newDispatchHarness(t, repository.ExecutorStats{}, "500")
+	self.dispatcher.engine = engine
+	self.achievements.rows = h.achievements.rows
+	self.order.Status = repository.OrderStatusCanceled
+	self.order.ExecutorID = &self.order.CustomerID
+	if err := self.events.Publish(context.Background(), nil, &repository.DomainEvent{
+		Type: repository.EventDisputeConceded, SubjectType: repository.EventSubjectOrder, SubjectID: self.order.ID,
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := self.dispatcher.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(self.achievements.granted) != 0 {
+		t.Fatalf("self-dealt concession granted %+v", self.achievements.granted)
+	}
 }
