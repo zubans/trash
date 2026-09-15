@@ -301,7 +301,7 @@ func TestSettleUnknownDisputeIntegration(t *testing.T) {
 	}
 
 	err = f.srv.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		if err := f.srv.closeOpenDisputeTx(ctx, tx, f.order.ID, repository.DisputeClosing{
+		if _, err := f.srv.closeOpenDisputeTx(ctx, tx, f.order.ID, repository.DisputeClosing{
 			Closure: repository.DisputeClosureArbitration, Decision: repository.DisputeDecisionUnknown,
 		}); err != nil {
 			return err

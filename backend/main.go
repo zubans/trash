@@ -218,7 +218,8 @@ func main() {
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
 		WithAchievements(levels, executorStatsRepo).
 		WithDisputes(disputeRepo).
-		WithPenalties(penaltyService)
+		WithPenalties(penaltyService).
+		WithDisputeNotifier(service.NewDisputeNotifier(mailRepo, userRepo, mailer))
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors)

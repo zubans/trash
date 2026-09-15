@@ -50,6 +50,8 @@ type OrderService struct {
 	disputes repository.DisputeRepository
 	// penalties начисляет штрафные баллы по решению арбитра.
 	penalties *PenaltyService
+	// disputeNotifier сообщает сторонам об открытии и закрытии спора.
+	disputeNotifier *DisputeNotifier
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
@@ -977,6 +979,7 @@ func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UU
 // заказа закрывает его спор: заказчик и исполнитель договорились, и арбитру
 // решать больше нечего.
 func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUID) error {
+	var closed *repository.Dispute
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
@@ -986,19 +989,24 @@ func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUI
 			return errors.New("forbidden")
 		}
 		if order.Status == repository.OrderStatusDisputed {
-			if err := s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
+			closed, err = s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
 				Closure:  repository.DisputeClosureCustomerConfirmed,
 				ClosedBy: &customerID,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
 		}
 		return s.confirmTx(ctx, tx, orderID)
 	})
-	if err == nil {
-		metrics.OrderEvent("confirmed")
+	if err != nil {
+		return err
 	}
-	return err
+	metrics.OrderEvent("confirmed")
+	if closed != nil {
+		s.disputeNotifier.DisputeClosed(ctx, closed)
+	}
+	return nil
 }
 
 // CancelOrder отменяет активный заказ и возвращает удержание ровно один раз.
