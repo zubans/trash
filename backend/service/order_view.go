@@ -89,6 +89,9 @@ func actionsFor(viewer orderViewer, o *repository.Order, now time.Time) *reposit
 		Cancel: isCustomer && slices.Contains(customerCancelStatuses, o.Status),
 		Reject: isExecutor && executorCanReject(o, viewer.userID),
 		Review: (isCustomer || isExecutor) && o.ExecutorID != nil && reviewOpen(o, now),
+		// Скриптовые услуги закрываются сами, их не оспаривают (см. OpenDispute).
+		Dispute: isCustomer && o.Status == repository.OrderStatusExecuted && o.ExecutorID != nil &&
+			(o.ServiceVariant == nil || !o.ServiceVariant.HasBehavior()),
 	}
 }
 

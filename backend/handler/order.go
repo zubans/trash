@@ -98,6 +98,40 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// OpenDispute обслуживает POST /customer/orders/{id}/dispute: заказчик
+// заявляет, что исполненный заказ не выполнен. Тело — {"claim": "..."}.
+func (h *OrderHandler) OpenDispute(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Claim string `json:"claim"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	dispute, err := h.orderService.OpenDispute(r.Context(), user.ID, orderID, req.Claim)
+	if err != nil {
+		writeOrderError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(dispute)
+}
+
 // ConfirmOrder обслуживает POST /customer/orders/{id}/confirm.
 func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)

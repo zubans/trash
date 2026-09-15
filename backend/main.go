@@ -76,6 +76,7 @@ func main() {
 	// каждого админского маршрута.
 	roleRepo := repository.NewRoleRepository(db)
 	penaltyRepo := repository.NewPenaltyRepository(db)
+	disputeRepo := repository.NewDisputeRepository(db)
 	// system_settings — несколько строк, читаемых на путях ценообразования,
 	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
 	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
@@ -212,7 +213,8 @@ func main() {
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo).
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
-		WithAchievements(levels, executorStatsRepo)
+		WithAchievements(levels, executorStatsRepo).
+		WithDisputes(disputeRepo)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors)
@@ -402,6 +404,7 @@ func main() {
 			r.Post("/customer/orders", oh.CreateOrderHandler)
 			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
 			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
+			r.Post("/customer/orders/{id}/dispute", oh.OpenDispute)
 			r.Post("/customer/orders/{id}/tip", oh.TipOrderHandler)
 			r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
 			r.Get("/customer/orders", oh.GetCustomerOrdersHandler)

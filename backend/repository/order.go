@@ -18,6 +18,9 @@ const (
 	OrderStatusSearching OrderStatus = "SEARCHING"
 	OrderStatusAssigned  OrderStatus = "ASSIGNED"
 	OrderStatusExecuted  OrderStatus = "EXECUTED"
+	// OrderStatusDisputed — исполнитель отметил выполнение, а заказчик его
+	// оспорил. Заказ открыт, пока спор не закрыт.
+	OrderStatusDisputed  OrderStatus = "DISPUTED"
 	OrderStatusCompleted OrderStatus = "COMPLETED"
 	OrderStatusCanceled  OrderStatus = "CANCELED"
 )
@@ -79,6 +82,8 @@ type OrderActions struct {
 	Cancel bool `json:"cancel"`
 	Reject bool `json:"reject"`
 	Review bool `json:"review"`
+	// Dispute — заказчик может заявить, что заказ не выполнен.
+	Dispute bool `json:"dispute"`
 }
 
 // OrderRepository описывает операции хранения заказов.
@@ -104,6 +109,8 @@ type OrderRepository interface {
 	// Они возвращают ErrConflict, когда сущность была не в ожидаемом состоянии.
 	Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error
 	Execute(ctx context.Context, q Querier, orderID uuid.UUID) error
+	// MarkDisputed переводит исполненный заказ в DISPUTED.
+	MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
 	// SetCommission сохраняет ставку, по которой заказ закрыли, и уровень
 	// исполнителя на тот момент. Ставка стала персональной, и без этой записи
@@ -217,8 +224,8 @@ func (r *orderRepo) GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, err
 
 func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3) ORDER BY o.created_at DESC`,
-		executorID, OrderStatusAssigned, OrderStatusExecuted,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3, $4) ORDER BY o.created_at DESC`,
+		executorID, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 	if err != nil {
 		return nil, err
@@ -401,14 +408,21 @@ func (r *orderRepo) Execute(ctx context.Context, q Querier, orderID uuid.UUID) e
 	)
 }
 
+func (r *orderRepo) MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
+		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
+		OrderStatusDisputed, orderID, OrderStatusExecuted,
+	)
+}
+
 func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
 		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
 		    completed_at = now()
-		 WHERE id = $4 AND status IN ($5, $6)`,
-		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted, OrderStatusAssigned,
+		 WHERE id = $4 AND status IN ($5, $6, $7)`,
+		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted, OrderStatusAssigned, OrderStatusDisputed,
 	)
 }
 
@@ -419,13 +433,15 @@ func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.U
 	return err
 }
 
-// Cancel аннулирует ещё не выполненный заказ. Принимаются и SEARCHING, и
-// ASSIGNED, потому что слой сервисов возвращает удержание в обоих случаях;
-// охрана не даёт второй параллельной отмене вернуть деньги дважды.
+// Cancel аннулирует незакрытый заказ. Из каких статусов отмена допустима в
+// конкретном случае, решает слой сервисов (cancelTx получает список); здесь
+// охрана лишь не даёт отменить уже закрытый заказ и второй параллельной отмене
+// вернуть деньги дважды. DISPUTED отменяется признанием исполнителя и решением
+// арбитра в пользу заказчика.
 func (r *orderRepo) Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
-		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
-		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned,
+		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4, $5, $6)`,
+		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 }
 
@@ -499,9 +515,9 @@ func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID)
 func (r *orderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o
-		 WHERE o.customer_id = $1 AND o.status IN ($2, $3, $4)
+		 WHERE o.customer_id = $1 AND o.status IN ($2, $3, $4, $5)
 		 ORDER BY o.created_at`,
-		customerID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted,
+		customerID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 	if err != nil {
 		return nil, err
@@ -584,7 +600,9 @@ func (r *orderRepo) CountActiveOrdersByExecutors(ctx context.Context, executorID
 func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'EXECUTED'`,
+		// Оспоренный заказ тоже ждёт закрытия, и исполнитель, копящий споры, не
+		// должен набирать новую работу сверх лимита.
+		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status IN ('EXECUTED', 'DISPUTED')`,
 		executorID,
 	).Scan(&count)
 	return count, err
