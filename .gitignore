@@ -23,6 +23,9 @@ healthlogin-app.apk
 .env.*
 !.env.deploy.example
 !.env.local.example
+# Closed design notes that must not reach the public repository.
+/doc/private/
+
 # APK signature metadata
 *.apk.idsig
 

@@ -39,6 +39,7 @@
 | **Локальный запуск** | Полный стек на своей машине: приложение, БД, Mailpit и мониторинг одной командой. | [`local_run.md`](./local_run.md) |
 | **Мониторинг и метрики** | Метрики бэкенда, стек Prometheus/Grafana/Alertmanager и экспортеры. | [`monitoring.md`](./monitoring.md) |
 | **Миграции БД** | Перечень SQL-миграций и регламент их применения. | [`migration.md`](./migration.md) |
+| **Споры, штрафы, фото-подтверждение** *(план)* | Арбитраж спорных заказов, журнал штрафных баллов, тихая блокировка и `SOFT_BANNED`, фото с жестом. | [`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md), [`tasks_disputes_penalties_photo_proof.md`](./tasks_disputes_penalties_photo_proof.md) |
 
 ---
 
