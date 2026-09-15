@@ -45,6 +45,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `044_service_node_scripts.sql` | A special service carries its own script: `service_nodes.behavior_constants` and `behavior_source`, edited in the admin panel's service constructor. |
 | `045_order_submissions.sql` | Data an executor submits for checking (`order_submissions`) and the cases a behaviour hands to an administrator (`behavior_escalations`), with one open escalation per order. |
 | `046_auto_shift_on_accept.sql` | Auto-opening a shift for an executor who takes an order without one: `auto_shift_on_accept_enabled` (on by default) and `auto_shift_duration_hours` (1 h by default, limited to the durations a manual start accepts). See [`order_lifecycle.md`](./order_lifecycle.md#3-автооткрытие-смены-при-взятии-заказа). |
+| `052_soft_banned_and_disputed_statuses.sql` | `SOFT_BANNED` in `status_type` (blocked, but sign-in allowed) and `DISPUTED` in `order_status_type`. Runs without a transaction and holds nothing else: a new enum value cannot be used before it is committed. See [`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md). |
 
 ## How to run manually
 

@@ -20,7 +20,7 @@ Issue: [zubans/trash#16](https://github.com/zubans/trash/issues/16).
 | **Этап 0. Подготовка** | | |
 | T0.1 ✅ | GitHub issue с планом | — |
 | **Этап 1. Схема и статусы** | | |
-| B1.1 | Миграция 052: `SOFT_BANNED`, `DISPUTED` | — |
+| B1.1 ✅ | Миграция 052: `SOFT_BANNED`, `DISPUTED` | — |
 | B1.2 | Миграция 053: споры, баллы, счёт `DISPUTES`, настройки, права | B1.1 |
 | B1.3 | Миграция 054: символы и снимки | B1.1 |
 | **Этап 2. `SOFT_BANNED`** | | |
