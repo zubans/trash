@@ -15,6 +15,8 @@ func TestCanViewOrTakeOrder(t *testing.T) {
 	moderator := &repository.User{Role: repository.RoleModerator, Roles: []string{repository.RoleModerator}, Status: "ACTIVE"}
 	execAndMod := &repository.User{Role: repository.RoleExecutor, Roles: []string{repository.RoleExecutor, repository.RoleModerator}, Status: "ACTIVE"}
 	bannedExec := &repository.User{Role: repository.RoleExecutor, Verified: true, Status: "BANNED"}
+	softBannedExec := &repository.User{Role: repository.RoleExecutor, Verified: true, Status: repository.UserStatusSoftBanned}
+	softBannedMod := &repository.User{Role: repository.RoleModerator, Roles: []string{repository.RoleModerator}, Status: repository.UserStatusSoftBanned}
 
 	verifiedCust := &repository.User{Verified: true, Status: "ACTIVE"}
 	unverifiedCust := &repository.User{Verified: false, Status: "ACTIVE"}
@@ -51,6 +53,9 @@ func TestCanViewOrTakeOrder(t *testing.T) {
 
 		// Бан блокирует всегда.
 		{"banned exec blocked", bannedExec, unverifiedCust, normal, false},
+		// Мягкий бан закрывает новую работу так же, как обычный.
+		{"soft-banned exec blocked", softBannedExec, unverifiedCust, normal, false},
+		{"soft-banned moderator blocked on mod-only", softBannedMod, unverifiedCust, modOnly, false},
 	}
 
 	for _, c := range cases {
@@ -63,5 +68,19 @@ func TestCanViewOrTakeOrder(t *testing.T) {
 				t.Error("expected hidden, got visible")
 			}
 		})
+	}
+}
+
+// Заказчик в мягком бане не может заказать услугу — как и забаненный.
+func TestCanCustomerOrderVariant_Blocked(t *testing.T) {
+	for _, status := range []string{repository.UserStatusBanned, repository.UserStatusSoftBanned} {
+		customer := &repository.User{Status: status}
+		if err := canCustomerOrderVariant(context.Background(), nil, customer, &repository.ServiceNode{}); err == nil {
+			t.Errorf("customer in %s allowed to order", status)
+		}
+	}
+	active := &repository.User{Status: repository.UserStatusActive}
+	if err := canCustomerOrderVariant(context.Background(), nil, active, &repository.ServiceNode{}); err != nil {
+		t.Errorf("active customer rejected: %v", err)
 	}
 }

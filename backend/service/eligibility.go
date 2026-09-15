@@ -40,7 +40,7 @@ func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, customer
 	if customer == nil {
 		return ErrCustomerNotEligible
 	}
-	if customer.Status == "BANNED" {
+	if customer.IsBlocked() {
 		return errors.New("аккаунт заблокирован")
 	}
 	if variant == nil {
@@ -93,7 +93,7 @@ func canExecutorTakeOrder(executor *repository.User, variant *repository.Service
 	if executor == nil {
 		return ErrExecutorNotEligible
 	}
-	if executor.Status == "BANNED" {
+	if executor.IsBlocked() {
 		return errors.New("аккаунт заблокирован")
 	}
 	if variant == nil {
@@ -132,7 +132,7 @@ func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, viewer *repos
 		if !viewer.HasRole(repository.RoleModerator) {
 			return ErrExecutorNotEligible
 		}
-		if viewer.Status == "BANNED" {
+		if viewer.IsBlocked() {
 			return errors.New("аккаунт заблокирован")
 		}
 		return behaviors.CanViewOrTake(ctx, viewer, customer, variant)
