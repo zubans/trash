@@ -32,6 +32,7 @@ var allTransactionTypes = []TransactionType{
 	TransactionTypeCommission,
 	TransactionTypeCommissionPayout,
 	TransactionTypeBonus,
+	TransactionTypeDisputeReward,
 }
 
 func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
@@ -56,6 +57,8 @@ func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 		TransactionTypeRefund:    +1,
 		TransactionTypeTipReward: +1,
 		TransactionTypeBonus:     +1,
+		// Выплата по спору с неизвестным исходом.
+		TransactionTypeDisputeReward: +1,
 		// Деньги уходят.
 		TransactionTypeHold:           -1,
 		TransactionTypeFine:           -1,

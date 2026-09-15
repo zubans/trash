@@ -21,7 +21,7 @@ Issue: [zubans/trash#16](https://github.com/zubans/trash/issues/16).
 | T0.1 ✅ | GitHub issue с планом | — |
 | **Этап 1. Схема и статусы** | | |
 | B1.1 ✅ | Миграция 052: `SOFT_BANNED`, `DISPUTED` | — |
-| B1.2 | Миграция 053: споры, баллы, счёт `DISPUTES`, настройки, права | B1.1 |
+| B1.2 ✅ | Миграция 053: споры, баллы, счёт `DISPUTES`, настройки, права | B1.1 |
 | B1.3 | Миграция 054: символы и снимки | B1.1 |
 | **Этап 2. `SOFT_BANNED`** | | |
 | B2.1 | `SOFT_BANNED` в аутентификации и допуске | B1.1 |
@@ -84,6 +84,7 @@ Issue: [zubans/trash#16](https://github.com/zubans/trash/issues/16).
 
 - `ALTER TYPE status_type ADD VALUE IF NOT EXISTS 'SOFT_BANNED'`.
 - `ALTER TYPE order_status_type ADD VALUE IF NOT EXISTS 'DISPUTED' AFTER 'EXECUTED'`.
+- `ALTER TYPE transaction_type ADD VALUE IF NOT EXISTS 'DISPUTE_REWARD'` (добавлено в B1.2).
 - Маркер `-- +migrate no-transaction`.
 
 **Готово:** миграция применяется на чистой базе и на копии рабочей схемы;
@@ -92,7 +93,9 @@ Issue: [zubans/trash#16](https://github.com/zubans/trash/issues/16).
 ### B1.2 Миграция `053_disputes_and_penalties.sql`
 
 - Таблицы `order_disputes` (уникальный частичный индекс: один `OPEN` на заказ),
-  `penalty_points`, `user_penalty_status`.
+  `penalty_points`, `user_penalty_status`, `user_penalty_flags`.
+- Тип проводки `DISPUTE_REWARD` и счёт `AccountDisputes` в соглашении сверки.
+- Проверка новых настроек при сохранении (целые числа в границах).
 - Системный счёт `DISPUTES`.
 - Настройки `penalty_points_threshold`, `photo_requirement_months`,
   `penalty_points_ttl_months`, `silent_block_months`,
