@@ -155,7 +155,8 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, ErrInvalidRefreshToken
 	}
 	// Забаненная учётная запись не должна уметь продлевать свою сессию.
-	if user.Status == "BANNED" {
+	// SOFT_BANNED сессию продлевает: такого пользователя пускают в приложение.
+	if user.Status == repository.UserStatusBanned {
 		if err := s.refreshRepo.RevokeAllForUser(ctx, user.ID); err != nil {
 			log.Printf("[AuthService] failed to revoke sessions for banned user %s: %v", user.ID, err)
 		}

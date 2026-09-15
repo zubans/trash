@@ -22,6 +22,23 @@ const (
 	RoleAdmin     = "ADMIN"
 )
 
+// Статусы учётной записи (users.status).
+const (
+	UserStatusActive = "ACTIVE"
+	// UserStatusSoftBanned — аккаунт заблокирован, но войти можно: чтобы узнать
+	// о блокировке, написать в поддержку и довести уже взятые заказы.
+	UserStatusSoftBanned = "SOFT_BANNED"
+	// UserStatusBanned — войти нельзя вовсе.
+	UserStatusBanned = "BANNED"
+)
+
+// IsBlocked сообщает, закрыта ли пользователю новая работа: заказы, взятие
+// заказов, ставки. Так ведут себя и BANNED, и SOFT_BANNED — различаются они
+// только тем, пускает ли их аутентификация.
+func (u *User) IsBlocked() bool {
+	return u.Status == UserStatusBanned || u.Status == UserStatusSoftBanned
+}
+
 // User представляет запись пользователя в базе.
 type User struct {
 	ID                     uuid.UUID    `json:"id"`
