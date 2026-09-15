@@ -205,9 +205,9 @@
 | `penalty_points` | журнал, источник правды: пользователь, роль, заказ, спор, кто назначил, `created_at`, `revoked_at`, `expired_at` |
 | `user_penalty_status` | готовое состояние роли для быстрых проверок (пользователь + роль): активные баллы, `photo_required_until`, `silent_block_started_at`, `silent_block_ends_at`. Пересчитывается в той же транзакции, где меняется журнал |
 | `user_penalty_flags` | факты уровня пользователя, переживающие баллы любой роли: `had_silent_block_at`, `soft_banned_at`, `soft_banned_by` (NULL — система при рецидиве), `soft_ban_reason` |
-| `watermark_symbols` | код, название, описание, картинка-подсказка, `fits_in_selfie`, порядок, мягкое удаление |
-| `order_photo_proofs` | заказ, вид (`AREA`/`SELFIE`), камера (`FRONT`/`REAR`), файл, sha256, EXIF-время и EXIF-координаты, время и координаты устройства, результат проверки защиты, `uploaded_at` |
-| `orders` | + `photo_required`, `watermark_symbol_id`, служебные данные защиты снимка, `executed_at_device` |
+| `watermark_symbols` | код, постоянный номер жеста (не переиспользуется), название, описание, картинка-подсказка, `fits_in_selfie`, порядок, мягкое удаление |
+| `order_photo_proofs` | заказ, исполнитель, вид (`AREA`/`SELFIE`, по одному снимку каждого вида), камера (`FRONT`/`REAR`), жест заказа, ключ идемпотентности с устройства, файл, sha256, размер, EXIF-время и EXIF-координаты, время и координаты устройства, результаты проверки снимка, `uploaded_at` |
+| `orders` | + `photo_required`, `watermark_symbol_id`, `proof_key` (служебные данные проверки снимка), `executed_at_device`; ограничение: требование фото всегда вместе с жестом и ключом |
 | `system_accounts` | + `DISPUTES` |
 
 Почему журнал, а не счётчик в профиле: видно, за что дан каждый балл; ошибочный
