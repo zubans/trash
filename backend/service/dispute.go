@@ -123,6 +123,7 @@ func (s *OrderService) OpenDispute(ctx context.Context, customerID, orderID uuid
 
 	s.systemChatMessage(ctx, orderID, customerID, "⚠️ Заказчик оспорил выполнение заказа: «"+claim+"». "+
 		"Спор передан на разбор. Заказчик может закрыть его, подтвердив выполнение, исполнитель — признав, что заказ не выполнен.")
+	s.disputeNotifier.DisputeOpened(ctx, dispute)
 	return dispute, nil
 }
 
@@ -133,6 +134,7 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 	if s.disputes == nil {
 		return ErrDisputeNotOpen
 	}
+	var closed *repository.Dispute
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
@@ -144,18 +146,15 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 		if order.Status != repository.OrderStatusDisputed {
 			return ErrDisputeNotOpen
 		}
-		dispute, err := s.disputes.FindOpenByOrder(ctx, tx, orderID)
+		closed, err = s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
+			Closure:  repository.DisputeClosureExecutorConceded,
+			ClosedBy: &executorID,
+		})
 		if err != nil {
 			return err
 		}
-		if dispute == nil {
+		if closed == nil {
 			return ErrDisputeNotOpen
-		}
-		if err := s.disputes.Close(ctx, tx, dispute.ID, repository.DisputeClosing{
-			Closure:  repository.DisputeClosureExecutorConceded,
-			ClosedBy: &executorID,
-		}); err != nil {
-			return err
 		}
 		if err := s.cancelTx(ctx, tx, orderID, repository.OrderStatusDisputed); err != nil {
 			return err
@@ -169,6 +168,7 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 
 	s.systemChatMessage(ctx, orderID, executorID, "Исполнитель признал, что заказ не выполнен. "+
 		"Заказ отменён, деньги возвращены заказчику. Спор закрыт.")
+	s.disputeNotifier.DisputeClosed(ctx, closed)
 	return nil
 }
 
@@ -287,6 +287,7 @@ func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID 
 	if err != nil {
 		return nil, err
 	}
+	s.disputeNotifier.DisputeClosed(ctx, resolved)
 	return resolved, nil
 }
 
@@ -354,17 +355,21 @@ func (s *OrderService) settleUnknownDisputeTx(ctx context.Context, tx *sql.Tx, o
 }
 
 // closeOpenDisputeTx закрывает открытый спор заказа в транзакции вызывающего,
-// который уже держит блокировку строки заказа. Заказ в DISPUTED без открытого
-// спора закрывать нечем — это не ошибка вызывающего, и он продолжает.
-func (s *OrderService) closeOpenDisputeTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID, closing repository.DisputeClosing) error {
+// который уже держит блокировку строки заказа, и возвращает его закрытым. Заказ
+// в DISPUTED без открытого спора закрывать нечем — это не ошибка вызывающего:
+// nil, nil.
+func (s *OrderService) closeOpenDisputeTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID, closing repository.DisputeClosing) (*repository.Dispute, error) {
 	if s.disputes == nil {
-		return nil
+		return nil, nil
 	}
 	dispute, err := s.disputes.FindOpenByOrder(ctx, tx, orderID)
 	if err != nil || dispute == nil {
-		return err
+		return nil, err
 	}
-	return s.disputes.Close(ctx, tx, dispute.ID, closing)
+	if err := s.disputes.Close(ctx, tx, dispute.ID, closing); err != nil {
+		return nil, err
+	}
+	return s.disputes.FindByID(ctx, tx, dispute.ID)
 }
 
 // requireNoOpenDisputeTx не даёт закрыть заказ, спор которого ещё открыт.
