@@ -48,6 +48,8 @@ type OrderService struct {
 	// disputes — споры по исполненным заказам. Без них заказ нельзя оспорить,
 	// а в остальном сервис работает как до появления споров.
 	disputes repository.DisputeRepository
+	// penalties начисляет штрафные баллы по решению арбитра.
+	penalties *PenaltyService
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии

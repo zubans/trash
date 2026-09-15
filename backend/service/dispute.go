@@ -38,9 +38,25 @@ var (
 	ErrDisputeAlreadyOpen = errors.New("по заказу уже открыт спор")
 	// ErrDisputeNotOpen — по заказу нет открытого спора.
 	ErrDisputeNotOpen = errors.New("по заказу нет открытого спора")
+	// ErrDisputeDecision — неизвестное решение арбитра.
+	ErrDisputeDecision = errors.New("решение арбитра: executor, customer или unknown")
+	// ErrDisputeClosed — спор уже закрыт: заказчиком, исполнителем или другим
+	// арбитром раньше.
+	ErrDisputeClosed = errors.New("спор уже закрыт")
+	// ErrDisputeNotFound — спора нет.
+	ErrDisputeNotFound = errors.New("спор не найден")
 	// ErrOrderHasOpenDispute — заказ пытаются закрыть в обход его спора.
 	ErrOrderHasOpenDispute = errors.New("по заказу открыт спор")
 )
+
+// maxResolutionNoteRunes ограничивает комментарий арбитра.
+const maxResolutionNoteRunes = 2000
+
+// WithPenalties подключает штрафные баллы, которые начисляет решение арбитра.
+func (s *OrderService) WithPenalties(penalties *PenaltyService) *OrderService {
+	s.penalties = penalties
+	return s
+}
 
 // WithDisputes подключает споры.
 func (s *OrderService) WithDisputes(disputes repository.DisputeRepository) *OrderService {
@@ -154,6 +170,137 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 	s.systemChatMessage(ctx, orderID, executorID, "Исполнитель признал, что заказ не выполнен. "+
 		"Заказ отменён, деньги возвращены заказчику. Спор закрыт.")
 	return nil
+}
+
+// ParseDisputeDecision переводит решение из запроса (executor, customer,
+// unknown) в значение базы.
+func ParseDisputeDecision(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "executor":
+		return repository.DisputeDecisionExecutor, nil
+	case "customer":
+		return repository.DisputeDecisionCustomer, nil
+	case "unknown":
+		return repository.DisputeDecisionUnknown, nil
+	}
+	return "", ErrDisputeDecision
+}
+
+var disputeDecisionText = map[string]string{
+	repository.DisputeDecisionExecutor: "прав исполнитель",
+	repository.DisputeDecisionCustomer: "прав заказчик",
+	repository.DisputeDecisionUnknown:  "установить, кто прав, не удалось",
+}
+
+// ResolveDispute — решение арбитра по открытому спору.
+//
+//   - executor: заказ оплачивается исполнителю как подтверждённый, балл —
+//     заказчику;
+//   - customer: заказ отменяется с полным возвратом заказчику, балл —
+//     исполнителю;
+//   - unknown: заказчику полный возврат, исполнителю оплата со счёта DISPUTES,
+//     баллы — обоим.
+//
+// Деньги, закрытие спора и баллы — одна транзакция. Строка заказа блокируется
+// первой, как и в подтверждении заказчиком, поэтому решение, опоздавшее за
+// подтверждением, увидит закрытый спор и получит ErrDisputeClosed.
+func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID uuid.UUID, decision, note string) (*repository.Dispute, error) {
+	if s.disputes == nil || s.penalties == nil {
+		return nil, ErrDisputeNotFound
+	}
+	if _, ok := disputeDecisionText[decision]; !ok {
+		return nil, ErrDisputeDecision
+	}
+	note = strings.TrimSpace(note)
+	if utf8.RuneCountInString(note) > maxResolutionNoteRunes {
+		return nil, errors.New("комментарий арбитра слишком длинный")
+	}
+
+	found, err := s.disputes.FindByID(ctx, nil, disputeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrDisputeNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var order *repository.Order
+	err = s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		locked, lockErr := s.orderRepo.LockForUpdate(ctx, tx, found.OrderID)
+		if lockErr != nil {
+			return errors.New("order not found")
+		}
+		order = locked
+		if err := s.disputes.Close(ctx, tx, disputeID, repository.DisputeClosing{
+			Closure:  repository.DisputeClosureArbitration,
+			Decision: decision,
+			Note:     note,
+			ClosedBy: &arbiterID,
+		}); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				return ErrDisputeClosed
+			}
+			return err
+		}
+
+		reason := "Спор по заказу: " + disputeDecisionText[decision]
+		executorPoint := PenaltyAward{UserID: found.ExecutorID, Role: repository.RoleExecutor,
+			OrderID: &found.OrderID, DisputeID: &disputeID, AssignedBy: &arbiterID, Reason: reason}
+		customerPoint := PenaltyAward{UserID: found.CustomerID, Role: repository.RoleCustomer,
+			OrderID: &found.OrderID, DisputeID: &disputeID, AssignedBy: &arbiterID, Reason: reason}
+
+		var awards []PenaltyAward
+		switch decision {
+		case repository.DisputeDecisionExecutor:
+			if err := s.confirmTx(ctx, tx, found.OrderID); err != nil {
+				return err
+			}
+			awards = []PenaltyAward{customerPoint}
+		case repository.DisputeDecisionCustomer:
+			if err := s.cancelTx(ctx, tx, found.OrderID, repository.OrderStatusDisputed); err != nil {
+				return err
+			}
+			awards = []PenaltyAward{executorPoint}
+		case repository.DisputeDecisionUnknown:
+			if err := s.settleUnknownDisputeTx(ctx, tx, found.OrderID); err != nil {
+				return err
+			}
+			awards = []PenaltyAward{executorPoint, customerPoint}
+		}
+		if _, err := s.penalties.AwardTx(ctx, tx, awards...); err != nil {
+			return err
+		}
+		return s.publishOrderEvent(ctx, tx, repository.EventDisputeResolved, order, &arbiterID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	metrics.OrderEvent("dispute_resolved")
+
+	text := "⚖️ Спор разобран: " + disputeDecisionText[decision] + "."
+	if note != "" {
+		text += " Комментарий арбитра: «" + note + "»."
+	}
+	s.systemChatMessage(ctx, found.OrderID, arbiterID, text)
+
+	resolved, err := s.disputes.FindByID(ctx, nil, disputeID)
+	if err != nil {
+		return nil, err
+	}
+	return resolved, nil
+}
+
+// ListDisputes — очередь арбитража.
+func (s *OrderService) ListDisputes(ctx context.Context, status string, limit, offset int) ([]repository.AdminDispute, error) {
+	if s.disputes == nil {
+		return []repository.AdminDispute{}, nil
+	}
+	switch status {
+	case "", repository.DisputeStatusOpen, repository.DisputeStatusClosed:
+	default:
+		return nil, errors.New("invalid status filter")
+	}
+	return s.disputes.ListForAdmin(ctx, status, limit, offset)
 }
 
 // settleUnknownDisputeTx закрывает оспоренный заказ по решению «неизвестно»:
