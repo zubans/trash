@@ -1,6 +1,6 @@
 # План реализации: споры, штрафные баллы, фото-подтверждение
 
-Статус: **план принят, реализация не начата**. Разбивка на задачи —
+Статус: **план принят, идёт реализация**. Разбивка на задачи —
 [`tasks_disputes_penalties_photo_proof.md`](./tasks_disputes_penalties_photo_proof.md).
 
 Документ описывает новую механику: заказчик может оспорить выполнение заказа,
@@ -200,9 +200,11 @@
 | :--- | :--- |
 | `status_type` | + `SOFT_BANNED` |
 | `order_status_type` | + `DISPUTED` |
-| `order_disputes` | заказ, претензия, статус (`OPEN`/`CLOSED`), способ закрытия (`CUSTOMER_CONFIRMED`, `EXECUTOR_CONCEDED`, `ARBITRATION`), решение (`EXECUTOR`/`CUSTOMER`/`UNKNOWN`), кто и когда закрыл; не больше одного открытого спора на заказ |
+| `transaction_type` | + `DISPUTE_REWARD` — выплата исполнителю по решению «неизвестно» |
+| `order_disputes` | заказ, заказчик и исполнитель, претензия, статус (`OPEN`/`CLOSED`), способ закрытия `closure` (`CUSTOMER_CONFIRMED`, `EXECUTOR_CONCEDED`, `ARBITRATION`), решение (`EXECUTOR`/`CUSTOMER`/`UNKNOWN`, только при `ARBITRATION`), комментарий арбитра, кто и когда закрыл; не больше одного открытого спора на заказ |
 | `penalty_points` | журнал, источник правды: пользователь, роль, заказ, спор, кто назначил, `created_at`, `revoked_at`, `expired_at` |
-| `user_penalty_status` | готовое состояние для быстрых проверок (пользователь + роль): активные баллы, `photo_required_until`, `silent_block_started_at`, `silent_block_ends_at`; на уровне пользователя — `had_silent_block`, `soft_banned_at`, `soft_ban_reason`. Пересчитывается в той же транзакции, где меняется журнал |
+| `user_penalty_status` | готовое состояние роли для быстрых проверок (пользователь + роль): активные баллы, `photo_required_until`, `silent_block_started_at`, `silent_block_ends_at`. Пересчитывается в той же транзакции, где меняется журнал |
+| `user_penalty_flags` | факты уровня пользователя, переживающие баллы любой роли: `had_silent_block_at`, `soft_banned_at`, `soft_banned_by` (NULL — система при рецидиве), `soft_ban_reason` |
 | `watermark_symbols` | код, название, описание, картинка-подсказка, `fits_in_selfie`, порядок, мягкое удаление |
 | `order_photo_proofs` | заказ, вид (`AREA`/`SELFIE`), камера (`FRONT`/`REAR`), файл, sha256, EXIF-время и EXIF-координаты, время и координаты устройства, результат проверки защиты, `uploaded_at` |
 | `orders` | + `photo_required`, `watermark_symbol_id`, служебные данные защиты снимка, `executed_at_device` |
@@ -218,8 +220,8 @@
 
 | Файл | Что делает |
 | :--- | :--- |
-| `052_soft_banned_and_disputed_statuses.sql` | `SOFT_BANNED` и `DISPUTED` в перечисления. С маркером `-- +migrate no-transaction`: новое значение перечисления нельзя использовать в той же транзакции, где его добавили |
-| `053_disputes_and_penalties.sql` | `order_disputes`, `penalty_points`, `user_penalty_status`, счёт `DISPUTES`, настройки, права, ачивка `first_repentance` (включена) |
+| `052_soft_banned_and_disputed_statuses.sql` | `SOFT_BANNED`, `DISPUTED` и `DISPUTE_REWARD` в перечисления. С маркером `-- +migrate no-transaction`: новое значение перечисления нельзя использовать в той же транзакции, где его добавили |
+| `053_disputes_and_penalties.sql` | `order_disputes`, `penalty_points`, `user_penalty_status`, `user_penalty_flags`, счёт `DISPUTES`, настройки, права, ачивка `first_repentance` (включена) |
 | `054_photo_proof.sql` | `watermark_symbols` с начальным набором, `order_photo_proofs`, новые поля `orders` |
 
 ### Настройки (`system_settings`)

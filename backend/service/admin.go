@@ -837,6 +837,9 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 		"max_executed_unconfirmed_orders":         true,
 	}
 	for key, value := range settings {
+		if err := validatePenaltySetting(key, value); err != nil {
+			return err
+		}
 		if numericKeys[key] {
 			v, err := strconv.ParseFloat(value, 64)
 			if err != nil {
