@@ -322,6 +322,7 @@ func (m *mockAdminRepo) SetTopUpStatus(ctx context.Context, q repository.Querier
 // mockPenaltyRepo — мягкий бан поверх mockRepo: статус меняется в той же карте
 // пользователей, причина запоминается рядом.
 type mockPenaltyRepo struct {
+	repository.PenaltyRepository
 	users   *mockRepo
 	reasons map[uuid.UUID]string
 	by      map[uuid.UUID]*uuid.UUID
