@@ -35,6 +35,8 @@ var (
 	ErrDisputeNotAllowed = errors.New("оспорить можно только заказ, отмеченный исполнителем как выполненный")
 	// ErrDisputeAlreadyOpen — по заказу уже идёт спор.
 	ErrDisputeAlreadyOpen = errors.New("по заказу уже открыт спор")
+	// ErrDisputeNotOpen — по заказу нет открытого спора.
+	ErrDisputeNotOpen = errors.New("по заказу нет открытого спора")
 	// ErrOrderHasOpenDispute — заказ пытаются закрыть в обход его спора.
 	ErrOrderHasOpenDispute = errors.New("по заказу открыт спор")
 )
@@ -105,6 +107,52 @@ func (s *OrderService) OpenDispute(ctx context.Context, customerID, orderID uuid
 	s.systemChatMessage(ctx, orderID, customerID, "⚠️ Заказчик оспорил выполнение заказа: «"+claim+"». "+
 		"Спор передан на разбор. Заказчик может закрыть его, подтвердив выполнение, исполнитель — признав, что заказ не выполнен.")
 	return dispute, nil
+}
+
+// ConcedeDispute — исполнитель признаёт, что оспоренный заказ не выполнен.
+// Заказ отменяется с полным возвратом заказчику, штрафного балла нет: признание
+// избавляет обе стороны от арбитража, и платформа его поощряет, а не наказывает.
+func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID uuid.UUID) error {
+	if s.disputes == nil {
+		return ErrDisputeNotOpen
+	}
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.ExecutorID == nil || *order.ExecutorID != executorID {
+			return errors.New("forbidden")
+		}
+		if order.Status != repository.OrderStatusDisputed {
+			return ErrDisputeNotOpen
+		}
+		dispute, err := s.disputes.FindOpenByOrder(ctx, tx, orderID)
+		if err != nil {
+			return err
+		}
+		if dispute == nil {
+			return ErrDisputeNotOpen
+		}
+		if err := s.disputes.Close(ctx, tx, dispute.ID, repository.DisputeClosing{
+			Closure:  repository.DisputeClosureExecutorConceded,
+			ClosedBy: &executorID,
+		}); err != nil {
+			return err
+		}
+		if err := s.cancelTx(ctx, tx, orderID, repository.OrderStatusDisputed); err != nil {
+			return err
+		}
+		return s.publishOrderEvent(ctx, tx, repository.EventDisputeConceded, order, &executorID)
+	})
+	if err != nil {
+		return err
+	}
+	metrics.OrderEvent("conceded")
+
+	s.systemChatMessage(ctx, orderID, executorID, "Исполнитель признал, что заказ не выполнен. "+
+		"Заказ отменён, деньги возвращены заказчику. Спор закрыт.")
+	return nil
 }
 
 // closeOpenDisputeTx закрывает открытый спор заказа в транзакции вызывающего,

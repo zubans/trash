@@ -106,8 +106,9 @@ func (s *OrderService) publishOrderEvent(ctx context.Context, tx *sql.Tx, eventT
 // где их кто-то ждёт: по одному на каждый шаг каждого заказа — это таблица,
 // чьё единственное будущее пометка «обработано».
 var eventsForEveryOrder = map[string]bool{
-	repository.EventOrderConfirmed: true,
-	repository.EventOrderCanceled:  true,
+	repository.EventOrderConfirmed:  true,
+	repository.EventOrderCanceled:   true,
+	repository.EventDisputeConceded: true,
 }
 
 // NewOrderService создаёт OrderService.

@@ -184,3 +184,73 @@ func TestConfirmDisputedOrderIntegration(t *testing.T) {
 		t.Fatal("confirmed a completed order twice")
 	}
 }
+
+// Исполнитель признаёт вину: заказ отменён, заказчику вернулось всё
+// удержанное, спор закрыт признанием, событие для ачивки записано.
+func TestConcedeDisputeIntegration(t *testing.T) {
+	f := newDisputeFixture(t)
+	ctx := context.Background()
+	events := repository.NewEventRepository(f.db)
+	f.srv.WithBehaviors(nil, nil, events)
+
+	if err := f.srv.ConcedeDispute(ctx, f.executorID, f.order.ID); !errors.Is(err, ErrDisputeNotOpen) {
+		t.Fatalf("concede without a dispute: %v", err)
+	}
+	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
+	if err != nil {
+		t.Fatalf("open dispute: %v", err)
+	}
+	if err := f.srv.ConcedeDispute(ctx, uuid.New(), f.order.ID); err == nil {
+		t.Fatal("another executor conceded")
+	}
+
+	if err := f.srv.ConcedeDispute(ctx, f.executorID, f.order.ID); err != nil {
+		t.Fatalf("concede: %v", err)
+	}
+	if got := f.status(t); got != repository.OrderStatusCanceled {
+		t.Fatalf("order status %s, want CANCELED", got)
+	}
+
+	var customerBalance, executorBalance money.Amount
+	if err := f.db.QueryRow(`SELECT balance FROM users WHERE id = $1`, f.customerID).Scan(&customerBalance); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.QueryRow(`SELECT balance FROM users WHERE id = $1`, f.executorID).Scan(&executorBalance); err != nil {
+		t.Fatal(err)
+	}
+	if customerBalance != money.FromRubles(5000) || !executorBalance.IsZero() {
+		t.Fatalf("balances after concession: customer %s, executor %s", customerBalance, executorBalance)
+	}
+
+	var closure string
+	var closedBy uuid.NullUUID
+	if err := f.db.QueryRow(`SELECT closure, closed_by FROM order_disputes WHERE id = $1`, dispute.ID).Scan(&closure, &closedBy); err != nil {
+		t.Fatal(err)
+	}
+	if closure != repository.DisputeClosureExecutorConceded || closedBy.UUID != f.executorID {
+		t.Fatalf("dispute after concession: %s %v", closure, closedBy)
+	}
+
+	var conceded int
+	if err := f.db.QueryRow(`SELECT count(*) FROM domain_events WHERE type = $1 AND subject_id = $2 AND actor_id = $3`,
+		repository.EventDisputeConceded, f.order.ID, f.executorID).Scan(&conceded); err != nil {
+		t.Fatal(err)
+	}
+	if conceded != 1 {
+		t.Fatalf("dispute.conceded events: %d, want 1", conceded)
+	}
+	t.Cleanup(func() { _, _ = f.db.Exec(`DELETE FROM domain_events WHERE subject_id = $1`, f.order.ID) })
+
+	var points int
+	if err := f.db.QueryRow(`SELECT count(*) FROM penalty_points WHERE order_id = $1`, f.order.ID).Scan(&points); err != nil {
+		t.Fatal(err)
+	}
+	if points != 0 {
+		t.Fatalf("concession awarded %d penalty points", points)
+	}
+
+	// Второй раз признавать нечего.
+	if err := f.srv.ConcedeDispute(ctx, f.executorID, f.order.ID); !errors.Is(err, ErrDisputeNotOpen) {
+		t.Fatalf("second concession: %v", err)
+	}
+}

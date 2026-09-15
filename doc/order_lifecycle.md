@@ -135,5 +135,11 @@ stateDiagram-v2
   админки, считается в лимите неподтверждённых заказов исполнителя и в сверке
   живых удержаний.
 
-Признание исполнителем, решение арбитра и штрафные баллы — в
+Исполнитель признаёт, что заказ не выполнен:
+`POST /api/executor/orders/{id}/dispute/concede` (кнопку даёт `actions.concede`).
+Спор закрывается как `EXECUTOR_CONCEDED`, заказ отменяется с полным возвратом
+заказчику, штрафного балла нет. Публикуется событие `dispute.conceded` — по
+нему выдаётся ачивка «Первое покаяние».
+
+Решение арбитра и штрафные баллы — в
 [`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md).

@@ -473,6 +473,7 @@ func main() {
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
 			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
+			r.Post("/executor/orders/{id}/dispute/concede", oh.ConcedeDispute)
 			// Данные, которые исполнитель отправляет на проверку по скриптовой услуге, —
 			// проверка личности в заказе верификации.
 			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
