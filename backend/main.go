@@ -128,6 +128,9 @@ func main() {
 	// пользователя, и системный счёт.
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo).
 		WithIncidents(incidentRepo)
+	// Штрафные баллы: журнал и свёрнутое состояние ролей. Транзакции берёт у
+	// реестра — баллы по спору начисляются в одной транзакции с деньгами.
+	penaltyService := service.NewPenaltyService(penaltyRepo, settingsRepo, ledger)
 
 	// Скрипты поведений несут правила услуг, чьи условия не укладываются во флаги
 	// каталога (см. doc/service_behaviors.md). Первыми загружаются копии,
@@ -214,7 +217,8 @@ func main() {
 		WithExecutorGeo(executorGeoRepo).
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
 		WithAchievements(levels, executorStatsRepo).
-		WithDisputes(disputeRepo)
+		WithDisputes(disputeRepo).
+		WithPenalties(penaltyService)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors)
@@ -331,6 +335,7 @@ func main() {
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
+	dh := handler.NewDisputeHandler(orderService)
 	mh := handler.NewMailHandler(mailRepo, userRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
@@ -547,6 +552,8 @@ func main() {
 			r.With(can("orders.view")).Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
 			r.With(can("escalations.view")).Get("/admin/escalations", bhh.ListEscalations)
 			r.With(can("escalations.edit")).Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
+			r.With(can("disputes.view")).Get("/admin/disputes", dh.ListDisputes)
+			r.With(can("disputes.edit")).Post("/admin/disputes/{id}/resolve", dh.ResolveDispute)
 			r.With(can("service_catalog.view")).Get("/admin/service-behaviors", sch.AdminListBehaviors)
 			r.With(can("service_catalog.view")).Get("/admin/service-nodes", sch.AdminListNodes)
 			r.With(can("service_catalog.view")).Get("/admin/service-nodes/{id}", sch.AdminGetNode)

@@ -29,6 +29,8 @@ const (
 	// EventDisputeConceded — исполнитель признал, что оспоренный заказ не
 	// выполнен. По нему выдаётся ачивка «Первое покаяние».
 	EventDisputeConceded = "dispute.conceded"
+	// EventDisputeResolved — спор закрыт решением арбитра.
+	EventDisputeResolved = "dispute.resolved"
 )
 
 // Типы субъектов события. Субъект решает, кому событие доставят: событие заказа
