@@ -92,6 +92,7 @@ func actionsFor(viewer orderViewer, o *repository.Order, now time.Time) *reposit
 		// Скриптовые услуги закрываются сами, их не оспаривают (см. OpenDispute).
 		Dispute: isCustomer && o.Status == repository.OrderStatusExecuted && o.ExecutorID != nil &&
 			(o.ServiceVariant == nil || !o.ServiceVariant.HasBehavior()),
+		Concede: isExecutor && o.Status == repository.OrderStatusDisputed,
 	}
 }
 

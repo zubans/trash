@@ -84,6 +84,8 @@ type OrderActions struct {
 	Review bool `json:"review"`
 	// Dispute — заказчик может заявить, что заказ не выполнен.
 	Dispute bool `json:"dispute"`
+	// Concede — исполнитель может признать, что оспоренный заказ не выполнен.
+	Concede bool `json:"concede"`
 }
 
 // OrderRepository описывает операции хранения заказов.

@@ -230,6 +230,29 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ConcedeDispute обслуживает POST /executor/orders/{id}/dispute/concede:
+// исполнитель признаёт, что оспоренный заказ не выполнен.
+func (h *OrderHandler) ConcedeDispute(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.orderService.ConcedeDispute(r.Context(), user.ID, orderID); err != nil {
+		writeOrderError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // ExecuteOrder обслуживает POST /executor/orders/{id}/execute.
 func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)

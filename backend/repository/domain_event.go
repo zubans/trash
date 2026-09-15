@@ -26,6 +26,9 @@ const (
 	EventOrderSubmission = "order.submission"
 	// EventDisputeOpened — заказчик оспорил выполнение заказа.
 	EventDisputeOpened = "dispute.opened"
+	// EventDisputeConceded — исполнитель признал, что оспоренный заказ не
+	// выполнен. По нему выдаётся ачивка «Первое покаяние».
+	EventDisputeConceded = "dispute.conceded"
 )
 
 // Типы субъектов события. Субъект решает, кому событие доставят: событие заказа

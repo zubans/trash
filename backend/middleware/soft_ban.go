@@ -66,13 +66,14 @@ var softBanAllowedRoutes = map[string]struct{}{
 	"GET /orders/{id}/reviews/mine":      {},
 
 	// Исполнитель: взятые заказы до конца и закрытие смены.
-	"GET /executor/orders/assigned":         {},
-	"POST /executor/orders/{id}/execute":    {},
-	"POST /executor/orders/{id}/reject":     {},
-	"POST /executor/orders/{id}/submission": {},
-	"GET /executor/shifts/active":           {},
-	"POST /executor/shifts/end":             {},
-	"POST /executor/shifts/early-end":       {},
+	"GET /executor/orders/assigned":              {},
+	"POST /executor/orders/{id}/execute":         {},
+	"POST /executor/orders/{id}/reject":          {},
+	"POST /executor/orders/{id}/dispute/concede": {},
+	"POST /executor/orders/{id}/submission":      {},
+	"GET /executor/shifts/active":                {},
+	"POST /executor/shifts/end":                  {},
+	"POST /executor/shifts/early-end":            {},
 }
 
 // softBanAllows сообщает, открыт ли маршрут запроса пользователю в SOFT_BANNED.
