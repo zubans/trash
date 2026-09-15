@@ -737,6 +737,11 @@
         <img :src="previewImageUrl" class="img-preview-full" alt="Full Preview" />
       </div>
     </div>
+    <!-- Модальное окно с предложением верифицироваться -->
+    <VerificationPromptModal
+      v-model:show="showVerificationPrompt"
+      @sent="onVerificationRequestSent"
+    />
     <!-- Модальное окно поддержки -->
     <SupportChatModal v-model:show="showSupportChatModal" />
   </div>
@@ -770,6 +775,7 @@ import OrderDetailsModal from '../../components/order/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
+import VerificationPromptModal from './components/VerificationPromptModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
@@ -801,6 +807,7 @@ export default defineComponent({
     AppLogo,
     ExecutorMapModal,
     ExecutorProfileModal,
+    VerificationPromptModal,
     IdentityCheckModal,
     OrderDetailsModal,
     ReviewModal,
@@ -1137,6 +1144,43 @@ export default defineComponent({
       showSupportChatModal.value = true
     }
 
+    // Напоминание о верификации. Закрыть его можно, но отказ ненадолго: окно
+    // возвращается при каждом входе в приложение и дальше каждые 30 минут, пока
+    // администратор не подтвердит аккаунт. is_verified приходит с /auth/me, поэтому
+    // первый показ ждёт профиль, а не рисуется по значению «ещё не загружено».
+    const VERIFICATION_PROMPT_INTERVAL_MS = 30 * 60 * 1000
+    const showVerificationPrompt = ref(false)
+    let verificationPromptTimer: any = null
+
+    const maybeShowVerificationPrompt = () => {
+      if (!authStore.user || authStore.user.is_verified) return
+      if (showVerificationPrompt.value || showSupportChatModal.value) return
+      showVerificationPrompt.value = true
+    }
+
+    const stopVerificationPromptTimer = () => {
+      if (verificationPromptTimer) {
+        clearInterval(verificationPromptTimer)
+        verificationPromptTimer = null
+      }
+    }
+
+    // Заявка ушла в поддержку из окна напоминания: дальше диалог ведётся в чате,
+    // поэтому напоминание уступает ему место.
+    const onVerificationRequestSent = () => {
+      showVerificationPrompt.value = false
+      openSupportChat()
+    }
+
+    // Верификацию подтверждает администратор без участия этого экрана; узнаём о
+    // ней из очередного опроса /auth/me и больше не напоминаем.
+    watch(isVerified, (val) => {
+      if (val) {
+        showVerificationPrompt.value = false
+        stopVerificationPromptTimer()
+      }
+    })
+
     // Ачивку выдаёт фоновый диспетчер, а не действие на этом экране, поэтому о
     // ней узнают тем же опросом, что и об остальном изменившемся без спроса.
     const checkMail = async () => {
@@ -1174,7 +1218,8 @@ export default defineComponent({
       showReviewModal.value ||
       showWithdrawalModal.value ||
       showExecutorMapModal.value ||
-      showImagePreviewModal.value
+      showImagePreviewModal.value ||
+      showVerificationPrompt.value
     ))
 
     const currentUserId = computed(() => authStore.userID)
@@ -1830,6 +1875,11 @@ export default defineComponent({
         [startImagePreload],
       ])
 
+      // Профиль к этому моменту уже запрошен (ступень 2), поэтому решение о
+      // показе принимается по настоящему is_verified, а не по заглушке.
+      maybeShowVerificationPrompt()
+      verificationPromptTimer = setInterval(maybeShowVerificationPrompt, VERIFICATION_PROMPT_INTERVAL_MS)
+
       countdownIntervalId = setInterval(updateShiftCountdown, 1000)
       intervalId = setInterval(() => {
         shiftResource.refresh()
@@ -1853,6 +1903,7 @@ export default defineComponent({
       stopGeofenceReporting()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       closeInlineChat()
+      stopVerificationPromptTimer()
       if (intervalId) clearInterval(intervalId)
       if (countdownIntervalId) clearInterval(countdownIntervalId)
       if (successTimer) clearTimeout(successTimer)
@@ -1893,6 +1944,8 @@ export default defineComponent({
       currentLon,
       showExecutorMapModal,
       showSupportChatModal,
+      showVerificationPrompt,
+      onVerificationRequestSent,
       hasUnreadSupport,
       mailUnread,
       openSupportChat,
