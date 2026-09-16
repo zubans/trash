@@ -24,6 +24,8 @@ type SymbolRepository interface {
 	Restore(ctx context.Context, id uuid.UUID) error
 	// PickRandomLive выбирает случайный действующий жест — для нового заказа.
 	PickRandomLive(ctx context.Context, q Querier) (*Symbol, error)
+	// ByIDs дополняет into жестами с перечисленными id, включая удалённые.
+	ByIDs(ctx context.Context, ids []uuid.UUID, into map[uuid.UUID]Symbol) error
 }
 
 // Querier — то, чем модуль ходит в базу: пул или транзакция вызывающего.

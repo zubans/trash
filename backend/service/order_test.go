@@ -367,6 +367,16 @@ func (m *mockOrderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, 
 	return nearby, nil
 }
 
+func (m *mockOrderRepo) SetExecutedAtDevice(ctx context.Context, q repository.Querier, orderID uuid.UUID, at time.Time) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			o.ExecutedAtDevice = &at
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
 func (m *mockOrderRepo) MarkDisputed(ctx context.Context, q repository.Querier, orderID uuid.UUID) error {
 	for _, o := range m.orders {
 		if o.ID == orderID && o.Status == repository.OrderStatusExecuted {

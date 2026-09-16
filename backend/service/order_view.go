@@ -41,6 +41,7 @@ func executorViewer(id uuid.UUID) orderViewer {
 func (s *OrderService) presentOrders(ctx context.Context, viewer orderViewer, orders []*repository.Order) {
 	users := s.hydrateServiceVariants(ctx, orders)
 	presentFor(viewer, orders, users, time.Now())
+	s.attachPhotoProof(ctx, viewer, orders)
 }
 
 // presentFor собирает уже заполненные заказы под смотрящего. users — участники

@@ -267,6 +267,20 @@ func (s *PenaltyService) ResetSilentBlockFlag(ctx context.Context, userID, admin
 	return nil
 }
 
+// PhotoRequired сообщает, идёт ли у роли период фото-подтверждения. Заказ,
+// взятый в период исполнителя или заказчика, закрывается только с фото.
+func (s *PenaltyService) PhotoRequired(ctx context.Context, userID uuid.UUID, role string) bool {
+	if s == nil || s.repo == nil || userID == uuid.Nil || !validPenaltyRole(role) {
+		return false
+	}
+	st, err := s.repo.Status(ctx, nil, userID, role)
+	if err != nil {
+		log.Printf("[penalty] cannot read status of %s (%s): %v", userID, role, err)
+		return false
+	}
+	return st.PhotoRequiredUntil != nil && st.PhotoRequiredUntil.After(s.now())
+}
+
 // SweepResult — что сделал один проход обслуживания штрафов.
 type SweepResult struct {
 	// PointsBurnt — сколько баллов сгорело по сроку давности.

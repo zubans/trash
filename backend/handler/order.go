@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -267,7 +269,19 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.ExecuteOrder(r.Context(), orderID, user.ID); err != nil {
+	// Тело необязательно: старые клиенты шлют пустой запрос. Новый присылает
+	// время нажатия по часам телефона — отметка могла пролежать в офлайн-очереди.
+	var req struct {
+		ExecutedAtDevice *time.Time `json:"executed_at_device"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := h.orderService.ExecuteOrderAt(r.Context(), orderID, user.ID, req.ExecutedAtDevice); err != nil {
 		writeOrderError(w, err)
 		return
 	}
