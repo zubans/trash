@@ -95,6 +95,14 @@ type PenaltyRepository interface {
 	LiftSoftBan(ctx context.Context, q Querier, userID uuid.UUID) error
 	// GetFlags отдаёт флаги пользователя; для пользователя без строки — пустые.
 	GetFlags(ctx context.Context, q Querier, userID uuid.UUID) (*PenaltyFlags, error)
+	// MarkSilentBlockLifted ставит флаг «была тихая блокировка». Пока он стоит,
+	// любой новый балл — рецидив.
+	MarkSilentBlockLifted(ctx context.Context, q Querier, userID uuid.UUID, at time.Time) error
+	// ClearSilentBlockFlag снимает этот флаг — решение администратора.
+	ClearSilentBlockFlag(ctx context.Context, q Querier, userID uuid.UUID) error
+	// ExpirePoints гасит действующие баллы роли: они сгорели по сроку или
+	// вместе со снятой тихой блокировкой. Возвращает число погашенных.
+	ExpirePoints(ctx context.Context, q Querier, userID uuid.UUID, role string, at time.Time) (int, error)
 }
 
 type penaltyRepo struct {
@@ -311,4 +319,31 @@ func (r *penaltyRepo) ListStatuses(ctx context.Context, q Querier, userID uuid.U
 		statuses = append(statuses, *st)
 	}
 	return statuses, rows.Err()
+}
+
+func (r *penaltyRepo) MarkSilentBlockLifted(ctx context.Context, q Querier, userID uuid.UUID, at time.Time) error {
+	_, err := r.exec(q).ExecContext(ctx, `
+        INSERT INTO user_penalty_flags (user_id, had_silent_block_at, updated_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (user_id) DO UPDATE SET had_silent_block_at = EXCLUDED.had_silent_block_at, updated_at = now()
+    `, userID, at)
+	return err
+}
+
+func (r *penaltyRepo) ClearSilentBlockFlag(ctx context.Context, q Querier, userID uuid.UUID) error {
+	_, err := r.exec(q).ExecContext(ctx,
+		`UPDATE user_penalty_flags SET had_silent_block_at = NULL, updated_at = now() WHERE user_id = $1`, userID)
+	return err
+}
+
+func (r *penaltyRepo) ExpirePoints(ctx context.Context, q Querier, userID uuid.UUID, role string, at time.Time) (int, error) {
+	res, err := r.exec(q).ExecContext(ctx, `
+        UPDATE penalty_points SET expired_at = $3
+        WHERE user_id = $1 AND role = $2 AND revoked_at IS NULL AND expired_at IS NULL
+    `, userID, role, at)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	return int(affected), err
 }
