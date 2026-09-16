@@ -345,6 +345,8 @@ func main() {
 	ah := handler.NewAdminHandler(adminService)
 	rolh := handler.NewRoleHandler(roleService)
 	oh := handler.NewOrderHandler(orderService)
+	evh := handler.NewExecutorVerificationHandler(service.NewExecutorVerificationService(
+		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService))
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
@@ -506,6 +508,11 @@ func main() {
 			// проверка личности в заказе верификации.
 			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
+			// Заявка на собственную верификацию — заказ на услугу верификации,
+			// который берёт модератор.
+			r.Get("/executor/verification", evh.GetStatus)
+			r.Post("/executor/verification", evh.Request)
+			r.Post("/executor/verification/cancel", evh.Cancel)
 			// Геймификация: значки, уровень со ставкой комиссии и подарки.
 			r.Get("/executor/achievements", ach.GetAchievements)
 			r.Get("/executor/level", ach.GetLevel)

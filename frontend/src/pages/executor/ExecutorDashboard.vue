@@ -145,6 +145,15 @@
             <div class="profile-phone-row">
               <div class="profile-phone">{{ phone || '79997454656' }}</div>
               <div v-if="isVerified" class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
+              <button
+                v-else-if="verificationOrder"
+                type="button"
+                class="verification-pending-badge"
+                :title="$t('executor.verificationPendingBadge')"
+                @click.stop="showVerificationPrompt = true"
+              >
+                <i class="ph-fill ph-hourglass-medium"></i>
+              </button>
               <!-- Жёлтый конвертик появляется только тогда, когда письмо есть, и
                    ничего не перекрывает: он ждёт, пока на него нажмут. -->
               <button
@@ -802,7 +811,9 @@
     <!-- Модальное окно с предложением верифицироваться -->
     <VerificationPromptModal
       v-model:show="showVerificationPrompt"
-      @sent="onVerificationRequestSent"
+      :order="verificationOrder"
+      @created="verificationOrder = $event"
+      @cancelled="verificationOrder = null"
     />
     <!-- Модальное окно поддержки -->
     <SupportChatModal v-model:show="showSupportChatModal" />
@@ -1245,15 +1256,26 @@ export default defineComponent({
 
     // Напоминание о верификации. Закрыть его можно, но отказ ненадолго: окно
     // возвращается при каждом входе в приложение и дальше каждые 30 минут, пока
-    // администратор не подтвердит аккаунт. is_verified приходит с /auth/me, поэтому
+    // исполнитель не создаст заявку. is_verified приходит с /auth/me, поэтому
     // первый показ ждёт профиль, а не рисуется по значению «ещё не загружено».
     const VERIFICATION_PROMPT_INTERVAL_MS = 30 * 60 * 1000
     const showVerificationPrompt = ref(false)
+    // Открытый заказ на верификацию: пока он есть, напоминать не о чем — ждём
+    // модератора.
+    const verificationOrder = ref<any>(null)
     let verificationPromptTimer: any = null
 
-    const maybeShowVerificationPrompt = () => {
+    const maybeShowVerificationPrompt = async () => {
       if (!authStore.user || authStore.user.is_verified) return
       if (showVerificationPrompt.value || showSupportChatModal.value) return
+      try {
+        const res = await api.get('/executor/verification')
+        verificationOrder.value = res.data?.order || null
+        if (res.data?.is_verified) return
+      } catch {
+        /* без статуса напоминаем как раньше: лишний показ лучше пропущенного */
+      }
+      if (verificationOrder.value || showVerificationPrompt.value || showSupportChatModal.value) return
       showVerificationPrompt.value = true
     }
 
@@ -1264,18 +1286,12 @@ export default defineComponent({
       }
     }
 
-    // Заявка ушла в поддержку из окна напоминания: дальше диалог ведётся в чате,
-    // поэтому напоминание уступает ему место.
-    const onVerificationRequestSent = () => {
-      showVerificationPrompt.value = false
-      openSupportChat()
-    }
-
-    // Верификацию подтверждает администратор без участия этого экрана; узнаём о
+    // Верификацию подтверждает модератор без участия этого экрана; узнаём о
     // ней из очередного опроса /auth/me и больше не напоминаем.
     watch(isVerified, (val) => {
       if (val) {
         showVerificationPrompt.value = false
+        verificationOrder.value = null
         stopVerificationPromptTimer()
       }
     })
@@ -2135,7 +2151,7 @@ export default defineComponent({
       showExecutorMapModal,
       showSupportChatModal,
       showVerificationPrompt,
-      onVerificationRequestSent,
+      verificationOrder,
       hasUnreadSupport,
       mailUnread,
       openSupportChat,
@@ -2559,6 +2575,7 @@ export default defineComponent({
 }
 .profile-phone { font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); letter-spacing: -0.5px; line-height: 1; }
 .verified-badge { color: #10b981; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+.verification-pending-badge { color: #f59e0b; font-size: 20px; display: flex; align-items: center; justify-content: center; background: none; border: none; padding: 0; cursor: pointer; }
 
 .badge-brand {
   background: #eef2ff; color: #5c60f5;

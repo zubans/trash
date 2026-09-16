@@ -11,90 +11,233 @@
       </header>
 
       <div class="verification-body">
-        <h3 class="verification-title">{{ $t('executor.verificationPromptTitle') }}</h3>
-        <p class="verification-text">{{ $t('executor.verificationPromptText') }}</p>
+        <template v-if="step === 'intro'">
+          <h3 class="verification-title">{{ $t('executor.verificationPromptTitle') }}</h3>
+          <p class="verification-text">{{ $t('executor.verificationPromptText') }}</p>
+        </template>
+
+        <template v-else-if="step === 'form'">
+          <h3 class="verification-title">{{ $t('executor.verificationFormTitle') }}</h3>
+          <p class="verification-text">{{ $t('executor.verificationFormText') }}</p>
+          <div class="verification-form">
+            <label v-if="missing.includes('last_name')" class="verification-field">
+              <span>{{ $t('executor.verificationLastName') }}</span>
+              <input v-model="lastName" type="text" class="verification-input" name="last_name" />
+            </label>
+            <label v-if="missing.includes('first_name')" class="verification-field">
+              <span>{{ $t('executor.verificationFirstName') }}</span>
+              <input v-model="firstName" type="text" class="verification-input" name="first_name" />
+            </label>
+            <label v-if="missing.includes('patronymic')" class="verification-field">
+              <span>{{ $t('executor.verificationPatronymic') }}</span>
+              <input v-model="patronymic" type="text" class="verification-input" name="patronymic" />
+            </label>
+            <label v-if="missing.includes('birth_date')" class="verification-field">
+              <span>{{ $t('executor.verificationBirthDate') }}</span>
+              <input v-model="birthDate" type="date" :max="maxBirthDate" class="verification-input" name="birth_date" />
+            </label>
+            <AddressAutocomplete
+              v-if="missing.includes('address')"
+              v-model="address"
+              :label="$t('executor.verificationAddress')"
+              :hint="$t('executor.verificationAddressHint')"
+              :needs-flat="false"
+            />
+          </div>
+        </template>
+
+        <template v-else>
+          <h3 class="verification-title">{{ $t('executor.verificationPendingTitle') }}</h3>
+          <p class="verification-text">{{ $t('executor.verificationPendingText') }}</p>
+          <p v-if="orderAddress" class="verification-address">
+            <i class="ph ph-map-pin"></i> {{ orderAddress }}
+          </p>
+        </template>
+
         <p v-if="errorText" class="verification-error">{{ errorText }}</p>
       </div>
 
       <footer class="verification-footer">
-        <button type="button" class="verification-btn-secondary" @click="dismiss">
-          {{ $t('executor.verificationPromptLater') }}
-        </button>
-        <button
-          type="button"
-          class="verification-btn-primary"
-          :disabled="busy"
-          @click="requestVerification"
-        >
-          <i v-if="busy" class="ph ph-spinner spinner"></i>
-          <i v-else class="ph-bold ph-paper-plane-tilt"></i>
-          {{ busy ? $t('executor.verificationPromptSending') : $t('executor.verificationPromptSubmit') }}
-        </button>
+        <template v-if="step === 'pending'">
+          <button type="button" class="verification-btn-secondary" :disabled="busy" @click="cancelRequest">
+            {{ $t('executor.verificationCancel') }}
+          </button>
+          <button type="button" class="verification-btn-primary" @click="dismiss">
+            {{ $t('executor.verificationPendingOk') }}
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" class="verification-btn-secondary" @click="dismiss">
+            {{ $t('executor.verificationPromptLater') }}
+          </button>
+          <button
+            type="button"
+            class="verification-btn-primary"
+            :disabled="busy"
+            @click="requestVerification"
+          >
+            <i v-if="busy" class="ph ph-spinner spinner"></i>
+            <i v-else class="ph-bold ph-seal-check"></i>
+            {{ busy ? $t('executor.verificationPromptSending') : $t('executor.verificationPromptSubmit') }}
+          </button>
+        </template>
       </footer>
     </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, watch } from 'vue'
+import { defineComponent, ref, computed, watch, PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../../services/api'
+import AddressAutocomplete, { StructuredAddress } from '../../../components/AddressAutocomplete.vue'
+
+type Step = 'intro' | 'form' | 'pending'
+
+interface VerificationOrder {
+  id: string
+  address?: string
+}
 
 export default defineComponent({
   name: 'VerificationPromptModal',
+  components: { AddressAutocomplete },
   props: {
     show: {
       type: Boolean,
       required: true,
     },
+    // Уже размещённая заявка: окно открывается сразу на её состоянии.
+    order: {
+      type: Object as PropType<VerificationOrder | null>,
+      default: null,
+    },
   },
-  emits: ['update:show', 'close', 'sent'],
+  emits: ['update:show', 'close', 'created', 'cancelled'],
   setup(props, { emit }) {
     const { t } = useI18n()
     const busy = ref(false)
     const errorText = ref('')
+    const step = ref<Step>('intro')
+    const missing = ref<string[]>([])
+    const createdOrder = ref<VerificationOrder | null>(null)
+
+    const lastName = ref('')
+    const firstName = ref('')
+    const patronymic = ref('')
+    const birthDate = ref('')
+    const address = ref<StructuredAddress | null>(null)
+    const maxBirthDate = new Date().toISOString().slice(0, 10)
+
+    const orderAddress = computed(() => (createdOrder.value || props.order)?.address || '')
 
     const dismiss = () => {
       emit('update:show', false)
       emit('close')
     }
 
-    // Кнопка пишет заявку в поддержку за пользователя: чат открывается с уже
-    // отправленной просьбой, и ему остаётся только ждать ответа администратора.
-    // Отдельного endpoint для верификации нет — заявка уходит обычным сообщением
-    // в тот же чат, где администратор отвечает на остальные вопросы.
+    const apiError = (err: any, fallback: string) => {
+      const data = err?.response?.data
+      if (typeof data === 'string' && data) return data
+      if (data?.error) return data.error
+      return fallback
+    }
+
+    // Кнопка размещает заказ на услугу верификации — тот же, что заказчик берёт
+    // из каталога, его выполняет модератор. Если адрес и данные уже есть в
+    // профиле, заказ создаётся сразу; иначе сервер перечисляет, чего не
+    // хватает, и окно просит дозаполнить ровно это.
     const requestVerification = async () => {
       if (busy.value) return
       busy.value = true
       errorText.value = ''
       try {
-        const res = await api.get('/support/chat')
-        const chatId = res.data?.id
-        if (!chatId) throw new Error('no support chat')
-        await api.post(`/support/chats/${chatId}/messages`, {
-          text: t('executor.verificationPromptRequestText'),
-        })
-        emit('update:show', false)
-        emit('sent')
+        const payload: Record<string, any> = {}
+        if (step.value === 'form') {
+          if (missing.value.includes('last_name')) payload.last_name = lastName.value
+          if (missing.value.includes('first_name')) payload.first_name = firstName.value
+          if (missing.value.includes('patronymic')) payload.patronymic = patronymic.value
+          if (missing.value.includes('birth_date')) payload.birth_date = birthDate.value
+          if (missing.value.includes('address') && address.value) {
+            const a = address.value
+            payload.address = {
+              address: a.value,
+              region: a.region,
+              city: a.city,
+              street: a.street,
+              house: a.house,
+              flat: a.flat,
+              fias_id: a.fias_id,
+              source: a.source,
+              lat: a.lat,
+              lon: a.lon,
+            }
+          }
+        }
+        const res = await api.post('/executor/verification', payload)
+        createdOrder.value = res.data
+        step.value = 'pending'
+        emit('created', res.data)
       } catch (err: any) {
-        errorText.value =
-          typeof err?.response?.data === 'string' && err.response.data
-            ? err.response.data
-            : t('executor.verificationPromptError')
+        const fields = err?.response?.status === 422 ? err.response.data?.missing : null
+        if (Array.isArray(fields) && fields.length > 0) {
+          if (step.value === 'form') errorText.value = t('executor.verificationFormIncomplete')
+          missing.value = fields
+          step.value = 'form'
+        } else {
+          errorText.value = apiError(err, t('executor.verificationPromptError'))
+        }
       } finally {
         busy.value = false
       }
     }
 
-    // Прошлая ошибка не должна встречать пользователя при следующем показе.
+    const cancelRequest = async () => {
+      if (busy.value) return
+      busy.value = true
+      errorText.value = ''
+      try {
+        await api.post('/executor/verification/cancel')
+        createdOrder.value = null
+        step.value = 'intro'
+        emit('cancelled')
+        dismiss()
+      } catch (err: any) {
+        errorText.value = apiError(err, t('executor.verificationCancelError'))
+      } finally {
+        busy.value = false
+      }
+    }
+
+    // Каждый показ начинается с чистого листа: прошлая ошибка или форма не
+    // должны встречать пользователя снова.
     watch(
       () => props.show,
       (val) => {
-        if (val) errorText.value = ''
-      }
+        if (!val) return
+        errorText.value = ''
+        createdOrder.value = null
+        step.value = props.order ? 'pending' : 'intro'
+      },
+      { immediate: true }
     )
 
-    return { busy, errorText, dismiss, requestVerification }
+    return {
+      busy,
+      errorText,
+      step,
+      missing,
+      lastName,
+      firstName,
+      patronymic,
+      birthDate,
+      address,
+      maxBirthDate,
+      orderAddress,
+      dismiss,
+      requestVerification,
+      cancelRequest,
+    }
   },
 })
 </script>
@@ -118,7 +261,8 @@ export default defineComponent({
   border-radius: 20px;
   width: 100%;
   max-width: 420px;
-  overflow: hidden;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   box-shadow: 0 24px 48px -16px rgba(15, 23, 42, 0.35);
   animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -185,6 +329,40 @@ export default defineComponent({
   color: #b91c1c;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.verification-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.verification-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.verification-input {
+  height: 42px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0 12px;
+  font-size: 15px;
+  font-family: inherit;
+  color: #0f172a;
+}
+
+.verification-address {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  color: #0f172a;
+  font-size: 14px;
 }
 
 .verification-footer {
