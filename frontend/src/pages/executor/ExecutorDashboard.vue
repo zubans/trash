@@ -229,6 +229,27 @@
         </div>
       </div>
 
+      <!-- Доп. задание: фото-подтверждение каждого заказа -->
+      <div v-if="photoPeriodActive" class="proof-period-banner">
+        <i class="ph-fill ph-camera"></i>
+        <div>
+          <div class="proof-period-title">Доп. задание до {{ formatDate(photoPeriodUntil) }}</div>
+          <div class="proof-period-text">
+            Каждый заказ закрывается с фотографией места заказа и жестом рядом с объектом.
+            На время доп. задания приложение передаёт местоположение.
+          </div>
+        </div>
+      </div>
+
+      <!-- Сеть и неотправленное -->
+      <div v-if="!networkOnline || queuePending > 0" :class="['offline-strip', { offline: !networkOnline }]">
+        <i :class="['ph-bold', networkOnline ? 'ph-cloud-arrow-up' : 'ph-wifi-slash']"></i>
+        <span v-if="!networkOnline">Нет сети. Заказы и снимки сохраняются на телефоне.</span>
+        <span v-if="queuePending > 0">
+          Ждут отправки: {{ queuePending }}<template v-if="queuePendingPhotos > 0"> (снимков: {{ queuePendingPhotos }})</template>
+        </span>
+      </div>
+
       <!-- Назначенные заказы -->
       <div>
         <div class="section-header">
@@ -410,7 +431,9 @@
                     <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
                     <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
                   </div>
-                  <div class="item-subtitle">Ожидает подтверждения</div>
+                  <div class="item-subtitle">
+                    {{ queuedExecutions.has(order.id) && order.status === 'ASSIGNED' ? 'Отметка «Исполнил» ждёт отправки' : 'Ожидает подтверждения' }}
+                  </div>
                 </div>
               </div>
               <div class="item-actions" @click.stop>
@@ -513,6 +536,45 @@
                     <i :class="['ph-bold', editingMessageId ? 'ph-check' : 'ph-paper-plane-tilt']"></i>
                   </button>
                 </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Споры: заказчик оспорил выполнение -->
+      <div v-if="disputedOrders.length > 0">
+        <div class="section-header">
+          <h2 class="section-title dispute-title">Споры по заказам <span class="section-count">({{ disputedOrders.length }})</span></h2>
+        </div>
+        <div class="orders-stack">
+          <div v-for="order in disputedOrders" :key="order.id" class="order-row disputed-order">
+            <div class="order-summary list-item-compact">
+              <div class="item-left-group cursor-pointer" @click="openOrderDetails(order)">
+                <div class="item-icon"><i class="ph-fill ph-scales"></i></div>
+                <div class="item-text-stack">
+                  <div class="item-price-top">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
+                  <div class="item-title order-title-stack">
+                    <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
+                    <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
+                  </div>
+                  <div class="item-subtitle">
+                    <span class="dispute-badge">Спор</span>
+                    Заказчик заявил, что заказ не выполнен
+                  </div>
+                </div>
+              </div>
+              <div class="item-actions" @click.stop>
+                <button
+                  v-if="order.actions && order.actions.concede"
+                  type="button"
+                  class="btn-action danger"
+                  title="Признать, что заказ не выполнен"
+                  :disabled="concedingId === order.id"
+                  @click="concedeDispute(order)"
+                >
+                  <i class="ph-bold ph-hand-palm"></i>
+                </button>
               </div>
             </div>
           </div>
@@ -745,6 +807,12 @@
     <!-- Модальное окно поддержки -->
     <SupportChatModal v-model:show="showSupportChatModal" />
   </div>
+    <photo-proof-modal
+      v-if="proofOrder"
+      :order="proofOrder"
+      @close="proofOrder = null"
+      @done="onProofDone"
+    />
     <identity-check-modal
       v-if="identityOrder"
       :order-id="identityOrder.id"
@@ -771,6 +839,11 @@ import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import RoleSwitcher from '../../components/RoleSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
 import IdentityCheckModal from './components/IdentityCheckModal.vue'
+import PhotoProofModal from '../../modules/photo-proof/PhotoProofModal.vue'
+import { proofQueue } from '../../modules/photo-proof/queue'
+import { online as networkOnline } from '../../modules/photo-proof/network'
+import { saveOfflineOrders, loadOfflineOrders } from '../../modules/photo-proof/offlineOrders'
+import { toRfc3339 } from '../../modules/photo-proof/imageSync'
 import OrderDetailsModal from '../../components/order/OrderDetailsModal.vue'
 import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
@@ -809,6 +882,7 @@ export default defineComponent({
     ExecutorProfileModal,
     VerificationPromptModal,
     IdentityCheckModal,
+    PhotoProofModal,
     OrderDetailsModal,
     ReviewModal,
     SupportChatModal,
@@ -911,11 +985,22 @@ export default defineComponent({
       key: 'executor:orders:assigned',
       initial: [],
       acceptCached: acceptPresentedOrders,
-      fetcher: async () => (await api.get('/executor/orders/assigned')).data || [],
+      fetcher: async () => {
+        try {
+          return (await api.get('/executor/orders/assigned')).data || []
+        } catch (err: any) {
+          // Нет ответа сервера — показываем заказы, сохранённые на телефоне:
+          // без них в офлайне было бы нечего снимать и нечего отмечать.
+          const snapshot = !err?.response ? loadOfflineOrders() : null
+          if (snapshot) return snapshot.orders
+          throw err
+        }
+      },
       // Картинки живут ровно столько, сколько открыт заказ. Список назначенных —
       // единственное место, где видно, что заказ закрылся, поэтому освобождение
       // висит здесь, а не на отдельном таймере.
-      onData: (orders) => {
+      onData: (orders, source) => {
+        if (source === 'network') saveOfflineOrders(orders)
         if (imagePreloadDeferred) releaseClosedOrderImages(orders)
         else void preloadOrderImages(orders)
       },
@@ -971,13 +1056,27 @@ export default defineComponent({
     const executorReviewsMap = ref<Record<string, OrderReview>>({})
     const isHistoryCollapsed = ref(true)
 
+    // Очередь того, что сделано без сети. Отметка «Исполнил», ждущая отправки,
+    // переносит заказ в «на проверке» сразу: исполнитель своё уже сделал.
+    const queue = proofQueue()
+    const queuePending = queue.pending
+    const queuePendingPhotos = queue.pendingPhotos
+    const queuedExecutions = computed(() => {
+      void queuePending.value
+      return queue.pendingExecutions()
+    })
+
     const activeAssignedOrders = computed(() =>
-      assignedOrders.value.filter((o) => o.status === 'ASSIGNED')
+      assignedOrders.value.filter((o) => o.status === 'ASSIGNED' && !queuedExecutions.value.has(o.id))
     )
 
     const pendingVerificationOrders = computed(() =>
-      assignedOrders.value.filter((o) => o.status === 'EXECUTED')
+      assignedOrders.value.filter(
+        (o) => o.status === 'EXECUTED' || (o.status === 'ASSIGNED' && queuedExecutions.value.has(o.id)),
+      )
     )
+
+    const disputedOrders = computed(() => assignedOrders.value.filter((o) => o.status === 'DISPUTED'))
 
     // Состояние местоположения
     const currentLat = ref(55.7558)
@@ -1381,16 +1480,82 @@ export default defineComponent({
       await fetchAssignedOrders()
     }
 
+    // Фото-подтверждение: заказ, взятый в период доп. задания, закрывается
+    // только через форму снимка.
+    const proofOrder = ref<any | null>(null)
+
+    // Отметка «Исполнил» идёт через очередь: без сети она сохраняется на
+    // телефоне и уходит сама, когда сеть появится.
     const markOrderAsExecuted = async (orderId: string) => {
+      const order = assignedOrders.value.find((o) => o.id === orderId)
+      if (order?.photo_proof?.required) {
+        proofOrder.value = order
+        return
+      }
+      const now = new Date()
+      now.setMilliseconds(0)
+      queue.enqueueExecute(orderId, toRfc3339(now))
+      if (networkOnline.value) await queue.flush()
+      if (queue.pendingExecutions().has(orderId)) {
+        successMsg.value = 'Отметка сохранена на телефоне и отправится, когда появится сеть.'
+        return
+      }
+      if (queue.failures.value.some((f) => f.action.kind === 'execute' && f.action.orderId === orderId)) return
+      successMsg.value = 'Статус заказа изменен на "Исполнил"! Заказчику отправлено уведомление.'
+      await fetchAssignedOrders()
+      if (selectedChatOrder.value && selectedChatOrder.value.id === orderId) {
+        fetchChatMessages(orderId)
+      }
+    }
+
+    const onProofDone = async (result: { sent: boolean }) => {
+      proofOrder.value = null
+      successMsg.value = result.sent
+        ? 'Снимки отправлены, заказ отмечен исполненным. Заказчику отправлено уведомление.'
+        : 'Снимки и отметка сохранены на телефоне и отправятся, когда появится сеть.'
+      if (result.sent) await fetchAssignedOrders()
+    }
+
+    // Отказ сервера на отправленное из очереди — показываем исполнителю.
+    watch(
+      () => queue.failures.value.length,
+      () => {
+        const last = queue.failures.value[queue.failures.value.length - 1]
+        if (last) errorMsg.value = last.message
+      },
+    )
+
+    // Спор: исполнитель признаёт, что заказ не выполнен.
+    const concedingId = ref<string | null>(null)
+    const concedeDispute = async (order: any) => {
+      const confirmed = window.confirm(
+        'Подтвердите, что заказ не выполнен. Заказ будет отменён, деньги вернутся заказчику, штрафной балл не начисляется.',
+      )
+      if (!confirmed) return
+      concedingId.value = order.id
       try {
-        await api.post(`/executor/orders/${orderId}/execute`)
-        successMsg.value = 'Статус заказа изменен на "Исполнил"! Заказчику отправлено уведомление.'
+        await api.post(`/executor/orders/${order.id}/dispute/concede`)
+        successMsg.value = 'Спор закрыт: заказ отменён, штрафной балл не начислен.'
         await fetchAssignedOrders()
-        if (selectedChatOrder.value && selectedChatOrder.value.id === orderId) {
-          fetchChatMessages(orderId)
-        }
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка изменения статуса заказа'
+        errorMsg.value = err.response?.data || 'Не удалось закрыть спор'
+      } finally {
+        concedingId.value = null
+      }
+    }
+
+    // Период доп. задания исполнителя (/me/penalty-status).
+    const photoPeriodUntil = ref('')
+    const photoPeriodActive = computed(
+      () => !!photoPeriodUntil.value && new Date(photoPeriodUntil.value).getTime() > Date.now(),
+    )
+    const fetchPenaltyStatus = async () => {
+      try {
+        const res = await api.get('/me/penalty-status')
+        photoPeriodUntil.value = res.data?.photo_required_until?.EXECUTOR || ''
+      } catch (err) {
+        // Без сети остаётся прежнее значение.
+        console.warn('[penalty] failed to read status', err)
       }
     }
 
@@ -1409,27 +1574,41 @@ export default defineComponent({
     let geofenceTimer: any = null
 
     const reportShiftLocation = async () => {
-      if (!geofenceTrackingEnabled.value) return
-      if (!activeShift.value || activeShift.value.status !== 'ACTIVE') return
+      const shiftTracking = geofenceTrackingEnabled.value && activeShift.value?.status === 'ACTIVE'
+      // В периоде доп. задания трек пишется всегда: без него проверять снимки
+      // нечем именно у тех, ради кого проверка заведена.
+      const periodTracking = photoPeriodActive.value
+      if (!shiftTracking && !periodTracking) return
 
       await updateCurrentPosition()
       if (currentLat.value === null || currentLon.value === null) return
 
-      try {
-        await api.post('/executor/shifts/location', {
-          latitude: currentLat.value,
-          longitude: currentLon.value,
-        })
-      } catch (err) {
-        // Пропущенная точка не стоит того, чтобы прерывать смену; следующий тик
-        // попробует снова.
-        console.warn('[geofence] failed to report location', err)
+      if (shiftTracking && networkOnline.value) {
+        try {
+          await api.post('/executor/shifts/location', {
+            latitude: currentLat.value,
+            longitude: currentLon.value,
+          })
+          // Этот отчёт сервер пишет и в трек.
+          return
+        } catch (err: any) {
+          // Пропущенная точка не стоит того, чтобы прерывать смену; следующий тик
+          // попробует снова. Без ответа сервера точка уходит в очередь трека.
+          console.warn('[geofence] failed to report location', err)
+          if (err?.response) return
+        }
+      }
+      if (periodTracking) {
+        const now = new Date()
+        now.setMilliseconds(0)
+        queue.enqueuePositions([{ lat: currentLat.value, lon: currentLon.value, device_at: toRfc3339(now) }])
+        if (networkOnline.value) void queue.flush()
       }
     }
 
     const startGeofenceReporting = () => {
       stopGeofenceReporting()
-      if (!geofenceTrackingEnabled.value) return
+      if (!geofenceTrackingEnabled.value && !photoPeriodActive.value) return
       geofenceTimer = setInterval(reportShiftLocation, geofenceIntervalSec.value * 1000)
     }
 
@@ -1439,6 +1618,9 @@ export default defineComponent({
         geofenceTimer = null
       }
     }
+
+    // Период начался или кончился — отчёты перезапускаются под новое правило.
+    watch(photoPeriodActive, () => startGeofenceReporting())
 
     // Читает позицию устройства. `announce` решает, показывать ли сбой
     // пользователю: периодический отчёт в смене должен молчать, а позиция, о
@@ -1857,7 +2039,7 @@ export default defineComponent({
         [shiftResource.refresh, assignedResource.refresh, fetchServiceVariants],
         // 2. Профиль и настройки: они приносят сохранённую позицию и решают,
         //    отправлять ли отчёты о местоположении.
-        [fetchProfile, loadGeofenceSettings],
+        [fetchProfile, loadGeofenceSettings, fetchPenaltyStatus],
         // 3. Заказы поблизости — считаются от позиции из профиля, поэтому
         //    раньше ступени 2 их запрашивать нечем. Здесь же включаются отчёты
         //    о местоположении: решает их настройка, прочитанная на ступени 2.
@@ -1888,6 +2070,7 @@ export default defineComponent({
         fetchUnreadSummary()
         checkSupportNotification()
         checkMail()
+        fetchPenaltyStatus()
         // Баланс двигается без всякого действия с этого экрана: заказ, который
         // подтвердил заказчик, штраф, одобренный вывод. Опрашиваем его вместе с
         // остальным, а не оставляем на экране число с момента открытия.
@@ -1997,6 +2180,17 @@ export default defineComponent({
       availableRefreshing,
       historyRefreshing,
       markOrderAsExecuted,
+      proofOrder,
+      onProofDone,
+      disputedOrders,
+      concedingId,
+      concedeDispute,
+      photoPeriodUntil,
+      photoPeriodActive,
+      networkOnline,
+      queuePending,
+      queuePendingPhotos,
+      queuedExecutions,
       identityOrder,
       openIdentityCheck,
       onIdentityChecked,
@@ -3398,6 +3592,54 @@ export default defineComponent({
 }
 .btn-action.primary { background: #e0e7ff; color: #5c60f5; }
 .btn-action.success { background: #ecfdf5; color: #10b981; }
+.btn-action.danger { background: #fef2f2; color: #dc2626; }
+.btn-action:disabled { opacity: 0.5; }
+
+.proof-period-banner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+.proof-period-banner > i { font-size: 24px; }
+.proof-period-title { font-weight: 700; font-size: 14px; }
+.proof-period-text { font-size: 13px; line-height: 1.4; color: #4338ca; }
+
+.offline-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  background: #f0fdf4;
+  color: #166534;
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.offline-strip.offline { background: #fffbeb; color: #92400e; }
+
+.dispute-title { color: #dc2626; }
+.disputed-order .order-summary {
+  border: 1px solid #fecaca;
+  background: #fff7f7;
+}
+.disputed-order .item-icon { background: #fee2e2; color: #dc2626; }
+.dispute-badge {
+  display: inline-block;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
+}
 
 /* Модификаторы для отзыва и истории */
 .list-item-compact.review { border-left: 4px solid #f59e0b; }
