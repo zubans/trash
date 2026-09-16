@@ -52,6 +52,8 @@ type OrderService struct {
 	penalties *PenaltyService
 	// disputeNotifier сообщает сторонам об открытии и закрытии спора.
 	disputeNotifier *DisputeNotifier
+	// photoProof — модуль фото-подтверждения. Без него заказы фото не требуют.
+	photoProof PhotoProofGate
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
@@ -600,6 +602,9 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 		if err := s.orderRepo.Assign(ctx, tx, orderID, executorID); err != nil {
 			return err
 		}
+		if err := s.requirePhotoProofTx(ctx, tx, order, executorID); err != nil {
+			return err
+		}
 		return s.publishOrderEvent(ctx, tx, repository.EventOrderAccepted, order, &executorID)
 	}); err != nil {
 		// Смену открыли только ради этого заказа, а заказа не будет — например,
@@ -757,6 +762,16 @@ func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executo
 
 // ExecuteOrder помечает заказ как EXECUTED исполнителем и шлёт системное сообщение в чат.
 func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uuid.UUID) error {
+	return s.ExecuteOrderAt(ctx, orderID, executorID, nil)
+}
+
+// ExecuteOrderAt — отметка «Исполнил» с временем устройства. Оно приходит,
+// когда отметка пролежала в офлайн-очереди, и хранится рядом со временем
+// сервера: арбитраж показывает оба.
+//
+// Заказ, требующий фото-подтверждения, без загруженного снимка места заказа
+// исполненным не становится — ErrPhotoProofRequired.
+func (s *OrderService) ExecuteOrderAt(ctx context.Context, orderID, executorID uuid.UUID, deviceAt *time.Time) error {
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return errors.New("order not found")
@@ -768,8 +783,22 @@ func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uui
 	// Отметка о выполненной работе — это то, что верифицирует заказчика в услуге
 	// верификации, поэтому событие обязано быть таким же надёжным, как смена статуса.
 	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if order.PhotoRequired && s.photoProof != nil {
+			has, err := s.photoProof.HasRequiredPhotoTx(ctx, tx, orderID)
+			if err != nil {
+				return err
+			}
+			if !has {
+				return ErrPhotoProofRequired
+			}
+		}
 		if err := s.orderRepo.Execute(ctx, tx, orderID); err != nil {
 			return err
+		}
+		if deviceAt != nil && !deviceAt.IsZero() {
+			if err := s.orderRepo.SetExecutedAtDevice(ctx, tx, orderID, *deviceAt); err != nil {
+				return err
+			}
 		}
 		return s.publishOrderEvent(ctx, tx, repository.EventOrderExecuted, order, &executorID)
 	}); err != nil {

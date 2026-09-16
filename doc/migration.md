@@ -49,6 +49,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `053_disputes_and_penalties.sql` | `order_disputes` (one open dispute per order), the `penalty_points` journal, folded state `user_penalty_status` (per role) and `user_penalty_flags` (per user), the `DISPUTES` account, penalty and photo proof settings, `disputes.*`/`penalties.edit` for `MODERATOR`, the `first_repentance` achievement switched on. |
 | `054_photo_proof.sql` | Photo proof: `watermark_symbols` (gestures, six seeded, soft deletion, a stable `number` per gesture), `order_photo_proofs` (one photo per kind per order, idempotent by `client_key`, EXIF and device time and coordinates, check results), and on `orders` — `photo_required`, `watermark_symbol_id`, `proof_key`, `executed_at_device`. |
 | `055_executor_positions.sql` | The executor track `executor_positions` (appended, never updated: coordinates, the device clock and the server clock, source `LIVE`/`PHOTO`, an idempotency key for offline batches), plus `photo_proof_max_track_gap_min` and `executor_track_days`. |
+| `056_order_executed_at.sql` | `orders.executed_at`: when the executor marked the order executed, by the server clock (the device time is `executed_at_device` from 054). Older executed orders keep NULL. |
 
 ## How to run manually
 

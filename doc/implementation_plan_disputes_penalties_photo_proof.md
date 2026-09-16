@@ -241,7 +241,7 @@
 | `watermark_symbols` | код, постоянный номер жеста (не переиспользуется), название, описание, картинка-подсказка, `fits_in_selfie`, порядок, мягкое удаление |
 | `executor_positions` | трек исполнителя: координаты, время сервера и устройства, источник (`LIVE`/`PHOTO`), заказ; дописывается, чистится по сроку |
 | `order_photo_proofs` | заказ, исполнитель, вид (`AREA`/`SELFIE`, по одному снимку каждого вида), камера (`FRONT`/`REAR`), жест заказа, ключ идемпотентности с устройства, файл, sha256, размер, EXIF-время и EXIF-координаты, время и координаты устройства, результаты проверки снимка, `uploaded_at` |
-| `orders` | + `photo_required`, `watermark_symbol_id`, `proof_key` (служебные данные проверки снимка), `executed_at_device`; ограничение: требование фото всегда вместе с жестом и ключом |
+| `orders` | + `photo_required`, `watermark_symbol_id`, `proof_key` (служебные данные проверки снимка), `executed_at_device`, `executed_at`; ограничение: требование фото всегда вместе с жестом и ключом |
 | `system_accounts` | + `DISPUTES` |
 
 Почему журнал, а не счётчик в профиле: видно, за что дан каждый балл; ошибочный
@@ -258,6 +258,7 @@
 | `053_disputes_and_penalties.sql` | `order_disputes`, `penalty_points`, `user_penalty_status`, `user_penalty_flags`, счёт `DISPUTES`, настройки, права, ачивка `first_repentance` (включена) |
 | `054_photo_proof.sql` | `watermark_symbols` с начальным набором, `order_photo_proofs`, новые поля `orders` |
 | `055_executor_positions.sql` | Трек исполнителя `executor_positions`, настройки трека |
+| `056_order_executed_at.sql` | `orders.executed_at` — время отметки «Исполнил» по часам сервера |
 
 ### Настройки (`system_settings`)
 
