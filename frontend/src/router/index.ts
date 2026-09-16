@@ -132,6 +132,12 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'escalations.view', bare: true },
       },
       {
+        path: 'disputes',
+        name: 'admin-disputes',
+        component: () => import('../pages/admin/Disputes.vue'),
+        meta: { permission: 'disputes.view', bare: true },
+      },
+      {
         path: 'achievements',
         name: 'admin-achievements',
         component: () => import('../pages/admin/Achievements.vue'),
@@ -278,6 +284,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/achievements', permission: 'achievements.view' },
   { path: '/admin/gifts', permission: 'gifts.view' },
   { path: '/admin/escalations', permission: 'escalations.view' },
+  { path: '/admin/disputes', permission: 'disputes.view' },
   { path: '/admin/settings', permission: 'settings.view' },
 ]
 
