@@ -303,3 +303,95 @@ func userStatusOf(t *testing.T, f *disputeFixture, userID uuid.UUID) string {
 	}
 	return status
 }
+
+// Проход обслуживания: баллы без новых начислений сгорают вместе с периодом
+// фото, а тихая блокировка снимается по сроку — даже если человеку больше
+// ничего не начисляли.
+func TestPenaltySweepIntegration(t *testing.T) {
+	f := newDisputeFixture(t)
+	f.cleanupPenalties(t)
+	penalties := newIntegrationPenaltyService(f.db, f.srv)
+	penalties.settings = settingsOverride{f.srv.settingsRepo, map[string]string{
+		SettingPenaltyPointsThreshold: "2",
+		SettingPhotoRequirementMonths: "3",
+		SettingPenaltyPointsTTLMonths: "3",
+		SettingSilentBlockMonths:      "6",
+	}}
+	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	penalties.now = func() time.Time { return clock }
+	ctx := context.Background()
+	adminID := seedExecutor(t, f.db)
+
+	// Баллы пишутся временем базы, а тест живёт по своим часам, поэтому
+	// начисленному проставляется то же время, которое видит сервис.
+	backdate := func(userID uuid.UUID) {
+		t.Helper()
+		if _, err := f.db.Exec(`UPDATE penalty_points SET created_at = $1
+			WHERE user_id = $2 AND revoked_at IS NULL AND expired_at IS NULL`, clock, userID); err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+	}
+
+	// Заказчику — два балла: порог, период фото, блокировки нет.
+	for i := 0; i < 2; i++ {
+		if _, err := awardTx(t, f, penalties, PenaltyAward{UserID: f.customerID, Role: repository.RoleCustomer, AssignedBy: &adminID}); err != nil {
+			t.Fatalf("award: %v", err)
+		}
+	}
+	backdate(f.customerID)
+	// Исполнителю — четыре: тихая блокировка.
+	for i := 0; i < 4; i++ {
+		if _, err := awardTx(t, f, penalties, PenaltyAward{UserID: f.executorID, Role: repository.RoleExecutor, AssignedBy: &adminID}); err != nil {
+			t.Fatalf("award: %v", err)
+		}
+	}
+
+	backdate(f.executorID)
+
+	// Ничего ещё не просрочено.
+	if got, err := penalties.Sweep(ctx); err != nil || got.PointsBurnt != 0 || got.BlocksLifted != 0 {
+		t.Fatalf("early sweep: %+v %v", got, err)
+	}
+
+	// Через три месяца без новых баллов заказчик очищается.
+	clock = clock.AddDate(0, 3, 1)
+	got, err := penalties.Sweep(ctx)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got.PointsBurnt != 6 || got.BlocksLifted != 0 {
+		t.Fatalf("sweep at three months: %+v", got)
+	}
+	if st := penaltyStatus(t, f.db, f.customerID, repository.RoleCustomer); st.ActivePoints != 0 || st.PhotoRequiredUntil != nil {
+		t.Fatalf("customer status after burning: %+v", st)
+	}
+	// У исполнителя баллы тоже сгорели, но блокировка держится своим сроком.
+	st := penaltyStatus(t, f.db, f.executorID, repository.RoleExecutor)
+	if st.ActivePoints != 0 || st.SilentBlockEndsAt == nil {
+		t.Fatalf("executor status after burning: %+v", st)
+	}
+
+	// Ещё три месяца — срок блокировки вышел.
+	clock = clock.AddDate(0, 3, 0)
+	got, err = penalties.Sweep(ctx)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if got.BlocksLifted != 1 {
+		t.Fatalf("sweep at the end of the block: %+v", got)
+	}
+	if st := penaltyStatus(t, f.db, f.executorID, repository.RoleExecutor); st.SilentBlockEndsAt != nil {
+		t.Fatalf("silent block still set: %+v", st)
+	}
+	flags, err := repository.NewPenaltyRepository(f.db).GetFlags(ctx, nil, f.executorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags.HadSilentBlockAt == nil {
+		t.Fatal("the relapse flag was not set by the sweep")
+	}
+	// Повторный проход ничего не делает.
+	if got, err := penalties.Sweep(ctx); err != nil || got.PointsBurnt != 0 || got.BlocksLifted != 0 {
+		t.Fatalf("repeated sweep: %+v %v", got, err)
+	}
+}

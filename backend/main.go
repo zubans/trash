@@ -303,6 +303,12 @@ func main() {
 	// этого в течение минуты — как и скрипты особых услуг.
 	achievementWorker.StartScriptSync(1 * time.Minute)
 
+	// Сроки штрафов — время, а не событие: баллы сгорают, а тихие блокировки
+	// снимаются сами, даже если человеку больше ничего не начисляют.
+	penaltyWorker := worker.NewPenaltyWorker(penaltyService).
+		WithLeader(leader, "penalty_sweep")
+	penaltyWorker.Start(1 * time.Hour)
+
 	// Ночная проверка книг. Она только сообщает и никогда не чинит: баланс,
 	// разошедшийся со своим реестром, — это баг, который надо видеть, а не число, которое надо переписать.
 	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
