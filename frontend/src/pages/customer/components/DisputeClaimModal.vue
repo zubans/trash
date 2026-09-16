@@ -120,6 +120,7 @@ export default defineComponent({
   padding: 4px 20px 8px;
 }
 .claim-input {
+  box-sizing: border-box;
   width: 100%;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
