@@ -138,6 +138,12 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'disputes.view', bare: true },
       },
       {
+        path: 'watermark-symbols',
+        name: 'admin-watermark-symbols',
+        component: () => import('../pages/admin/WatermarkSymbols.vue'),
+        meta: { permission: 'watermarks.view', bare: true },
+      },
+      {
         path: 'achievements',
         name: 'admin-achievements',
         component: () => import('../pages/admin/Achievements.vue'),
@@ -285,6 +291,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/gifts', permission: 'gifts.view' },
   { path: '/admin/escalations', permission: 'escalations.view' },
   { path: '/admin/disputes', permission: 'disputes.view' },
+  { path: '/admin/watermark-symbols', permission: 'watermarks.view' },
   { path: '/admin/settings', permission: 'settings.view' },
 ]
 
