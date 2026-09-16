@@ -88,7 +88,8 @@ func main() {
 	)
 	// Фото-подтверждение — отдельный модуль со своей схемой и своими правилами.
 	photoProofService := photoproof.NewService(photoproof.NewSymbolRepository(db)).
-		WithTrack(photoproof.NewTrackRepository(db), settingsRepo)
+		WithTrack(photoproof.NewTrackRepository(db), settingsRepo).
+		WithProofs(db, photoproof.DiskStorage{Root: getEnv("UPLOADS_DIR", "uploads")}, nil)
 	tokenRepo := repository.NewTokenRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
