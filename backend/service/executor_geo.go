@@ -13,6 +13,8 @@ import (
 )
 
 type ExecutorGeoService struct {
+	// penalties — тихая блокировка ролей; nil означает «механизм штрафов не подключён».
+	penalties *PenaltyService
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
 	// Необязательно. Когда подключено, карта применяет тот же предикат видимости,
@@ -377,7 +379,7 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		// заказы только для модераторов → модераторам; обычные заказы → сегментация
 		// по верификации заказчика плюс стандартные проверки исполнителя.
 		if s.userRepo != nil {
-			if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
+			if canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
 				continue
 			}
 		}
@@ -446,4 +448,11 @@ func (s *ExecutorGeoService) eligibilityInputs(ctx context.Context, orders []*re
 
 func (s *ExecutorGeoService) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {
 	return s.geoRepo.GetGeoAlerts(ctx, status, limit, offset)
+}
+
+// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
+// видит заказов и не может их брать.
+func (s *ExecutorGeoService) WithPenalties(penalties *PenaltyService) *ExecutorGeoService {
+	s.penalties = penalties
+	return s
 }

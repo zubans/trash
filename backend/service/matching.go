@@ -19,6 +19,8 @@ const defaultAutoMatchRadiusKM = 10.0
 
 // MatchingService сопоставляет заказы в поиске с активными исполнителями.
 type MatchingService struct {
+	// penalties — тихая блокировка ролей; nil означает «механизм штрафов не подключён».
+	penalties    *PenaltyService
 	orderRepo    repository.OrderRepository
 	shiftRepo    repository.ShiftRepository
 	userRepo     repository.UserRepository
@@ -232,7 +234,7 @@ func (s *MatchingService) executorEligible(ctx context.Context, round *matchingR
 	if !ok {
 		return false
 	}
-	return canViewOrTakeOrder(ctx, s.behaviors, executor, round.users[order.CustomerID], variant) == nil
+	return canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, round.users[order.CustomerID], variant) == nil
 }
 
 // MatchOrders выполняет цикл подбора.
@@ -318,4 +320,11 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
+// видит заказов и не может их брать.
+func (s *MatchingService) WithPenalties(penalties *PenaltyService) *MatchingService {
+	s.penalties = penalties
+	return s
 }

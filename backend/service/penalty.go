@@ -146,6 +146,27 @@ func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID)
 	return point, nil
 }
 
+// SilentlyBlocked сообщает, закрыта ли роли работа тихой блокировкой.
+//
+// Тихая блокировка ничего не объявляет: заблокированный исполнитель видит
+// пустой список заказов, заблокированный заказчик — пустой каталог, и оба
+// получают на действие тот же нейтральный отказ, что и всякий, кому заказ
+// недоступен. Поэтому проверка возвращает bool, а не ошибку с причиной.
+//
+// Сбой чтения трактуется как «не заблокирован»: недоступная база не должна
+// молча выключать площадку для всех.
+func (s *PenaltyService) SilentlyBlocked(ctx context.Context, userID uuid.UUID, role string) bool {
+	if s == nil || s.repo == nil || userID == uuid.Nil || !validPenaltyRole(role) {
+		return false
+	}
+	st, err := s.repo.Status(ctx, nil, userID, role)
+	if err != nil {
+		log.Printf("[penalty] cannot read status of %s (%s): %v", userID, role, err)
+		return false
+	}
+	return st.SilentBlockEndsAt != nil && st.SilentBlockEndsAt.After(s.now())
+}
+
 // SweepResult — что сделал один проход обслуживания штрафов.
 type SweepResult struct {
 	// PointsBurnt — сколько баллов сгорело по сроку давности.

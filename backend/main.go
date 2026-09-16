@@ -222,7 +222,8 @@ func main() {
 		WithDisputeNotifier(service.NewDisputeNotifier(mailRepo, userRepo, mailer))
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
-		WithBehaviors(serviceBehaviors)
+		WithBehaviors(serviceBehaviors).
+		WithPenalties(penaltyService)
 	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
 	// сохранённой позиции исполнителя один писатель и один набор правил.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
@@ -232,9 +233,11 @@ func main() {
 	// позиция исполнителя и настроенный радиус.
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
 		WithGeo(executorGeoRepo, settingsRepo).
-		WithBehaviors(serviceBehaviors)
+		WithBehaviors(serviceBehaviors).
+		WithPenalties(penaltyService)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo).
-		WithBehaviors(serviceBehaviors, eventRepo)
+		WithBehaviors(serviceBehaviors, eventRepo).
+		WithPenalties(penaltyService)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo).
 		WithExecutorStats(executorStatsRepo)
@@ -337,7 +340,7 @@ func main() {
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
 	gh := handler.NewGeoHandler(addressSuggester)
-	sch := handler.NewServiceCatalogHandler(catalogRepo).WithBehaviors(serviceBehaviors)
+	sch := handler.NewServiceCatalogHandler(catalogRepo).WithPenalties(penaltyService).WithBehaviors(serviceBehaviors)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
