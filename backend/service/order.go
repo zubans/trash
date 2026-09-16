@@ -54,6 +54,8 @@ type OrderService struct {
 	disputeNotifier *DisputeNotifier
 	// photoProof — модуль фото-подтверждения. Без него заказы фото не требуют.
 	photoProof PhotoProofGate
+	// evidence — снимки и трек для карточки доказательств арбитража.
+	evidence ProofEvidenceSource
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии

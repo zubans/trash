@@ -88,6 +88,8 @@ func TestTrackNearestPosition(t *testing.T) {
 		{Lat: 55.10, Lon: 37.10, Source: photoproof.SourceLive, DeviceAt: shot.Add(-40 * time.Minute)},
 		{Lat: 55.20, Lon: 37.20, Source: photoproof.SourceLive, DeviceAt: shot.Add(-3 * time.Minute)},
 		{Lat: 55.30, Lon: 37.30, Source: photoproof.SourceLive, DeviceAt: shot.Add(9 * time.Minute)},
+		// Точка со снимком ближе всех по времени, но трек ею не подтверждается.
+		{Lat: 59.90, Lon: 30.30, Source: photoproof.SourcePhoto, DeviceAt: shot},
 	}); err != nil {
 		t.Fatalf("seed track: %v", err)
 	}

@@ -180,6 +180,31 @@ func (h *Handler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.H
 	r.With(can("watermarks.edit")).Put("/admin/watermark-symbols/{id}", h.Update)
 	r.With(can("watermarks.delete")).Delete("/admin/watermark-symbols/{id}", h.Delete)
 	r.With(can("watermarks.edit")).Post("/admin/watermark-symbols/{id}/restore", h.Restore)
+	// Снимки смотрит арбитр: право то же, что на очередь споров.
+	r.With(can("disputes.view")).Get("/admin/photo-proofs/{id}/file", h.ProofFile)
+}
+
+// ProofFile обслуживает GET /admin/photo-proofs/{id}/file — файл снимка как есть.
+func (h *Handler) ProofFile(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid photo id", http.StatusBadRequest)
+		return
+	}
+	proof, err := h.service.ProofByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "photo not found", http.StatusNotFound)
+		return
+	}
+	file, err := h.service.OpenProofFile(proof)
+	if err != nil {
+		http.Error(w, "photo file not found", http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	_, _ = io.Copy(w, file)
 }
 
 // List обслуживает GET /admin/watermark-symbols?include_deleted=true.

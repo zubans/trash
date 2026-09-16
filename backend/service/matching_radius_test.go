@@ -318,3 +318,7 @@ func TestMatching_AssignsAtMostOneOrderPerExecutorPerCycle(t *testing.T) {
 		t.Errorf("executor was assigned %d orders in one cycle, want exactly 1", assigned)
 	}
 }
+
+func (f *fakeGeoRepo) GeoAlertsBetween(ctx context.Context, executorID uuid.UUID, from, to time.Time) ([]repository.GeoAlert, error) {
+	return nil, nil
+}

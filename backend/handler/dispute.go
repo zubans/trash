@@ -33,6 +33,25 @@ func (h *DisputeHandler) ListDisputes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, disputes)
 }
 
+// DisputeEvidence обслуживает GET /admin/disputes/{id}/evidence — карточку
+// доказательств спора: снимки, жест, сверку времени и координат, трек.
+func (h *DisputeHandler) DisputeEvidence(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUIDParam(r, "id")
+	if err != nil {
+		http.Error(w, "invalid dispute id", http.StatusBadRequest)
+		return
+	}
+	evidence, err := h.orders.DisputeEvidence(r.Context(), id)
+	switch {
+	case err == nil:
+		writeJSON(w, evidence)
+	case errors.Is(err, service.ErrDisputeNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // ResolveDispute обслуживает POST /admin/disputes/{id}/resolve.
 // Тело — {"decision": "executor" | "customer" | "unknown", "note": "..."}.
 func (h *DisputeHandler) ResolveDispute(w http.ResponseWriter, r *http.Request) {
