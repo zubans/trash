@@ -25,6 +25,15 @@ type ServiceCatalogHandler struct {
 	// Необязательно: без него применяются только встроенные флаги — так каталог
 	// и работал до появления поведений.
 	behaviors *service.Behaviors
+	// penalties прячет каталог целиком от заказчика в тихой блокировке.
+	// Необязательно.
+	penalties *service.PenaltyService
+}
+
+// WithPenalties подключает тихую блокировку заказчика к каталогу.
+func (h *ServiceCatalogHandler) WithPenalties(penalties *service.PenaltyService) *ServiceCatalogHandler {
+	h.penalties = penalties
+	return h
 }
 
 // NewServiceCatalogHandler создаёт ServiceCatalogHandler.
@@ -59,6 +68,13 @@ func hideVerificationOnly(r *http.Request) bool {
 func (h *ServiceCatalogHandler) visibleTo(r *http.Request, nodes []*repository.ServiceNode) []*repository.ServiceNode {
 	hide := hideVerificationOnly(r)
 	user := userFromContext(r)
+
+	// Тихая блокировка заказчика: каталог пуст. Это то же самое, что видит
+	// человек, которому не подходит ни одна услуга, — механика ничего о себе
+	// не объявляет.
+	if user != nil && h.penalties.SilentlyBlocked(r.Context(), user.ID, repository.RoleCustomer) {
+		return []*repository.ServiceNode{}
+	}
 
 	// Claim'ы читаются, только когда на этой странице их кому-то есть куда деть.
 	// Каталог обычных услуг не должен получать лишний запрос на каждый вызов лишь

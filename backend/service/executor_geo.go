@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -13,6 +14,8 @@ import (
 )
 
 type ExecutorGeoService struct {
+	// penalties — тихая блокировка ролей; nil означает «механизм штрафов не подключён».
+	penalties *PenaltyService
 	geoRepo   repository.ExecutorGeoRepository
 	orderRepo repository.OrderRepository
 	// Необязательно. Когда подключено, карта применяет тот же предикат видимости,
@@ -24,6 +27,10 @@ type ExecutorGeoService struct {
 	// behaviors применяет скриптовые правила услуги к карте, чтобы карта показывала
 	// ровно те заказы, что и список. Необязательно.
 	behaviors *Behaviors
+	// track копит отчёты о местоположении в треке исполнителя: сохранённая
+	// позиция отвечает на вопрос «где он сейчас», а трек — «где он был тогда».
+	// Необязательно.
+	track PositionRecorder
 	// Кэш в памяти и мьютекс для быстрых проверок паузы
 	cooldownMap sync.Map
 }
@@ -238,6 +245,18 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}, nil
 }
 
+// PositionRecorder дописывает точку в трек исполнителя. Ему удовлетворяет
+// *photoproof.Service; сервису местоположений нужно ровно столько.
+type PositionRecorder interface {
+	RecordLive(ctx context.Context, executorID uuid.UUID, lat, lon float64, at time.Time) error
+}
+
+// WithTrack подключает трек исполнителя к отчётам о местоположении.
+func (s *ExecutorGeoService) WithTrack(track PositionRecorder) *ExecutorGeoService {
+	s.track = track
+	return s
+}
+
 // RecordLiveLocation сохраняет позицию, о которой приложение исполнителя
 // сообщает само во время смены.
 //
@@ -256,6 +275,13 @@ func (s *ExecutorGeoService) RecordLiveLocation(ctx context.Context, executorID 
 	}
 	if err := s.geoRepo.RecordDevicePosition(ctx, executorID, lat, lon); err != nil {
 		return false, err
+	}
+	// Та же точка уходит в трек. Сбой записи трека не отменяет отчёта: трек —
+	// доказательная история, а не условие работы карты и подбора.
+	if s.track != nil {
+		if err := s.track.RecordLive(ctx, executorID, lat, lon, time.Now()); err != nil {
+			log.Printf("[ExecutorGeoService] cannot append the track of %s: %v", executorID, err)
+		}
 	}
 	return true, nil
 }
@@ -377,7 +403,7 @@ func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uui
 		// заказы только для модераторов → модераторам; обычные заказы → сегментация
 		// по верификации заказчика плюс стандартные проверки исполнителя.
 		if s.userRepo != nil {
-			if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
+			if canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
 				continue
 			}
 		}
@@ -446,4 +472,11 @@ func (s *ExecutorGeoService) eligibilityInputs(ctx context.Context, orders []*re
 
 func (s *ExecutorGeoService) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {
 	return s.geoRepo.GetGeoAlerts(ctx, status, limit, offset)
+}
+
+// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
+// видит заказов и не может их брать.
+func (s *ExecutorGeoService) WithPenalties(penalties *PenaltyService) *ExecutorGeoService {
+	s.penalties = penalties
+	return s
 }

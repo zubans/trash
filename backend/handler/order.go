@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -96,6 +98,40 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// OpenDispute обслуживает POST /customer/orders/{id}/dispute: заказчик
+// заявляет, что исполненный заказ не выполнен. Тело — {"claim": "..."}.
+func (h *OrderHandler) OpenDispute(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Claim string `json:"claim"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	dispute, err := h.orderService.OpenDispute(r.Context(), user.ID, orderID, req.Claim)
+	if err != nil {
+		writeOrderError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(dispute)
 }
 
 // ConfirmOrder обслуживает POST /customer/orders/{id}/confirm.
@@ -196,6 +232,29 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ConcedeDispute обслуживает POST /executor/orders/{id}/dispute/concede:
+// исполнитель признаёт, что оспоренный заказ не выполнен.
+func (h *OrderHandler) ConcedeDispute(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.orderService.ConcedeDispute(r.Context(), user.ID, orderID); err != nil {
+		writeOrderError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // ExecuteOrder обслуживает POST /executor/orders/{id}/execute.
 func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
@@ -210,7 +269,19 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orderService.ExecuteOrder(r.Context(), orderID, user.ID); err != nil {
+	// Тело необязательно: старые клиенты шлют пустой запрос. Новый присылает
+	// время нажатия по часам телефона — отметка могла пролежать в офлайн-очереди.
+	var req struct {
+		ExecutedAtDevice *time.Time `json:"executed_at_device"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := h.orderService.ExecuteOrderAt(r.Context(), orderID, user.ID, req.ExecutedAtDevice); err != nil {
 		writeOrderError(w, err)
 		return
 	}
@@ -313,4 +384,14 @@ func (h *OrderHandler) RejectOrderHandler(w http.ResponseWriter, r *http.Request
 }
 func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	h.ListAssignedOrders(w, r)
+}
+
+// CallerID отдаёт id аутентифицированного пользователя запроса. Он существует
+// для модулей, которые не должны знать про ключи контекста middleware, —
+// например photoproof: единственное, что им нужно о пришедшем, это id.
+func CallerID(r *http.Request) uuid.UUID {
+	if user := userFromContext(r); user != nil {
+		return user.ID
+	}
+	return uuid.Nil
 }

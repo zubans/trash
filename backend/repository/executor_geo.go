@@ -55,6 +55,9 @@ type ExecutorGeoRepository interface {
 	GetExecutorLocations(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]ExecutorPosition, error)
 	CreateGeoAlert(ctx context.Context, alert *GeoAlert) error
 	GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]GeoAlert, error)
+	// GeoAlertsBetween — аномалии скорости исполнителя за промежуток времени:
+	// арбитраж смотрит, не «телепортировался» ли исполнитель перед снимком.
+	GeoAlertsBetween(ctx context.Context, executorID uuid.UUID, from, to time.Time) ([]GeoAlert, error)
 }
 
 // ExecutorPosition — сохранённая рабочая позиция исполнителя.
@@ -235,7 +238,20 @@ func (r *executorGeoRepository) GetGeoAlerts(ctx context.Context, status string,
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
-	rows, err := r.db.QueryContext(ctx, query, status, limit, offset)
+	return r.scanGeoAlerts(ctx, query, status, limit, offset)
+}
+
+func (r *executorGeoRepository) GeoAlertsBetween(ctx context.Context, executorID uuid.UUID, from, to time.Time) ([]GeoAlert, error) {
+	return r.scanGeoAlerts(ctx, `
+		SELECT id, executor_id, old_lat, old_lon, new_lat, new_lon, calculated_speed_kmh, status, created_at
+		FROM geo_alerts
+		WHERE executor_id = $1 AND created_at BETWEEN $2 AND $3
+		ORDER BY created_at
+	`, executorID, from, to)
+}
+
+func (r *executorGeoRepository) scanGeoAlerts(ctx context.Context, query string, args ...interface{}) ([]GeoAlert, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

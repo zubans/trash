@@ -25,6 +25,7 @@ import (
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
+	"healthlogin/backend/photoproof"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 	"healthlogin/backend/worker"
@@ -75,6 +76,8 @@ func main() {
 	// Справочник ролей и их прав. На него опираются и назначение ролей, и охрана
 	// каждого админского маршрута.
 	roleRepo := repository.NewRoleRepository(db)
+	penaltyRepo := repository.NewPenaltyRepository(db)
+	disputeRepo := repository.NewDisputeRepository(db)
 	// system_settings — несколько строк, читаемых на путях ценообразования,
 	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
 	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
@@ -83,6 +86,10 @@ func main() {
 		repository.NewSettingsRepository(db),
 		time.Duration(getEnvInt("SETTINGS_CACHE_TTL_SEC", 10))*time.Second,
 	)
+	// Фото-подтверждение — отдельный модуль со своей схемой и своими правилами.
+	photoProofService := photoproof.NewService(photoproof.NewSymbolRepository(db)).
+		WithTrack(photoproof.NewTrackRepository(db), settingsRepo).
+		WithProofs(db, photoproof.DiskStorage{Root: getEnv("UPLOADS_DIR", "uploads")}, photoproof.NewChecker())
 	tokenRepo := repository.NewTokenRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
@@ -126,6 +133,9 @@ func main() {
 	// пользователя, и системный счёт.
 	ledger := service.NewLedger(transactionRepo, systemAccountRepo).
 		WithIncidents(incidentRepo)
+	// Штрафные баллы: журнал и свёрнутое состояние ролей. Транзакции берёт у
+	// реестра — баллы по спору начисляются в одной транзакции с деньгами.
+	penaltyService := service.NewPenaltyService(penaltyRepo, settingsRepo, ledger)
 
 	// Скрипты поведений несут правила услуг, чьи условия не укладываются во флаги
 	// каталога (см. doc/service_behaviors.md). Первыми загружаются копии,
@@ -201,7 +211,8 @@ func main() {
 		WithAddresses(addressRepo).
 		WithReconciliation(reconcileRepo).
 		WithEvents(eventRepo).
-		WithRoles(roleRepo)
+		WithRoles(roleRepo).
+		WithPenalties(penaltyRepo)
 	// Права: что разрешено роли, отличной от ADMIN. Кэш карты «роль → права»
 	// сбрасывается тем же, что её меняет, — страницей ролей.
 	permissions := service.NewPermissions(roleRepo)
@@ -210,10 +221,17 @@ func main() {
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo).
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
-		WithAchievements(levels, executorStatsRepo)
+		WithAchievements(levels, executorStatsRepo).
+		WithDisputes(disputeRepo).
+		WithPenalties(penaltyService).
+		WithDisputeNotifier(service.NewDisputeNotifier(mailRepo, userRepo, mailer)).
+		WithPhotoProof(photoProofService).
+		WithEvidence(photoProofService)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
-		WithBehaviors(serviceBehaviors)
+		WithBehaviors(serviceBehaviors).
+		WithPenalties(penaltyService).
+		WithTrack(photoProofService)
 	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
 	// сохранённой позиции исполнителя один писатель и один набор правил.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
@@ -223,9 +241,11 @@ func main() {
 	// позиция исполнителя и настроенный радиус.
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
 		WithGeo(executorGeoRepo, settingsRepo).
-		WithBehaviors(serviceBehaviors)
+		WithBehaviors(serviceBehaviors).
+		WithPenalties(penaltyService)
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo).
-		WithBehaviors(serviceBehaviors, eventRepo)
+		WithBehaviors(serviceBehaviors, eventRepo).
+		WithPenalties(penaltyService)
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo).
 		WithExecutorStats(executorStatsRepo)
@@ -294,6 +314,13 @@ func main() {
 	// этого в течение минуты — как и скрипты особых услуг.
 	achievementWorker.StartScriptSync(1 * time.Minute)
 
+	// Сроки штрафов — время, а не событие: баллы сгорают, а тихие блокировки
+	// снимаются сами, даже если человеку больше ничего не начисляют.
+	penaltyWorker := worker.NewPenaltyWorker(penaltyService).
+		WithTrack(photoProofService).
+		WithLeader(leader, "penalty_sweep")
+	penaltyWorker.Start(1 * time.Hour)
+
 	// Ночная проверка книг. Она только сообщает и никогда не чинит: баланс,
 	// разошедшийся со своим реестром, — это баг, который надо видеть, а не число, которое надо переписать.
 	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
@@ -318,15 +345,20 @@ func main() {
 	ah := handler.NewAdminHandler(adminService)
 	rolh := handler.NewRoleHandler(roleService)
 	oh := handler.NewOrderHandler(orderService)
+	evh := handler.NewExecutorVerificationHandler(service.NewExecutorVerificationService(
+		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService))
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService)
 	gh := handler.NewGeoHandler(addressSuggester)
-	sch := handler.NewServiceCatalogHandler(catalogRepo).WithBehaviors(serviceBehaviors)
+	sch := handler.NewServiceCatalogHandler(catalogRepo).WithPenalties(penaltyService).WithBehaviors(serviceBehaviors)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
+	dh := handler.NewDisputeHandler(orderService)
+	pnh := handler.NewPenaltyHandler(penaltyService)
+	pph := photoproof.NewHandler(photoProofService, handler.CallerID)
 	mh := handler.NewMailHandler(mailRepo, userRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
@@ -400,6 +432,7 @@ func main() {
 			r.Post("/customer/orders", oh.CreateOrderHandler)
 			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
 			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
+			r.Post("/customer/orders/{id}/dispute", oh.OpenDispute)
 			r.Post("/customer/orders/{id}/tip", oh.TipOrderHandler)
 			r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
 			r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
@@ -412,6 +445,7 @@ func main() {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
 			r.Get("/auth/me", ph.MeHandler)
+			r.Get("/me/penalty-status", pnh.MyPenaltyStatus)
 			r.Get("/user/profile", ah.GetProfileHandler)
 			// Оба пути возвращают собственный профиль вызывающего. /customer/profile
 			// оставлен здесь, а не в группе заказчика, потому что приложение
@@ -468,10 +502,17 @@ func main() {
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
 			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
+			r.Post("/executor/orders/{id}/dispute/concede", oh.ConcedeDispute)
+			pph.RegisterExecutorRoutes(r)
 			// Данные, которые исполнитель отправляет на проверку по скриптовой услуге, —
 			// проверка личности в заказе верификации.
 			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
 			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
+			// Заявка на собственную верификацию — заказ на услугу верификации,
+			// который берёт модератор.
+			r.Get("/executor/verification", evh.GetStatus)
+			r.Post("/executor/verification", evh.Request)
+			r.Post("/executor/verification/cancel", evh.Cancel)
 			// Геймификация: значки, уровень со ставкой комиссии и подарки.
 			r.Get("/executor/achievements", ach.GetAchievements)
 			r.Get("/executor/level", ach.GetLevel)
@@ -541,6 +582,12 @@ func main() {
 			r.With(can("orders.view")).Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
 			r.With(can("escalations.view")).Get("/admin/escalations", bhh.ListEscalations)
 			r.With(can("escalations.edit")).Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
+			r.With(can("users.view")).Get("/admin/users/{id}/penalties", pnh.AdminUserPenalties)
+			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/reset-silent-flag", pnh.AdminResetSilentBlockFlag)
+			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/{point_id}/revoke", pnh.AdminRevokePoint)
+			r.With(can("disputes.view")).Get("/admin/disputes", dh.ListDisputes)
+			r.With(can("disputes.view")).Get("/admin/disputes/{id}/evidence", dh.DisputeEvidence)
+			r.With(can("disputes.edit")).Post("/admin/disputes/{id}/resolve", dh.ResolveDispute)
 			r.With(can("service_catalog.view")).Get("/admin/service-behaviors", sch.AdminListBehaviors)
 			r.With(can("service_catalog.view")).Get("/admin/service-nodes", sch.AdminListNodes)
 			r.With(can("service_catalog.view")).Get("/admin/service-nodes/{id}", sch.AdminGetNode)
@@ -568,6 +615,7 @@ func main() {
 			r.With(can("gifts.create")).Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
 			r.With(can("gifts.edit")).Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
 			mh.RegisterAdminRoutes(r, can)
+			pph.RegisterAdminRoutes(r, can)
 			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
 			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
 		})

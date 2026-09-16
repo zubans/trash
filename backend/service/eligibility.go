@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/google/uuid"
+
 	"healthlogin/backend/repository"
 )
 
@@ -36,12 +38,15 @@ var ErrCustomerNotEligible = errors.New("customer is not eligible for this servi
 // Вариант, управляемый скриптом поведения, получает хук can_order этого скрипта
 // поверх этих правил, но никогда вместо них: скрипт может ограничить, кто
 // заказывает услугу, но не может выдать освобождение от бана.
-func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, customer *repository.User, variant *repository.ServiceNode) error {
+func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, blocks penaltyGate, customer *repository.User, variant *repository.ServiceNode) error {
 	if customer == nil {
 		return ErrCustomerNotEligible
 	}
-	if customer.Status == "BANNED" {
+	if customer.IsBlocked() {
 		return errors.New("аккаунт заблокирован")
+	}
+	if silentlyBlocked(ctx, blocks, customer, repository.RoleCustomer) {
+		return ErrCustomerNotEligible
 	}
 	if variant == nil {
 		return nil
@@ -89,11 +94,23 @@ func settingInt(ctx context.Context, repo settingsGetter, key string, defaultVal
 // фильтрации списков заказов, и когда исполнитель реально действует по заказу,
 // поэтому ограничения нельзя обойти, вызвав эндпоинт напрямую с известным id
 // заказа.
+// penaltyGate — тихая блокировка роли. Ему удовлетворяет *PenaltyService;
+// предикатам допуска нужно ровно столько.
+type penaltyGate interface {
+	SilentlyBlocked(ctx context.Context, userID uuid.UUID, role string) bool
+}
+
+// silentlyBlocked — проверка тихой блокировки там, где она должна выглядеть как
+// обычная недоступность. Без подключённого механизма штрафов — никогда.
+func silentlyBlocked(ctx context.Context, blocks penaltyGate, user *repository.User, role string) bool {
+	return blocks != nil && user != nil && blocks.SilentlyBlocked(ctx, user.ID, role)
+}
+
 func canExecutorTakeOrder(executor *repository.User, variant *repository.ServiceNode) error {
 	if executor == nil {
 		return ErrExecutorNotEligible
 	}
-	if executor.Status == "BANNED" {
+	if executor.IsBlocked() {
 		return errors.New("аккаунт заблокирован")
 	}
 	if variant == nil {
@@ -124,15 +141,20 @@ func canExecutorTakeOrder(executor *repository.User, variant *repository.Service
 //     (именно это позволяет неверифицированному исполнителю работать с их пулом);
 //   - заказ верифицированного заказчика виден только верифицированному
 //     исполнителю или модератору.
-func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, viewer *repository.User, customer *repository.User, variant *repository.ServiceNode) error {
+func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, blocks penaltyGate, viewer *repository.User, customer *repository.User, variant *repository.ServiceNode) error {
 	if viewer == nil {
+		return ErrExecutorNotEligible
+	}
+	// Тихая блокировка исполнителя: заказы ему просто не показываются, и взять
+	// он их не может — тем же отказом, что и любой недоступный заказ.
+	if silentlyBlocked(ctx, blocks, viewer, repository.RoleExecutor) {
 		return ErrExecutorNotEligible
 	}
 	if variant != nil && variant.ModeratorOnly {
 		if !viewer.HasRole(repository.RoleModerator) {
 			return ErrExecutorNotEligible
 		}
-		if viewer.Status == "BANNED" {
+		if viewer.IsBlocked() {
 			return errors.New("аккаунт заблокирован")
 		}
 		return behaviors.CanViewOrTake(ctx, viewer, customer, variant)

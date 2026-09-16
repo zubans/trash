@@ -15,6 +15,8 @@ import (
 
 // BidService управляет бизнес-операциями торгов.
 type BidService struct {
+	// penalties — тихая блокировка ролей; nil означает «механизм штрафов не подключён».
+	penalties   *PenaltyService
 	bidRepo     repository.BidRepository
 	orderRepo   repository.OrderRepository
 	shiftRepo   repository.ShiftRepository
@@ -101,7 +103,7 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 			return nil, err
 		}
 		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-		if err := canViewOrTakeOrder(ctx, s.behaviors, executor, customer, variant); err != nil {
+		if err := canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -181,7 +183,7 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 			return errors.New("executor not found")
 		}
 		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-		if err := canViewOrTakeOrder(ctx, s.behaviors, executor, customer, variant); err != nil {
+		if err := canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, customer, variant); err != nil {
 			return err
 		}
 		shift, err := s.shiftRepo.GetActiveShift(ctx, bid.ExecutorID)
@@ -238,4 +240,11 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 	metrics.BidEvent("accepted")
 	metrics.OrderEvent("assigned")
 	return nil
+}
+
+// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
+// видит заказов и не может их брать.
+func (s *BidService) WithPenalties(penalties *PenaltyService) *BidService {
+	s.penalties = penalties
+	return s
 }

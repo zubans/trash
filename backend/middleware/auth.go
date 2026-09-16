@@ -233,8 +233,15 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			http.Error(w, "User not found", http.StatusUnauthorized)
 			return
 		}
-		if user.Status == "BANNED" {
+		if user.Status == repository.UserStatusBanned {
 			http.Error(w, "Account is banned", http.StatusUnauthorized)
+			return
+		}
+		// Мягкий бан пускает в приложение, но только к тому, что перечислено в
+		// softBanAllowedRoutes. Отказ — 403, а не 401: сессия действительна, и
+		// клиент не должен пытаться её обновить или выкидывать пользователя.
+		if user.Status == repository.UserStatusSoftBanned && !softBanAllows(r) {
+			writeSoftBanned(w)
 			return
 		}
 

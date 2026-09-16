@@ -164,6 +164,7 @@ export default defineComponent({
       COMMISSION: 'Комиссия',
       COMMISSION_PAYOUT: 'Выплата комиссии',
       BONUS: 'Бонус',
+      DISPUTE_REWARD: 'Оплата по спору',
     }
 
     const typeLabel = (type: string) => TYPE_LABELS[type] || type

@@ -155,6 +155,29 @@ const FIRE: Sprite = {
   ],
 }
 
+// Рукопожатие: первое покаяние — исполнитель признал оспоренный заказ.
+const HANDSHAKE: Sprite = {
+  palette: { b: '#2563eb', g: '#16a34a', o: '#7c2d12', s: '#f6c28b', d: '#d9925a' },
+  rows: [
+    '................',
+    '................',
+    '................',
+    'bbb.........ggg.',
+    'bbbooooo.oooggg.',
+    'bbbssssosssoggg.',
+    'bbbsdsssssssggg.',
+    'bbbssdsdsdssggg.',
+    'bbbosssssssoggg.',
+    'bbb.ooosooo.ggg.',
+    'bbb....oo...ggg.',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+}
+
 // Печать с галочкой — значок ачивки, чью иконку скрипт не назвал или назвал
 // незнакомым словом. Пустого места на полке быть не должно: значок есть, и
 // выглядеть он обязан значком.
@@ -186,6 +209,7 @@ const SPRITES: Record<string, Sprite> = {
   medal: MEDAL,
   star: STAR,
   fire: FIRE,
+  handshake: HANDSHAKE,
   seal: SEAL,
 }
 

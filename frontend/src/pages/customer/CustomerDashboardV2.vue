@@ -189,6 +189,17 @@
         <i class="ph-bold ph-plus"></i> Создать новый заказ
       </button>
 
+      <!-- Доп. задание: заказы закрываются с фото-подтверждением -->
+      <div v-if="photoPeriodActive" class="proof-period-banner">
+        <i class="ph-fill ph-camera"></i>
+        <div>
+          <div class="proof-period-title">Фото-подтверждение до {{ formatDateFull(photoPeriodUntil) }}</div>
+          <div class="proof-period-text">
+            Ваши заказы в этот период исполнитель закрывает с фотографией места заказа. Если согласитесь, он может сделать совместное селфи.
+          </div>
+        </div>
+      </div>
+
       <!-- Блок заказов -->
       <div>
         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -222,11 +233,23 @@
                     <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
                   </div>
                   <div v-if="order.address" class="item-subtitle"><i class="ph-fill ph-map-pin me-1"></i>{{ order.address }}</div>
+                  <div v-if="order.status === 'DISPUTED'" class="item-subtitle">
+                    <span class="dispute-badge">Спор</span> Идёт разбор. Договорились — подтвердите выполнение.
+                  </div>
                 </div>
               </div>
               <div class="o-actions item-actions" @click.stop>
                 <button
-                  v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED'"
+                  v-if="order.actions && order.actions.dispute"
+                  type="button"
+                  class="btn-action dispute-btn"
+                  title="Заказ не выполнен"
+                  @click="disputeOrderId = order.id"
+                >
+                  <i class="ph-bold ph-warning-octagon"></i>
+                </button>
+                <button
+                  v-if="order.status === 'ASSIGNED' || order.status === 'EXECUTED' || order.status === 'DISPUTED'"
                   type="button"
                   :class="['btn-action primary chat-btn position-relative', { active: openChatOrderId === order.id }]"
                   title="Чат"
@@ -236,10 +259,10 @@
                   <span v-if="unreadOrderIDs.has(order.id)" class="yellow-unread-dot"></span>
                 </button>
                 <button
-                  v-if="order.status === 'EXECUTED' || order.status === 'ASSIGNED'"
+                  v-if="order.status === 'EXECUTED' || order.status === 'ASSIGNED' || order.status === 'DISPUTED'"
                   type="button"
                   class="btn-action success confirm-btn"
-                  :title="order.status === 'EXECUTED' ? 'Подтвердить выполнение и закрыть заказ' : 'Принять заказ досрочно и закрыть его'"
+                  :title="order.status === 'ASSIGNED' ? 'Принять заказ досрочно и закрыть его' : order.status === 'DISPUTED' ? 'Подтвердить выполнение и закрыть спор' : 'Подтвердить выполнение и закрыть заказ'"
                   @click="confirmOrder(order)"
                 >
                   <i class="ph-bold ph-check"></i>
@@ -400,6 +423,14 @@
         @open-review-modal="openReviewModal"
       />
 
+      <!-- Спор: заказ не выполнен -->
+      <DisputeClaimModal
+        v-if="disputeOrderId"
+        :order-id="disputeOrderId"
+        @close="disputeOrderId = null"
+        @opened="onDisputeOpened"
+      />
+
       <!-- Модальное окно отзыва -->
       <ReviewModal
         v-model="showReviewModal"
@@ -525,6 +556,7 @@ import OrderDetailsModal from '../../components/order/OrderDetailsModal.vue'
 import CreateOrderModal from './components/CreateOrderModal.vue'
 import CustomerProfileModal from './components/CustomerProfileModal.vue'
 import ReviewModal from './components/ReviewModal.vue'
+import DisputeClaimModal from './components/DisputeClaimModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
@@ -559,6 +591,7 @@ export default defineComponent({
     CreateOrderModal,
     CustomerProfileModal,
     ReviewModal,
+    DisputeClaimModal,
     SupportChatModal,
   },
   setup() {
@@ -709,7 +742,7 @@ export default defineComponent({
     const orderLon = ref<number | null>(null)
 
     const activeOrders = computed(() => {
-      return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED', 'EXECUTED'].includes(o.status))
+      return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED', 'EXECUTED', 'DISPUTED'].includes(o.status))
     })
 
     const historyOrders = computed(() => {
@@ -949,6 +982,10 @@ export default defineComponent({
           !confirm('Исполнитель ещё не отметил заказ выполненным. Подтвердить и закрыть заказ досрочно? Средства спишутся исполнителю.')) {
         return
       }
+      if (orderStatus === 'DISPUTED' &&
+          !confirm('Подтвердить выполнение? Спор будет закрыт, оплата уйдёт исполнителю.')) {
+        return
+      }
       try {
         await api.post(`/customer/orders/${orderId}/confirm`)
         successMsg.value = 'Заказ подтвержден'
@@ -958,6 +995,28 @@ export default defineComponent({
         }
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка подтверждения'
+      }
+    }
+
+    // Спор: заказчик заявляет, что исполненный заказ не выполнен.
+    const disputeOrderId = ref<string | null>(null)
+    const onDisputeOpened = async () => {
+      disputeOrderId.value = null
+      successMsg.value = 'Спор открыт. Исполнитель получил уведомление, заказ передан на разбор.'
+      await fetchOrders()
+    }
+
+    // Период доп. задания в роли заказчика (/me/penalty-status).
+    const photoPeriodUntil = ref('')
+    const photoPeriodActive = computed(
+      () => !!photoPeriodUntil.value && new Date(photoPeriodUntil.value).getTime() > Date.now(),
+    )
+    const fetchPenaltyStatus = async () => {
+      try {
+        const res = await api.get('/me/penalty-status')
+        photoPeriodUntil.value = res.data?.photo_required_until?.CUSTOMER || ''
+      } catch (err) {
+        console.warn('[penalty] failed to read status', err)
       }
     }
 
@@ -1608,7 +1667,7 @@ export default defineComponent({
         ],
         // 2. История — последней: оценки к завершённым заказам стоят по запросу
         //    на каждый заказ и нужны только значку с рейтингом.
-        [loadHistoryReviews, checkMail],
+        [loadHistoryReviews, checkMail, fetchPenaltyStatus],
         // 3. Прогрев фотографий активных заказов. Идёт после всего, потому что
         //    это подготовка к будущему нажатию, а не содержимое экрана: чат
         //    открывают ради фотографий, и ждать их в момент открытия не должен
@@ -1733,6 +1792,10 @@ export default defineComponent({
       openCreateOrderModal,
       submitOrder,
       confirmOrder,
+      disputeOrderId,
+      onDisputeOpened,
+      photoPeriodUntil,
+      photoPeriodActive,
       cancelOrder,
       submitTopUp,
       openOrderDetails,
@@ -2737,6 +2800,33 @@ export default defineComponent({
 
 .btn-action.chat-btn { background: #e0e7ff; color: var(--accent-main); }
 .btn-action.confirm-btn { background: #dcfce7; color: #15803d; }
+.btn-action.dispute-btn { background: #fef2f2; color: #dc2626; }
+
+.dispute-badge {
+  display: inline-block;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.proof-period-banner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin: 10px 0 14px;
+}
+.proof-period-banner > i { font-size: 24px; }
+.proof-period-title { font-weight: 700; font-size: 14px; }
+.proof-period-text { font-size: 13px; line-height: 1.4; color: #4338ca; }
 .btn-action.confirm-btn:hover { background: #bbf7d0; color: #166534; }
 .order-row.chat-open .btn-action.chat-btn { background: var(--accent-main); color: white; box-shadow: 0 4px 12px var(--accent-glow);}
 

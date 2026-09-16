@@ -18,6 +18,9 @@ const (
 	OrderStatusSearching OrderStatus = "SEARCHING"
 	OrderStatusAssigned  OrderStatus = "ASSIGNED"
 	OrderStatusExecuted  OrderStatus = "EXECUTED"
+	// OrderStatusDisputed — исполнитель отметил выполнение, а заказчик его
+	// оспорил. Заказ открыт, пока спор не закрыт.
+	OrderStatusDisputed  OrderStatus = "DISPUTED"
 	OrderStatusCompleted OrderStatus = "COMPLETED"
 	OrderStatusCanceled  OrderStatus = "CANCELED"
 )
@@ -52,6 +55,22 @@ type Order struct {
 	DeadlineAt      *time.Time   `json:"deadline_at,omitempty"`
 	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
 	CanceledAt      *time.Time   `json:"canceled_at,omitempty"`
+	// ExecutedAt — когда исполнитель отметил «Исполнил», по часам сервера;
+	// ExecutedAtDevice — по часам телефона. Они расходятся, когда отметка
+	// пролежала в офлайн-очереди.
+	ExecutedAt       *time.Time `json:"executed_at,omitempty"`
+	ExecutedAtDevice *time.Time `json:"-"`
+	// PhotoRequired — заказ закрывается только с фото-подтверждением: при
+	// взятии у исполнителя или заказчика шёл период доп. задания.
+	PhotoRequired bool `json:"photo_required"`
+	// WatermarkSymbolID и ProofKey — жест и служебные данные проверки снимка,
+	// выданные заказу при взятии. Наружу не отдаются как есть: исполнитель
+	// получает их в PhotoProof, заказчик не получает вовсе.
+	WatermarkSymbolID *uuid.UUID `json:"-"`
+	ProofKey          []byte     `json:"-"`
+	// PhotoProof собирается для исполнителя заказа (service/order_view.go);
+	// колонки за ним нет.
+	PhotoProof *OrderPhotoProof `json:"photo_proof,omitempty"`
 	// SubmitFields называет данные, которые исполнитель обязан отправить на
 	// проверку до завершения этого заказа, — поля личности в заказе верификации.
 	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит
@@ -61,6 +80,24 @@ type Order struct {
 	// (service/order_view.go); колонок за ними нет.
 	Counterparty *OrderParty   `json:"counterparty,omitempty"`
 	Actions      *OrderActions `json:"actions,omitempty"`
+}
+
+// OrderPhotoProof — что исполнитель должен знать о фото-подтверждении заказа,
+// чтобы снять его без сети: какой жест показать и служебные данные проверки.
+type OrderPhotoProof struct {
+	Required bool          `json:"required"`
+	Gesture  *OrderGesture `json:"gesture,omitempty"`
+	Nonce    string        `json:"nonce,omitempty"`
+}
+
+// OrderGesture — жест заказа в том виде, в каком его показывает попап.
+type OrderGesture struct {
+	Code         string `json:"code"`
+	Number       int    `json:"number"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	HintImageURL string `json:"hint_image_url,omitempty"`
+	FitsInSelfie bool   `json:"fits_in_selfie"`
 }
 
 // OrderParty — вторая сторона заказа глазами смотрящего: заказчику —
@@ -79,6 +116,10 @@ type OrderActions struct {
 	Cancel bool `json:"cancel"`
 	Reject bool `json:"reject"`
 	Review bool `json:"review"`
+	// Dispute — заказчик может заявить, что заказ не выполнен.
+	Dispute bool `json:"dispute"`
+	// Concede — исполнитель может признать, что оспоренный заказ не выполнен.
+	Concede bool `json:"concede"`
 }
 
 // OrderRepository описывает операции хранения заказов.
@@ -104,6 +145,11 @@ type OrderRepository interface {
 	// Они возвращают ErrConflict, когда сущность была не в ожидаемом состоянии.
 	Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error
 	Execute(ctx context.Context, q Querier, orderID uuid.UUID) error
+	// SetExecutedAtDevice записывает, когда исполнитель нажал «Исполнил» по часам
+	// телефона.
+	SetExecutedAtDevice(ctx context.Context, q Querier, orderID uuid.UUID, at time.Time) error
+	// MarkDisputed переводит исполненный заказ в DISPUTED.
+	MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
 	// SetCommission сохраняет ставку, по которой заказ закрыли, и уровень
 	// исполнителя на тот момент. Ставка стала персональной, и без этой записи
@@ -157,7 +203,8 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 const orderColumns = `
     o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
     o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-    o.comment, o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at
+    o.comment, o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
+    o.executed_at, o.executed_at_device, o.photo_required, o.watermark_symbol_id, o.proof_key
 `
 
 const orderInsertColumns = `
@@ -168,23 +215,35 @@ const orderInsertColumns = `
 
 func scanOrderRow(row *sql.Row) (Order, error) {
 	var o Order
+	var symbolID uuid.NullUUID
 	err := row.Scan(
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
 		&o.PickupLat, &o.PickupLon, &o.Comment, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
+		&o.ExecutedAt, &o.ExecutedAtDevice, &o.PhotoRequired, &symbolID, &o.ProofKey,
 	)
+	if symbolID.Valid {
+		id := symbolID.UUID
+		o.WatermarkSymbolID = &id
+	}
 	return o, err
 }
 
 func scanOrderRows(rows *sql.Rows) (Order, error) {
 	var o Order
+	var symbolID uuid.NullUUID
 	err := rows.Scan(
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
 		&o.PickupLat, &o.PickupLon, &o.Comment, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
+		&o.ExecutedAt, &o.ExecutedAtDevice, &o.PhotoRequired, &symbolID, &o.ProofKey,
 	)
+	if symbolID.Valid {
+		id := symbolID.UUID
+		o.WatermarkSymbolID = &id
+	}
 	return o, err
 }
 
@@ -217,8 +276,8 @@ func (r *orderRepo) GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, err
 
 func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3) ORDER BY o.created_at DESC`,
-		executorID, OrderStatusAssigned, OrderStatusExecuted,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3, $4) ORDER BY o.created_at DESC`,
+		executorID, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 	if err != nil {
 		return nil, err
@@ -396,8 +455,20 @@ func (r *orderRepo) Assign(ctx context.Context, q Querier, orderID, executorID u
 
 func (r *orderRepo) Execute(ctx context.Context, q Querier, orderID uuid.UUID) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
-		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
+		`UPDATE orders SET status = $1, executed_at = now() WHERE id = $2 AND status = $3`,
 		OrderStatusExecuted, orderID, OrderStatusAssigned,
+	)
+}
+
+func (r *orderRepo) SetExecutedAtDevice(ctx context.Context, q Querier, orderID uuid.UUID, at time.Time) error {
+	_, err := r.exec(ctx, q).ExecContext(ctx, `UPDATE orders SET executed_at_device = $2 WHERE id = $1`, orderID, at)
+	return err
+}
+
+func (r *orderRepo) MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
+		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
+		OrderStatusDisputed, orderID, OrderStatusExecuted,
 	)
 }
 
@@ -407,8 +478,8 @@ func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, f
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
 		    completed_at = now()
-		 WHERE id = $4 AND status IN ($5, $6)`,
-		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted, OrderStatusAssigned,
+		 WHERE id = $4 AND status IN ($5, $6, $7)`,
+		OrderStatusCompleted, finalAmount, isDowngraded, orderID, OrderStatusExecuted, OrderStatusAssigned, OrderStatusDisputed,
 	)
 }
 
@@ -419,13 +490,15 @@ func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.U
 	return err
 }
 
-// Cancel аннулирует ещё не выполненный заказ. Принимаются и SEARCHING, и
-// ASSIGNED, потому что слой сервисов возвращает удержание в обоих случаях;
-// охрана не даёт второй параллельной отмене вернуть деньги дважды.
+// Cancel аннулирует незакрытый заказ. Из каких статусов отмена допустима в
+// конкретном случае, решает слой сервисов (cancelTx получает список); здесь
+// охрана лишь не даёт отменить уже закрытый заказ и второй параллельной отмене
+// вернуть деньги дважды. DISPUTED отменяется признанием исполнителя и решением
+// арбитра в пользу заказчика.
 func (r *orderRepo) Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error {
 	return execExpectingOne(ctx, r.exec(ctx, q),
-		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4)`,
-		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned,
+		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4, $5, $6)`,
+		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 }
 
@@ -499,9 +572,9 @@ func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID)
 func (r *orderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o
-		 WHERE o.customer_id = $1 AND o.status IN ($2, $3, $4)
+		 WHERE o.customer_id = $1 AND o.status IN ($2, $3, $4, $5)
 		 ORDER BY o.created_at`,
-		customerID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted,
+		customerID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 	if err != nil {
 		return nil, err
@@ -584,7 +657,9 @@ func (r *orderRepo) CountActiveOrdersByExecutors(ctx context.Context, executorID
 func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'EXECUTED'`,
+		// Оспоренный заказ тоже ждёт закрытия, и исполнитель, копящий споры, не
+		// должен набирать новую работу сверх лимита.
+		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status IN ('EXECUTED', 'DISPUTED')`,
 		executorID,
 	).Scan(&count)
 	return count, err

@@ -45,6 +45,17 @@ type OrderService struct {
 	// одна на всех, ровно как до появления геймификации.
 	levels *Levels
 	stats  repository.ExecutorStatsRepository
+	// disputes — споры по исполненным заказам. Без них заказ нельзя оспорить,
+	// а в остальном сервис работает как до появления споров.
+	disputes repository.DisputeRepository
+	// penalties начисляет штрафные баллы по решению арбитра.
+	penalties *PenaltyService
+	// disputeNotifier сообщает сторонам об открытии и закрытии спора.
+	disputeNotifier *DisputeNotifier
+	// photoProof — модуль фото-подтверждения. Без него заказы фото не требуют.
+	photoProof PhotoProofGate
+	// evidence — снимки и трек для карточки доказательств арбитража.
+	evidence ProofEvidenceSource
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
@@ -103,8 +114,9 @@ func (s *OrderService) publishOrderEvent(ctx context.Context, tx *sql.Tx, eventT
 // где их кто-то ждёт: по одному на каждый шаг каждого заказа — это таблица,
 // чьё единственное будущее пометка «обработано».
 var eventsForEveryOrder = map[string]bool{
-	repository.EventOrderConfirmed: true,
-	repository.EventOrderCanceled:  true,
+	repository.EventOrderConfirmed:  true,
+	repository.EventOrderCanceled:   true,
+	repository.EventDisputeConceded: true,
 }
 
 // NewOrderService создаёт OrderService.
@@ -391,7 +403,7 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		if err != nil {
 			return nil, err
 		}
-		if err := canCustomerOrderVariant(ctx, s.behaviors, customer, variant); err != nil {
+		if err := canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -592,6 +604,9 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 		if err := s.orderRepo.Assign(ctx, tx, orderID, executorID); err != nil {
 			return err
 		}
+		if err := s.requirePhotoProofTx(ctx, tx, order, executorID); err != nil {
+			return err
+		}
 		return s.publishOrderEvent(ctx, tx, repository.EventOrderAccepted, order, &executorID)
 	}); err != nil {
 		// Смену открыли только ради этого заказа, а заказа не будет — например,
@@ -659,7 +674,7 @@ func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID 
 		return err
 	}
 	customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-	return canViewOrTakeOrder(ctx, s.behaviors, viewer, customer, variant)
+	return canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customer, variant)
 }
 
 // checkAcceptRadius не даёт взять заказ дальше радиуса взятия.
@@ -749,6 +764,16 @@ func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executo
 
 // ExecuteOrder помечает заказ как EXECUTED исполнителем и шлёт системное сообщение в чат.
 func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uuid.UUID) error {
+	return s.ExecuteOrderAt(ctx, orderID, executorID, nil)
+}
+
+// ExecuteOrderAt — отметка «Исполнил» с временем устройства. Оно приходит,
+// когда отметка пролежала в офлайн-очереди, и хранится рядом со временем
+// сервера: арбитраж показывает оба.
+//
+// Заказ, требующий фото-подтверждения, без загруженного снимка места заказа
+// исполненным не становится — ErrPhotoProofRequired.
+func (s *OrderService) ExecuteOrderAt(ctx context.Context, orderID, executorID uuid.UUID, deviceAt *time.Time) error {
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return errors.New("order not found")
@@ -760,8 +785,22 @@ func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uui
 	// Отметка о выполненной работе — это то, что верифицирует заказчика в услуге
 	// верификации, поэтому событие обязано быть таким же надёжным, как смена статуса.
 	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if order.PhotoRequired && s.photoProof != nil {
+			has, err := s.photoProof.HasRequiredPhotoTx(ctx, tx, orderID)
+			if err != nil {
+				return err
+			}
+			if !has {
+				return ErrPhotoProofRequired
+			}
+		}
 		if err := s.orderRepo.Execute(ctx, tx, orderID); err != nil {
 			return err
+		}
+		if deviceAt != nil && !deviceAt.IsZero() {
+			if err := s.orderRepo.SetExecutedAtDevice(ctx, tx, orderID, *deviceAt); err != nil {
+				return err
+			}
 		}
 		return s.publishOrderEvent(ctx, tx, repository.EventOrderExecuted, order, &executorID)
 	}); err != nil {
@@ -810,24 +849,22 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 	// EXECUTED, и раньше, пока он ещё ASSIGNED, — раннее одобрение просто
 	// закрывает заказ и платит исполнителю удержанную сумму, так же как путь
 	// EXECUTED ниже.
-	if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned {
+	if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned &&
+		order.Status != repository.OrderStatusDisputed {
 		return errors.New("order must be assigned or marked as executed before confirmation")
+	}
+	// Оспоренный заказ закрывается только вместе со спором: вызывающий обязан
+	// закрыть спор в этой же транзакции раньше, чем платить.
+	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
+		return err
 	}
 	if order.ExecutorID == nil {
 		return errors.New("order has no executor")
 	}
 
-	finalAmount := order.HoldAmount
-	isDowngraded := order.IsDowngraded
-	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
-		downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
-		if err != nil {
-			return err
-		}
-		if downgraded < finalAmount {
-			isDowngraded = true
-			finalAmount = downgraded
-		}
+	finalAmount, isDowngraded, err := s.payableAmount(ctx, order)
+	if err != nil {
+		return err
 	}
 
 	// Ставка платформы теперь персональная: уровень исполнителя снимает с неё
@@ -868,6 +905,24 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 		return err
 	}
 	return s.publishOrderEvent(ctx, tx, repository.EventOrderConfirmed, order, nil)
+}
+
+// payableAmount — сколько стоит заказ на момент закрытия: удержанное, а для
+// ASAP, закрываемого после срока, — цена со сниженным тарифом, если она ниже.
+func (s *OrderService) payableAmount(ctx context.Context, order *repository.Order) (money.Amount, bool, error) {
+	finalAmount := order.HoldAmount
+	isDowngraded := order.IsDowngraded
+	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
+		downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
+		if err != nil {
+			return 0, false, err
+		}
+		if downgraded < finalAmount {
+			isDowngraded = true
+			finalAmount = downgraded
+		}
+	}
+	return finalAmount, isDowngraded, nil
 }
 
 // commissionLevel читает уровень исполнителя внутри транзакции подтверждения.
@@ -951,16 +1006,38 @@ func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UU
 	return err
 }
 
-// Confirm завершает заказ конкретного заказчика (псевдоним, совместимый с обработчиком).
+// Confirm завершает заказ конкретного заказчика. Подтверждение оспоренного
+// заказа закрывает его спор: заказчик и исполнитель договорились, и арбитру
+// решать больше нечего.
 func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	var closed *repository.Dispute
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if order.CustomerID != customerID {
+			return errors.New("forbidden")
+		}
+		if order.Status == repository.OrderStatusDisputed {
+			closed, err = s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
+				Closure:  repository.DisputeClosureCustomerConfirmed,
+				ClosedBy: &customerID,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return s.confirmTx(ctx, tx, orderID)
+	})
 	if err != nil {
-		return errors.New("order not found")
+		return err
 	}
-	if order.CustomerID != customerID {
-		return errors.New("forbidden")
+	metrics.OrderEvent("confirmed")
+	if closed != nil {
+		s.disputeNotifier.DisputeClosed(ctx, closed)
 	}
-	return s.ConfirmOrder(ctx, orderID)
+	return nil
 }
 
 // CancelOrder отменяет активный заказ и возвращает удержание ровно один раз.
@@ -1012,6 +1089,9 @@ func (s *OrderService) cancelTx(ctx context.Context, tx *sql.Tx, orderID uuid.UU
 	}
 	if !permitted {
 		return errors.New("order cannot be canceled")
+	}
+	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
+		return err
 	}
 
 	if order.HoldAmount.IsPositive() {
@@ -1092,7 +1172,7 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 		if err != nil {
 			return nil, err
 		}
-		if err := canCustomerOrderVariant(ctx, s.behaviors, customer, variant); err != nil {
+		if err := canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -1247,7 +1327,7 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		// путь принятия: заказы только для модераторов идут модераторам; обычные
 		// заказы следуют сегментации по верификации заказчика и стандартным
 		// проверкам исполнителя (requires_verification, min_age, бан).
-		if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
+		if canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
 			continue
 		}
 

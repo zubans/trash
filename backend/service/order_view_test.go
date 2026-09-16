@@ -19,6 +19,8 @@ func TestActionsFor(t *testing.T) {
 		return &repository.Order{CustomerID: customerID, ExecutorID: &executorID, Status: status, CompletedAt: completedAt}
 	}
 	searching := &repository.Order{CustomerID: customerID, Status: repository.OrderStatusSearching}
+	scripted := order(repository.OrderStatusExecuted, nil)
+	scripted.ServiceVariant = &repository.ServiceNode{BehaviorCode: "verification"}
 
 	cases := []struct {
 		name   string
@@ -28,7 +30,14 @@ func TestActionsFor(t *testing.T) {
 	}{
 		{"customer cancels a searching order", customerViewer(customerID), searching, repository.OrderActions{Cancel: true}},
 		{"customer cancels an assigned order", customerViewer(customerID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{Cancel: true}},
-		{"customer cannot cancel an executed order", customerViewer(customerID), order(repository.OrderStatusExecuted, nil), repository.OrderActions{}},
+		{"customer disputes, but cannot cancel, an executed order", customerViewer(customerID), order(repository.OrderStatusExecuted, nil), repository.OrderActions{Dispute: true}},
+		{"customer cannot dispute an assigned order", customerViewer(customerID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{Cancel: true}},
+		{"customer cannot dispute twice", customerViewer(customerID), order(repository.OrderStatusDisputed, nil), repository.OrderActions{}},
+		{"another customer cannot dispute", customerViewer(otherID), order(repository.OrderStatusExecuted, nil), repository.OrderActions{}},
+		{"scripted service is not disputed", customerViewer(customerID), scripted, repository.OrderActions{}},
+		{"executor concedes a disputed order", executorViewer(executorID), order(repository.OrderStatusDisputed, nil), repository.OrderActions{Concede: true}},
+		{"another executor cannot concede", executorViewer(otherID), order(repository.OrderStatusDisputed, nil), repository.OrderActions{}},
+		{"executor cannot concede an undisputed order", executorViewer(executorID), order(repository.OrderStatusExecuted, nil), repository.OrderActions{}},
 		{"another customer gets nothing", customerViewer(otherID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{}},
 		{"executor rejects their assigned order", executorViewer(executorID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{Reject: true}},
 		{"executor cannot reject someone else's order", executorViewer(otherID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{}},

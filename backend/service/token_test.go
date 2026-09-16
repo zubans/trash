@@ -235,6 +235,24 @@ func TestRefreshRefusesBannedUser(t *testing.T) {
 	}
 }
 
+// TestRefreshKeepsSoftBannedSession: мягкий бан пускает в приложение, значит и
+// сессию продлевает — иначе заблокированный вылетал бы с экрана «Напишите в
+// поддержку» через время жизни access-токена.
+func TestRefreshKeepsSoftBannedSession(t *testing.T) {
+	svc, repo, _, user := newSessionTestService(t)
+
+	pair, err := svc.IssueTokenPair(context.Background(), user)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	repo.users[user.Phone].Status = repository.UserStatusSoftBanned
+
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); err != nil {
+		t.Errorf("expected a soft-banned user to keep the session, got %v", err)
+	}
+}
+
 // TestIssuedAccessTokenCarriesTheUser охраняет утверждения, которые читает middleware.
 func TestIssuedAccessTokenCarriesTheUser(t *testing.T) {
 	svc, _, _, user := newSessionTestService(t)

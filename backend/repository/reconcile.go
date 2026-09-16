@@ -224,7 +224,7 @@ func (r *reconcileRepo) books(ctx context.Context) (*BooksSummary, error) {
 
 	if err := r.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(hold_amount), 0) FROM orders
-		WHERE status IN ('SEARCHING', 'ASSIGNED', 'EXECUTED')`).Scan(&b.LiveOrderSum); err != nil {
+		WHERE status IN ('SEARCHING', 'ASSIGNED', 'EXECUTED', 'DISPUTED')`).Scan(&b.LiveOrderSum); err != nil {
 		return nil, fmt.Errorf("sum live order holds: %w", err)
 	}
 	b.EscrowDrift = b.EscrowHeld.Sub(b.LiveOrderSum)
@@ -287,7 +287,7 @@ func (r *reconcileRepo) holdAnomalies(ctx context.Context, tolerance money.Amoun
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
 		WHERE (o.status IN ('COMPLETED', 'CANCELED') AND o.hold_amount > $1)
 		   OR (
-		        o.status IN ('ASSIGNED', 'EXECUTED')
+		        o.status IN ('ASSIGNED', 'EXECUTED', 'DISPUTED')
 		        AND sn.is_auction = FALSE
 		        AND o.hold_amount <= $1
 		        -- Money was taken for this order once. Without this the check

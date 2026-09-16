@@ -41,6 +41,7 @@ func executorViewer(id uuid.UUID) orderViewer {
 func (s *OrderService) presentOrders(ctx context.Context, viewer orderViewer, orders []*repository.Order) {
 	users := s.hydrateServiceVariants(ctx, orders)
 	presentFor(viewer, orders, users, time.Now())
+	s.attachPhotoProof(ctx, viewer, orders)
 }
 
 // presentFor собирает уже заполненные заказы под смотрящего. users — участники
@@ -89,6 +90,10 @@ func actionsFor(viewer orderViewer, o *repository.Order, now time.Time) *reposit
 		Cancel: isCustomer && slices.Contains(customerCancelStatuses, o.Status),
 		Reject: isExecutor && executorCanReject(o, viewer.userID),
 		Review: (isCustomer || isExecutor) && o.ExecutorID != nil && reviewOpen(o, now),
+		// Скриптовые услуги закрываются сами, их не оспаривают (см. OpenDispute).
+		Dispute: isCustomer && o.Status == repository.OrderStatusExecuted && o.ExecutorID != nil &&
+			(o.ServiceVariant == nil || !o.ServiceVariant.HasBehavior()),
+		Concede: isExecutor && o.Status == repository.OrderStatusDisputed,
 	}
 }
 
