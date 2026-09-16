@@ -63,6 +63,12 @@ type PenaltyFlags struct {
 	SoftBanReason string     `json:"soft_ban_reason,omitempty"`
 }
 
+// RoleRef — пользователь и его роль: чем адресуется штрафное состояние.
+type RoleRef struct {
+	UserID uuid.UUID `json:"user_id"`
+	Role   string    `json:"role"`
+}
+
 // PenaltyRepository хранит штрафное состояние пользователей.
 type PenaltyRepository interface {
 	// AddPoint записывает балл и заполняет ID и CreatedAt. Возвращает
@@ -100,6 +106,12 @@ type PenaltyRepository interface {
 	MarkSilentBlockLifted(ctx context.Context, q Querier, userID uuid.UUID, at time.Time) error
 	// ClearSilentBlockFlag снимает этот флаг — решение администратора.
 	ClearSilentBlockFlag(ctx context.Context, q Querier, userID uuid.UUID) error
+	// RolesWithStalePoints перечисляет роли, у которых последний действующий
+	// балл старше before: их баллы пора гасить.
+	RolesWithStalePoints(ctx context.Context, before time.Time, limit int) ([]RoleRef, error)
+	// RolesWithExpiredSilentBlock перечисляет роли, чья тихая блокировка
+	// закончилась к at.
+	RolesWithExpiredSilentBlock(ctx context.Context, at time.Time, limit int) ([]RoleRef, error)
 	// ExpirePoints гасит действующие баллы роли: они сгорели по сроку или
 	// вместе со снятой тихой блокировкой. Возвращает число погашенных.
 	ExpirePoints(ctx context.Context, q Querier, userID uuid.UUID, role string, at time.Time) (int, error)
@@ -346,4 +358,41 @@ func (r *penaltyRepo) ExpirePoints(ctx context.Context, q Querier, userID uuid.U
 	}
 	affected, err := res.RowsAffected()
 	return int(affected), err
+}
+
+func (r *penaltyRepo) rolesFrom(ctx context.Context, q Querier, query string, args ...interface{}) ([]RoleRef, error) {
+	rows, err := r.exec(q).QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := []RoleRef{}
+	for rows.Next() {
+		var ref RoleRef
+		if err := rows.Scan(&ref.UserID, &ref.Role); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+func (r *penaltyRepo) RolesWithStalePoints(ctx context.Context, before time.Time, limit int) ([]RoleRef, error) {
+	return r.rolesFrom(ctx, nil, `
+        SELECT user_id, role FROM penalty_points
+        WHERE revoked_at IS NULL AND expired_at IS NULL
+        GROUP BY user_id, role
+        HAVING max(created_at) < $1
+        ORDER BY max(created_at)
+        LIMIT $2
+    `, before, limit)
+}
+
+func (r *penaltyRepo) RolesWithExpiredSilentBlock(ctx context.Context, at time.Time, limit int) ([]RoleRef, error) {
+	return r.rolesFrom(ctx, nil, `
+        SELECT user_id, role FROM user_penalty_status
+        WHERE silent_block_ends_at IS NOT NULL AND silent_block_ends_at <= $1
+        ORDER BY silent_block_ends_at
+        LIMIT $2
+    `, at, limit)
 }

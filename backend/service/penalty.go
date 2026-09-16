@@ -146,6 +146,82 @@ func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID)
 	return point, nil
 }
 
+// SweepResult — что сделал один проход обслуживания штрафов.
+type SweepResult struct {
+	// PointsBurnt — сколько баллов сгорело по сроку давности.
+	PointsBurnt int
+	// BlocksLifted — сколько тихих блокировок снято по истечении срока.
+	BlocksLifted int
+}
+
+// sweepBatch ограничивает один проход: обслуживание не должно превращаться в
+// полную перезапись таблицы на одном тике.
+const sweepBatch = 500
+
+// Sweep — обслуживание штрафов: гасит баллы, по которым давно не было новых, и
+// снимает тихие блокировки, чей срок вышел. Вызывается воркером раз в час;
+// начисление балла делает то же самое для своей роли само, поэтому воркер —
+// про тех, кому баллов больше не приходило.
+func (s *PenaltyService) Sweep(ctx context.Context) (SweepResult, error) {
+	var result SweepResult
+	limits := s.limits(ctx)
+	now := s.now()
+
+	stale, err := s.repo.RolesWithStalePoints(ctx, now.AddDate(0, -limits.pointsTTLMonths, 0), sweepBatch)
+	if err != nil {
+		return result, err
+	}
+	for _, ref := range stale {
+		burnt := 0
+		if err := s.tx.RunInTx(ctx, func(tx *sql.Tx) error {
+			if _, err := s.repo.LockStatus(ctx, tx, ref.UserID, ref.Role); err != nil {
+				return err
+			}
+			// Внутри транзакции срок проверяется заново: балл мог прийти между
+			// выборкой и блокировкой, и тогда гасить нечего.
+			live, err := s.repo.CountLivePoints(ctx, tx, ref.UserID, ref.Role)
+			if err != nil {
+				return err
+			}
+			if live.Count == 0 || live.Last == nil || live.Last.After(now.AddDate(0, -limits.pointsTTLMonths, 0)) {
+				return nil
+			}
+			burnt, err = s.repo.ExpirePoints(ctx, tx, ref.UserID, ref.Role, now)
+			if err != nil {
+				return err
+			}
+			_, err = s.recomputeTx(ctx, tx, ref.UserID, ref.Role, recomputeAfterExpire)
+			return err
+		}); err != nil {
+			return result, err
+		}
+		if burnt > 0 {
+			result.PointsBurnt += burnt
+			log.Printf("[AUDIT] %d penalty points of user %s (%s) expired after %d months without a new one",
+				burnt, ref.UserID, ref.Role, limits.pointsTTLMonths)
+		}
+	}
+
+	expired, err := s.repo.RolesWithExpiredSilentBlock(ctx, now, sweepBatch)
+	if err != nil {
+		return result, err
+	}
+	for _, ref := range expired {
+		lifted := false
+		if err := s.tx.RunInTx(ctx, func(tx *sql.Tx) error {
+			var err error
+			lifted, err = s.liftExpiredSilentBlockTx(ctx, tx, ref.UserID, ref.Role)
+			return err
+		}); err != nil {
+			return result, err
+		}
+		if lifted {
+			result.BlocksLifted++
+		}
+	}
+	return result, nil
+}
+
 // liftExpiredSilentBlockTx снимает тихую блокировку роли, если её срок вышел.
 //
 // Блокировка живёт свой срок независимо от баллов, поэтому снимает её время, а
