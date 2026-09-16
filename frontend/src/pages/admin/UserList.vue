@@ -170,7 +170,17 @@
                   <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
                   {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
                 </button>
+                <button v-if="canSeeUsers" class="dropdown-item" @click="openHistory(u, 'penalties')">
+                  <i class="ph-bold ph-scales"></i> Штрафы
+                </button>
                 <div class="menu-divider"></div>
+                <button
+                  v-if="u.status === 'ACTIVE'"
+                  class="dropdown-item danger"
+                  @click="softBanUser(u)"
+                >
+                  <i class="ph-bold ph-lock-key"></i> Мягкий бан
+                </button>
                 <button
                   v-if="u.status === 'ACTIVE'"
                   class="dropdown-item danger"
@@ -258,6 +268,12 @@
           <button @click="toggleUserVerified(u); cardMenuId = null">
             <i class="ph-bold" :class="u.is_verified ? 'ph-seal-warning' : 'ph-seal-check'"></i>
             {{ u.is_verified ? 'Снять верификацию' : 'Верифицировать' }}
+          </button>
+          <button v-if="canSeeUsers" @click="openHistory(u, 'penalties'); cardMenuId = null">
+            <i class="ph-bold ph-scales"></i> Штрафы
+          </button>
+          <button v-if="u.status === 'ACTIVE'" class="danger" @click="softBanUser(u); cardMenuId = null">
+            <i class="ph-bold ph-lock-key"></i> Мягкий бан
           </button>
           <button class="danger" @click="toggleUserStatus(u); cardMenuId = null">
             <i class="ph-bold" :class="u.status === 'ACTIVE' ? 'ph-prohibit' : 'ph-check'"></i>
@@ -504,7 +520,7 @@ export default defineComponent({
     // лишь вкладка, на которой оно открывается.
     const showHistoryModal = ref(false)
     const historyUser = ref<any | null>(null)
-    const historyTab = ref<'transactions' | 'orders' | 'achievements'>('transactions')
+    const historyTab = ref<'transactions' | 'orders' | 'achievements' | 'penalties'>('transactions')
 
     // Права те же, что охраняют эндпоинты историй: раздел проводок и раздел
     // заказов, а не право на пользователей.
@@ -521,7 +537,9 @@ export default defineComponent({
     const canSeeOrders = computed(() => authStore.can('orders.view'))
     const canSeeAchievements = computed(() => authStore.can('achievements.view'))
 
-    const openHistory = (user: any, tab: 'transactions' | 'orders' | 'achievements') => {
+    const canSeeUsers = computed(() => authStore.can('users.view'))
+
+    const openHistory = (user: any, tab: 'transactions' | 'orders' | 'achievements' | 'penalties') => {
       historyUser.value = user
       historyTab.value = tab
       showHistoryModal.value = true
@@ -552,6 +570,7 @@ export default defineComponent({
     const statusOptions = computed(() => [
       { text: t('statuses.all'), value: '' },
       { text: t('statuses.active'), value: 'ACTIVE' },
+      { text: t('statuses.softBanned'), value: 'SOFT_BANNED' },
       { text: t('statuses.banned'), value: 'BANNED' },
     ])
 
@@ -617,6 +636,19 @@ export default defineComponent({
       } catch (err) {
         alert(t('users.updateStatusError'))
         console.error(err)
+      }
+    }
+
+    // Мягкий бан: вход остаётся, работа закрывается, человеку предлагают
+    // написать в поддержку. Снимается той же кнопкой «Активировать».
+    const softBanUser = async (user: any) => {
+      const reason = window.prompt('Причина мягкого бана — её увидит пользователь:', '')
+      if (reason === null) return
+      try {
+        await api.post(`/admin/users/${user.id}/status`, { status: 'SOFT_BANNED', reason })
+        user.status = 'SOFT_BANNED'
+      } catch (err: any) {
+        alert(err.response?.data || t('users.updateStatusError'))
       }
     }
 
@@ -919,6 +951,8 @@ export default defineComponent({
       canSendMail,
       writeMail,
       openHistory,
+      canSeeUsers,
+      softBanUser,
       totalUsers,
       page,
       limit,

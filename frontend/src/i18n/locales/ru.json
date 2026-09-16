@@ -129,6 +129,7 @@
   "statuses": {
     "all": "Все",
     "active": "Активен",
+    "softBanned": "Мягкий бан",
     "banned": "Забанен"
   },
   "topups": {
