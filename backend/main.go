@@ -346,6 +346,7 @@ func main() {
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
 	dh := handler.NewDisputeHandler(orderService)
+	pnh := handler.NewPenaltyHandler(penaltyService)
 	mh := handler.NewMailHandler(mailRepo, userRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
@@ -432,6 +433,7 @@ func main() {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
 			r.Get("/auth/me", ph.MeHandler)
+			r.Get("/me/penalty-status", pnh.MyPenaltyStatus)
 			r.Get("/user/profile", ah.GetProfileHandler)
 			// Оба пути возвращают собственный профиль вызывающего. /customer/profile
 			// оставлен здесь, а не в группе заказчика, потому что приложение
@@ -562,6 +564,9 @@ func main() {
 			r.With(can("orders.view")).Get("/admin/orders/completed", ah.GetCompletedOrdersHandler)
 			r.With(can("escalations.view")).Get("/admin/escalations", bhh.ListEscalations)
 			r.With(can("escalations.edit")).Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
+			r.With(can("users.view")).Get("/admin/users/{id}/penalties", pnh.AdminUserPenalties)
+			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/reset-silent-flag", pnh.AdminResetSilentBlockFlag)
+			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/{point_id}/revoke", pnh.AdminRevokePoint)
 			r.With(can("disputes.view")).Get("/admin/disputes", dh.ListDisputes)
 			r.With(can("disputes.edit")).Post("/admin/disputes/{id}/resolve", dh.ResolveDispute)
 			r.With(can("service_catalog.view")).Get("/admin/service-behaviors", sch.AdminListBehaviors)

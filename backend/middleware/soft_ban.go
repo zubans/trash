@@ -24,10 +24,11 @@ const SoftBannedErrorCode = "account_soft_banned"
 // работу, а себе незакрытую смену.
 var softBanAllowedRoutes = map[string]struct{}{
 	// Кто я и выход.
-	"GET /auth/me":          {},
-	"POST /logout":          {},
-	"GET /user/profile":     {},
-	"GET /customer/profile": {},
+	"GET /auth/me":           {},
+	"POST /logout":           {},
+	"GET /user/profile":      {},
+	"GET /me/penalty-status": {},
+	"GET /customer/profile":  {},
 
 	// Поддержка и её вложения.
 	"GET /support/chat":                      {},

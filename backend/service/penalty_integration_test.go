@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -393,5 +395,83 @@ func TestPenaltySweepIntegration(t *testing.T) {
 	// Повторный проход ничего не делает.
 	if got, err := penalties.Sweep(ctx); err != nil || got.PointsBurnt != 0 || got.BlocksLifted != 0 {
 		t.Fatalf("repeated sweep: %+v %v", got, err)
+	}
+}
+
+// Что пользователь знает о своих штрафах: период фото и мягкий бан — да,
+// тихую блокировку — нет. Админская карточка показывает всё.
+func TestPenaltyViewsIntegration(t *testing.T) {
+	f := newDisputeFixture(t)
+	f.cleanupPenalties(t)
+	ctx := context.Background()
+	penalties := newIntegrationPenaltyService(f.db, f.srv)
+	penalties.settings = settingsOverride{f.srv.settingsRepo, map[string]string{
+		SettingPenaltyPointsThreshold: "2",
+		SettingPhotoRequirementMonths: "3",
+		SettingSilentBlockMonths:      "6",
+	}}
+	adminID := seedExecutor(t, f.db)
+
+	for i := 0; i < 4; i++ {
+		if _, err := awardTx(t, f, penalties, PenaltyAward{UserID: f.executorID, Role: repository.RoleExecutor, AssignedBy: &adminID}); err != nil {
+			t.Fatalf("award: %v", err)
+		}
+	}
+
+	view, err := penalties.ViewFor(ctx, f.executorID)
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if _, ok := view.PhotoRequiredUntil[repository.RoleExecutor]; !ok {
+		t.Fatalf("photo period is not shown to the executor: %+v", view)
+	}
+	if view.SoftBanned {
+		t.Fatalf("a silently blocked user is told about a soft ban: %+v", view)
+	}
+	// Тихой блокировки в ответе нет вовсе — её негде и назвать.
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(raw)), "silent") || strings.Contains(strings.ToLower(string(raw)), "block") {
+		t.Fatalf("the user-facing view mentions the silent block: %s", raw)
+	}
+
+	admin, err := penalties.AdminViewFor(ctx, f.executorID)
+	if err != nil {
+		t.Fatalf("admin view: %v", err)
+	}
+	if len(admin.Points) != 4 || len(admin.Statuses) == 0 || admin.Limits[SettingPenaltyPointsThreshold] != 2 {
+		t.Fatalf("admin view: %d points, %d statuses, limits %+v", len(admin.Points), len(admin.Statuses), admin.Limits)
+	}
+	var blocked bool
+	for _, st := range admin.Statuses {
+		blocked = blocked || st.SilentBlockEndsAt != nil
+	}
+	if !blocked {
+		t.Fatal("the admin view hides the silent block")
+	}
+
+	// Чужой балл с карточки не отменяется.
+	if _, err := penalties.Revoke(ctx, admin.Points[0].ID, adminID, f.customerID); !errors.Is(err, ErrPenaltyPointNotFound) {
+		t.Fatalf("revoking someone else's point from a user card: %v", err)
+	}
+	if _, err := penalties.Revoke(ctx, admin.Points[0].ID, adminID, f.executorID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	// Сброс флага прошлой тихой блокировки.
+	if err := repository.NewPenaltyRepository(f.db).MarkSilentBlockLifted(ctx, nil, f.executorID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := penalties.ResetSilentBlockFlag(ctx, f.executorID, adminID); err != nil {
+		t.Fatalf("reset flag: %v", err)
+	}
+	flags, err := repository.NewPenaltyRepository(f.db).GetFlags(ctx, nil, f.executorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags.HadSilentBlockAt != nil {
+		t.Fatalf("flag still set: %+v", flags)
 	}
 }
