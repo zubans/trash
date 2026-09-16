@@ -115,10 +115,16 @@ export const useAuthStore = defineStore('auth', {
       user: null as CurrentUser | null,
       userLoading: false,
       userError: '',
+      // Сервер отказал с кодом мягкого бана раньше, чем пришёл /auth/me.
+      softBanReported: false,
     }
   },
   getters: {
     isAuthenticated: (state) => !!state.token,
+    // Мягкий бан: вход разрешён, работа закрыта. Экран блокировки показывается
+    // по статусу из /auth/me или по отказу сервера с кодом мягкого бана.
+    isSoftBanned: (state) =>
+      !!state.token && (state.user?.status === 'SOFT_BANNED' || (state.softBanReported && state.user?.status !== 'ACTIVE')),
     balance: (state) => state.user?.balance ?? null,
     fullName: (state) => {
       if (!state.user) return ''
@@ -165,6 +171,9 @@ export const useAuthStore = defineStore('auth', {
     },
   },
   actions: {
+    reportSoftBan() {
+      this.softBanReported = true
+    },
     login(token: string, role: string, phone: string, userID: string, refreshToken?: string) {
       this.token = token
       this.userID = userID
@@ -192,6 +201,7 @@ export const useAuthStore = defineStore('auth', {
       setStoredItem('phone', phone)
     },
     logout() {
+      this.softBanReported = false
       this.token = ''
       this.userID = ''
       this.role = ''
