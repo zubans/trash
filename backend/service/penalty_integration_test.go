@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -125,5 +126,100 @@ func TestPenaltyJournalIntegration(t *testing.T) {
 	}
 	if len(journal) != 3 {
 		t.Fatalf("journal keeps %d rows, want 3 (revoked included)", len(journal))
+	}
+}
+
+func penaltyStatus(t *testing.T, db *sql.DB, userID uuid.UUID, role string) repository.PenaltyStatus {
+	t.Helper()
+	statuses, err := repository.NewPenaltyRepository(db).ListStatuses(context.Background(), nil, userID)
+	if err != nil {
+		t.Fatalf("statuses: %v", err)
+	}
+	for _, st := range statuses {
+		if st.Role == role {
+			return st
+		}
+	}
+	return repository.PenaltyStatus{UserID: userID, Role: role}
+}
+
+func sameMoment(a *time.Time, b time.Time) bool {
+	return a != nil && a.Sub(b).Abs() < time.Second
+}
+
+// Порог N включает и продлевает период фото, 2×N включает тихую блокировку,
+// отмена ошибочных баллов снимает то, что на них держалось.
+func TestPenaltyPeriodAndSilentBlockIntegration(t *testing.T) {
+	f := newDisputeFixture(t)
+	f.cleanupPenalties(t)
+	penalties := newIntegrationPenaltyService(f.db, f.srv)
+	penalties.settings = settingsOverride{f.srv.settingsRepo, map[string]string{
+		SettingPenaltyPointsThreshold: "2",
+		SettingPhotoRequirementMonths: "3",
+		SettingSilentBlockMonths:      "6",
+	}}
+	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	penalties.now = func() time.Time { return clock }
+	adminID := seedExecutor(t, f.db)
+	award := func() *repository.PenaltyPoint {
+		t.Helper()
+		points, err := awardTx(t, f, penalties, PenaltyAward{UserID: f.executorID, Role: repository.RoleExecutor, AssignedBy: &adminID})
+		if err != nil {
+			t.Fatalf("award: %v", err)
+		}
+		return points[0]
+	}
+	status := func() repository.PenaltyStatus { return penaltyStatus(t, f.db, f.executorID, repository.RoleExecutor) }
+
+	first := award()
+	if st := status(); st.PhotoRequiredUntil != nil || st.SilentBlockEndsAt != nil {
+		t.Fatalf("one point below the threshold: %+v", st)
+	}
+
+	second := award()
+	periodStart := clock
+	if st := status(); !sameMoment(st.PhotoRequiredUntil, periodStart.AddDate(0, 3, 0)) || st.SilentBlockEndsAt != nil {
+		t.Fatalf("threshold reached: %+v", st)
+	}
+
+	// Новый балл через месяц продлевает период на три месяца от себя.
+	clock = clock.AddDate(0, 1, 0)
+	third := award()
+	if st := status(); !sameMoment(st.PhotoRequiredUntil, clock.AddDate(0, 3, 0)) {
+		t.Fatalf("period not extended: %+v", st)
+	}
+
+	blockStart := clock.Add(time.Hour)
+	clock = blockStart
+	fourth := award()
+	st := status()
+	if st.ActivePoints != 4 || !sameMoment(st.SilentBlockStartedAt, blockStart) || !sameMoment(st.SilentBlockEndsAt, blockStart.AddDate(0, 6, 0)) {
+		t.Fatalf("silent block at 2×N: %+v", st)
+	}
+
+	// Пятый балл идущую блокировку не продлевает.
+	clock = clock.AddDate(0, 0, 10)
+	award()
+	if st := status(); !sameMoment(st.SilentBlockEndsAt, blockStart.AddDate(0, 6, 0)) {
+		t.Fatalf("silent block extended by a new point: %+v", st)
+	}
+
+	// Отмена ошибочных баллов: ниже 2×N блокировка снимается сразу, ниже N —
+	// и период.
+	for _, p := range []*repository.PenaltyPoint{fourth, first} {
+		if _, err := penalties.Revoke(context.Background(), p.ID, adminID); err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+	}
+	if st := status(); st.ActivePoints != 3 || st.SilentBlockEndsAt != nil || st.PhotoRequiredUntil == nil {
+		t.Fatalf("after revoking to 3: %+v", st)
+	}
+	for _, p := range []*repository.PenaltyPoint{second, third} {
+		if _, err := penalties.Revoke(context.Background(), p.ID, adminID); err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+	}
+	if st := status(); st.ActivePoints != 1 || st.PhotoRequiredUntil != nil {
+		t.Fatalf("below the threshold after revokes: %+v", st)
 	}
 }
