@@ -399,7 +399,7 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		if err != nil {
 			return nil, err
 		}
-		if err := canCustomerOrderVariant(ctx, s.behaviors, customer, variant); err != nil {
+		if err := canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -667,7 +667,7 @@ func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID 
 		return err
 	}
 	customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-	return canViewOrTakeOrder(ctx, s.behaviors, viewer, customer, variant)
+	return canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customer, variant)
 }
 
 // checkAcceptRadius не даёт взять заказ дальше радиуса взятия.
@@ -1141,7 +1141,7 @@ func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID u
 		if err != nil {
 			return nil, err
 		}
-		if err := canCustomerOrderVariant(ctx, s.behaviors, customer, variant); err != nil {
+		if err := canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant); err != nil {
 			return nil, err
 		}
 	}
@@ -1296,7 +1296,7 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 		// путь принятия: заказы только для модераторов идут модераторам; обычные
 		// заказы следуют сегментации по верификации заказчика и стандартным
 		// проверкам исполнителя (requires_verification, min_age, бан).
-		if canViewOrTakeOrder(ctx, s.behaviors, viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
+		if canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
 			continue
 		}
 

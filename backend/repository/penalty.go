@@ -86,6 +86,8 @@ type PenaltyRepository interface {
 	LockStatus(ctx context.Context, q Querier, userID uuid.UUID, role string) (*PenaltyStatus, error)
 	// SaveStatus записывает пересчитанное состояние роли.
 	SaveStatus(ctx context.Context, q Querier, st *PenaltyStatus) error
+	// Status — состояние одной роли; для роли без строки — пустое.
+	Status(ctx context.Context, q Querier, userID uuid.UUID, role string) (*PenaltyStatus, error)
 	// ListStatuses — состояния всех ролей пользователя.
 	ListStatuses(ctx context.Context, q Querier, userID uuid.UUID) ([]PenaltyStatus, error)
 
@@ -395,4 +397,13 @@ func (r *penaltyRepo) RolesWithExpiredSilentBlock(ctx context.Context, at time.T
         ORDER BY silent_block_ends_at
         LIMIT $2
     `, at, limit)
+}
+
+func (r *penaltyRepo) Status(ctx context.Context, q Querier, userID uuid.UUID, role string) (*PenaltyStatus, error) {
+	st, err := scanPenaltyStatus(r.exec(q).QueryRowContext(ctx,
+		`SELECT `+penaltyStatusColumns+` FROM user_penalty_status WHERE user_id = $1 AND role = $2`, userID, role))
+	if errors.Is(err, sql.ErrNoRows) {
+		return &PenaltyStatus{UserID: userID, Role: role}, nil
+	}
+	return st, err
 }
