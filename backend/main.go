@@ -25,6 +25,7 @@ import (
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
+	"healthlogin/backend/photoproof"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 	"healthlogin/backend/worker"
@@ -77,6 +78,8 @@ func main() {
 	roleRepo := repository.NewRoleRepository(db)
 	penaltyRepo := repository.NewPenaltyRepository(db)
 	disputeRepo := repository.NewDisputeRepository(db)
+	// Фото-подтверждение — отдельный модуль со своей схемой и своими правилами.
+	photoProofService := photoproof.NewService(photoproof.NewSymbolRepository(db))
 	// system_settings — несколько строк, читаемых на путях ценообразования,
 	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
 	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
@@ -347,6 +350,7 @@ func main() {
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
 	dh := handler.NewDisputeHandler(orderService)
 	pnh := handler.NewPenaltyHandler(penaltyService)
+	pph := photoproof.NewHandler(photoProofService)
 	mh := handler.NewMailHandler(mailRepo, userRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
@@ -596,6 +600,7 @@ func main() {
 			r.With(can("gifts.create")).Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
 			r.With(can("gifts.edit")).Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
 			mh.RegisterAdminRoutes(r, can)
+			pph.RegisterAdminRoutes(r, can)
 			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
 			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
 		})
