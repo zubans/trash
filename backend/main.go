@@ -225,7 +225,8 @@ func main() {
 		WithDisputes(disputeRepo).
 		WithPenalties(penaltyService).
 		WithDisputeNotifier(service.NewDisputeNotifier(mailRepo, userRepo, mailer)).
-		WithPhotoProof(photoProofService)
+		WithPhotoProof(photoProofService).
+		WithEvidence(photoProofService)
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors).
@@ -578,6 +579,7 @@ func main() {
 			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/reset-silent-flag", pnh.AdminResetSilentBlockFlag)
 			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/{point_id}/revoke", pnh.AdminRevokePoint)
 			r.With(can("disputes.view")).Get("/admin/disputes", dh.ListDisputes)
+			r.With(can("disputes.view")).Get("/admin/disputes/{id}/evidence", dh.DisputeEvidence)
 			r.With(can("disputes.edit")).Post("/admin/disputes/{id}/resolve", dh.ResolveDispute)
 			r.With(can("service_catalog.view")).Get("/admin/service-behaviors", sch.AdminListBehaviors)
 			r.With(can("service_catalog.view")).Get("/admin/service-nodes", sch.AdminListNodes)

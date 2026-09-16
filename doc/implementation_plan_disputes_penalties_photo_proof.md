@@ -313,6 +313,9 @@
 | `POST` | `/api/executor/orders/{id}/photo-proof` | исполнитель; идемпотентный по ключу снимка |
 | `GET` | `/api/me/penalty-status` | любой; период фото и `SOFT_BANNED`, про тихую блокировку молчит |
 | `GET` | `/api/admin/disputes` | `disputes.view` |
+| `GET` | `/api/admin/disputes/{id}/evidence` | `disputes.view`; карточка доказательств |
+| `GET` | `/api/admin/photo-proofs/{id}/file` | `disputes.view`; файл снимка |
+| `POST` | `/api/executor/positions` | исполнитель; пачка точек трека |
 | `POST` | `/api/admin/disputes/{id}/resolve` | `disputes.edit`; `{ "decision": "executor" \| "customer" \| "unknown" }`, `409` для закрытого спора |
 | `GET`/`POST`/`PUT`/`DELETE` | `/api/admin/watermark-symbols[/{id}]` | `watermarks.*` |
 | `GET` | `/api/admin/users/{id}/penalties` | `users.view` |

@@ -99,7 +99,7 @@ func (s *Service) RecordLive(ctx context.Context, executorID uuid.UUID, lat, lon
 	return err
 }
 
-// NearestPosition отдаёт точку трека, ближайшую по времени устройства к
+// NearestPosition отдаёт отчёт трека (LIVE), ближайший по времени устройства к
 // моменту at, в пределах окна из настроек. Нет такой точки — nil без ошибки:
 // отсутствие трека само по себе не сбой.
 func (s *Service) NearestPosition(ctx context.Context, q Querier, executorID uuid.UUID, at time.Time) (*Position, error) {

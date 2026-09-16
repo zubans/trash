@@ -44,8 +44,9 @@ type TrackRepository interface {
 	// client_key) молча пропускается: офлайн-очередь повторяет то, что не
 	// смогла подтвердить.
 	Add(ctx context.Context, q Querier, positions []Position) (int, error)
-	// Nearest отдаёт точку, ближайшую по времени устройства к at, но не дальше
-	// window. Нет такой — nil.
+	// Nearest отдаёт отчёт LIVE, ближайший по времени устройства к at, но не
+	// дальше window. Нет такого — nil. Точки PHOTO не участвуют: это координаты,
+	// которые телефон назвал вместе со снимком, и подтверждать ими снимок нельзя.
 	Nearest(ctx context.Context, q Querier, executorID uuid.UUID, at time.Time, window time.Duration) (*Position, error)
 	// DeleteOlderThan чистит трек по возрасту.
 	DeleteOlderThan(ctx context.Context, before time.Time) (int, error)
@@ -118,7 +119,7 @@ func (r *trackRepo) Nearest(ctx context.Context, q Querier, executorID uuid.UUID
 	err := r.exec(q).QueryRowContext(ctx, `
         SELECT id, executor_id, lat, lon, accuracy_m, source, order_id, device_at, reported_at, client_key
         FROM executor_positions
-        WHERE executor_id = $1 AND device_at BETWEEN $2 AND $3
+        WHERE executor_id = $1 AND source = 'LIVE' AND device_at BETWEEN $2 AND $3
         ORDER BY abs(EXTRACT(EPOCH FROM (device_at - $4)))
         LIMIT 1
     `, executorID, at.Add(-window), at.Add(window), at).

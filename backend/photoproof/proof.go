@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +111,8 @@ func (noChecker) Check([]byte, CheckInput) (string, string) { return SealMissing
 // Storage сохраняет файл снимка и отдаёт его путь для ссылок.
 type Storage interface {
 	Save(orderID uuid.UUID, name string, data []byte) (string, error)
+	// Open открывает сохранённый файл по пути, который вернул Save.
+	Open(fileURL string) (io.ReadCloser, error)
 }
 
 // DiskStorage кладёт снимки в каталог загрузок: <root>/photo-proofs/<заказ>/.
@@ -127,6 +130,33 @@ func (d DiskStorage) Save(orderID uuid.UUID, name string, data []byte) (string, 
 		return "", err
 	}
 	return "/uploads/photo-proofs/" + orderID.String() + "/" + name, nil
+}
+
+// Open открывает файл снимка. Путь принимается только того вида, какой отдаёт
+// Save: никакого выхода за каталог снимков.
+func (d DiskStorage) Open(fileURL string) (io.ReadCloser, error) {
+	const prefix = "/uploads/photo-proofs/"
+	rel := strings.TrimPrefix(fileURL, prefix)
+	if rel == fileURL || strings.Contains(rel, "..") || strings.HasPrefix(rel, "/") {
+		return nil, os.ErrNotExist
+	}
+	return os.Open(filepath.Join(d.Root, "photo-proofs", filepath.FromSlash(rel)))
+}
+
+// ProofByID отдаёт снимок по id.
+func (s *Service) ProofByID(ctx context.Context, id uuid.UUID) (*Proof, error) {
+	if s.db == nil {
+		return nil, sql.ErrNoRows
+	}
+	return scanProof(s.db.QueryRowContext(ctx, `SELECT `+proofColumns+` FROM order_photo_proofs WHERE id = $1`, id))
+}
+
+// OpenProofFile открывает файл снимка.
+func (s *Service) OpenProofFile(p *Proof) (io.ReadCloser, error) {
+	if s.storage == nil {
+		return nil, os.ErrNotExist
+	}
+	return s.storage.Open(p.FileURL)
 }
 
 // WithProofs подключает приём снимков: базу, хранилище файлов и проверку.

@@ -550,3 +550,7 @@ func TestAuthService_NewAuthService(t *testing.T) {
 		t.Error("expected non-nil AuthService")
 	}
 }
+
+func (f *mockExecutorGeoRepo) GeoAlertsBetween(ctx context.Context, executorID uuid.UUID, from, to time.Time) ([]repository.GeoAlert, error) {
+	return nil, nil
+}
