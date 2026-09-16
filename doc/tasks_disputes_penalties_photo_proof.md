@@ -506,3 +506,7 @@ Issue: [zubans/trash#16](https://github.com/zubans/trash/issues/16).
 
 **Готово:** приложение обновляется на устройстве, камера и офлайн-очередь
 работают.
+
+Частично: `cap sync android` выполнен, плагины `filesystem` и `network`
+подключены в Gradle. Сборка APK, проверка на устройстве и загрузка релиза
+остаются (локально нет Android SDK).
