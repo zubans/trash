@@ -9,6 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.12.3
 	github.com/prometheus/client_golang v1.24.0
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	go.starlark.net v0.0.0-20231101134539-556fd59b42f6
 	golang.org/x/crypto v0.53.0
 )

@@ -2,6 +2,7 @@ package photoproof
 
 import (
 	"context"
+	"database/sql"
 	"strconv"
 	"time"
 
@@ -32,6 +33,11 @@ type Service struct {
 	track    TrackRepository
 	settings SettingsReader
 	now      func() time.Time
+
+	// Приём снимков (WithProofs).
+	db      *sql.DB
+	storage Storage
+	checker Checker
 }
 
 // NewService создаёт Service.

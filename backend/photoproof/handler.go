@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -27,9 +31,110 @@ func NewHandler(service *Service, callerID func(*http.Request) uuid.UUID) *Handl
 	return &Handler{service: service, callerID: callerID}
 }
 
-// RegisterExecutorRoutes подключает приём точек трека.
+// RegisterExecutorRoutes подключает приём точек трека и снимков.
 func (h *Handler) RegisterExecutorRoutes(r chi.Router) {
 	r.Post("/executor/positions", h.RecordPositions)
+	r.Post("/executor/orders/{id}/photo-proof", h.UploadProof)
+}
+
+// uploadedProof — ответ исполнителю о принятом снимке. Результатов проверки в
+// нём нет: исполнитель о проверке не знает.
+type uploadedProof struct {
+	ID         uuid.UUID `json:"id"`
+	Kind       string    `json:"kind"`
+	Camera     string    `json:"camera"`
+	ClientKey  string    `json:"client_key"`
+	UploadedAt time.Time `json:"uploaded_at"`
+}
+
+// UploadProof обслуживает POST /executor/orders/{id}/photo-proof (multipart):
+// file — JPEG как есть; kind — AREA или SELFIE; camera — FRONT или REAR;
+// client_key — ключ отправки; device_taken_at — время съёмки по часам телефона
+// (RFC 3339 с поясом); device_lat, device_lon, device_accuracy_m — где был
+// телефон, если известно.
+func (h *Handler) UploadProof(w http.ResponseWriter, r *http.Request) {
+	executor := h.caller(r)
+	if executor == uuid.Nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid order id", http.StatusBadRequest)
+		return
+	}
+
+	// Запас сверх снимка — на поля формы.
+	r.Body = http.MaxBytesReader(w, r.Body, MaxPhotoBytes+(1<<20))
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		http.Error(w, ErrProofTooLarge.Error(), http.StatusRequestEntityTooLarge)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "нет файла снимка", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, MaxPhotoBytes+1))
+	if err != nil {
+		http.Error(w, "не удалось прочитать снимок", http.StatusBadRequest)
+		return
+	}
+
+	takenAt, err := time.Parse(time.RFC3339, r.FormValue("device_taken_at"))
+	if err != nil {
+		http.Error(w, ErrProofDeviceTime.Error(), http.StatusBadRequest)
+		return
+	}
+	in := UploadInput{
+		Kind:          r.FormValue("kind"),
+		Camera:        r.FormValue("camera"),
+		ClientKey:     r.FormValue("client_key"),
+		DeviceTakenAt: takenAt,
+		DeviceLat:     formFloat(r, "device_lat"),
+		DeviceLon:     formFloat(r, "device_lon"),
+		DeviceAccM:    formFloat(r, "device_accuracy_m"),
+		Data:          data,
+	}
+
+	proof, err := h.service.UploadProof(r.Context(), executor, orderID, in)
+	if err != nil {
+		writeProofError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, uploadedProof{ID: proof.ID, Kind: proof.Kind, Camera: proof.Camera, ClientKey: proof.ClientKey, UploadedAt: proof.UploadedAt})
+}
+
+func formFloat(r *http.Request, name string) *float64 {
+	raw := strings.TrimSpace(r.FormValue(name))
+	if raw == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+func writeProofError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrProofOrderAbsent):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, ErrProofForbidden):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, ErrProofClosed):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, ErrProofTooLarge):
+		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+	case errors.Is(err, ErrProofNotRequired), errors.Is(err, ErrProofKind), errors.Is(err, ErrProofCamera),
+		errors.Is(err, ErrProofNotJPEG), errors.Is(err, ErrProofClientKey), errors.Is(err, ErrProofDeviceTime):
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // RecordPositions обслуживает POST /executor/positions: пачка точек трека с
