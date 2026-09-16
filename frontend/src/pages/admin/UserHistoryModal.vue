@@ -270,6 +270,7 @@ const STATUS_LABELS: Record<string, string> = {
   SEARCHING: 'в поиске',
   ASSIGNED: 'у исполнителя',
   EXECUTED: 'выполнен',
+  DISPUTED: 'спор',
   COMPLETED: 'завершён',
   CANCELED: 'отменён',
 }

@@ -224,6 +224,7 @@ export default defineComponent({
         case 'SEARCHING': return 'status-searching'
         case 'ASSIGNED': return 'status-assigned'
         case 'EXECUTED': return 'status-executed'
+        case 'DISPUTED': return 'status-disputed'
         case 'COMPLETED': return 'status-completed'
         case 'CANCELED': return 'status-canceled'
         default: return 'status-default'
@@ -382,6 +383,10 @@ export default defineComponent({
 
 .status-executed {
   background: var(--info-bg); color: var(--info-main);
+}
+.status-disputed {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .status-completed {

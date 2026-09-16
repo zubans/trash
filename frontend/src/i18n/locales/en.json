@@ -414,6 +414,7 @@
     "SEARCHING": "Searching",
     "ASSIGNED": "Assigned",
     "EXECUTED": "Executed",
+    "DISPUTED": "Disputed",
     "COMPLETED": "Completed",
     "CANCELED": "Cancelled"
   },
