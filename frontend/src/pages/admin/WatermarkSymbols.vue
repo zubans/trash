@@ -224,7 +224,7 @@ export default defineComponent({
 .editor h3 { margin: 0 0 12px; font-size: 16px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .editor label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #64748b; font-weight: 600; }
-.editor input:not([type='checkbox']), .editor textarea { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; font-size: 14px; font-family: inherit; color: #0f172a; }
+.editor input:not([type='checkbox']), .editor textarea { box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; font-size: 14px; font-family: inherit; color: #0f172a; }
 .editor .wide { margin-top: 10px; }
 .editor .check { flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; color: #334155; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

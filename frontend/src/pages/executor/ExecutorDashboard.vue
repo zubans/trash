@@ -233,7 +233,7 @@
       <div v-if="photoPeriodActive" class="proof-period-banner">
         <i class="ph-fill ph-camera"></i>
         <div>
-          <div class="proof-period-title">Доп. задание до {{ formatDate(photoPeriodUntil) }}</div>
+          <div class="proof-period-title">Доп. задание до {{ formatDay(photoPeriodUntil) }}</div>
           <div class="proof-period-text">
             Каждый заказ закрывается с фотографией места заказа и жестом рядом с объектом.
             На время доп. задания приложение передаёт местоположение.
@@ -1580,8 +1580,11 @@ export default defineComponent({
       const periodTracking = photoPeriodActive.value
       if (!shiftTracking && !periodTracking) return
 
-      await updateCurrentPosition()
-      if (currentLat.value === null || currentLon.value === null) return
+      // Только свежая позиция устройства. Если её прочитать не удалось, на экране
+      // осталась прежняя или вовсе точка по умолчанию — в отчёт и тем более в
+      // трек, который сверяют со снимками, она попасть не должна.
+      const fresh = await updateCurrentPosition()
+      if (!fresh || currentLat.value === null || currentLon.value === null) return
 
       if (shiftTracking && networkOnline.value) {
         try {
@@ -1984,6 +1987,10 @@ export default defineComponent({
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
+    // Период доп. задания длится месяцами: для него нужна дата, а не время.
+    const formatDay = (dateStr: string) =>
+      dateStr ? new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+
     const handleLogout = async () => {
       try {
         await api.post('/logout', { refresh_token: getRefreshToken() })
@@ -2187,6 +2194,7 @@ export default defineComponent({
       concedeDispute,
       photoPeriodUntil,
       photoPeriodActive,
+      formatDay,
       networkOnline,
       queuePending,
       queuePendingPhotos,

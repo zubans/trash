@@ -329,7 +329,7 @@ export default defineComponent({
 .flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .flag { background: #fef2f2; color: #b91c1c; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
 .decide { border-top: 1px solid #f1f5f9; margin-top: 12px; padding-top: 12px; }
-.note-input { width: 100%; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; font-family: inherit; font-size: 14px; resize: vertical; }
+.note-input { box-sizing: border-box; width: 100%; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; font-family: inherit; font-size: 14px; resize: vertical; }
 .decide-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .btn-decide { height: 40px; border-radius: 10px; border: none; padding: 0 14px; font-weight: 600; cursor: pointer; font-family: inherit; color: #fff; }
 .btn-decide:disabled { opacity: 0.55; cursor: default; }
