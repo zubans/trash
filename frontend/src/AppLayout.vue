@@ -138,6 +138,11 @@
             <span v-if="!sidebarMinimized || isMobile">Споры</span>
           </router-link>
 
+          <router-link v-if="can('watermarks.view')" to="/admin/watermark-symbols" class="nav-item" :class="{ active: currentRouteName === 'admin-watermark-symbols' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-hand-peace"></i>
+            <span v-if="!sidebarMinimized || isMobile">Символы подтверждения</span>
+          </router-link>
+
           <router-link v-if="can('settings.view')" to="/admin/settings" class="nav-item" :class="{ active: currentRouteName === 'admin-settings' }" @click="closeSidebarOnMobile">
             <i class="ph ph-gear"></i>
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
@@ -212,6 +217,7 @@ const PAGE_TITLE_KEYS: Record<string, string> = {
   'admin-service-catalog': 'serviceCatalog',
   'admin-escalations': 'escalations',
   'admin-disputes': 'disputes',
+  'admin-watermark-symbols': 'watermarkSymbols',
   'admin-achievements': 'achievements',
   'admin-gifts': 'gifts',
   'admin-incidents': 'incidents',
