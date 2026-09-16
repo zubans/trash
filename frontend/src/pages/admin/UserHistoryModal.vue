@@ -363,6 +363,7 @@ const TYPE_LABELS: Record<string, string> = {
   TIP_REWARD: 'Чаевые исполнителю',
   COMMISSION: 'Комиссия платформы',
   BONUS: 'Бонус',
+  DISPUTE_REWARD: 'Оплата по спору',
 }
 
 type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties'

@@ -2,7 +2,7 @@
   <div class="active-orders">
     <va-data-table :items="orders" :columns="columns" :loading="loading">
       <template #cell(status)="{ value }">
-        <va-badge :color="getStatusColor(value)">{{ value }}</va-badge>
+        <va-badge :color="getStatusColor(value)">{{ value === 'DISPUTED' ? 'СПОР' : value }}</va-badge>
       </template>
 
       <template #cell(hold_amount)="{ value }">
@@ -72,6 +72,9 @@ export default defineComponent({
           return 'warning'
         case 'ASSIGNED':
           return 'info'
+        // Спор выделен цветом: заказ ждёт решения арбитра.
+        case 'DISPUTED':
+          return 'danger'
         case 'COMPLETED':
           return 'success'
         case 'CANCELED':
