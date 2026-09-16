@@ -137,7 +137,7 @@ Content-Type: application/json
 ### 2.8b Штрафные баллы на карточке пользователя
 
 Журнал штрафных баллов и то, во что они сложились
-([`disputes_and_penalties`](./implementation_plan_disputes_penalties_photo_proof.md#2-баллы-и-блокировки)).
+([`disputes_and_penalties.md`](./disputes_and_penalties.md#2-штрафные-баллы)).
 
 - **`GET /api/admin/users/{id}/penalties`** (право `users.view`) — журнал
   баллов (включая отменённые и сгоревшие), состояние каждой роли (активные

@@ -24,7 +24,7 @@
 | :--- | :--- | :--- |
 | **Авторизация и роли** | JWT, разграничение прав (Customer, Executor, Admin), blacklist токенов. | [`auth_service.md`](./auth_service.md) |
 | **Биллинг и тарифы** | Внутренние кошельки, холдирование, выплаты, штрафы и коэффициенты тарифов. | [`financial_system.md`](./financial_system.md) |
-| **Жизненный цикл заказов** | Статусы (`SEARCHING`, `ASSIGNED`, `COMPLETED`, `CANCELED`) и SLA. | [`order_lifecycle.md`](./order_lifecycle.md) |
+| **Жизненный цикл заказов** | Статусы (`SEARCHING`, `ASSIGNED`, `EXECUTED`, `DISPUTED`, `COMPLETED`, `CANCELED`) и SLA. | [`order_lifecycle.md`](./order_lifecycle.md) |
 | **Аукцион строительного мусора** | Торги по заказам категории `CONSTRUCTION`, размещение и приём ставок. | [`bids_and_auction.md`](./bids_and_auction.md) |
 | **Геолокация и мэтчинг** | Подбор исполнителей в радиусе 2 км, геозоны (`CIRCLE`/`POLYGON`), учет смен. | [`geolocation_and_matching.md`](./geolocation_and_matching.md) |
 | **Подсказки адресов (DaData)** | Интеграция с DaData, валидация и структурирование адресов (ФИАС, координаты). | [`address_suggestions.md`](./address_suggestions.md) |
@@ -39,7 +39,8 @@
 | **Локальный запуск** | Полный стек на своей машине: приложение, БД, Mailpit и мониторинг одной командой. | [`local_run.md`](./local_run.md) |
 | **Мониторинг и метрики** | Метрики бэкенда, стек Prometheus/Grafana/Alertmanager и экспортеры. | [`monitoring.md`](./monitoring.md) |
 | **Миграции БД** | Перечень SQL-миграций и регламент их применения. | [`migration.md`](./migration.md) |
-| **Споры, штрафы, фото-подтверждение** *(план)* | Арбитраж спорных заказов, журнал штрафных баллов, тихая блокировка и `SOFT_BANNED`, фото с жестом. | [`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md), [`tasks_disputes_penalties_photo_proof.md`](./tasks_disputes_penalties_photo_proof.md) |
+| **Споры и штрафные баллы** | Арбитраж спорных заказов, журнал штрафных баллов, тихая блокировка и мягкий бан `SOFT_BANNED`. | [`disputes_and_penalties.md`](./disputes_and_penalties.md) |
+| **Фото-подтверждение** | Жесты, снимки со скрытой защитой, трек исполнителя, сверка в арбитраже, работа без сети. | [`photo_proof.md`](./photo_proof.md) |
 
 ---
 

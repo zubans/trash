@@ -116,6 +116,16 @@ r.With(can("roles.edit")).Post("/admin/users/{id}/roles", ah.UpdateUserRolesHand
 
 ---
 
+### Права споров, штрафов и жестов
+
+Миграция `053` выдаёт роли `MODERATOR` `disputes.view`, `disputes.edit` и
+`penalties.edit`: разбор споров — та же работа, что разбор проверок. Раздел
+`watermarks.*` (символы подтверждения) по умолчанию есть только у `ADMIN`.
+Раздел `penalties` пункта меню не имеет: его действия — на карточке
+пользователя. См. [`disputes_and_penalties.md`](./disputes_and_penalties.md).
+
+---
+
 ## 4. Эндпоинты
 
 | Метод | Путь | Право |
