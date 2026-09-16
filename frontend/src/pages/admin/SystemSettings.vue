@@ -197,6 +197,96 @@
           </div>
         </div>
 
+        <!-- Споры, штрафные баллы и фото-подтверждение -->
+        <div class="settings-card">
+          <div class="section-header">
+            <div class="section-icon icon-warning">
+              <i class="ph-fill ph-scales"></i>
+            </div>
+            <div class="section-title-group">
+              <div class="section-title">Споры, штрафные баллы и фото-подтверждение</div>
+              <div class="section-desc">
+                Пороги наказаний по итогам споров и пороги, по которым арбитраж подсвечивает расхождения в снимках.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Порог штрафных баллов (N)</label>
+                <div class="input-hint">N баллов включают фото-подтверждение, 2×N — тихую блокировку.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.penalty_points_threshold" type="number" step="1" min="1" max="100" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Длительность фото-подтверждения (мес.)</label>
+                <div class="input-hint">Период доп. задания и шаг, на который его продлевает новый балл.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.photo_requirement_months" type="number" step="1" min="1" max="60" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Срок жизни баллов (мес.)</label>
+                <div class="input-hint">Сколько месяцев без нового балла баллы роли живут, потом сгорают.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.penalty_points_ttl_months" type="number" step="1" min="1" max="60" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Длительность тихой блокировки (мес.)</label>
+                <div class="input-hint">Снимается ровно через этот срок, независимо от сгорания баллов.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.silent_block_months" type="number" step="1" min="1" max="60" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Порог времени снимка (мин)</label>
+                <div class="input-hint">Арбитраж подсвечивает снимок, сделанный дальше этого от отметки «Исполнил».</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.photo_proof_max_time_diff_min" type="number" step="1" min="1" max="1440" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Порог расстояния снимка (м)</label>
+                <div class="input-hint">Арбитраж подсвечивает снимок, сделанный дальше этого от адреса заказа.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.photo_proof_max_distance_m" type="number" step="10" min="1" max="100000" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Окно поиска точки трека (мин)</label>
+                <div class="input-hint">Насколько далеко по времени от съёмки может быть точка трека, чтобы подтверждать снимок.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.photo_proof_max_track_gap_min" type="number" step="1" min="1" max="1440" required />
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="input-header">
+                <label class="input-label">Хранение трека исполнителей (дн.)</label>
+                <div class="input-hint">Сколько дней хранятся точки местоположения.</div>
+              </div>
+              <div class="input-wrapper">
+                <input v-model="values.executor_track_days" type="number" step="1" min="1" max="3650" required />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Карточка 3: SLA и Лимиты -->
         <div class="settings-card">
           <div class="section-header">
@@ -389,6 +479,15 @@ export default defineComponent({
       auto_matching_enabled: '0',
       auto_shift_on_accept_enabled: '1',
       auto_shift_duration_hours: '1',
+      // Споры и фото-подтверждение: значения миграций 053 и 055.
+      penalty_points_threshold: '2',
+      photo_requirement_months: '3',
+      penalty_points_ttl_months: '3',
+      silent_block_months: '6',
+      photo_proof_max_time_diff_min: '30',
+      photo_proof_max_distance_m: '300',
+      photo_proof_max_track_gap_min: '15',
+      executor_track_days: '30',
     })
 
     // Тот же список, что принимает бэкенд (service.ShiftDurationsHours): смену,
