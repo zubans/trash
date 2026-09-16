@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,7 +100,7 @@ func (s *PenaltyService) AwardTx(ctx context.Context, tx *sql.Tx, awards ...Pena
 		if err := s.repo.AddPoint(ctx, tx, point); err != nil {
 			return nil, err
 		}
-		if _, err := s.recomputeTx(ctx, tx, a.UserID, a.Role); err != nil {
+		if _, err := s.recomputeTx(ctx, tx, a.UserID, a.Role, recomputeAfterAward); err != nil {
 			return nil, err
 		}
 		points = append(points, point)
@@ -124,7 +125,7 @@ func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID)
 		if _, err := s.repo.LockStatus(ctx, tx, point.UserID, point.Role); err != nil {
 			return err
 		}
-		_, err = s.recomputeTx(ctx, tx, point.UserID, point.Role)
+		_, err = s.recomputeTx(ctx, tx, point.UserID, point.Role, recomputeAfterRevoke)
 		return err
 	})
 	if err != nil {
@@ -133,9 +134,71 @@ func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID)
 	return point, nil
 }
 
+// penaltyLimits — настройки механики на момент пересчёта.
+type penaltyLimits struct {
+	threshold         int
+	photoMonths       int
+	pointsTTLMonths   int
+	silentBlockMonths int
+}
+
+func (s *PenaltyService) limits(ctx context.Context) penaltyLimits {
+	l := penaltyLimits{
+		threshold:         defaultPenaltyPointsThreshold,
+		photoMonths:       defaultPhotoRequirementMonths,
+		pointsTTLMonths:   defaultPenaltyPointsTTLMonths,
+		silentBlockMonths: defaultSilentBlockMonths,
+	}
+	if s.settings == nil {
+		return l
+	}
+	settings, err := s.settings.GetSettings(ctx)
+	if err != nil {
+		return l
+	}
+	read := func(key string, into *int) {
+		// Нечитаемое или вне границ значение не должно выключать механику:
+		// берётся умолчание, как если бы строки не было.
+		if v, err := strconv.Atoi(settings[key]); err == nil && validatePenaltySetting(key, settings[key]) == nil {
+			*into = v
+		}
+	}
+	read(SettingPenaltyPointsThreshold, &l.threshold)
+	read(SettingPhotoRequirementMonths, &l.photoMonths)
+	read(SettingPenaltyPointsTTLMonths, &l.pointsTTLMonths)
+	read(SettingSilentBlockMonths, &l.silentBlockMonths)
+	return l
+}
+
+// recomputeReason — что изменило журнал. От этого зависит, что пересчёт вправе
+// сделать с периодом и блокировкой.
+type recomputeReason int
+
+const (
+	// recomputeAfterAward — начислен балл: период фото включается или
+	// продлевается, тихая блокировка может включиться.
+	recomputeAfterAward recomputeReason = iota
+	// recomputeAfterRevoke — администратор отменил ошибочный балл: то, что
+	// держалось на этом балле, снимается сразу — это исправление ошибки, а не
+	// срок наказания.
+	recomputeAfterRevoke
+	// recomputeAfterExpire — баллы сгорели по сроку: снимается период фото, а
+	// тихая блокировка живёт свой срок независимо от баллов.
+	recomputeAfterExpire
+)
+
 // recomputeTx сворачивает журнал роли в её состояние. Вызывающий уже держит
 // блокировку строки состояния (LockStatus).
-func (s *PenaltyService) recomputeTx(ctx context.Context, tx *sql.Tx, userID uuid.UUID, role string) (*repository.PenaltyStatus, error) {
+//
+//   - Баллов N и больше, и балл только что начислен — период фото тянется до
+//     «сейчас + photo_requirement_months», если он кончался раньше.
+//   - Баллов меньше N после отмены или сгорания — периода нет.
+//   - Баллов 2×N и больше, и блокировки нет — тихая блокировка на
+//     silent_block_months от сейчас. Идущая блокировка новым баллом не
+//     продлевается: её срок — от включения.
+//   - Баллов меньше 2×N после отмены — блокировка снимается. Сгорание баллов
+//     её не снимает: это делает только истечение срока (воркер).
+func (s *PenaltyService) recomputeTx(ctx context.Context, tx *sql.Tx, userID uuid.UUID, role string, reason recomputeReason) (*repository.PenaltyStatus, error) {
 	st, err := s.repo.LockStatus(ctx, tx, userID, role)
 	if err != nil {
 		return nil, err
@@ -144,7 +207,31 @@ func (s *PenaltyService) recomputeTx(ctx context.Context, tx *sql.Tx, userID uui
 	if err != nil {
 		return nil, err
 	}
+	limits := s.limits(ctx)
+	now := s.now()
 	st.ActivePoints = live.Count
+
+	switch {
+	case live.Count >= limits.threshold && reason == recomputeAfterAward:
+		until := now.AddDate(0, limits.photoMonths, 0)
+		if st.PhotoRequiredUntil == nil || st.PhotoRequiredUntil.Before(until) {
+			st.PhotoRequiredUntil = &until
+		}
+	case live.Count < limits.threshold:
+		st.PhotoRequiredUntil = nil
+	}
+
+	blocked := st.SilentBlockEndsAt != nil && st.SilentBlockEndsAt.After(now)
+	switch {
+	case live.Count >= 2*limits.threshold && reason == recomputeAfterAward && !blocked:
+		ends := now.AddDate(0, limits.silentBlockMonths, 0)
+		st.SilentBlockStartedAt = &now
+		st.SilentBlockEndsAt = &ends
+	case live.Count < 2*limits.threshold && reason == recomputeAfterRevoke:
+		st.SilentBlockStartedAt = nil
+		st.SilentBlockEndsAt = nil
+	}
+
 	if err := s.repo.SaveStatus(ctx, tx, st); err != nil {
 		return nil, err
 	}
