@@ -2,6 +2,7 @@ import { onCacheCleared } from '../../services/cache'
 import { blobStore } from './blobStore'
 import { clearOfflineData } from './offlineOrders'
 import { startNetworkWatch } from './network'
+import { startProofQueue } from './queue'
 
 /**
  * Подключает модуль фото-подтверждения к приложению: следит за сетью и стирает
@@ -16,5 +17,5 @@ export function installPhotoProof(): void {
       .then((keys) => Promise.all(keys.map((k) => blobStore().remove(k))))
       .catch(() => undefined)
   })
-  void startNetworkWatch()
+  void startNetworkWatch().then(startProofQueue)
 }

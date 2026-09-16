@@ -1,0 +1,138 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import { ProofQueue, isPermanentFailure, type QueueTransport, type KeyValue, type PhotoAction } from './queue'
+import { MemoryBlobStore } from './blobStore'
+
+function memoryStorage(): KeyValue {
+  const items = new Map<string, string>()
+  return { get: (k) => items.get(k) ?? null, set: (k, v) => void items.set(k, v) }
+}
+
+function httpError(status: number, message = 'отказ') {
+  return Object.assign(new Error(message), { response: { status, data: message } })
+}
+
+class FakeTransport implements QueueTransport {
+  calls: string[] = []
+  photoFailure: any = null
+  executeFailure: any = null
+  offline = false
+
+  async uploadPhoto(action: PhotoAction) {
+    if (this.offline) throw new Error('Network Error')
+    if (this.photoFailure) throw this.photoFailure
+    this.calls.push(`photo:${action.orderId}:${action.photoKind}:${action.clientKey}`)
+  }
+  async sendPositions(points: any[]) {
+    if (this.offline) throw new Error('Network Error')
+    this.calls.push(`positions:${points.length}`)
+  }
+  async execute(orderId: string) {
+    if (this.offline) throw new Error('Network Error')
+    if (this.executeFailure) throw this.executeFailure
+    this.calls.push(`execute:${orderId}`)
+  }
+}
+
+const photoMeta = (orderId: string, photoKind: 'AREA' | 'SELFIE' = 'AREA') => ({
+  orderId,
+  photoKind,
+  camera: 'REAR' as const,
+  takenAt: '2026-09-16T14:30:05+03:00',
+  lat: '55.755800',
+  lon: '37.617300',
+  accuracy: 12,
+})
+
+let transport: FakeTransport
+let blobs: MemoryBlobStore
+let queue: ProofQueue
+
+beforeEach(() => {
+  localStorage.clear()
+  transport = new FakeTransport()
+  blobs = new MemoryBlobStore()
+  queue = new ProofQueue(memoryStorage(), () => 'queue-key', blobs, transport)
+})
+
+describe('очередь снимков, трека и отметок', () => {
+  it('в офлайне копит, при сети отправляет по порядку: снимки раньше отметки', async () => {
+    transport.offline = true
+    queue.enqueueExecute('order-1', '2026-09-16T14:35:00+03:00')
+    await queue.enqueuePhoto(photoMeta('order-1'), new Uint8Array([1]))
+    queue.enqueuePositions([{ lat: 55.75, lon: 37.61, device_at: '2026-09-16T14:29:00+03:00' }])
+    await queue.flush()
+    expect(queue.pending.value).toBe(3)
+    expect(queue.pendingPhotos.value).toBe(1)
+    expect(transport.calls).toEqual([])
+
+    transport.offline = false
+    await queue.flush()
+    // Отметка стоит в очереди первой, но уходит после снимка своего заказа.
+    expect(transport.calls.map((c) => c.split(':').slice(0, 2).join(':'))).toEqual(['photo:order-1', 'positions:1'])
+    await queue.flush()
+    expect(transport.calls[transport.calls.length - 1]).toBe('execute:order-1')
+    expect(queue.pending.value).toBe(0)
+    expect(await blobs.keys()).toEqual([])
+  })
+
+  it('пересъёмка заменяет неотправленный снимок того же вида', async () => {
+    transport.offline = true
+    await queue.enqueuePhoto(photoMeta('order-1'), new Uint8Array([1]))
+    await queue.enqueuePhoto(photoMeta('order-1', 'SELFIE'), new Uint8Array([2]))
+    const retake = await queue.enqueuePhoto(photoMeta('order-1'), new Uint8Array([3]))
+    expect(queue.pendingPhotosFor('order-1').map((a) => a.photoKind).sort()).toEqual(['AREA', 'SELFIE'])
+    expect(Array.from((await blobs.get(retake.blobKey)) || [])).toEqual([3])
+    expect((await blobs.keys()).length).toBe(2)
+  })
+
+  it('отказ сервера убирает действие и сообщает о нём, временный сбой — нет', async () => {
+    await queue.enqueuePhoto(photoMeta('order-1'), new Uint8Array([1]))
+    transport.photoFailure = httpError(503)
+    await queue.flush()
+    expect(queue.pending.value).toBe(1)
+    expect(queue.failures.value).toEqual([])
+
+    transport.photoFailure = httpError(409, 'заказ уже отмечен исполненным')
+    await queue.flush()
+    expect(queue.pending.value).toBe(0)
+    expect(queue.failures.value[0].message).toContain('отмечен')
+  })
+
+  it('вторая отметка того же заказа не ставится', () => {
+    queue.enqueueExecute('order-1', 'a')
+    queue.enqueueExecute('order-1', 'b')
+    expect(queue.pending.value).toBe(1)
+    expect([...queue.pendingExecutions()]).toEqual(['order-1'])
+  })
+
+  it('точки трека складываются в пачки', () => {
+    const points = Array.from({ length: 501 }, (_, i) => ({ lat: 55, lon: 37, device_at: String(i) }))
+    queue.enqueuePositions(points)
+    const actions = queue.actions()
+    expect(actions.length).toBe(2)
+    expect((actions[0] as any).points.length).toBe(500)
+    expect(new Set((actions[0] as any).points.map((p: any) => p.client_key)).size).toBe(500)
+  })
+
+  it('очередь переживает перезапуск', async () => {
+    const storage = memoryStorage()
+    const first = new ProofQueue(storage, () => 'k', blobs, transport)
+    transport.offline = true
+    await first.enqueuePhoto(photoMeta('order-9'), new Uint8Array([9]))
+    const restarted = new ProofQueue(storage, () => 'k', blobs, transport)
+    expect(restarted.pending.value).toBe(1)
+    transport.offline = false
+    await restarted.flush()
+    expect(transport.calls[0]).toMatch(/^photo:order-9:AREA:/)
+  })
+})
+
+describe('классификация ошибок', () => {
+  it('временные и постоянные', () => {
+    expect(isPermanentFailure(new Error('Network Error'))).toBe(false)
+    expect(isPermanentFailure(httpError(500))).toBe(false)
+    expect(isPermanentFailure(httpError(429))).toBe(false)
+    expect(isPermanentFailure(httpError(422))).toBe(true)
+    expect(isPermanentFailure(httpError(409))).toBe(true)
+  })
+})
