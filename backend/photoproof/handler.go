@@ -10,17 +10,62 @@ import (
 	"github.com/google/uuid"
 )
 
-// Handler — админские эндпоинты жестов. Жесты правит администратор, а не
-// миграция: набор рук и ног — это данные, и новый жест не должен требовать
-// выката.
+// Handler — эндпоинты модуля: жесты для администратора и трек от исполнителя.
+// Жесты правит администратор, а не миграция: набор рук и ног — это данные, и
+// новый жест не должен требовать выката.
 type Handler struct {
 	service *Service
+	// callerID отдаёт id аутентифицированного пользователя. Он передаётся
+	// снаружи, чтобы модуль не зависел от ключей контекста middleware: это
+	// единственное, что ему нужно знать о том, кто пришёл.
+	callerID func(*http.Request) uuid.UUID
 }
 
-// NewHandler создаёт Handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+// NewHandler создаёт Handler. callerID может быть nil — тогда доступны только
+// админские маршруты жестов.
+func NewHandler(service *Service, callerID func(*http.Request) uuid.UUID) *Handler {
+	return &Handler{service: service, callerID: callerID}
 }
+
+// RegisterExecutorRoutes подключает приём точек трека.
+func (h *Handler) RegisterExecutorRoutes(r chi.Router) {
+	r.Post("/executor/positions", h.RecordPositions)
+}
+
+// RecordPositions обслуживает POST /executor/positions: пачка точек трека с
+// временем устройства. Через него уходит и то, что накопилось в офлайне.
+func (h *Handler) RecordPositions(w http.ResponseWriter, r *http.Request) {
+	executor := h.caller(r)
+	if executor == uuid.Nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Positions []Position `json:"positions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Positions) > maxPositionsPerRequest {
+		http.Error(w, "слишком много точек в одном запросе", http.StatusRequestEntityTooLarge)
+		return
+	}
+	added, err := h.service.RecordPositions(r.Context(), nil, executor, req.Positions)
+	if err != nil {
+		if errors.Is(err, ErrPositionInvalid) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]int{"accepted": added})
+}
+
+// maxPositionsPerRequest — потолок одной пачки. Офлайн-очередь шлёт накопленное
+// частями; запрос на десять тысяч точек — не очередь, а попытка засыпать трек.
+const maxPositionsPerRequest = 500
 
 // RegisterAdminRoutes подключает CRUD жестов. can — проверка права, та же, что
 // охраняет остальную панель.
@@ -104,6 +149,13 @@ func (h *Handler) setDeleted(w http.ResponseWriter, r *http.Request, action func
 		return
 	}
 	writeJSON(w, symbol)
+}
+
+func (h *Handler) caller(r *http.Request) uuid.UUID {
+	if h.callerID == nil {
+		return uuid.Nil
+	}
+	return h.callerID(r)
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {

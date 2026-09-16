@@ -123,6 +123,10 @@ func TestRequireAuth_SoftBanned(t *testing.T) {
 func TestSoftBanAllowedRoutes_Exist(t *testing.T) {
 	var sources strings.Builder
 	files, _ := filepath.Glob("../handler/*.go")
+	// Маршруты регистрируют и обработчики, и модули со своей маршрутизацией
+	// (photoproof), и сам main.
+	modules, _ := filepath.Glob("../photoproof/*.go")
+	files = append(files, modules...)
 	files = append(files, "../main.go")
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
