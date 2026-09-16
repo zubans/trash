@@ -148,4 +148,5 @@ stateDiagram-v2
 его сбой только пишется в лог.
 
 Решение арбитра и штрафные баллы — в
-[`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md).
+[`disputes_and_penalties.md`](./disputes_and_penalties.md); фото-подтверждение
+выполнения — в [`photo_proof.md`](./photo_proof.md).

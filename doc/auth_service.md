@@ -176,7 +176,7 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
   заказы, взятие заказов и ставки так же, как `BANNED` (`User.IsBlocked`).
 
 Кто и когда ставит `SOFT_BANNED` — в
-[`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md#24-рецидив-и-статус-soft_banned).
+[`disputes_and_penalties.md`](./disputes_and_penalties.md#мягкий-бан).
 
 ## Переменные окружения
 
