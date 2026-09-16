@@ -451,6 +451,29 @@ export async function ensureFreshSession(): Promise<SessionState> {
   }
 }
 
+// Мягкий бан. Сервер отвечает 403 с кодом account_soft_banned на всё, что
+// заблокированному недоступно; сессия при этом действительна, поэтому это не
+// конец сессии, а повод показать экран блокировки. Обработчик регистрирует main.ts.
+export const SOFT_BANNED_CODE = 'account_soft_banned'
+
+let softBanHandler: (() => void) | null = null
+
+export function setSoftBanHandler(handler: (() => void) | null) {
+  softBanHandler = handler
+}
+
+export function isSoftBanError(err: any): boolean {
+  return err?.response?.status === 403 && err?.response?.data?.error === SOFT_BANNED_CODE
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (isSoftBanError(error) && softBanHandler) softBanHandler()
+    return Promise.reject(error)
+  },
+)
+
 // Эндпоинты, чей 401 говорит о самих учётных данных, а не об истёкшем токене.
 // Обновление на них бессмысленно: на экране входа обновлять нечего.
 function isAuthEndpoint(url: string | undefined): boolean {

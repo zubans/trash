@@ -4,6 +4,7 @@
   <router-view />
   <AppVersionFooter />
   <DebugConsole />
+  <SoftBanScreen />
 </template>
 
 <script lang="ts">
@@ -12,12 +13,13 @@ import ServerStatusIndicator from './components/ServerStatusIndicator.vue'
 import UpdateBanner from './components/UpdateBanner.vue'
 import AppVersionFooter from './components/AppVersionFooter.vue'
 import DebugConsole from './components/DebugConsole.vue'
+import SoftBanScreen from './components/SoftBanScreen.vue'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
 
 export default defineComponent({
   name: 'App',
-  components: { ServerStatusIndicator, UpdateBanner, AppVersionFooter, DebugConsole },
+  components: { ServerStatusIndicator, UpdateBanner, AppVersionFooter, DebugConsole, SoftBanScreen },
   setup() {
     const authStore = useAuthStore()
 
