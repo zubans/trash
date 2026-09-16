@@ -120,8 +120,10 @@ func (s *PenaltyService) AwardTx(ctx context.Context, tx *sql.Tx, awards ...Pena
 	return points, nil
 }
 
-// Revoke отменяет ошибочный балл и пересчитывает состояние его роли.
-func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID) (*repository.PenaltyPoint, error) {
+// Revoke отменяет ошибочный балл и пересчитывает состояние его роли. owner,
+// если задан, обязан совпасть с владельцем балла: карточка пользователя не
+// должна уметь отменить чужой балл, даже если id подставлен вручную.
+func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID, owner ...uuid.UUID) (*repository.PenaltyPoint, error) {
 	var point *repository.PenaltyPoint
 	err := s.tx.RunInTx(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -133,6 +135,9 @@ func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID)
 			return ErrPenaltyPointNotFound
 		case err != nil:
 			return err
+		}
+		if len(owner) > 0 && owner[0] != uuid.Nil && point.UserID != owner[0] {
+			return ErrPenaltyPointNotFound
 		}
 		if _, err := s.repo.LockStatus(ctx, tx, point.UserID, point.Role); err != nil {
 			return err
@@ -165,6 +170,101 @@ func (s *PenaltyService) SilentlyBlocked(ctx context.Context, userID uuid.UUID, 
 		return false
 	}
 	return st.SilentBlockEndsAt != nil && st.SilentBlockEndsAt.After(s.now())
+}
+
+// PenaltyView — то, что о своих штрафах знает сам пользователь.
+//
+// Про тихую блокировку здесь нет ничего, и это её суть: заблокированный видит
+// пустой список заказов или пустой каталог, а не сообщение о наказании.
+// Мягкий бан, наоборот, объявляется прямо — иначе человек не поймёт, зачем
+// писать в поддержку.
+type PenaltyView struct {
+	// PhotoRequiredUntil — до какого момента заказы роли требуют фото. Ключи —
+	// EXECUTOR и CUSTOMER; роль без периода в карту не попадает.
+	PhotoRequiredUntil map[string]time.Time `json:"photo_required_until,omitempty"`
+	SoftBanned         bool                 `json:"soft_banned"`
+	SoftBanReason      string               `json:"soft_ban_reason,omitempty"`
+}
+
+// ViewFor собирает то, что пользователю показывают о его штрафах.
+func (s *PenaltyService) ViewFor(ctx context.Context, userID uuid.UUID) (PenaltyView, error) {
+	view := PenaltyView{}
+	if s == nil || s.repo == nil {
+		return view, nil
+	}
+	statuses, err := s.repo.ListStatuses(ctx, nil, userID)
+	if err != nil {
+		return view, err
+	}
+	now := s.now()
+	for _, st := range statuses {
+		if st.PhotoRequiredUntil != nil && st.PhotoRequiredUntil.After(now) {
+			if view.PhotoRequiredUntil == nil {
+				view.PhotoRequiredUntil = map[string]time.Time{}
+			}
+			view.PhotoRequiredUntil[st.Role] = *st.PhotoRequiredUntil
+		}
+	}
+	flags, err := s.repo.GetFlags(ctx, nil, userID)
+	if err != nil {
+		return view, err
+	}
+	view.SoftBanned = flags.SoftBannedAt != nil
+	if view.SoftBanned {
+		view.SoftBanReason = flags.SoftBanReason
+	}
+	return view, nil
+}
+
+// AdminPenaltyView — штрафы пользователя глазами администрации: журнал целиком,
+// состояние каждой роли и флаги, включая тихую блокировку.
+type AdminPenaltyView struct {
+	Points   []repository.PenaltyPoint  `json:"points"`
+	Statuses []repository.PenaltyStatus `json:"statuses"`
+	Flags    *repository.PenaltyFlags   `json:"flags"`
+	Limits   map[string]int             `json:"limits"`
+}
+
+// AdminViewFor собирает карточку штрафов пользователя для админки.
+func (s *PenaltyService) AdminViewFor(ctx context.Context, userID uuid.UUID) (*AdminPenaltyView, error) {
+	if s == nil || s.repo == nil {
+		return &AdminPenaltyView{Points: []repository.PenaltyPoint{}, Statuses: []repository.PenaltyStatus{}}, nil
+	}
+	points, err := s.repo.ListPoints(ctx, nil, userID)
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := s.repo.ListStatuses(ctx, nil, userID)
+	if err != nil {
+		return nil, err
+	}
+	flags, err := s.repo.GetFlags(ctx, nil, userID)
+	if err != nil {
+		return nil, err
+	}
+	limits := s.limits(ctx)
+	return &AdminPenaltyView{
+		Points: points, Statuses: statuses, Flags: flags,
+		Limits: map[string]int{
+			SettingPenaltyPointsThreshold: limits.threshold,
+			SettingPhotoRequirementMonths: limits.photoMonths,
+			SettingPenaltyPointsTTLMonths: limits.pointsTTLMonths,
+			SettingSilentBlockMonths:      limits.silentBlockMonths,
+		},
+	}, nil
+}
+
+// ResetSilentBlockFlag снимает флаг «была тихая блокировка»: решение
+// администратора, после которого следующий балл снова не будет рецидивом.
+func (s *PenaltyService) ResetSilentBlockFlag(ctx context.Context, userID, adminID uuid.UUID) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	if err := s.repo.ClearSilentBlockFlag(ctx, nil, userID); err != nil {
+		return err
+	}
+	log.Printf("[AUDIT] admin %s cleared the past-silent-block flag of user %s", adminID, userID)
+	return nil
 }
 
 // SweepResult — что сделал один проход обслуживания штрафов.
