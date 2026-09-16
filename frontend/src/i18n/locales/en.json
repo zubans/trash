@@ -129,6 +129,7 @@
   "statuses": {
     "all": "All",
     "active": "Active",
+    "softBanned": "Soft-banned",
     "banned": "Banned"
   },
   "topups": {

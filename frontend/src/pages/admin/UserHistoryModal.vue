@@ -40,11 +40,20 @@
         >
           Ачивки<span v-if="tab === 'achievements' && total"> · {{ total }}</span>
         </button>
+        <button
+          v-if="canSeePenalties"
+          type="button"
+          class="tab"
+          :class="{ active: tab === 'penalties' }"
+          @click="switchTo('penalties')"
+        >
+          Штрафы
+        </button>
       </div>
 
       <p v-if="errorMsg" class="alert error">{{ errorMsg }}</p>
 
-      <div v-if="tab !== 'achievements'" class="table-scroll">
+      <div v-if="tab === 'transactions' || tab === 'orders'" class="table-scroll">
         <table v-if="tab === 'transactions'" class="history-table">
           <thead>
             <tr>
@@ -202,13 +211,98 @@
         </table>
       </div>
 
+      <!-- Штрафные баллы. Журнал целиком: отменённые и сгоревшие остаются
+           строками — по ним видно, за что человек наказывался раньше. -->
+      <div v-if="tab === 'penalties'" class="penalties">
+        <p v-if="actionMsg" class="alert success">{{ actionMsg }}</p>
+        <template v-if="penalties">
+          <div class="penalty-roles">
+            <div v-for="role in ['EXECUTOR', 'CUSTOMER']" :key="role" class="penalty-role">
+              <div class="penalty-role-title">{{ role === 'EXECUTOR' ? 'Исполнитель' : 'Заказчик' }}</div>
+              <template v-if="statusFor(role)">
+                <div>Действующих баллов: <strong>{{ statusFor(role)!.active_points }}</strong> из порога {{ penalties.limits.penalty_points_threshold }}</div>
+                <div v-if="activeUntil(statusFor(role)!.photo_required_until)">
+                  Фото-подтверждение до {{ formatDate(statusFor(role)!.photo_required_until!) }}
+                </div>
+                <div v-if="activeUntil(statusFor(role)!.silent_block_ends_at)" class="danger-text">
+                  Тихая блокировка до {{ formatDate(statusFor(role)!.silent_block_ends_at!) }}
+                </div>
+              </template>
+              <div v-else class="muted">Баллов не было</div>
+            </div>
+          </div>
+
+          <div class="penalty-flags">
+            <div v-if="penalties.flags.soft_banned_at" class="danger-text">
+              Мягкий бан с {{ formatDate(penalties.flags.soft_banned_at) }}:
+              {{ penalties.flags.soft_ban_reason || 'без причины' }}
+              ({{ penalties.flags.soft_banned_by ? 'администратор' : 'система, рецидив' }})
+            </div>
+            <div v-if="penalties.flags.had_silent_block_at">
+              Тихая блокировка была снята {{ formatDate(penalties.flags.had_silent_block_at) }}:
+              следующий балл переведёт аккаунт в мягкий бан.
+              <button
+                v-if="canEditPenalties"
+                type="button"
+                class="btn-link"
+                :disabled="busy"
+                @click="resetFlag"
+              >
+                Сбросить флаг
+              </button>
+            </div>
+          </div>
+
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Роль</th>
+                <th>За что</th>
+                <th>Состояние</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="point in penalties.points" :key="point.id" :class="{ revoked: point.revoked_at || point.expired_at }">
+                <td class="nowrap">{{ formatDate(point.created_at) }}</td>
+                <td>{{ point.role === 'EXECUTOR' ? 'исполнитель' : 'заказчик' }}</td>
+                <td>
+                  {{ point.reason || '—' }}
+                  <div v-if="point.order_id" class="muted mono">заказ {{ point.order_id.slice(0, 8) }}</div>
+                </td>
+                <td>
+                  <template v-if="point.revoked_at">отменён {{ formatDate(point.revoked_at) }}</template>
+                  <template v-else-if="point.expired_at">сгорел {{ formatDate(point.expired_at) }}</template>
+                  <template v-else>действует</template>
+                </td>
+                <td>
+                  <button
+                    v-if="!point.revoked_at && !point.expired_at && canEditPenalties"
+                    type="button"
+                    class="btn-link danger"
+                    :disabled="busy"
+                    @click="revokePoint(point)"
+                  >
+                    Отменить
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="!penalties.points.length">
+                <td colspan="5" class="empty">Штрафных баллов нет.</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+      </div>
+
       <div class="history-foot">
         <span class="muted">
           <template v-if="total">Показано {{ shown }} из {{ total }}</template>
         </span>
         <div class="foot-actions">
           <button
-            v-if="tab !== 'achievements' && shown < total"
+            v-if="(tab === 'transactions' || tab === 'orders') && shown < total"
             type="button"
             class="btn-more"
             :disabled="loading"
@@ -245,6 +339,13 @@ import {
   type UserGrant,
 } from '../../api/achievements'
 import { useAuthStore } from '../../stores/auth-store'
+import {
+  getUserPenalties,
+  resetSilentBlockFlag,
+  revokePenaltyPoint,
+  type AdminPenaltyView,
+  type PenaltyPoint,
+} from '../../api/penalties'
 
 const PAGE_SIZE = 20
 
@@ -264,7 +365,7 @@ const TYPE_LABELS: Record<string, string> = {
   BONUS: 'Бонус',
 }
 
-type Tab = 'transactions' | 'orders' | 'achievements'
+type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties'
 
 const STATUS_LABELS: Record<string, string> = {
   SEARCHING: 'в поиске',
@@ -310,6 +411,11 @@ export default defineComponent({
     const canGrant = computed(() => authStore.can('achievements.create'))
     const canRevoke = computed(() => authStore.can('achievements.delete'))
 
+    // Штрафы видит тот, кто видит пользователей; менять — право penalties.edit.
+    const penalties = ref<AdminPenaltyView | null>(null)
+    const canSeePenalties = computed(() => authStore.can('users.view'))
+    const canEditPenalties = computed(() => authStore.can('penalties.edit'))
+
     // Выдать вручную можно только включённую ачивку с загруженным скриптом —
     // ровно то, что разрешает сервер. Предлагать в списке большее значило бы
     // обещать кнопку, которая ответит отказом.
@@ -337,6 +443,7 @@ export default defineComponent({
       transactions: 'История проводок',
       orders: 'История заказов',
       achievements: 'Ачивки пользователя',
+      penalties: 'Штрафные баллы',
     }
     const title = computed(() => TITLES[tab.value])
 
@@ -370,6 +477,9 @@ export default defineComponent({
         const offset = append ? shown.value : 0
         if (tab.value === 'achievements') {
           await loadAchievements()
+        } else if (tab.value === 'penalties') {
+          penalties.value = await getUserPenalties(props.user.id)
+          total.value = penalties.value.points.length
         } else if (tab.value === 'transactions') {
           const res = await getUserTransactions(props.user.id, { limit: PAGE_SIZE, offset })
           transactions.value = append ? [...transactions.value, ...res.transactions] : res.transactions
@@ -435,6 +545,38 @@ export default defineComponent({
         return `Выдача «${achievementTitle(row.code)}» отозвана, её баллы больше не считаются.`
       })
 
+    const runPenaltyAction = async (job: () => Promise<string>) => {
+      if (!props.user || busy.value) return
+      busy.value = true
+      errorMsg.value = ''
+      actionMsg.value = ''
+      try {
+        actionMsg.value = await job()
+        penalties.value = await getUserPenalties(props.user.id)
+      } catch (err: any) {
+        fail(err, 'Действие не удалось')
+      } finally {
+        busy.value = false
+      }
+    }
+
+    const revokePoint = (point: PenaltyPoint) => {
+      if (!window.confirm('Отменить штрафной балл? Период фото и блокировки пересчитаются сразу.')) return
+      return runPenaltyAction(async () => {
+        await revokePenaltyPoint(props.user.id, point.id)
+        return 'Балл отменён, состояние пересчитано.'
+      })
+    }
+
+    const resetFlag = () =>
+      runPenaltyAction(async () => {
+        await resetSilentBlockFlag(props.user.id)
+        return 'Флаг прошлой тихой блокировки снят.'
+      })
+
+    const statusFor = (role: string) => penalties.value?.statuses.find((st) => st.role === role) || null
+    const activeUntil = (value?: string) => !!value && new Date(value).getTime() > Date.now()
+
     const switchTo = (next: Tab) => {
       if (tab.value === next) return
       tab.value = next
@@ -455,6 +597,7 @@ export default defineComponent({
         transactions.value = []
         orders.value = []
         grants.value = []
+        penalties.value = null
         actionMsg.value = ''
         grantCode.value = ''
         grantReason.value = ''
@@ -514,6 +657,13 @@ export default defineComponent({
       fullName,
       title,
       switchTo,
+      penalties,
+      canSeePenalties,
+      canEditPenalties,
+      revokePoint,
+      resetFlag,
+      statusFor,
+      activeUntil,
       loadMore,
       formatDate,
       formatAmount,
@@ -774,4 +924,9 @@ export default defineComponent({
   opacity: 0.5;
   cursor: default;
 }
+.penalty-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.penalty-role { background: #f8fafc; border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.6; }
+.penalty-role-title { font-weight: 700; font-size: 14px; }
+.penalty-flags { font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+.danger-text { color: #b91c1c; }
 </style>
