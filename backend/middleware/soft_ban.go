@@ -71,10 +71,12 @@ var softBanAllowedRoutes = map[string]struct{}{
 	"POST /executor/orders/{id}/execute":         {},
 	"POST /executor/orders/{id}/reject":          {},
 	"POST /executor/orders/{id}/dispute/concede": {},
-	"POST /executor/orders/{id}/submission":      {},
-	"GET /executor/shifts/active":                {},
-	"POST /executor/shifts/end":                  {},
-	"POST /executor/shifts/early-end":            {},
+	// Трек продолжает писаться по заказам, которые человек доводит до конца.
+	"POST /executor/positions":              {},
+	"POST /executor/orders/{id}/submission": {},
+	"GET /executor/shifts/active":           {},
+	"POST /executor/shifts/end":             {},
+	"POST /executor/shifts/early-end":       {},
 }
 
 // softBanAllows сообщает, открыт ли маршрут запроса пользователю в SOFT_BANNED.

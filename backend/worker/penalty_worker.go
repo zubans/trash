@@ -18,7 +18,23 @@ import (
 // воркер здесь не единственный путь, а тот, что срабатывает в тишине.
 type PenaltyWorker struct {
 	penalties *service.PenaltyService
-	guard     func(func() error) error
+	// track чистит трек исполнителей по сроку хранения. Он обслуживается тем
+	// же проходом: это такая же уборка по времени, и заводить ради неё второй
+	// воркер незачем.
+	track TrackSweeper
+	guard func(func() error) error
+}
+
+// TrackSweeper удаляет точки трека старше срока хранения. Ему удовлетворяет
+// *photoproof.Service.
+type TrackSweeper interface {
+	SweepTrack(ctx context.Context) (int, error)
+}
+
+// WithTrack подключает уборку трека к проходу обслуживания.
+func (w *PenaltyWorker) WithTrack(track TrackSweeper) *PenaltyWorker {
+	w.track = track
+	return w
 }
 
 // NewPenaltyWorker создаёт PenaltyWorker.
@@ -63,6 +79,15 @@ func (w *PenaltyWorker) Run() error {
 	}
 	if result.PointsBurnt > 0 || result.BlocksLifted > 0 {
 		log.Printf("[PenaltyWorker] %d penalty points expired, %d silent blocks lifted", result.PointsBurnt, result.BlocksLifted)
+	}
+	if w.track != nil {
+		removed, err := w.track.SweepTrack(context.Background())
+		if err != nil {
+			return err
+		}
+		if removed > 0 {
+			log.Printf("[PenaltyWorker] %d track points removed by age", removed)
+		}
 	}
 	return nil
 }

@@ -78,8 +78,6 @@ func main() {
 	roleRepo := repository.NewRoleRepository(db)
 	penaltyRepo := repository.NewPenaltyRepository(db)
 	disputeRepo := repository.NewDisputeRepository(db)
-	// Фото-подтверждение — отдельный модуль со своей схемой и своими правилами.
-	photoProofService := photoproof.NewService(photoproof.NewSymbolRepository(db))
 	// system_settings — несколько строк, читаемых на путях ценообразования,
 	// допуска и подбора, по нескольку раз за запрос и внутри циклов воркеров. Кэш
 	// сквозной, поэтому правка админа всё равно применится к следующему заказу;
@@ -88,6 +86,9 @@ func main() {
 		repository.NewSettingsRepository(db),
 		time.Duration(getEnvInt("SETTINGS_CACHE_TTL_SEC", 10))*time.Second,
 	)
+	// Фото-подтверждение — отдельный модуль со своей схемой и своими правилами.
+	photoProofService := photoproof.NewService(photoproof.NewSymbolRepository(db)).
+		WithTrack(photoproof.NewTrackRepository(db), settingsRepo)
 	tokenRepo := repository.NewTokenRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	shiftRepo := repository.NewShiftRepository(db)
@@ -226,7 +227,8 @@ func main() {
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
 		WithEligibility(userRepo, settingsRepo, catalogRepo).
 		WithBehaviors(serviceBehaviors).
-		WithPenalties(penaltyService)
+		WithPenalties(penaltyService).
+		WithTrack(photoProofService)
 	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
 	// сохранённой позиции исполнителя один писатель и один набор правил.
 	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
@@ -312,6 +314,7 @@ func main() {
 	// Сроки штрафов — время, а не событие: баллы сгорают, а тихие блокировки
 	// снимаются сами, даже если человеку больше ничего не начисляют.
 	penaltyWorker := worker.NewPenaltyWorker(penaltyService).
+		WithTrack(photoProofService).
 		WithLeader(leader, "penalty_sweep")
 	penaltyWorker.Start(1 * time.Hour)
 
@@ -350,7 +353,7 @@ func main() {
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
 	dh := handler.NewDisputeHandler(orderService)
 	pnh := handler.NewPenaltyHandler(penaltyService)
-	pph := photoproof.NewHandler(photoProofService)
+	pph := photoproof.NewHandler(photoProofService, handler.CallerID)
 	mh := handler.NewMailHandler(mailRepo, userRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
@@ -495,6 +498,7 @@ func main() {
 			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
 			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
 			r.Post("/executor/orders/{id}/dispute/concede", oh.ConcedeDispute)
+			pph.RegisterExecutorRoutes(r)
 			// Данные, которые исполнитель отправляет на проверку по скриптовой услуге, —
 			// проверка личности в заказе верификации.
 			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)

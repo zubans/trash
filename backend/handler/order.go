@@ -371,3 +371,13 @@ func (h *OrderHandler) RejectOrderHandler(w http.ResponseWriter, r *http.Request
 func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	h.ListAssignedOrders(w, r)
 }
+
+// CallerID отдаёт id аутентифицированного пользователя запроса. Он существует
+// для модулей, которые не должны знать про ключи контекста middleware, —
+// например photoproof: единственное, что им нужно о пришедшем, это id.
+func CallerID(r *http.Request) uuid.UUID {
+	if user := userFromContext(r); user != nil {
+		return user.ID
+	}
+	return uuid.Nil
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -26,6 +27,10 @@ type ExecutorGeoService struct {
 	// behaviors применяет скриптовые правила услуги к карте, чтобы карта показывала
 	// ровно те заказы, что и список. Необязательно.
 	behaviors *Behaviors
+	// track копит отчёты о местоположении в треке исполнителя: сохранённая
+	// позиция отвечает на вопрос «где он сейчас», а трек — «где он был тогда».
+	// Необязательно.
+	track PositionRecorder
 	// Кэш в памяти и мьютекс для быстрых проверок паузы
 	cooldownMap sync.Map
 }
@@ -240,6 +245,18 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}, nil
 }
 
+// PositionRecorder дописывает точку в трек исполнителя. Ему удовлетворяет
+// *photoproof.Service; сервису местоположений нужно ровно столько.
+type PositionRecorder interface {
+	RecordLive(ctx context.Context, executorID uuid.UUID, lat, lon float64, at time.Time) error
+}
+
+// WithTrack подключает трек исполнителя к отчётам о местоположении.
+func (s *ExecutorGeoService) WithTrack(track PositionRecorder) *ExecutorGeoService {
+	s.track = track
+	return s
+}
+
 // RecordLiveLocation сохраняет позицию, о которой приложение исполнителя
 // сообщает само во время смены.
 //
@@ -258,6 +275,13 @@ func (s *ExecutorGeoService) RecordLiveLocation(ctx context.Context, executorID 
 	}
 	if err := s.geoRepo.RecordDevicePosition(ctx, executorID, lat, lon); err != nil {
 		return false, err
+	}
+	// Та же точка уходит в трек. Сбой записи трека не отменяет отчёта: трек —
+	// доказательная история, а не условие работы карты и подбора.
+	if s.track != nil {
+		if err := s.track.RecordLive(ctx, executorID, lat, lon, time.Now()); err != nil {
+			log.Printf("[ExecutorGeoService] cannot append the track of %s: %v", executorID, err)
+		}
 	}
 	return true, nil
 }
