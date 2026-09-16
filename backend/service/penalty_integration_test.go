@@ -223,3 +223,83 @@ func TestPenaltyPeriodAndSilentBlockIntegration(t *testing.T) {
 		t.Fatalf("below the threshold after revokes: %+v", st)
 	}
 }
+
+// Тихая блокировка кончается по сроку: баллы гасятся, ставится флаг. Следующий
+// балл — рецидив: аккаунт переходит в SOFT_BANNED.
+func TestSilentBlockExpiryAndRelapseIntegration(t *testing.T) {
+	f := newDisputeFixture(t)
+	f.cleanupPenalties(t)
+	penalties := newIntegrationPenaltyService(f.db, f.srv)
+	penalties.settings = settingsOverride{f.srv.settingsRepo, map[string]string{
+		SettingPenaltyPointsThreshold: "2",
+		SettingSilentBlockMonths:      "6",
+	}}
+	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	penalties.now = func() time.Time { return clock }
+	adminID := seedExecutor(t, f.db)
+	award := func() {
+		t.Helper()
+		if _, err := awardTx(t, f, penalties, PenaltyAward{UserID: f.executorID, Role: repository.RoleExecutor, AssignedBy: &adminID}); err != nil {
+			t.Fatalf("award: %v", err)
+		}
+	}
+	status := func() repository.PenaltyStatus { return penaltyStatus(t, f.db, f.executorID, repository.RoleExecutor) }
+	flags := func() *repository.PenaltyFlags {
+		t.Helper()
+		fl, err := repository.NewPenaltyRepository(f.db).GetFlags(context.Background(), nil, f.executorID)
+		if err != nil {
+			t.Fatalf("flags: %v", err)
+		}
+		return fl
+	}
+
+	for i := 0; i < 4; i++ {
+		award()
+	}
+	if st := status(); st.SilentBlockEndsAt == nil {
+		t.Fatalf("no silent block at 2×N: %+v", st)
+	}
+	if flags().HadSilentBlockAt != nil {
+		t.Fatal("the relapse flag is set while the block is still running")
+	}
+	if got := userStatusOf(t, f, f.executorID); got != repository.UserStatusActive {
+		t.Fatalf("account status %s during a silent block, want ACTIVE", got)
+	}
+
+	// Через полгода срок вышел: первый же балл после этого снимает блокировку,
+	// гасит старые баллы и становится рецидивом.
+	clock = clock.AddDate(0, 6, 1)
+	award()
+
+	st := status()
+	if st.SilentBlockEndsAt != nil || st.SilentBlockStartedAt != nil {
+		t.Fatalf("expired silent block not lifted: %+v", st)
+	}
+	if st.ActivePoints != 1 {
+		t.Fatalf("active points %d after the lift, want only the new one", st.ActivePoints)
+	}
+	if flags().HadSilentBlockAt == nil {
+		t.Fatal("the relapse flag was not set when the block was lifted")
+	}
+	if got := userStatusOf(t, f, f.executorID); got != repository.UserStatusSoftBanned {
+		t.Fatalf("account status %s after the relapse, want SOFT_BANNED", got)
+	}
+	if fl := flags(); fl.SoftBannedBy != nil || fl.SoftBanReason == "" {
+		t.Fatalf("system soft ban recorded as: %+v", fl)
+	}
+
+	// Повторный балл ничего не меняет: аккаунт уже заблокирован.
+	award()
+	if fl := flags(); fl.SoftBannedAt == nil {
+		t.Fatal("soft ban lost after another point")
+	}
+}
+
+func userStatusOf(t *testing.T, f *disputeFixture, userID uuid.UUID) string {
+	t.Helper()
+	var status string
+	if err := f.db.QueryRow(`SELECT status::text FROM users WHERE id = $1`, userID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	return status
+}

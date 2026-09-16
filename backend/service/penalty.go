@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ var (
 	// ErrPenaltyPointNotFound — балла нет.
 	ErrPenaltyPointNotFound = errors.New("балл не найден")
 )
+
+// softBanRelapseReason — причина мягкого бана, поставленного системой.
+const softBanRelapseReason = "Штрафной балл после снятой тихой блокировки"
 
 // TxRunner выполняет функцию в транзакции. Ему удовлетворяет *Ledger.
 type TxRunner interface {
@@ -84,6 +88,11 @@ func (s *PenaltyService) AwardTx(ctx context.Context, tx *sql.Tx, awards ...Pena
 		if !validPenaltyRole(a.Role) {
 			return nil, ErrPenaltyRole
 		}
+		// Истёкшая блокировка снимается до начисления: балл, пришедший после
+		// её срока, — уже рецидив, а не продолжение прежнего наказания.
+		if _, err := s.liftExpiredSilentBlockTx(ctx, tx, a.UserID, a.Role); err != nil {
+			return nil, err
+		}
 		// Блокировка состояния берётся до записи балла: пересчёт другой
 		// транзакции не должен увидеть балл, которого ещё нет в его подсчёте.
 		if _, err := s.repo.LockStatus(ctx, tx, a.UserID, a.Role); err != nil {
@@ -101,6 +110,9 @@ func (s *PenaltyService) AwardTx(ctx context.Context, tx *sql.Tx, awards ...Pena
 			return nil, err
 		}
 		if _, err := s.recomputeTx(ctx, tx, a.UserID, a.Role, recomputeAfterAward); err != nil {
+			return nil, err
+		}
+		if err := s.softBanOnRelapseTx(ctx, tx, a.UserID); err != nil {
 			return nil, err
 		}
 		points = append(points, point)
@@ -132,6 +144,60 @@ func (s *PenaltyService) Revoke(ctx context.Context, pointID, adminID uuid.UUID)
 		return nil, err
 	}
 	return point, nil
+}
+
+// liftExpiredSilentBlockTx снимает тихую блокировку роли, если её срок вышел.
+//
+// Блокировка живёт свой срок независимо от баллов, поэтому снимает её время, а
+// не пересчёт журнала. При снятии оставшиеся баллы роли гасятся — человек
+// начинает с чистого листа, — а пользователю навсегда ставится флаг «была тихая
+// блокировка»: следующий балл будет рецидивом.
+func (s *PenaltyService) liftExpiredSilentBlockTx(ctx context.Context, tx *sql.Tx, userID uuid.UUID, role string) (bool, error) {
+	st, err := s.repo.LockStatus(ctx, tx, userID, role)
+	if err != nil {
+		return false, err
+	}
+	now := s.now()
+	if st.SilentBlockEndsAt == nil || st.SilentBlockEndsAt.After(now) {
+		return false, nil
+	}
+	if _, err := s.repo.ExpirePoints(ctx, tx, userID, role, now); err != nil {
+		return false, err
+	}
+	if err := s.repo.MarkSilentBlockLifted(ctx, tx, userID, now); err != nil {
+		return false, err
+	}
+	st.ActivePoints = 0
+	st.PhotoRequiredUntil = nil
+	st.SilentBlockStartedAt = nil
+	st.SilentBlockEndsAt = nil
+	if err := s.repo.SaveStatus(ctx, tx, st); err != nil {
+		return false, err
+	}
+	log.Printf("[AUDIT] silent block of user %s (%s) expired: points burnt, relapse flag set", userID, role)
+	return true, nil
+}
+
+// softBanOnRelapseTx переводит аккаунт в SOFT_BANNED, если балл пришёл к тому,
+// у кого тихая блокировка уже была. Рецидив — любой новый балл в любой роли:
+// тихую блокировку такой человек уже отбыл, и вторая была бы тем же наказанием,
+// которое не сработало.
+func (s *PenaltyService) softBanOnRelapseTx(ctx context.Context, tx *sql.Tx, userID uuid.UUID) error {
+	flags, err := s.repo.GetFlags(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if flags.HadSilentBlockAt == nil || flags.SoftBannedAt != nil {
+		return nil
+	}
+	if err := s.repo.ApplySoftBan(ctx, tx, userID, nil, softBanRelapseReason); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	log.Printf("[AUDIT] user %s soft-banned: penalty point after a lifted silent block", userID)
+	return nil
 }
 
 // penaltyLimits — настройки механики на момент пересчёта.
