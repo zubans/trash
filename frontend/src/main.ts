@@ -18,6 +18,7 @@ import router from './router'
 import { i18n } from './i18n'
 import { setSessionExpiredHandler, startSessionWatch } from './services/api'
 import { useAuthStore } from './stores/auth-store'
+import { installPhotoProof } from './modules/photo-proof'
 
 const app = createApp(App)
 
@@ -55,5 +56,7 @@ setSessionExpiredHandler(() => {
 // Планирует обновление для сессии, восстановленной из localStorage, и обновляет
 // её при возврате приложения из фона, где таймеры WebView не идут.
 startSessionWatch()
+
+installPhotoProof()
 
 app.mount('#app')
