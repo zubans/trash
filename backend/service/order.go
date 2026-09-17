@@ -263,6 +263,7 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 			// их показывать нельзя.
 			if manifest, ok := s.behaviors.Manifest(variant); ok {
 				o.SubmitFields = manifest.CheckFields
+				o.ScriptExecuted = !manifest.ManualExecute
 			}
 		}
 		// executor_name и executor_phone читают установленные APK заказчика;
@@ -767,6 +768,9 @@ func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uui
 	return s.ExecuteOrderAt(ctx, orderID, executorID, nil)
 }
 
+// ErrManualExecuteDisabled — услуга запрещает отмечать заказ исполненным вручную.
+var ErrManualExecuteDisabled = errors.New("этот заказ закрывается автоматически после проверки, отметить его исполненным вручную нельзя")
+
 // ExecuteOrderAt — отметка «Исполнил» с временем устройства. Оно приходит,
 // когда отметка пролежала в офлайн-очереди, и хранится рядом со временем
 // сервера: арбитраж показывает оба.
@@ -780,6 +784,18 @@ func (s *OrderService) ExecuteOrderAt(ctx context.Context, orderID, executorID u
 	}
 	if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
 		return errors.New("order is not assigned to this executor")
+	}
+	// Заказ, который закрывает скрипт услуги (верификация — по совпадению данных),
+	// отметкой исполнителя не закрывается: иначе заказчик подтвердил бы работу,
+	// которой не было. Кнопку приложение не рисует, здесь — для запросов в обход.
+	if s.behaviors != nil && s.catalogRepo != nil {
+		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
+		if err != nil {
+			return err
+		}
+		if !s.behaviors.ManualExecute(variant) {
+			return ErrManualExecuteDisabled
+		}
 	}
 
 	// Отметка о выполненной работе — это то, что верифицирует заказчика в услуге

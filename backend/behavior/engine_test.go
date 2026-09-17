@@ -39,6 +39,9 @@ func TestVerificationManifest(t *testing.T) {
 	if !m.ReleaseClaimOnCancel {
 		t.Error("a cancelled verification order must release the claim")
 	}
+	if m.ManualExecute {
+		t.Error("verification must not be closable by the executor's «Исполнил»")
+	}
 	if !m.Handles("order.executed") || !m.Handles("user.verified") {
 		t.Errorf("manifest does not declare the events it reacts to: %v", m.Events)
 	}
@@ -481,4 +484,19 @@ func asDenied(err error, target **DeniedError) bool {
 		*target = d
 	}
 	return ok
+}
+
+// Скрипт, не упомянувший manual_execute, кнопку «Исполнил» не отнимает.
+func TestManualExecuteDefaultsToAllowed(t *testing.T) {
+	e := New(DefaultLimits)
+	if err := e.Compile("t", "t.star", []byte(`MANIFEST = {"name": "t"}`)); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	m, ok := e.Manifest("t")
+	if !ok {
+		t.Fatal("manifest not registered")
+	}
+	if !m.ManualExecute {
+		t.Error("manual_execute must default to true")
+	}
 }

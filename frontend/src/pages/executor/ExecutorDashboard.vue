@@ -306,7 +306,11 @@
                 >
                   <i class="ph-bold ph-identification-card"></i>
                 </button>
+                <!-- Заказ, который закрывает скрипт услуги (manual_execute = false),
+                     отметкой исполнителя не закрывается. Старый ответ без actions
+                     кнопку показывает, как раньше. -->
                 <button
+                  v-if="!order.actions || order.actions.execute"
                   type="button"
                   class="btn-action success"
                   :title="$t('executor.executed')"
@@ -1504,6 +1508,7 @@ export default defineComponent({
     // телефоне и уходит сама, когда сеть появится.
     const markOrderAsExecuted = async (orderId: string) => {
       const order = assignedOrders.value.find((o) => o.id === orderId)
+      if (order?.actions && !order.actions.execute) return
       if (order?.photo_proof?.required) {
         proofOrder.value = order
         return

@@ -1019,3 +1019,28 @@ func (w *verificationWorld) acceptedVerificationOrder(t *testing.T) *repository.
 	w.rewardBase = w.tx.balances[w.moderator.ID]
 	return order
 }
+
+// Модератор не может закрыть верификацию отметкой «Исполнил» в обход проверки
+// паспорта: скрипт объявляет manual_execute = false, и ядро отметку отклоняет.
+func TestVerificationOrderCannotBeExecutedManually(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+	order := w.acceptedVerificationOrder(t)
+
+	if view := w.orderView(t, order.ID); view.Actions == nil || view.Actions.Execute {
+		t.Errorf("the executor must not be offered «Исполнил»: %+v", view.Actions)
+	}
+	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); !errors.Is(err, ErrManualExecuteDisabled) {
+		t.Fatalf("manual execute: err = %v, want ErrManualExecuteDisabled", err)
+	}
+	reloaded, err := w.orders.GetOrderByID(ctx, order.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Status != repository.OrderStatusAssigned {
+		t.Errorf("status = %s, want ASSIGNED", reloaded.Status)
+	}
+	if w.customer.Verified {
+		t.Error("the customer must not be verified without the passport check")
+	}
+}

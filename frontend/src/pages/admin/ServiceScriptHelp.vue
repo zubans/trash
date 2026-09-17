@@ -120,8 +120,15 @@ pay_bonus(
     ...
     "check_fields": ["last_name", "first_name", "patronymic", "birth_date"],
     "hide_customer_contacts": True,   # исполнителю видно только адрес
+    "manual_execute": False,          # нет кнопки «Исполнил»: закрывает скрипт
     "events": ["order.submission"],
 }</code></pre>
+      <p>
+        <code>manual_execute: False</code> убирает у исполнителя кнопку
+        «Исполнил», а платформа отклоняет такую отметку: заказ закрывает только
+        скрипт — по совпадению данных или решению администратора. Без этого
+        исполнитель мог бы закрыть заказ, не пройдя проверку.
+      </p>
       <p>После отправки скрипт получает <strong>результат</strong> сравнения:</p>
       <pre><code>f.submission.attempt     номер попытки, начиная с 1
 f.submission.all_match   всё ли совпало

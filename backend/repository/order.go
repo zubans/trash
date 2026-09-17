@@ -76,6 +76,10 @@ type Order struct {
 	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит
 	// колонки, и оно никогда не несёт сами значения.
 	SubmitFields []string `json:"submit_fields,omitempty"`
+	// ScriptExecuted — заказ закрывает скрипт услуги, а не отметка исполнителя
+	// (manual_execute = false в манифесте). Заполняется при отрисовке, наружу
+	// выходит как actions.execute.
+	ScriptExecuted bool `json:"-"`
 	// Counterparty и Actions собираются под того, кто смотрит на заказ
 	// (service/order_view.go); колонок за ними нет.
 	Counterparty *OrderParty   `json:"counterparty,omitempty"`
@@ -120,6 +124,8 @@ type OrderActions struct {
 	Dispute bool `json:"dispute"`
 	// Concede — исполнитель может признать, что оспоренный заказ не выполнен.
 	Concede bool `json:"concede"`
+	// Execute — исполнитель может отметить заказ исполненным («Исполнил»).
+	Execute bool `json:"execute"`
 }
 
 // OrderRepository описывает операции хранения заказов.

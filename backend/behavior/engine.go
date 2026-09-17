@@ -180,6 +180,7 @@ func manifestFrom(raw script.Manifest) Manifest {
 		ReleaseClaimOnCancel: raw.Bool("release_claim_on_cancel", true),
 		CheckFields:          raw.Strings("check_fields"),
 		HideCustomerContacts: raw.Bool("hide_customer_contacts", false),
+		ManualExecute:        raw.Bool("manual_execute", true),
 	}
 }
 

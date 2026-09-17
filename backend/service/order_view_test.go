@@ -21,6 +21,8 @@ func TestActionsFor(t *testing.T) {
 	searching := &repository.Order{CustomerID: customerID, Status: repository.OrderStatusSearching}
 	scripted := order(repository.OrderStatusExecuted, nil)
 	scripted.ServiceVariant = &repository.ServiceNode{BehaviorCode: "verification"}
+	scriptExecuted := order(repository.OrderStatusAssigned, nil)
+	scriptExecuted.ScriptExecuted = true
 
 	cases := []struct {
 		name   string
@@ -39,7 +41,8 @@ func TestActionsFor(t *testing.T) {
 		{"another executor cannot concede", executorViewer(otherID), order(repository.OrderStatusDisputed, nil), repository.OrderActions{}},
 		{"executor cannot concede an undisputed order", executorViewer(executorID), order(repository.OrderStatusExecuted, nil), repository.OrderActions{}},
 		{"another customer gets nothing", customerViewer(otherID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{}},
-		{"executor rejects their assigned order", executorViewer(executorID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{Reject: true}},
+		{"executor rejects or executes their assigned order", executorViewer(executorID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{Reject: true, Execute: true}},
+		{"executor cannot execute an order its script closes", executorViewer(executorID), scriptExecuted, repository.OrderActions{Reject: true}},
 		{"executor cannot reject someone else's order", executorViewer(otherID), order(repository.OrderStatusAssigned, nil), repository.OrderActions{}},
 		{"executor cannot reject an executed order", executorViewer(executorID), order(repository.OrderStatusExecuted, nil), repository.OrderActions{}},
 		{"executor cannot act on a searching order", executorViewer(executorID), searching, repository.OrderActions{}},
