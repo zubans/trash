@@ -51,6 +51,9 @@
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/profile')">
               <i class="ph-fill ph-user-circle"></i> Профиль
             </button>
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/history')">
+              <i class="ph-fill ph-clock-counter-clockwise"></i> История заказов
+            </button>
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/achievements')">
               <i class="ph-fill ph-trophy"></i> Достижения
             </button>
@@ -668,55 +671,6 @@
           </div>
         </div>
       </div>
-
-      <!-- Финансовая история -->
-      <div style="margin-top: 8px;">
-        <div
-          class="section-header cursor-pointer"
-          @click="isHistoryCollapsed = !isHistoryCollapsed"
-        >
-          <i class="ph-bold ph-clock-counter-clockwise" style="color: var(--text-muted); font-size: 18px;"></i>
-          <h2 class="section-title" style="font-size: 15px;">
-            {{ $t('executor.financialHistoryTitle') }} <span class="section-count">({{ executorHistoryOrders.length }})</span>
-            <RefreshingBadge :active="historyRefreshing && !historyLoading" />
-          </h2>
-          <i :class="['ph-bold', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="color: var(--text-muted);"></i>
-        </div>
-
-        <div v-if="!isHistoryCollapsed" class="orders-stack">
-          <SkeletonList v-if="historyLoading" :rows="3" />
-          <div v-else-if="executorHistoryOrders.length === 0" class="empty-state">
-            {{ $t('customer.noHistoryOrders') }}
-          </div>
-          <div
-            v-for="order in executorHistoryOrders"
-            :key="order.id"
-            class="list-item-compact history-item cursor-pointer"
-            @click="openOrderDetails(order)"
-          >
-            <div class="item-left-group">
-              <div class="item-icon"><i class="ph-bold ph-check-circle"></i></div>
-              <div class="item-text-stack">
-                <div class="item-title order-title-stack" style="font-size: 14px;">
-                  <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
-                  <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
-                </div>
-                <div class="item-subtitle" style="font-family: inherit;">#{{ order?.id ? order.id.slice(0, 8) : '---' }}<span v-if="order.address"> • {{ order.address }}</span></div>
-              </div>
-            </div>
-            <div>
-              <div class="history-price">{{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}</div>
-              <div class="history-status">
-                {{ $t('orderStatus.' + order.status, order.status) }}
-                <span v-if="executorReviewsMap[order.id]" class="review-status-badge ms-1" title="Оценка клиента">
-                  <i class="ph-fill ph-star" style="color: #f59e0b; font-size: 11px;"></i>
-                  <span>{{ executorReviewsMap[order.id].rating }}/5</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Модальное окно деталей заказа для исполнителя -->
@@ -728,15 +682,6 @@
       :get-status-color="getStatusColor"
       :format-date-full="formatDate"
       @reject-order="rejectAssignedOrder"
-      @open-review-modal="openReviewModal"
-    />
-
-    <!-- Модальное окно отзыва для исполнителя -->
-    <ReviewModal
-      v-model="showReviewModal"
-      :order-id="reviewTargetOrderId"
-      role="EXECUTOR"
-      @reviewed="onReviewSubmitted"
     />
 
     <!-- Модальное окно вывода средств -->
@@ -860,7 +805,6 @@ import { online as networkOnline } from '../../modules/photo-proof/network'
 import { saveOfflineOrders, loadOfflineOrders } from '../../modules/photo-proof/offlineOrders'
 import { toRfc3339 } from '../../modules/photo-proof/imageSync'
 import OrderDetailsModal from '../../components/order/OrderDetailsModal.vue'
-import ReviewModal from '../customer/components/ReviewModal.vue'
 import ExecutorMapModal from './components/ExecutorMapModal.vue'
 import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import VerificationPromptModal from './components/VerificationPromptModal.vue'
@@ -881,7 +825,6 @@ import {
   isImagePending,
 } from '../../services/orderImages'
 import { useChatSocket } from '../../composables/useChatSocket'
-import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceVariants, getServiceCategories, type ServiceNode } from '../../api/services'
 import { orderTitle, orderTitleLine } from '../../utils/orderTitle'
@@ -899,7 +842,6 @@ export default defineComponent({
     IdentityCheckModal,
     PhotoProofModal,
     OrderDetailsModal,
-    ReviewModal,
     SupportChatModal,
     SkeletonList,
     RefreshingBadge,
@@ -1041,35 +983,12 @@ export default defineComponent({
         return res.data || []
       },
     })
-    const historyResource = useCachedResource<any[]>({
-      key: 'executor:history:orders',
-      initial: [],
-      acceptCached: acceptPresentedOrders,
-      fetcher: async () => {
-        const res = await api.get('/executor/history')
-        const rawOrders = res.data?.orders || res.data || []
-        // Сортировка здесь, а не в шаблоне: в кэш ложится уже готовый к показу
-        // список, поэтому первый кадр из кэша совпадает с тем, что придёт из сети.
-        return rawOrders.slice().sort((a: any, b: any) => {
-          const dateA = new Date(a.completed_at || a.canceled_at || a.created_at).getTime()
-          const dateB = new Date(b.completed_at || b.canceled_at || b.created_at).getTime()
-          return dateB - dateA
-        })
-      },
-      onData: () => fetchReviewsForExecutorHistory(),
-    })
-
     const assignedOrders = assignedResource.data
     const availableOrders = availableResource.data
-    const executorHistoryOrders = historyResource.data
     const assignedLoading = assignedResource.loading
     const availableLoading = availableResource.loading
-    const historyLoading = historyResource.loading
     const assignedRefreshing = assignedResource.refreshing
     const availableRefreshing = availableResource.refreshing
-    const historyRefreshing = historyResource.refreshing
-    const executorReviewsMap = ref<Record<string, OrderReview>>({})
-    const isHistoryCollapsed = ref(true)
 
     // Очередь того, что сделано без сети. Отметка «Исполнил», ждущая отправки,
     // переносит заказ в «на проверке» сразу: исполнитель своё уже сделал.
@@ -1117,21 +1036,6 @@ export default defineComponent({
       } catch (err: any) {
         errorMsg.value = err.response?.data || 'Ошибка отказа от заказа'
       }
-    }
-
-    // Состояние модального окна отзыва
-    const showReviewModal = ref(false)
-    const reviewTargetOrderId = ref('')
-
-    const openReviewModal = (order: any) => {
-      reviewTargetOrderId.value = order.id
-      showReviewModal.value = true
-    }
-
-    const onReviewSubmitted = () => {
-      successMsg.value = 'Отзыв о заказчике успешно отправлен!'
-      showReviewModal.value = false
-      fetchHistoryOrders()
     }
 
     // Состояние модального окна вывода
@@ -1194,8 +1098,7 @@ export default defineComponent({
       if (isSupp) {
         openSupportChat()
       } else if (orderID) {
-        const order = assignedOrders.value.find((o: any) => o.id === orderID) ||
-                      executorHistoryOrders.value.find((o: any) => o.id === orderID)
+        const order = assignedOrders.value.find((o: any) => o.id === orderID)
         if (order) toggleChat(order)
       }
     }
@@ -1334,7 +1237,6 @@ export default defineComponent({
 
     useScrollLock(() => (
       showOrderDetailsModal.value ||
-      showReviewModal.value ||
       showWithdrawalModal.value ||
       showExecutorMapModal.value ||
       showImagePreviewModal.value ||
@@ -1433,24 +1335,6 @@ export default defineComponent({
     const fetchAssignedOrders = () => assignedResource.reload()
 
     const fetchAvailableOrders = () => availableResource.reload()
-
-    const fetchReviewsForExecutorHistory = async () => {
-      const completed = executorHistoryOrders.value.filter((o) => o.status === 'COMPLETED')
-      for (const order of completed) {
-        if (!executorReviewsMap.value[order.id]) {
-          try {
-            const res = await checkMyOrderReview(order.id)
-            if (res && res.has_reviewed && res.review) {
-              executorReviewsMap.value[order.id] = res.review
-            }
-          } catch (err) {
-            // игнорируем
-          }
-        }
-      }
-    }
-
-    const fetchHistoryOrders = () => historyResource.reload()
 
     const acceptOrder = async (orderId: string) => {
       // Смена до нажатия. Взятие заказа без смены открывает её на сервере, и
@@ -1948,10 +1832,6 @@ export default defineComponent({
       })
     }
 
-    const openFinancialHistoryModal = () => {
-      fetchHistoryOrders()
-    }
-
     const serviceVariantsMap = ref<Record<string, ServiceNode>>({})
     const serviceCategories = ref<ServiceNode[]>([])
 
@@ -2055,7 +1935,6 @@ export default defineComponent({
       shiftResource.hydrate()
       assignedResource.hydrate()
       availableResource.hydrate()
-      historyResource.hydrate()
 
       // Порядок сетевых запросов задаётся смыслом, а не порядком строк. На
       // мобильной сети они конкурируют за одно соединение, и запущенные разом
@@ -2074,11 +1953,7 @@ export default defineComponent({
         [startGeofenceReporting, availableResource.refresh, updateCurrentPosition],
         // 4. Фон экрана: непрочитанное и уведомление поддержки.
         [fetchUnreadSummary, checkSupportNotification, checkMail],
-        // 5. История — самой последней. Это справка о прошлом, к тому же секция
-        //    свёрнута по умолчанию; на первом кадре она не нужна никому, а
-        //    запросов за отзывами тянет за собой по одному на завершённый заказ.
-        [historyResource.refresh],
-        // 6. Прогрев фотографий активных заказов. Идёт после всего, потому что
+        // 5. Прогрев фотографий активных заказов. Идёт после всего, потому что
         //    это подготовка к будущему нажатию, а не содержимое экрана: чат
         //    открывают ради фотографий, и ждать их в момент открытия не должен
         //    никто. Самая тяжёлая по трафику часть — ей и уступать очередь.
@@ -2148,9 +2023,6 @@ export default defineComponent({
       activeAssignedOrders,
       pendingVerificationOrders,
       availableOrders,
-      executorHistoryOrders,
-      executorReviewsMap,
-      isHistoryCollapsed,
       currentLat,
       currentLon,
       showExecutorMapModal,
@@ -2164,10 +2036,6 @@ export default defineComponent({
       selectedOrderDetails,
       openOrderDetails,
       rejectAssignedOrder,
-      showReviewModal,
-      reviewTargetOrderId,
-      openReviewModal,
-      onReviewSubmitted,
       showWithdrawalModal,
       withdrawalAmount,
       submittingWithdrawal,
@@ -2203,10 +2071,8 @@ export default defineComponent({
       shiftLoading,
       assignedLoading,
       availableLoading,
-      historyLoading,
       assignedRefreshing,
       availableRefreshing,
-      historyRefreshing,
       markOrderAsExecuted,
       proofOrder,
       onProofDone,
@@ -2237,7 +2103,6 @@ export default defineComponent({
       isImagePending,
       openImagePreview,
       onChatImgError,
-      openFinancialHistoryModal,
       formatOrderType,
       formatDistance,
       getOrderTitles,
@@ -3065,11 +2930,6 @@ export default defineComponent({
   flex-shrink: 0;
 }
 
-.o-icon.history {
-  background: #f1f5f9;
-  color: var(--text-muted);
-}
-
 .o-info {
   flex: 1;
   display: flex;
@@ -3465,20 +3325,6 @@ export default defineComponent({
 .msg-edited { font-style: italic; opacity: 0.8; }
 .read-receipt { color: var(--accent-main, #6366f1); font-size: 13px; }
 
-.review-status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 12px;
-  padding: 1px 6px;
-  line-height: 1.2;
-}
-
 @media (max-width: 768px) {
   .msg-actions { opacity: 1; transform: translateX(0); }
   .action-icon-btn { width: 28px; height: 28px; font-size: 14px; }
@@ -3683,11 +3529,6 @@ export default defineComponent({
   background: rgba(255,255,255,0.5); border: 1px dashed rgba(0,0,0,0.1); border-radius: var(--rad-md, 16px);
   padding: 16px; text-align: center; font-size: 13px; color: var(--text-muted, #64748b); font-weight: 500;
 }
-
-.history-item { opacity: 0.85; box-shadow: none; border: 1px solid rgba(0,0,0,0.03); margin-bottom: 8px; padding: 10px 16px; }
-.history-item .item-icon { background: #f1f5f9; color: var(--text-muted, #64748b); width: 32px; height: 32px; font-size: 16px; border-radius: 10px; }
-.history-status { font-size: 12px; font-weight: 500; color: var(--text-muted, #64748b); text-align: right; }
-.history-price { font-size: 14px; font-weight: 700; color: var(--text-title, #0f172a); text-align: right; margin-bottom: 2px; }
 
 @media (max-width: 600px) {
   .list-item-compact {

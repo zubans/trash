@@ -10,6 +10,7 @@ import ExecutorProfilePageView from '../pages/executor/ExecutorProfilePage.vue'
 import AchievementsPageView from '../pages/executor/AchievementsPage.vue'
 import GiftsPageView from '../pages/executor/GiftsPage.vue'
 import MailPageView from '../pages/MailPage.vue'
+import OrderHistoryPageView from '../pages/shared/OrderHistoryPage.vue'
 
 const routes: Array<RouteRecordRaw> = [
   {
@@ -183,6 +184,13 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true, role: 'CUSTOMER' },
   },
   {
+    path: '/customer/history',
+    name: 'customer-history',
+    component: OrderHistoryPageView,
+    props: { role: 'CUSTOMER' },
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
     path: '/customer-v2',
     name: 'customer-dashboard-v2',
     component: CustomerDashboardV2View,
@@ -198,6 +206,13 @@ const routes: Array<RouteRecordRaw> = [
     path: '/executor/profile',
     name: 'executor-profile',
     component: ExecutorProfilePageView,
+    meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    path: '/executor/history',
+    name: 'executor-history',
+    component: OrderHistoryPageView,
+    props: { role: 'EXECUTOR' },
     meta: { requiresAuth: true, role: 'EXECUTOR' },
   },
   {

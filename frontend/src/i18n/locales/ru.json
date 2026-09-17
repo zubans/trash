@@ -461,7 +461,7 @@
     "ASSIGNED": "Назначен",
     "EXECUTED": "Исполнен",
     "DISPUTED": "Спор",
-    "COMPLETED": "Завершён",
+    "COMPLETED": "Выполнен",
     "CANCELED": "Отменён"
   },
   "$t": "vuestic",

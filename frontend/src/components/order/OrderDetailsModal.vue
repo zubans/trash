@@ -12,12 +12,14 @@
           <div class="title-row">
             <h1 class="main-title">{{ getCategoryTitle(selectedOrderDetails) }}</h1>
             <span :class="['status-pill', getStatusBadgeClass(selectedOrderDetails.status)]">
-              {{ selectedOrderDetails.status }}
+              {{ $t('orderStatus.' + selectedOrderDetails.status, selectedOrderDetails.status) }}
             </span>
           </div>
           <div class="meta-row">
             <div class="order-type">
-              <i class="ph-fill ph-package"></i> {{ getVariantTitle(selectedOrderDetails) }}
+              <template v-if="getVariantTitle(selectedOrderDetails)">
+                <i class="ph-fill ph-package"></i> {{ getVariantTitle(selectedOrderDetails) }}
+              </template>
             </div>
             <div class="order-price">
               {{ Number(selectedOrderDetails.final_amount || selectedOrderDetails.hold_amount).toFixed(2) }} {{ currencySymbol }}
@@ -33,17 +35,18 @@
             <span class="label">{{ $t('customer.created') }}</span>
             <span class="value">{{ formatDateFull(selectedOrderDetails.created_at) }}</span>
           </div>
-          <div v-if="selectedOrderDetails.assigned_at" class="date-block">
-            <span class="label">{{ $t('customer.assignedAt') }}</span>
-            <span class="value">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</span>
-          </div>
-          <div v-else-if="selectedOrderDetails.completed_at" class="date-block">
+          <!-- У закрытого заказа важнее, когда он закрылся, чем когда его взяли. -->
+          <div v-if="selectedOrderDetails.completed_at" class="date-block">
             <span class="label">{{ $t('customer.completedAt') }}</span>
             <span class="value">{{ formatDateFull(selectedOrderDetails.completed_at) }}</span>
           </div>
           <div v-else-if="selectedOrderDetails.canceled_at" class="date-block">
             <span class="label">{{ $t('customer.canceledAt') }}</span>
             <span class="value">{{ formatDateFull(selectedOrderDetails.canceled_at) }}</span>
+          </div>
+          <div v-else-if="selectedOrderDetails.assigned_at" class="date-block">
+            <span class="label">{{ $t('customer.assignedAt') }}</span>
+            <span class="value">{{ formatDateFull(selectedOrderDetails.assigned_at) }}</span>
           </div>
         </div>
 
@@ -231,24 +234,19 @@ export default defineComponent({
       }
     }
 
-    const getCategoryTitle = (order: any) => {
-      if (!order) return 'Услуга'
-      const formatted = props.formatOrderType(order)
-      if (typeof formatted === 'string' && formatted.includes('(')) {
-        return formatted.split('(')[0].trim()
-      }
-      return 'Услуга'
+    // Строка названия приходит как «Категория · Услуга» (orderTitleLine):
+    // крупно — категория, под ней — услуга. Раньше здесь разбирался старый
+    // формат «Категория (Услуга)», и заголовок всегда был просто «Услуга».
+    const splitTitle = (order: any): [string, string] => {
+      const formatted = order ? String(props.formatOrderType(order) || '') : ''
+      const at = formatted.indexOf(' · ')
+      if (at === -1) return [formatted || 'Заказ', '']
+      return [formatted.slice(0, at), formatted.slice(at + 3)]
     }
 
-    const getVariantTitle = (order: any) => {
-      if (!order) return 'Услуга'
-      const formatted = props.formatOrderType(order)
-      if (typeof formatted === 'string' && formatted.includes('(')) {
-        const match = formatted.match(/\(([^)]+)\)/)
-        if (match && match[1]) return match[1].trim()
-      }
-      return formatted
-    }
+    const getCategoryTitle = (order: any) => splitTitle(order)[0]
+
+    const getVariantTitle = (order: any) => splitTitle(order)[1]
 
     onMounted(() => {
       // Иконки Phosphor загружены глобально
@@ -413,7 +411,7 @@ export default defineComponent({
 
 .order-price {
   font-size: 20px; font-weight: 700; color: var(--brand-primary);
-  font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px;
+  white-space: nowrap;
 }
 
 /* --- Разделитель --- */
@@ -428,7 +426,7 @@ export default defineComponent({
 
 .date-block { display: flex; flex-direction: column; gap: 4px; }
 .label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.value { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-main); }
+.value { font-size: 14px; font-weight: 500; color: var(--text-main); }
 
 /* --- 3. Адрес --- */
 .address-block { display: flex; flex-direction: column; gap: 6px; }

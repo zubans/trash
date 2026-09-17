@@ -54,6 +54,9 @@
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/profile')">
               <i class="ph-fill ph-user-circle"></i> Профиль и адреса
             </button>
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/history')">
+              <i class="ph-fill ph-clock-counter-clockwise"></i> История заказов
+            </button>
             <button type="button" class="nav-item position-relative" @click="menuOpen = false; $router.push('/mail')">
               <i class="ph-fill ph-envelope-simple"></i> Почта
               <span v-if="mailUnread > 0" class="support-unread-dot nav-dot mail-nav-dot"></span>
@@ -365,52 +368,6 @@
         </div>
       </div>
 
-      <!-- История -->
-      <div style="margin-top: 12px;">
-        <div class="cursor-pointer" @click="isHistoryCollapsed = !isHistoryCollapsed">
-          <h2 class="section-title" style="font-size: 18px;">
-            <i class="ph ph-clock-counter-clockwise"></i> История заказов ({{ historyOrders.length }})
-            <i :class="['ph', isHistoryCollapsed ? 'ph-caret-down' : 'ph-caret-up']" style="font-size: 14px; margin-left: 6px;"></i>
-          </h2>
-        </div>
-
-        <div v-if="!isHistoryCollapsed" class="orders-stack mt-3">
-          <SkeletonList v-if="ordersLoading" :rows="3" />
-          <div v-else-if="historyOrders.length === 0" class="empty-orders-state">
-            <p>{{ $t('customer.noHistoryOrders') }}</p>
-          </div>
-
-          <div
-            v-for="order in historyOrders"
-            :key="order.id"
-            class="order-pill cursor-pointer"
-            style="box-shadow: none; border-color: rgba(0,0,0,0.05); background: transparent;"
-            @click="openOrderDetails(order)"
-          >
-            <div class="op-icon" style="background: #e2e8f0; width: 40px; height: 40px; border-radius: 12px;">
-              <i :class="['ph', order.status === 'COMPLETED' ? 'ph-check-circle' : 'ph-x-circle']"></i>
-            </div>
-            <div class="op-info">
-              <div class="op-title order-title-stack" style="color: var(--text-muted);">
-                <span class="order-title-main">{{ getOrderTitles(order).title }}</span>
-                <span v-if="getOrderTitles(order).subtitle" class="order-title-sub">{{ getOrderTitles(order).subtitle }}</span>
-              </div>
-              <div class="op-id">#{{ order.id.slice(0, 8) }}</div>
-            </div>
-            <div class="op-price" style="color: var(--text-muted); font-size: 16px;">
-              {{ Number(order.final_amount || order.hold_amount).toFixed(2) }} {{ currencySymbol }}
-            </div>
-            <div class="op-status" style="background: transparent; color: var(--text-muted); display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-              <span>{{ order.status === 'COMPLETED' ? 'Завершен' : 'Отменен' }}</span>
-              <span v-if="orderReviewsMap[order.id]" class="review-status-badge" title="Оценка отправлена">
-                <i class="ph-fill ph-star" style="color: #f59e0b; font-size: 11px;"></i>
-                <span>{{ orderReviewsMap[order.id].rating }}/5</span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Модальное окно деталей заказа -->
       <OrderDetailsModal
         v-model="showOrderDetailsModal"
@@ -574,7 +531,6 @@ import {
   markImageRendered,
   isImagePending,
 } from '../../services/orderImages'
-import { checkMyOrderReview, type OrderReview } from '../../api/review'
 import { compressImage } from '../../utils/imageCompressor'
 import { getServiceCategories, getServiceCategoryChildren, type ServiceNode } from '../../api/services'
 
@@ -658,12 +614,6 @@ export default defineComponent({
     // `ordersLoading` означает «показывать нечего» — только тогда на месте
     // списка стоит прелоадер; `ordersRefreshing` — тихая догрузка поверх уже
     // показанных заказов.
-    // Отзывы к завершённым заказам — по запросу на заказ ради значка с оценкой
-    // в истории. На первой загрузке экрана их откладывает очередь приоритетов
-    // (история идёт последней); дальше они обновляются вместе со списком, а
-    // уже полученные не перезапрашиваются.
-    let historyReviewsDeferred = true
-
     // Предзагрузка фотографий откладывается до своей ступени в очереди
     // приоритетов: иначе она стартовала бы вместе с первым же списком заказов и
     // отбирала соединение у того, что пользователь видит на экране. Дальше она
@@ -683,14 +633,8 @@ export default defineComponent({
         // или отменённый уходит в историю, и держать его фотографии незачем.
         if (imagePreloadDeferred) releaseClosedOrderImages(orders)
         else void preloadOrderImages(orders)
-        if (!historyReviewsDeferred) fetchReviewsForHistory()
       },
     })
-
-    const loadHistoryReviews = () => {
-      historyReviewsDeferred = false
-      return fetchReviewsForHistory()
-    }
 
     const startImagePreload = () => {
       imagePreloadDeferred = false
@@ -699,8 +643,6 @@ export default defineComponent({
     const orders = ordersResource.data
     const ordersLoading = ordersResource.loading
     const ordersRefreshing = ordersResource.refreshing
-    const isHistoryCollapsed = ref(false)
-    const orderReviewsMap = ref<Record<string, OrderReview>>({})
 
     // Модальные окна
     const showCreateOrderModal = ref(false)
@@ -743,16 +685,6 @@ export default defineComponent({
 
     const activeOrders = computed(() => {
       return orders.value.filter((o) => ['SEARCHING', 'ASSIGNED', 'EXECUTED', 'DISPUTED'].includes(o.status))
-    })
-
-    const historyOrders = computed(() => {
-      return orders.value
-        .filter((o) => ['COMPLETED', 'CANCELED'].includes(o.status))
-        .sort((a, b) => {
-          const dateA = new Date(a.completed_at || a.canceled_at || a.created_at).getTime()
-          const dateB = new Date(b.completed_at || b.canceled_at || b.created_at).getTime()
-          return dateB - dateA
-        })
     })
 
     const selectedVariant = computed(() =>
@@ -901,22 +833,6 @@ export default defineComponent({
       orderLon.value = saved && saved.lon != null ? saved.lon : null
     }
 
-    const fetchReviewsForHistory = async () => {
-      const completed = orders.value.filter((o) => o.status === 'COMPLETED')
-      for (const order of completed) {
-        if (!orderReviewsMap.value[order.id]) {
-          try {
-            const res = await checkMyOrderReview(order.id)
-            if (res && res.has_reviewed && res.review) {
-              orderReviewsMap.value[order.id] = res.review
-            }
-          } catch (err) {
-            // игнорируем
-          }
-        }
-      }
-    }
-
     // Обновление после действия пользователя: `reload` не присоединяется к
     // запросу, отправленному ДО действия, — тот ответ о нём не знает и вернул бы
     // список до нажатия. Опрос по таймеру зовёт `refresh`, а первую загрузку
@@ -1057,11 +973,7 @@ export default defineComponent({
 
     const onReviewSubmitted = (payload?: { tipped?: boolean }) => {
       successMsg.value = payload?.tipped ? 'Спасибо за отзыв и чаевые!' : 'Спасибо за отзыв!'
-      if (reviewTargetOrderId.value) {
-        delete orderReviewsMap.value[reviewTargetOrderId.value]
-      }
-      fetchReviewsForHistory()
-      // Чаевые меняют баланс, поэтому обновляем профиль вместе с отзывами.
+      // Чаевые меняют баланс, поэтому обновляем профиль.
       if (payload?.tipped) {
         fetchProfile()
       }
@@ -1665,9 +1577,8 @@ export default defineComponent({
           () => fetchProfile(false),
           () => getServiceCategories().then((cats) => { serviceCategories.value = cats }),
         ],
-        // 2. История — последней: оценки к завершённым заказам стоят по запросу
-        //    на каждый заказ и нужны только значку с рейтингом.
-        [loadHistoryReviews, checkMail, fetchPenaltyStatus],
+        // 2. Второстепенное: почта и штрафной статус.
+        [checkMail, fetchPenaltyStatus],
         // 3. Прогрев фотографий активных заказов. Идёт после всего, потому что
         //    это подготовка к будущему нажатию, а не содержимое экрана: чат
         //    открывают ради фотографий, и ждать их в момент открытия не должен
@@ -1714,11 +1625,8 @@ export default defineComponent({
       startEditAddress,
       cancelEditAddress,
       activeOrders,
-      historyOrders,
       ordersLoading,
       ordersRefreshing,
-      isHistoryCollapsed,
-      orderReviewsMap,
       showCreateOrderModal,
       showOrderDetailsModal,
       showTopUpModal,
@@ -2451,20 +2359,6 @@ export default defineComponent({
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
-}
-
-.review-status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 12px;
-  padding: 1px 6px;
-  line-height: 1.2;
 }
 
 .topup-modal-title {
