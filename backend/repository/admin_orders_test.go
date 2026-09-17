@@ -11,9 +11,10 @@ import (
 )
 
 // Заказ в поиске исполнителя не имеет, и его телефон приходит из LEFT JOIN как
-// NULL. Проверяется, переживает ли это чтение списка активных заказов: NULL,
-// прочитанный в обычную строку, — ошибка драйвера, а не пустое значение.
-func TestGetActiveOrdersHandlesUnassignedOrder(t *testing.T) {
+// NULL. Проверяется, переживает ли это чтение списка заказов: NULL, прочитанный
+// в обычную строку, — ошибка драйвера, а не пустое значение. Заодно — что
+// заказ в поиске попадает в группу активных и не попадает в «на проверке».
+func TestGetOrdersHandlesUnassignedOrder(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
 
@@ -41,9 +42,11 @@ func TestGetActiveOrdersHandlesUnassignedOrder(t *testing.T) {
 		t.Fatalf("insert order: %v", err)
 	}
 
-	orders, err := repo.GetActiveOrders(ctx, 50, 0)
+	orders, _, err := repo.GetOrders(ctx, repository.OrdersFilter{
+		Statuses: repository.OrderStatusGroups[repository.OrderGroupActive], Limit: 50,
+	})
 	if err != nil {
-		t.Fatalf("GetActiveOrders вернул ошибку на заказе без исполнителя: %v", err)
+		t.Fatalf("GetOrders вернул ошибку на заказе без исполнителя: %v", err)
 	}
 
 	var found bool
@@ -57,5 +60,15 @@ func TestGetActiveOrdersHandlesUnassignedOrder(t *testing.T) {
 	}
 	if !found {
 		t.Error("заказ в поиске не попал в список активных")
+	}
+
+	review, _, err := repo.GetOrders(ctx, repository.OrdersFilter{
+		Statuses: repository.OrderStatusGroups[repository.OrderGroupReview], Search: orderID.String(), Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("GetOrders(review): %v", err)
+	}
+	if len(review) != 0 {
+		t.Error("заказ в поиске не должен попадать в группу «на проверке»")
 	}
 }

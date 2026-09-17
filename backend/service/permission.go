@@ -75,9 +75,9 @@ var permissionCatalog = []PermissionSection{
 
 	{Key: "shifts", Label: "Активные смены", Group: "Система", Route: "/admin/shifts",
 		Actions: []string{ActionView}},
-	{Key: "orders", Label: "Заказы", Group: "Система", Route: "/admin/orders/active",
-		Actions: []string{ActionView},
-		Hint:    "Активные и завершённые заказы."},
+	{Key: "orders", Label: "Заказы", Group: "Система", Route: "/admin/orders",
+		Actions: []string{ActionView, ActionEdit},
+		Hint:    "Все заказы с фильтром по статусу. Правка — вернуть заказ на проверке в работу."},
 	{Key: "service_catalog", Label: "Конструктор услуг", Group: "Система", Route: "/admin/service-catalog",
 		Actions: []string{ActionView, ActionCreate, ActionEdit, ActionDelete}},
 	{Key: "achievements", Label: "Ачивки", Group: "Система", Route: "/admin/achievements",

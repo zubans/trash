@@ -103,14 +103,9 @@
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeShifts') }}</span>
           </router-link>
 
-          <router-link v-if="can('orders.view')" to="/admin/orders/active" class="nav-item" :class="{ active: currentRouteName === 'admin-active-orders' }" @click="closeSidebarOnMobile">
+          <router-link v-if="can('orders.view')" to="/admin/orders" class="nav-item" :class="{ active: currentRouteName === 'admin-orders' }" @click="closeSidebarOnMobile">
             <i class="ph ph-package"></i>
-            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.activeOrders') }}</span>
-          </router-link>
-
-          <router-link v-if="can('orders.view')" to="/admin/orders/completed" class="nav-item" :class="{ active: currentRouteName === 'admin-completed-orders' }" @click="closeSidebarOnMobile">
-            <i class="ph ph-check-circle"></i>
-            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.completedOrders') }}</span>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('app.orders') }}</span>
           </router-link>
 
           <router-link v-if="can('service_catalog.view')" to="/admin/service-catalog" class="nav-item" :class="{ active: currentRouteName === 'admin-service-catalog' }" @click="closeSidebarOnMobile">
@@ -212,8 +207,7 @@ const PAGE_TITLE_KEYS: Record<string, string> = {
   'admin-broadcasts': 'broadcasts',
   'admin-mail': 'mail',
   'admin-shifts': 'shifts',
-  'admin-active-orders': 'activeOrders',
-  'admin-completed-orders': 'completedOrders',
+  'admin-orders': 'orders',
   'admin-service-catalog': 'serviceCatalog',
   'admin-escalations': 'escalations',
   'admin-disputes': 'disputes',

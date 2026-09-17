@@ -96,17 +96,15 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'shifts.view' },
       },
       {
-        path: 'orders/active',
-        name: 'admin-active-orders',
-        component: () => import('../pages/admin/ActiveOrders.vue'),
+        path: 'orders',
+        name: 'admin-orders',
+        component: () => import('../pages/admin/Orders.vue'),
         meta: { permission: 'orders.view' },
       },
-      {
-        path: 'orders/completed',
-        name: 'admin-completed-orders',
-        component: () => import('../pages/admin/CompletedOrders.vue'),
-        meta: { permission: 'orders.view' },
-      },
+      // Старые адреса разделов «Активные» и «Выполненные» ведут на общий список
+      // с тем же фильтром: на них могли остаться закладки.
+      { path: 'orders/active', redirect: { path: '/admin/orders', query: { status: 'active' } } },
+      { path: 'orders/completed', redirect: { path: '/admin/orders', query: { status: 'completed' } } },
       {
         path: 'service-catalog',
         name: 'admin-service-catalog',
@@ -284,8 +282,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/broadcasts', permission: 'broadcasts.view' },
   { path: '/admin/mail', permission: 'mail.view' },
   { path: '/admin/shifts', permission: 'shifts.view' },
-  { path: '/admin/orders/active', permission: 'orders.view' },
-  { path: '/admin/orders/completed', permission: 'orders.view' },
+  { path: '/admin/orders', permission: 'orders.view' },
   { path: '/admin/service-catalog', permission: 'service_catalog.view' },
   { path: '/admin/achievements', permission: 'achievements.view' },
   { path: '/admin/gifts', permission: 'gifts.view' },

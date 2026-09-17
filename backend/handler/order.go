@@ -386,6 +386,30 @@ func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r
 	h.ListAssignedOrders(w, r)
 }
 
+// ReturnToWork обслуживает POST /admin/orders/{id}/return-to-work: заказ на
+// проверке возвращается исполнителю в работу.
+func (h *OrderHandler) ReturnToWork(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid order id", http.StatusBadRequest)
+		return
+	}
+	if err := h.orderService.ReturnToWork(r.Context(), orderID, user.ID); err != nil {
+		if errors.Is(err, service.ErrOrderNotOnReview) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		writeOrderError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // CallerID отдаёт id аутентифицированного пользователя запроса. Он существует
 // для модулей, которые не должны знать про ключи контекста middleware, —
 // например photoproof: единственное, что им нужно о пришедшем, это id.

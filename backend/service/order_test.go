@@ -387,6 +387,20 @@ func (m *mockOrderRepo) MarkDisputed(ctx context.Context, q repository.Querier, 
 	return repository.ErrConflict
 }
 
+func (m *mockOrderRepo) ReturnToWork(ctx context.Context, q repository.Querier, orderID uuid.UUID) error {
+	for _, o := range m.orders {
+		if o.ID == orderID {
+			if o.Status != repository.OrderStatusExecuted {
+				return repository.ErrConflict
+			}
+			o.Status = repository.OrderStatusAssigned
+			o.ExecutedAt = nil
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
 func (m *mockOrderRepo) Execute(ctx context.Context, q repository.Querier, orderID uuid.UUID) error {
 	for _, o := range m.orders {
 		if o.ID == orderID {

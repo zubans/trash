@@ -743,23 +743,17 @@ func (s *AdminService) GetActiveShifts(ctx context.Context) ([]*repository.Admin
 	return s.adminRepo.GetActiveShifts(ctx)
 }
 
-// GetActiveOrders возвращает заказы клиентов, которые ещё активны (в поиске или назначены).
-func (s *AdminService) GetActiveOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
-	limit, offset = page(limit, offset)
-	return s.adminRepo.GetActiveOrders(ctx, limit, offset)
-}
-
-// GetCompletedOrders возвращает одну страницу завершённых заказов клиентов
-// вместе с общим числом подходящих под фильтр, чтобы клиент мог листать и
-// выгружать, не гадая, сколько стоит за имеющейся у него страницей.
-func (s *AdminService) GetCompletedOrders(ctx context.Context, f repository.CompletedOrdersFilter) ([]*repository.AdminOrder, int, error) {
+// GetOrders возвращает одну страницу списка заказов вместе с общим числом
+// подходящих под фильтр, чтобы клиент мог листать и выгружать, не гадая,
+// сколько стоит за имеющейся у него страницей.
+func (s *AdminService) GetOrders(ctx context.Context, f repository.OrdersFilter) ([]*repository.AdminOrder, int, error) {
 	f.Limit, f.Offset = page(f.Limit, f.Offset)
-	return s.adminRepo.GetCompletedOrders(ctx, f)
+	return s.adminRepo.GetOrders(ctx, f)
 }
 
-// CompletedOrderFacets возвращает значения, которые предлагают фильтры завершённых заказов.
-func (s *AdminService) CompletedOrderFacets(ctx context.Context) (repository.CompletedOrderFacets, error) {
-	return s.adminRepo.CompletedOrderFacets(ctx)
+// OrderFacets возвращает значения фильтров услуги и периода для группы статусов.
+func (s *AdminService) OrderFacets(ctx context.Context, statuses []repository.OrderStatus) (repository.OrderFacets, error) {
+	return s.adminRepo.OrderFacets(ctx, statuses)
 }
 
 // GetProfile возвращает профиль аутентифицированного пользователя, включая адрес заказчика.

@@ -104,15 +104,16 @@ type AdminRepository interface {
 	// в роли заказчика».
 	GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*AdminOrder, int, error)
 	GetActiveShifts(ctx context.Context) ([]*AdminShift, error)
-	GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error)
-	GetCompletedOrders(ctx context.Context, f CompletedOrdersFilter) ([]*AdminOrder, int, error)
-	CompletedOrderFacets(ctx context.Context) (CompletedOrderFacets, error)
+	// GetOrders — страница списка заказов админки с фильтрами и общим числом.
+	GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrder, int, error)
+	// OrderFacets — значения фильтров услуги и периода для группы статусов.
+	OrderFacets(ctx context.Context, statuses []OrderStatus) (OrderFacets, error)
 }
 
-// CompletedOrderFacets — значения, в которые можно выставить фильтры
-// завершённых заказов. Они считаются по всем завершённым заказам, а не по
-// текущей странице, поэтому выбор одного фильтра никогда не опустошает другой.
-type CompletedOrderFacets struct {
+// OrderFacets — значения, в которые можно выставить фильтры списка заказов.
+// Они считаются по всем заказам выбранной группы статусов, а не по текущей
+// странице, поэтому выбор одного фильтра никогда не опустошает другой.
+type OrderFacets struct {
 	Services []string `json:"services"`
 	Periods  []string `json:"periods"`
 }
@@ -145,29 +146,68 @@ var transactionSorts = map[string]string{
 	"user":       "u.phone",
 }
 
-// CompletedOrdersFilter описывает одну страницу списка завершённых заказов.
-// Search, service и period сужают набор; Sort выбирает колонку. Всё это
-// выполняется в SQL, поэтому то, что админ видит и выгружает, покрывает каждый
-// завершённый заказ, а не только строки, которые случайно загрузились.
-type CompletedOrdersFilter struct {
-	Search  string // телефон, id заказа или название услуги, нестрогое совпадение
-	Service string // точное название услуги
-	Period  string // YYYY-MM по completed_at
-	Sort    string // один из completedOrderSorts; всё прочее откатывается к умолчанию
-	Desc    bool
-	Limit   int
-	Offset  int
+// Группы статусов списка заказов админки. «На проверке» — исполнитель отметил
+// заказ исполненным и ждёт подтверждения заказчика.
+const (
+	OrderGroupActive    = "active"
+	OrderGroupReview    = "review"
+	OrderGroupCompleted = "completed"
+	OrderGroupCanceled  = "canceled"
+	OrderGroupAll       = "all"
+)
+
+// OrderStatusGroups — статусы каждой группы. Спор (DISPUTED) — в активных: его
+// разбирают, и заказ не должен пропадать из списка, пока спор открыт.
+var OrderStatusGroups = map[string][]OrderStatus{
+	OrderGroupActive:    {OrderStatusSearching, OrderStatusAssigned, OrderStatusDisputed},
+	OrderGroupReview:    {OrderStatusExecuted},
+	OrderGroupCompleted: {OrderStatusCompleted},
+	OrderGroupCanceled:  {OrderStatusCanceled},
 }
 
-// completedOrderSorts — белый список того, что может дойти до ORDER BY. Ключ
-// приходит от клиента, поэтому его нельзя подставлять в запрос: выбрать можно
-// только эти фиксированные выражения.
-var completedOrderSorts = map[string]string{
-	"completed_at": "o.completed_at",
+// OrdersFilter описывает одну страницу списка заказов. Statuses сужает набор до
+// группы (пусто — все статусы); search, service и period сужают дальше; Sort
+// выбирает колонку. Всё выполняется в SQL, поэтому то, что админ видит и
+// выгружает, покрывает все подходящие заказы, а не загруженные строки.
+type OrdersFilter struct {
+	Statuses []OrderStatus
+	Search   string // телефон, id заказа или название услуги, нестрогое совпадение
+	Service  string // точное название услуги
+	Period   string // YYYY-MM по дате последнего события заказа (orderEventAt)
+	Sort     string // один из orderSorts; всё прочее откатывается к умолчанию
+	Desc     bool
+	Limit    int
+	Offset   int
+}
+
+// orderEventAt — дата последнего события заказа: завершения, отмены, отметки
+// исполнителя или создания. По ней список показывает дату, сортирует и
+// группирует периоды, какой бы ни была группа статусов.
+const orderEventAt = "COALESCE(o.completed_at, o.canceled_at, o.executed_at, o.created_at)"
+
+// orderSorts — белый список того, что может дойти до ORDER BY. Ключ приходит от
+// клиента, поэтому его нельзя подставлять в запрос: выбрать можно только эти
+// фиксированные выражения.
+var orderSorts = map[string]string{
+	"date":         orderEventAt,
 	"final_amount": "o.final_amount",
 	"service":      "COALESCE(sn.name->>'ru', sn.code)",
 	"customer":     "cu.phone",
 	"executor":     "eu.phone",
+	"status":       "o.status",
+}
+
+// statusArgs дописывает условие по статусам в where и аргументы.
+func statusArgs(where string, args []interface{}, statuses []OrderStatus) (string, []interface{}) {
+	if len(statuses) == 0 {
+		return where, args
+	}
+	placeholders := make([]string, len(statuses))
+	for i, st := range statuses {
+		args = append(args, st)
+		placeholders[i] = fmt.Sprintf("$%d", len(args))
+	}
+	return where + " AND o.status IN (" + strings.Join(placeholders, ", ") + ")", args
 }
 
 type adminRepo struct {
@@ -763,48 +803,8 @@ func clampPage(limit, offset int) (int, int) {
 	return limit, offset
 }
 
-func (r *adminRepo) GetActiveOrders(ctx context.Context, limit, offset int) ([]*AdminOrder, error) {
-	query := `
-		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
-		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)
-		FROM orders o
-		JOIN users cu ON o.customer_id = cu.id
-		LEFT JOIN users eu ON o.executor_id = eu.id
-		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.status IN ($1, $2, $3)
-		ORDER BY o.created_at DESC
-		LIMIT $4 OFFSET $5`
-
-	// DISPUTED — в активных: спор разбирают здесь же, и заказ не должен
-	// пропадать из списка, пока он открыт.
-	rows, err := r.db.QueryContext(ctx, query, OrderStatusSearching, OrderStatusAssigned, OrderStatusDisputed, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var orders []*AdminOrder
-	for rows.Next() {
-		var o AdminOrder
-		err := rows.Scan(
-			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
-			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
-			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
-			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
-		)
-		if err != nil {
-			return nil, err
-		}
-		orders = append(orders, &o)
-	}
-	return orders, rows.Err()
-}
-
-func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFilter) ([]*AdminOrder, int, error) {
-	where := "WHERE o.status = $1"
-	args := []interface{}{OrderStatusCompleted}
+func (r *adminRepo) GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrder, int, error) {
+	where, args := statusArgs("WHERE TRUE", nil, f.Statuses)
 
 	if search := strings.TrimSpace(f.Search); search != "" {
 		// Телефон хранится как +79997454656, а набирают его как
@@ -838,7 +838,7 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFil
 
 	if period := strings.TrimSpace(f.Period); period != "" {
 		args = append(args, period)
-		where += fmt.Sprintf(" AND to_char(o.completed_at, 'YYYY-MM') = $%d", len(args))
+		where += fmt.Sprintf(" AND to_char(%s, 'YYYY-MM') = $%d", orderEventAt, len(args))
 	}
 
 	from := `
@@ -853,9 +853,9 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFil
 		return nil, 0, err
 	}
 
-	sortExpr, ok := completedOrderSorts[f.Sort]
+	sortExpr, ok := orderSorts[f.Sort]
 	if !ok {
-		sortExpr = completedOrderSorts["completed_at"]
+		sortExpr = orderSorts["date"]
 	}
 	direction := "ASC"
 	if f.Desc {
@@ -863,11 +863,13 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFil
 	}
 
 	args = append(args, f.Limit, f.Offset)
+	// Телефон исполнителя — через COALESCE: у заказа в поиске исполнителя нет,
+	// и NULL из LEFT JOIN, прочитанный в строку, — ошибка драйвера.
 	query := fmt.Sprintf(`
 		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
 		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, eu.phone, COALESCE(sn.name->>'ru', sn.code)
+		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at, o.executed_at,
+		       cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)
 		%s
 		ORDER BY %s %s NULLS LAST, o.created_at DESC
 		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
@@ -878,13 +880,13 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFil
 	}
 	defer rows.Close()
 
-	var orders []*AdminOrder
+	orders := []*AdminOrder{}
 	for rows.Next() {
 		var o AdminOrder
 		err := rows.Scan(
 			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
-			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
+			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt, &o.ExecutedAt,
 			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
 		)
 		if err != nil {
@@ -895,15 +897,16 @@ func (r *adminRepo) GetCompletedOrders(ctx context.Context, f CompletedOrdersFil
 	return orders, total, rows.Err()
 }
 
-func (r *adminRepo) CompletedOrderFacets(ctx context.Context) (CompletedOrderFacets, error) {
-	facets := CompletedOrderFacets{Services: []string{}, Periods: []string{}}
+func (r *adminRepo) OrderFacets(ctx context.Context, statuses []OrderStatus) (OrderFacets, error) {
+	facets := OrderFacets{Services: []string{}, Periods: []string{}}
+	where, args := statusArgs("WHERE TRUE", nil, statuses)
 
 	serviceRows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT COALESCE(sn.name->>'ru', sn.code) AS name
 		FROM orders o
 		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.status = $1
-		ORDER BY name`, OrderStatusCompleted)
+		`+where+`
+		ORDER BY name`, args...)
 	if err != nil {
 		return facets, err
 	}
@@ -920,10 +923,10 @@ func (r *adminRepo) CompletedOrderFacets(ctx context.Context) (CompletedOrderFac
 	}
 
 	periodRows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT to_char(completed_at, 'YYYY-MM') AS period
-		FROM orders
-		WHERE status = $1 AND completed_at IS NOT NULL
-		ORDER BY period DESC`, OrderStatusCompleted)
+		SELECT DISTINCT to_char(`+orderEventAt+`, 'YYYY-MM') AS period
+		FROM orders o
+		`+where+`
+		ORDER BY period DESC`, args...)
 	if err != nil {
 		return facets, err
 	}

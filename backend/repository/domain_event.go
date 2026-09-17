@@ -21,6 +21,8 @@ const (
 	EventOrderExecuted  = "order.executed"
 	EventOrderConfirmed = "order.confirmed"
 	EventOrderCanceled  = "order.canceled"
+	// EventOrderReturned — заказ на проверке возвращён исполнителю в работу.
+	EventOrderReturned = "order.returned"
 	// EventOrderSubmission несёт данные, отправленные исполнителем на проверку, и
 	// то, как они сравнились, — но никогда значения, с которыми сравнивали.
 	EventOrderSubmission = "order.submission"

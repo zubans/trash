@@ -12,7 +12,7 @@
 2. **Заявки на пополнение (`/admin/topups`)**
 3. **История транзакций (`/admin/transactions`)**
 4. **Активные смены (`/admin/shifts`)**
-5. **Активные и завершенные заказы (`/admin/orders`)**
+5. **Заказы (`/admin/orders`)** — один список с фильтром по статусу
 6. **Системные настройки и тарифы (`/admin/settings`)**
 7. **Роли и права (`/admin/roles`)** — см. [`roles.md`](./roles.md)
 
@@ -58,6 +58,29 @@ Content-Type: application/json
 
 - **`GET /api/admin/shifts`** — отображение всех активных и завершенных смен с текущими статусами (`ACTIVE`, `COMPLETED`, `PENALIZED`).
 - Индикация количества нарушений геозоны и штрафов.
+
+### 2.3a Заказы (`Orders.vue`)
+
+Раньше было два пункта меню — «Активные» и «Выполненные»; заказы на проверке
+(`EXECUTED`) не попадали ни в один. Теперь один раздел с фильтром.
+
+- **`GET /api/admin/orders`** — страница списка. Параметры: `status` — группа
+  (`active` = `SEARCHING`/`ASSIGNED`/`DISPUTED`, `review` = `EXECUTED`,
+  `completed`, `canceled`, `all`; неизвестное значение читается как `all`),
+  `search`, `service`, `period` (`YYYY-MM`), `sort` (`date`, `final_amount`,
+  `service`, `customer`, `executor`, `status`), `order`, `limit`, `offset`.
+  Дата строки — последнее событие заказа: завершение, отмена, отметка
+  «Исполнил» или создание. Ответ несёт `orders`, `total` и фасеты фильтров
+  (`services`, `periods`) для выбранной группы. Право `orders.view`.
+- Группа живёт в адресе (`/admin/orders?status=review`); старые адреса
+  `/admin/orders/active` и `/admin/orders/completed` перенаправляются на неё.
+- **`POST /api/admin/orders/{id}/return-to-work`** — вернуть заказ на проверке в
+  работу: `EXECUTED` → `ASSIGNED` у того же исполнителя, отметка «Исполнил»
+  (`executed_at`, `executed_at_device`) стирается, в чат заказа уходит
+  сообщение, публикуется событие `order.returned`. Деньги не двигаются. Любой
+  другой статус — `409`. Право `orders.edit`.
+- Кнопка «Вернуть в работу» есть в этом разделе и во вкладке «Заказы» истории
+  пользователя — только у заказов на проверке и только при `orders.edit`.
 
 ### 2.4 Системные настройки (`SystemSettings.vue`)
 

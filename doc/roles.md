@@ -124,6 +124,13 @@ r.With(can("roles.edit")).Post("/admin/users/{id}/roles", ah.UpdateUserRolesHand
 Раздел `penalties` пункта меню не имеет: его действия — на карточке
 пользователя. См. [`disputes_and_penalties.md`](./disputes_and_penalties.md).
 
+### Права заказов
+
+Миграция `057` выдаёт роли `MODERATOR` `orders.view` и `orders.edit`. Правка
+заказов — возврат заказа на проверке в работу (см.
+[`admin_panel.md`](./admin_panel.md)): это тот же разбор отметки, поставленной
+без работы, что и споры.
+
 ---
 
 ## 4. Эндпоинты

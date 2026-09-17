@@ -842,41 +842,30 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(shifts)
 }
 
-// GetActiveOrdersHandler перечисляет активные заказы заказчиков (в поиске или назначенные).
-func (h *AdminHandler) GetActiveOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	limit, offset := pageParams(r)
-	orders, err := h.adminService.GetActiveOrders(r.Context(), limit, offset)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
-}
-
-// GetCompletedOrdersHandler перечисляет завершённые заказы заказчиков.
-func (h *AdminHandler) GetCompletedOrdersHandler(w http.ResponseWriter, r *http.Request) {
+// GetOrdersHandler обслуживает GET /admin/orders: один список заказов с
+// фильтром по группе статусов (status = active | review | completed |
+// canceled | all). Неизвестная группа читается как all.
+func (h *AdminHandler) GetOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	q := r.URL.Query()
-	orders, total, err := h.adminService.GetCompletedOrders(r.Context(), repository.CompletedOrdersFilter{
-		Search:  q.Get("search"),
-		Service: q.Get("service"),
-		Period:  q.Get("period"),
-		Sort:    q.Get("sort"),
-		Desc:    q.Get("order") != "asc",
-		Limit:   limit,
-		Offset:  offset,
+	statuses := repository.OrderStatusGroups[q.Get("status")]
+	orders, total, err := h.adminService.GetOrders(r.Context(), repository.OrdersFilter{
+		Statuses: statuses,
+		Search:   q.Get("search"),
+		Service:  q.Get("service"),
+		Period:   q.Get("period"),
+		Sort:     q.Get("sort"),
+		Desc:     q.Get("order") != "asc",
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if orders == nil {
-		orders = []*repository.AdminOrder{}
-	}
 	// Фасеты едут вместе со страницей, чтобы выпадающие фильтры перечисляли все
-	// существующие услуги и месяцы, а не только попавшие на экран.
-	facets, err := h.adminService.CompletedOrderFacets(r.Context())
+	// существующие услуги и месяцы группы, а не только попавшие на экран.
+	facets, err := h.adminService.OrderFacets(r.Context(), statuses)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

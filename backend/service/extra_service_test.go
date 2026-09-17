@@ -359,8 +359,7 @@ func TestAdminService_Extended(t *testing.T) {
 	}
 
 	_, _ = srv.GetActiveShifts(context.Background())
-	_, _ = srv.GetActiveOrders(context.Background(), 0, 0)
-	_, _, _ = srv.GetCompletedOrders(context.Background(), repository.CompletedOrdersFilter{})
+	_, _, _ = srv.GetOrders(context.Background(), repository.OrdersFilter{})
 
 	prof, err := srv.GetProfile(context.Background(), u.ID)
 	if err != nil || prof["phone"] != "70000000000" {

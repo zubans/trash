@@ -2,10 +2,10 @@ package repository
 
 import "testing"
 
-// TestCompletedOrderSortsAreWhitelisted: ключ сортировки приходит из строки
+// TestOrderSortsAreWhitelisted: ключ сортировки приходит из строки
 // запроса и конкатенируется в ORDER BY, поэтому всё, чего нет в карте, обязано
 // откатиться к умолчанию, а не дойти до SQL.
-func TestCompletedOrderSortsAreWhitelisted(t *testing.T) {
+func TestOrderSortsAreWhitelisted(t *testing.T) {
 	rejected := []string{
 		"o.completed_at; DROP TABLE orders",
 		"(SELECT password FROM users LIMIT 1)",
@@ -13,13 +13,13 @@ func TestCompletedOrderSortsAreWhitelisted(t *testing.T) {
 		"",
 	}
 	for _, key := range rejected {
-		if _, ok := completedOrderSorts[key]; ok {
+		if _, ok := orderSorts[key]; ok {
 			t.Errorf("%q must not be an accepted sort key", key)
 		}
 	}
 
-	for _, key := range []string{"completed_at", "final_amount", "service", "customer", "executor"} {
-		if _, ok := completedOrderSorts[key]; !ok {
+	for _, key := range []string{"date", "final_amount", "service", "customer", "executor", "status"} {
+		if _, ok := orderSorts[key]; !ok {
 			t.Errorf("%q should be sortable", key)
 		}
 	}

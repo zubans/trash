@@ -1,5 +1,5 @@
 <template>
-  <div class="completed-orders">
+  <div class="orders-page">
     <div class="admin-card">
       <!-- Действия страницы; заголовок выводит шапка раскладки -->
       <div class="page-header">
@@ -16,6 +16,10 @@
 
       <!-- Панель инструментов -->
       <div class="toolbar">
+        <select v-model="statusFilter" class="filter-btn" name="status">
+          <option v-for="g in statusGroups" :key="g.value" :value="g.value">{{ g.label }}</option>
+        </select>
+
         <div class="search-box">
           <i class="ph-bold ph-magnifying-glass"></i>
           <input v-model="searchQuery" type="text" placeholder="Поиск по телефону или ID..." />
@@ -36,6 +40,8 @@
         </span>
       </div>
 
+      <p v-if="actionMsg" class="action-msg" :class="{ error: actionIsError }">{{ actionMsg }}</p>
+
       <!-- Таблица -->
       <div class="grid-table">
         <div class="grid-row grid-header">
@@ -52,9 +58,13 @@
             Сумма <i class="ph-bold" :class="sortIcon('final_amount')"></i>
           </button>
           <div class="th">Адрес</div>
-          <button type="button" class="th sortable" @click="toggleSort('completed_at')">
-            Завершен <i class="ph-bold" :class="sortIcon('completed_at')"></i>
+          <button type="button" class="th sortable" @click="toggleSort('status')">
+            Статус <i class="ph-bold" :class="sortIcon('status')"></i>
           </button>
+          <button type="button" class="th sortable" @click="toggleSort('date')">
+            Дата <i class="ph-bold" :class="sortIcon('date')"></i>
+          </button>
+          <div class="th"></div>
         </div>
 
         <div v-for="o in orders" :key="o.id" class="grid-row grid-item">
@@ -96,8 +106,25 @@
           </div>
 
           <div class="cell">
-            <span class="date-main">{{ formatDay(o.completed_at) }}</span>
-            <span class="date-time">{{ formatTime(o.completed_at) }}</span>
+            <span class="status-badge" :class="o.status">{{ statusLabel(o.status) }}</span>
+          </div>
+
+          <div class="cell">
+            <span class="date-main">{{ formatDay(eventAt(o)) }}</span>
+            <span class="date-time">{{ formatTime(eventAt(o)) }}</span>
+          </div>
+
+          <div class="cell">
+            <button
+              v-if="canEdit && canReturnToWork(o.status)"
+              type="button"
+              class="btn-return"
+              :disabled="returning === o.id"
+              @click="returnToWork(o)"
+            >
+              <i class="ph-bold ph-arrow-counter-clockwise"></i>
+              Вернуть в работу
+            </button>
           </div>
         </div>
 
@@ -105,7 +132,7 @@
         <div v-else-if="orders.length === 0 && hasFilters" class="table-note">
           Ничего не найдено по заданным фильтрам
         </div>
-        <div v-else-if="orders.length === 0" class="table-note">Выполненных заказов пока нет</div>
+        <div v-else-if="orders.length === 0" class="table-note">Заказов нет</div>
       </div>
 
       <!-- Постраничная навигация -->
@@ -124,39 +151,74 @@
 
 <script lang="ts">
 import { defineComponent, ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth-store'
 import api from '../../services/api'
 import { formatPhoneMask } from '../../utils/phoneMask'
+import {
+  ORDER_STATUS_LABELS,
+  RETURN_TO_WORK_CONFIRM,
+  canReturnToWork,
+  returnOrderToWork,
+} from '../../api/admin-orders'
 
-interface CompletedOrder {
+interface AdminOrderRow {
   id: string
+  status: string
   customer_phone?: string
   executor_phone?: string
   service_variant_name?: string
   is_urgent?: boolean
   is_asap?: boolean
+  hold_amount?: number
   final_amount?: number
   address?: string
+  created_at?: string
+  executed_at?: string
   completed_at?: string
+  canceled_at?: string
 }
 
+// Группы статусов — те же, что понимает GET /admin/orders?status=.
+const STATUS_GROUPS = [
+  { value: 'active', label: 'Активные' },
+  { value: 'review', label: 'На проверке' },
+  { value: 'completed', label: 'Выполненные' },
+  { value: 'canceled', label: 'Отменённые' },
+  { value: 'all', label: 'Все заказы' },
+]
+const DEFAULT_GROUP = 'active'
+
 export default defineComponent({
-  name: 'CompletedOrders',
+  name: 'AdminOrders',
   setup() {
     const authStore = useAuthStore()
-    const orders = ref<CompletedOrder[]>([])
+    const route = useRoute()
+    const router = useRouter()
+    const orders = ref<AdminOrderRow[]>([])
     const loading = ref(false)
 
+    const groupFromRoute = () => {
+      const value = String(route.query.status || '')
+      return STATUS_GROUPS.some((g) => g.value === value) ? value : DEFAULT_GROUP
+    }
+
+    const statusFilter = ref(groupFromRoute())
     const searchQuery = ref('')
     const serviceFilter = ref('')
     const periodFilter = ref('')
-    const sortKey = ref('completed_at')
+    const sortKey = ref('date')
     const sortDesc = ref(true)
     const page = ref(1)
     const total = ref(0)
     const exporting = ref(false)
     const serviceOptions = ref<string[]>([])
     const periodKeys = ref<string[]>([])
+    const returning = ref('')
+    const actionMsg = ref('')
+    const actionIsError = ref(false)
+
+    const canEdit = computed(() => authStore.can('orders.edit'))
 
     const PAGE_SIZE = 50
     // Сервер отказывает, если попросить больше за один запрос, поэтому полная
@@ -165,10 +227,17 @@ export default defineComponent({
 
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
-    const isFree = (o: CompletedOrder) => Number(o.final_amount || 0) === 0
+    const amountOf = (o: AdminOrderRow) => Number(o.final_amount ?? o.hold_amount ?? 0)
 
-    const amountLabel = (o: CompletedOrder) =>
-      isFree(o) ? 'Бесплатно' : `${Number(o.final_amount).toFixed(2)} ${currencySymbol.value}`
+    const isFree = (o: AdminOrderRow) => amountOf(o) === 0
+
+    const amountLabel = (o: AdminOrderRow) =>
+      isFree(o) ? 'Бесплатно' : `${amountOf(o).toFixed(2)} ${currencySymbol.value}`
+
+    const statusLabel = (status: string) => ORDER_STATUS_LABELS[status] || status
+
+    // Дата последнего события — та же, по которой сервер сортирует и считает периоды.
+    const eventAt = (o: AdminOrderRow) => o.completed_at || o.canceled_at || o.executed_at || o.created_at
 
     // Адреса собираются как «Город, Улица, д. X, кв. Y», поэтому дом и квартира
     // чисто отделяются на собственную строку.
@@ -213,6 +282,7 @@ export default defineComponent({
     })
 
     const queryParams = (limit: number, offset: number) => ({
+      status: statusFilter.value,
       search: searchQuery.value.trim() || undefined,
       service: serviceFilter.value || undefined,
       period: periodFilter.value || undefined,
@@ -225,7 +295,7 @@ export default defineComponent({
     const fetchOrders = async () => {
       loading.value = true
       try {
-        const response = await api.get('/admin/orders/completed', {
+        const response = await api.get('/admin/orders', {
           params: queryParams(PAGE_SIZE, (page.value - 1) * PAGE_SIZE),
         })
         orders.value = response.data?.orders || []
@@ -233,7 +303,7 @@ export default defineComponent({
         serviceOptions.value = response.data?.services || []
         periodKeys.value = response.data?.periods || []
       } catch (err) {
-        console.error('Error fetching completed orders:', err)
+        console.error('Error fetching orders:', err)
       } finally {
         loading.value = false
       }
@@ -251,6 +321,25 @@ export default defineComponent({
       clearTimeout(searchTimer)
       searchTimer = setTimeout(reload, 300)
     })
+
+    // Группа статусов живёт в адресе: пункт меню и ссылка «на проверке» ведут
+    // сразу на нужный фильтр. Услуги и периоды у групп свои, поэтому выбранные
+    // значения сбрасываются.
+    watch(statusFilter, (value) => {
+      if (route.query.status !== value) {
+        router.replace({ query: { ...route.query, status: value } })
+      }
+      serviceFilter.value = ''
+      periodFilter.value = ''
+      actionMsg.value = ''
+      reload()
+    })
+    watch(
+      () => route.query.status,
+      () => {
+        statusFilter.value = groupFromRoute()
+      },
+    )
 
     const toggleSort = (key: string) => {
       if (sortKey.value === key) {
@@ -273,28 +362,48 @@ export default defineComponent({
       fetchOrders()
     }
 
+    const returnToWork = async (o: AdminOrderRow) => {
+      if (returning.value || !window.confirm(RETURN_TO_WORK_CONFIRM)) return
+      returning.value = o.id
+      actionMsg.value = ''
+      actionIsError.value = false
+      try {
+        await returnOrderToWork(o.id)
+        actionMsg.value = 'Заказ возвращён в работу.'
+        await fetchOrders()
+      } catch (err: any) {
+        actionIsError.value = true
+        actionMsg.value =
+          typeof err?.response?.data === 'string' && err.response.data
+            ? err.response.data
+            : 'Не удалось вернуть заказ в работу'
+      } finally {
+        returning.value = ''
+      }
+    }
+
     const csvCell = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`
 
     const exportCsv = async () => {
       if (exporting.value) return
       exporting.value = true
       try {
-        // The export covers the whole filtered set, so it pages through the
-        // server instead of dumping the 50 rows currently rendered.
-        const rows: CompletedOrder[] = []
+        // Выгрузка покрывает весь отфильтрованный набор, поэтому обходит страницы
+        // сервера, а не сбрасывает 50 строк, что сейчас на экране.
+        const rows: AdminOrderRow[] = []
         let offset = 0
         do {
-          const response = await api.get('/admin/orders/completed', {
+          const response = await api.get('/admin/orders', {
             params: queryParams(MAX_PAGE_SIZE, offset),
           })
-          const batch: CompletedOrder[] = response.data?.orders || []
+          const batch: AdminOrderRow[] = response.data?.orders || []
           total.value = response.data?.total ?? total.value
           rows.push(...batch)
           if (batch.length < MAX_PAGE_SIZE) break
           offset += MAX_PAGE_SIZE
         } while (offset < total.value)
 
-        const header = ['ID', 'Услуга', 'Срочно', 'ASAP', 'Заказчик', 'Исполнитель', 'Сумма', 'Адрес', 'Завершён']
+        const header = ['ID', 'Услуга', 'Срочно', 'ASAP', 'Заказчик', 'Исполнитель', 'Сумма', 'Адрес', 'Статус', 'Дата']
         const body = rows.map((o) => [
           o.id,
           o.service_variant_name || '',
@@ -302,21 +411,22 @@ export default defineComponent({
           o.is_asap ? 'да' : 'нет',
           o.customer_phone ? formatPhoneMask(o.customer_phone) : '',
           o.executor_phone ? formatPhoneMask(o.executor_phone) : '',
-          Number(o.final_amount || 0).toFixed(2),
+          amountOf(o).toFixed(2),
           o.address || '',
-          o.completed_at ? `${formatDay(o.completed_at)} ${formatTime(o.completed_at)}` : '',
+          statusLabel(o.status),
+          eventAt(o) ? `${formatDay(eventAt(o))} ${formatTime(eventAt(o))}` : '',
         ])
-        // Semicolons and a BOM: this opens in Russian Excel without an import step.
+        // Точка с запятой и BOM: так файл открывается в русском Excel без импорта.
         const csv = [header, ...body].map((row) => row.map(csvCell).join(';')).join('\r\n')
         const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
         const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = `completed-orders-${new Date().toISOString().slice(0, 10)}.csv`
+        link.download = `orders-${statusFilter.value}-${new Date().toISOString().slice(0, 10)}.csv`
         link.click()
         URL.revokeObjectURL(url)
       } catch (err) {
-        console.error('Error exporting completed orders:', err)
+        console.error('Error exporting orders:', err)
         alert('Не удалось выгрузить CSV')
       } finally {
         exporting.value = false
@@ -328,6 +438,8 @@ export default defineComponent({
     return {
       orders,
       loading,
+      statusGroups: STATUS_GROUPS,
+      statusFilter,
       searchQuery,
       serviceFilter,
       periodFilter,
@@ -339,16 +451,23 @@ export default defineComponent({
       hasFilters,
       rangeLabel,
       exporting,
-      currencySymbol,
+      returning,
+      actionMsg,
+      actionIsError,
+      canEdit,
       isFree,
       amountLabel,
+      statusLabel,
+      eventAt,
       splitAddress,
       formatDay,
       formatTime,
       formatPhoneMask,
+      canReturnToWork,
       toggleSort,
       sortIcon,
       goToPage,
+      returnToWork,
       exportCsv,
     }
   },
@@ -359,15 +478,15 @@ export default defineComponent({
 /* Общий вид карточки-таблицы живёт в styles/admin-table.css: он делится с
    историей транзакций. Здесь остаётся только то, что есть на этой странице. */
 
-.completed-orders {
+.orders-page {
   display: flex;
   flex-direction: column;
 }
 
 .grid-row {
-  /* Услуга | Заказчик | Исполнитель | Сумма | Адрес | Завершен */
-  grid-template-columns: minmax(200px, 1.2fr) 220px 220px 120px minmax(200px, 1.5fr) 130px;
-  min-width: 1110px;
+  /* Услуга | Заказчик | Исполнитель | Сумма | Адрес | Статус | Дата | Действие */
+  grid-template-columns: minmax(200px, 1.2fr) 200px 200px 110px minmax(200px, 1.5fr) 130px 120px 150px;
+  min-width: 1310px;
 }
 
 /* Услуга и метки */
@@ -423,5 +542,53 @@ export default defineComponent({
   font-size: 12px;
   color: #64748b;
   margin-top: 2px;
+}
+
+/* Статус */
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.status-badge.SEARCHING { background: #fef3c7; color: #b45309; }
+.status-badge.ASSIGNED { background: #e0f2fe; color: #0369a1; }
+.status-badge.EXECUTED { background: #ede9fe; color: #6d28d9; }
+.status-badge.DISPUTED { background: #fee2e2; color: #b91c1c; }
+.status-badge.COMPLETED { background: #dcfce7; color: #15803d; }
+.status-badge.CANCELED { background: #f1f5f9; color: #64748b; }
+
+.btn-return {
+  border: 1px solid #c4b5fd;
+  background: #f5f3ff;
+  color: #6d28d9;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.btn-return:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.action-msg {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #15803d;
+}
+
+.action-msg.error {
+  color: #b91c1c;
 }
 </style>

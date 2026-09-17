@@ -768,6 +768,42 @@ func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uui
 	return s.ExecuteOrderAt(ctx, orderID, executorID, nil)
 }
 
+// ErrOrderNotOnReview — вернуть в работу можно только заказ на проверке.
+var ErrOrderNotOnReview = errors.New("вернуть в работу можно только заказ на проверке")
+
+// ReturnToWork возвращает заказ на проверке (исполнитель отметил «Исполнил»,
+// заказчик ещё не подтвердил) исполнителю в работу. Так администратор или
+// модератор снимает отметку, поставленную без выполненной работы. Деньги не
+// двигаются: удержание заказчика остаётся на эскроу до подтверждения.
+func (s *OrderService) ReturnToWork(ctx context.Context, orderID, actorID uuid.UUID) error {
+	var order *repository.Order
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		locked, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+		if err != nil {
+			return errors.New("order not found")
+		}
+		if locked.Status != repository.OrderStatusExecuted {
+			return ErrOrderNotOnReview
+		}
+		if err := s.orderRepo.ReturnToWork(ctx, tx, orderID); err != nil {
+			return err
+		}
+		order = locked
+		return s.publishOrderEvent(ctx, tx, repository.EventOrderReturned, order, &actorID)
+	}); err != nil {
+		return err
+	}
+	metrics.OrderEvent("returned")
+	log.Printf("[AUDIT] user %s returned order %s to work", actorID, orderID)
+
+	if s.chatRepo != nil && order.ExecutorID != nil {
+		if chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID); err == nil && chat != nil {
+			_, _ = s.chatRepo.SaveMessage(ctx, chat.ID, *order.ExecutorID, "🔄 Администрация вернула заказ в работу: отметка «Исполнил» снята.")
+		}
+	}
+	return nil
+}
+
 // ErrManualExecuteDisabled — услуга запрещает отмечать заказ исполненным вручную.
 var ErrManualExecuteDisabled = errors.New("этот заказ закрывается автоматически после проверки, отметить его исполненным вручную нельзя")
 

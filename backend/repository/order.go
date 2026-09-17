@@ -154,6 +154,9 @@ type OrderRepository interface {
 	// SetExecutedAtDevice записывает, когда исполнитель нажал «Исполнил» по часам
 	// телефона.
 	SetExecutedAtDevice(ctx context.Context, q Querier, orderID uuid.UUID, at time.Time) error
+	// ReturnToWork возвращает заказ на проверке (EXECUTED) исполнителю в работу
+	// (ASSIGNED) и стирает отметку «Исполнил».
+	ReturnToWork(ctx context.Context, q Querier, orderID uuid.UUID) error
 	// MarkDisputed переводит исполненный заказ в DISPUTED.
 	MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
@@ -469,6 +472,13 @@ func (r *orderRepo) Execute(ctx context.Context, q Querier, orderID uuid.UUID) e
 func (r *orderRepo) SetExecutedAtDevice(ctx context.Context, q Querier, orderID uuid.UUID, at time.Time) error {
 	_, err := r.exec(ctx, q).ExecContext(ctx, `UPDATE orders SET executed_at_device = $2 WHERE id = $1`, orderID, at)
 	return err
+}
+
+func (r *orderRepo) ReturnToWork(ctx context.Context, q Querier, orderID uuid.UUID) error {
+	return execExpectingOne(ctx, r.exec(ctx, q),
+		`UPDATE orders SET status = $1, executed_at = NULL, executed_at_device = NULL WHERE id = $2 AND status = $3`,
+		OrderStatusAssigned, orderID, OrderStatusExecuted,
+	)
 }
 
 func (r *orderRepo) MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error {

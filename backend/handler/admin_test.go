@@ -233,16 +233,12 @@ func (m *mockAdminRepository) GetActiveShifts(ctx context.Context) ([]*repositor
 	return nil, nil
 }
 
-func (m *mockAdminRepository) GetActiveOrders(ctx context.Context, limit, offset int) ([]*repository.AdminOrder, error) {
-	return nil, nil
-}
-
-func (m *mockAdminRepository) GetCompletedOrders(ctx context.Context, f repository.CompletedOrdersFilter) ([]*repository.AdminOrder, int, error) {
+func (m *mockAdminRepository) GetOrders(ctx context.Context, f repository.OrdersFilter) ([]*repository.AdminOrder, int, error) {
 	return nil, 0, nil
 }
 
-func (m *mockAdminRepository) CompletedOrderFacets(ctx context.Context) (repository.CompletedOrderFacets, error) {
-	return repository.CompletedOrderFacets{}, nil
+func (m *mockAdminRepository) OrderFacets(ctx context.Context, statuses []repository.OrderStatus) (repository.OrderFacets, error) {
+	return repository.OrderFacets{}, nil
 }
 
 // mockSettingsRepository реализует repository.SettingsRepository.

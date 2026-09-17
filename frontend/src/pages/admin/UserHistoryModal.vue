@@ -52,6 +52,7 @@
       </div>
 
       <p v-if="errorMsg" class="alert error">{{ errorMsg }}</p>
+      <p v-if="tab === 'orders' && actionMsg" class="alert success">{{ actionMsg }}</p>
 
       <div v-if="tab === 'transactions' || tab === 'orders'" class="table-scroll">
         <table v-if="tab === 'transactions'" class="history-table">
@@ -88,6 +89,7 @@
               <th>Роль</th>
               <th>Статус</th>
               <th class="num">Сумма</th>
+              <th v-if="canEditOrders"></th>
             </tr>
           </thead>
           <tbody>
@@ -100,9 +102,21 @@
               <td>{{ roleIn(order) }}</td>
               <td>{{ statusLabel(order.status) }}</td>
               <td class="num">{{ formatAmount(order.final_amount ?? order.hold_amount) }}</td>
+              <td v-if="canEditOrders" class="nowrap">
+                <button
+                  v-if="canReturnToWork(order.status)"
+                  type="button"
+                  class="btn-action"
+                  :disabled="busy"
+                  @click="returnToWork(order)"
+                >
+                  <i class="ph-bold ph-arrow-counter-clockwise"></i>
+                  Вернуть в работу
+                </button>
+              </td>
             </tr>
             <tr v-if="!loading && !orders.length">
-              <td colspan="5" class="empty">Заказов нет.</td>
+              <td :colspan="canEditOrders ? 6 : 5" class="empty">Заказов нет.</td>
             </tr>
           </tbody>
         </table>
@@ -340,6 +354,12 @@ import {
 } from '../../api/achievements'
 import { useAuthStore } from '../../stores/auth-store'
 import {
+  ORDER_STATUS_LABELS,
+  RETURN_TO_WORK_CONFIRM,
+  canReturnToWork,
+  returnOrderToWork,
+} from '../../api/admin-orders'
+import {
   getUserPenalties,
   resetSilentBlockFlag,
   revokePenaltyPoint,
@@ -368,14 +388,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties'
 
-const STATUS_LABELS: Record<string, string> = {
-  SEARCHING: 'в поиске',
-  ASSIGNED: 'у исполнителя',
-  EXECUTED: 'выполнен',
-  DISPUTED: 'спор',
-  COMPLETED: 'завершён',
-  CANCELED: 'отменён',
-}
 
 export default defineComponent({
   name: 'UserHistoryModal',
@@ -416,6 +428,7 @@ export default defineComponent({
     const penalties = ref<AdminPenaltyView | null>(null)
     const canSeePenalties = computed(() => authStore.can('users.view'))
     const canEditPenalties = computed(() => authStore.can('penalties.edit'))
+    const canEditOrders = computed(() => authStore.can('orders.edit'))
 
     // Выдать вручную можно только включённую ачивку с загруженным скриптом —
     // ровно то, что разрешает сервер. Предлагать в списке большее значило бы
@@ -561,6 +574,24 @@ export default defineComponent({
       }
     }
 
+    // Вернуть в работу можно только заказ на проверке; после ответа лента
+    // перечитывается, чтобы статус в строке был тем, что записал сервер.
+    const returnToWork = async (order: UserOrder) => {
+      if (!props.user || busy.value || !window.confirm(RETURN_TO_WORK_CONFIRM)) return
+      busy.value = true
+      errorMsg.value = ''
+      actionMsg.value = ''
+      try {
+        await returnOrderToWork(order.id)
+        actionMsg.value = 'Заказ возвращён в работу.'
+        await load()
+      } catch (err: any) {
+        fail(err, 'Не удалось вернуть заказ в работу')
+      } finally {
+        busy.value = false
+      }
+    }
+
     const revokePoint = (point: PenaltyPoint) => {
       if (!window.confirm('Отменить штрафной балл? Период фото и блокировки пересчитаются сразу.')) return
       return runPenaltyAction(async () => {
@@ -582,6 +613,7 @@ export default defineComponent({
       if (tab.value === next) return
       tab.value = next
       total.value = 0
+      actionMsg.value = ''
       load()
     }
 
@@ -621,7 +653,7 @@ export default defineComponent({
       direction > 0 ? 'positive' : direction < 0 ? 'negative' : ''
 
     const typeLabel = (type: string) => TYPE_LABELS[type] || type
-    const statusLabel = (status: string) => STATUS_LABELS[status] || status
+    const statusLabel = (status: string) => ORDER_STATUS_LABELS[status] || status
 
     // Один и тот же человек мог быть в заказе и заказчиком, и исполнителем —
     // лента общая, поэтому роль подписывается у каждой строки.
@@ -661,6 +693,9 @@ export default defineComponent({
       penalties,
       canSeePenalties,
       canEditPenalties,
+      canEditOrders,
+      canReturnToWork,
+      returnToWork,
       revokePoint,
       resetFlag,
       statusFor,
