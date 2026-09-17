@@ -540,8 +540,21 @@ func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, new
 	return user, nil
 }
 
-// UpdateUserBirthDate обновляет дату рождения пользователя.
+// ErrBirthDateLocked — дату рождения подтверждённого аккаунта пользователь
+// сам не меняет: модератор сверил её с паспортом, и правка задним числом
+// обесценила бы проверку. Исправить её может только администратор.
+var ErrBirthDateLocked = errors.New("дату рождения подтверждённого аккаунта может изменить только администратор")
+
+// UpdateUserBirthDate обновляет дату рождения пользователя. Самому пользователю
+// это доступно только до верификации.
 func (s *AuthService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDateStr string) (*repository.User, error) {
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.IsVerified() {
+		return nil, ErrBirthDateLocked
+	}
 	t, err := parseBirthDate(birthDateStr)
 	if err != nil {
 		return nil, err

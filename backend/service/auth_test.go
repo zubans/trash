@@ -708,3 +708,30 @@ func (m *mockRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, e
 func (m *mockRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
 	return nil
 }
+
+// TestUserChangesBirthDateOnlyBeforeVerification: до верификации дату рождения
+// правит сам пользователь, после — только администратор, потому что модератор
+// уже сверил её с паспортом.
+func TestUserChangesBirthDateOnlyBeforeVerification(t *testing.T) {
+	repo := newMockRepo()
+	old := time.Date(1990, time.May, 17, 0, 0, 0, 0, time.UTC)
+	user := &repository.User{ID: uuid.New(), Phone: "+79001230001", BirthDate: &old}
+	repo.users[user.Phone] = user
+	svc := NewAuthServiceWithSecret(repo, "test-secret", nil, nil)
+	ctx := context.Background()
+
+	if _, err := svc.UpdateUserBirthDate(ctx, user.ID, "1991-06-18"); err != nil {
+		t.Fatalf("unverified user must be able to change the birth date: %v", err)
+	}
+	if got := user.BirthDate.Format("2006-01-02"); got != "1991-06-18" {
+		t.Fatalf("birth date = %s, want 1991-06-18", got)
+	}
+
+	user.Verified = true
+	if _, err := svc.UpdateUserBirthDate(ctx, user.ID, "1992-07-19"); !errors.Is(err, ErrBirthDateLocked) {
+		t.Fatalf("verified user: err = %v, want ErrBirthDateLocked", err)
+	}
+	if got := user.BirthDate.Format("2006-01-02"); got != "1991-06-18" {
+		t.Errorf("birth date of a verified user changed to %s", got)
+	}
+}
