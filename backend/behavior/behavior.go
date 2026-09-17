@@ -209,6 +209,16 @@ type Manifest struct {
 	Source          string `json:"source,omitempty"`
 }
 
+// ExecutableByHand сообщает, может ли исполнитель сам отметить заказ
+// исполненным. Нельзя, если скрипт объявил manual_execute = false, и нельзя
+// всегда, когда услуга требует от исполнителя данных на сверку (check_fields):
+// такой заказ закрывает совпадение данных, а не слово исполнителя. Второе
+// правило держит ядро, а не скрипт, — оно действует и для копии скрипта,
+// сохранённой в конструкторе до появления флага.
+func (m Manifest) ExecutableByHand() bool {
+	return m.ManualExecute && len(m.CheckFields) == 0
+}
+
 // Handles сообщает, запрашивало ли поведение это событие.
 func (m Manifest) Handles(event string) bool {
 	for _, e := range m.Events {

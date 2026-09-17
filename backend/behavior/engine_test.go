@@ -500,3 +500,20 @@ func TestManualExecuteDefaultsToAllowed(t *testing.T) {
 		t.Error("manual_execute must default to true")
 	}
 }
+
+// Услуга со сверкой данных не закрывается отметкой исполнителя, даже если
+// скрипт флаг manual_execute не объявил.
+func TestCheckFieldsForbidManualExecute(t *testing.T) {
+	e := New(DefaultLimits)
+	src := []byte(`MANIFEST = {"name": "t", "check_fields": ["last_name"]}`)
+	if err := e.Compile("t", "t.star", src); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	m, ok := e.Manifest("t")
+	if !ok {
+		t.Fatal("manifest not registered")
+	}
+	if m.ExecutableByHand() {
+		t.Error("a service with check_fields must not be executable by hand")
+	}
+}

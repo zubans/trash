@@ -1044,3 +1044,38 @@ func TestVerificationOrderCannotBeExecutedManually(t *testing.T) {
 		t.Error("the customer must not be verified without the passport check")
 	}
 }
+
+// Копия скрипта верификации, сохранённая в конструкторе до появления
+// manual_execute, флага не знает. Заказ всё равно нельзя закрыть отметкой
+// «Исполнил»: услуга требует данных на сверку, и это правило держит ядро.
+func TestForkedVerificationScriptWithoutFlagStillBlocksManualExecute(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+
+	constants, err := os.ReadFile("../behaviors/verification/config.star")
+	if err != nil {
+		t.Fatalf("read config.star: %v", err)
+	}
+	source, err := os.ReadFile("../behaviors/verification/behavior.star")
+	if err != nil {
+		t.Fatalf("read behavior.star: %v", err)
+	}
+	old := strings.Replace(string(source), `"manual_execute": False,`, "", 1)
+	if old == string(source) {
+		t.Fatal("the library script no longer declares manual_execute; update this test")
+	}
+	node := w.catalog.node
+	node.BehaviorConstants = string(constants)
+	node.BehaviorSource = old
+	if err := w.behaviors.SyncNode(node); err != nil {
+		t.Fatalf("compile forked script: %v", err)
+	}
+
+	order := w.acceptedVerificationOrder(t)
+	if view := w.orderView(t, order.ID); view.Actions == nil || view.Actions.Execute {
+		t.Errorf("the executor must not be offered «Исполнил»: %+v", view.Actions)
+	}
+	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); !errors.Is(err, ErrManualExecuteDisabled) {
+		t.Fatalf("manual execute: err = %v, want ErrManualExecuteDisabled", err)
+	}
+}

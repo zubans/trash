@@ -263,7 +263,7 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 			// их показывать нельзя.
 			if manifest, ok := s.behaviors.Manifest(variant); ok {
 				o.SubmitFields = manifest.CheckFields
-				o.ScriptExecuted = !manifest.ManualExecute
+				o.ScriptExecuted = !manifest.ExecutableByHand()
 			}
 		}
 		// executor_name и executor_phone читают установленные APK заказчика;

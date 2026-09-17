@@ -219,7 +219,7 @@ func (b *Behaviors) OncePerUser(node *repository.ServiceNode) bool {
 // исполненным. Узел без поведения — может.
 func (b *Behaviors) ManualExecute(node *repository.ServiceNode) bool {
 	m, ok := b.Manifest(node)
-	return !ok || m.ManualExecute
+	return !ok || m.ExecutableByHand()
 }
 
 // ReleasesClaimOnCancel сообщает, возвращает ли отмена заказа по этому узлу
