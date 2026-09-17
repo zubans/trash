@@ -42,13 +42,14 @@
             <input
               v-model="birthDateInput"
               type="date"
+              :disabled="birthDateLocked"
               class="form-input"
               :max="maxBirthDate"
             />
             <button
               type="button"
               class="btn-save-email"
-              :disabled="savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate"
+              :disabled="birthDateLocked || savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate"
               @click="saveBirthDate"
             >
               <span v-if="savingBirthDate" class="spinner-sm"></span>
@@ -57,6 +58,9 @@
           </div>
           <div v-if="userAge > 0" class="mt-2 text-sm text-secondary">
             Ваш возраст: <strong>{{ userAge }} {{ getAgeWord(userAge) }}</strong>
+          </div>
+          <div v-if="birthDateLocked" class="mt-2 text-sm text-secondary">
+            Аккаунт подтверждён — изменить дату рождения может только администратор
           </div>
           <div v-if="birthDateMsg" class="email-msg-text" :class="{ error: birthDateMsgIsError }">
             {{ birthDateMsg }}
@@ -211,6 +215,8 @@ export default defineComponent({
     const userFullName = ref('')
 
     const birthDateInput = ref('')
+    // После верификации дата сверена с паспортом, и сервер правку отклонит.
+    const birthDateLocked = ref(false)
     const currentBirthDate = ref('')
     const userAge = ref(0)
     const savingBirthDate = ref(false)
@@ -235,6 +241,7 @@ export default defineComponent({
         if (meRes?.data) {
           const parts = [meRes.data.last_name, meRes.data.first_name, meRes.data.patronymic].filter((p: string) => p && p.trim())
           userFullName.value = parts.join(' ')
+          birthDateLocked.value = !!meRes.data.is_verified
           if (meRes.data.birth_date) {
             birthDateInput.value = meRes.data.birth_date
             currentBirthDate.value = meRes.data.birth_date
@@ -416,6 +423,7 @@ export default defineComponent({
       currentEmail,
       saveEmail,
       birthDateInput,
+      birthDateLocked,
       currentBirthDate,
       maxBirthDate,
       userAge,

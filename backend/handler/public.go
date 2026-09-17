@@ -427,6 +427,10 @@ func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	updatedUser, err := h.authService.UpdateUserBirthDate(r.Context(), user.ID, req.BirthDate)
+	if errors.Is(err, service.ErrBirthDateLocked) {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
