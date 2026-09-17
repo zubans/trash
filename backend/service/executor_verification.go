@@ -20,8 +20,15 @@ import (
 // делает руками: найти вариант услуги, убедиться, что сверять есть с чем, и
 // разместить заказ на свой адрес.
 
-// VerificationBehaviorCode — поведение, которым помечена услуга верификации.
+// VerificationBehaviorCode — библиотечное поведение услуги верификации.
 const VerificationBehaviorCode = "verification"
+
+// VerificationServiceCode — системный код услуги верификации в каталоге (у
+// варианта или у его категории). По поведению узел находится, только пока он
+// выполняет библиотечный скрипт: сохранение в админке записывает в узел
+// собственную копию, и движок зовёт её уже по id узла. Системный код админ
+// задаёт сам, и от такой правки он не меняется.
+const VerificationServiceCode = "verified"
 
 // Поля, без которых модератору не с чем сверять паспорт или некуда ехать.
 const (
@@ -208,19 +215,57 @@ func (s *ExecutorVerificationService) Cancel(ctx context.Context, userID uuid.UU
 	return s.orders.Cancel(ctx, userID, order.ID)
 }
 
-// variant находит включённый вариант услуги верификации. Ищется по поведению, а
-// не по коду узла: администратор может завести услугу заново.
+// variant находит включённый вариант услуги верификации.
 func (s *ExecutorVerificationService) variant(ctx context.Context) (*repository.ServiceNode, error) {
 	variants, err := s.catalog.GetActiveVariants(ctx)
 	if err != nil {
 		return nil, err
 	}
+	orderable := make([]*repository.ServiceNode, 0, len(variants))
 	for _, v := range variants {
-		if v.IsOrderable() && s.behaviors.Code(v) == VerificationBehaviorCode {
+		if v.IsOrderable() {
+			orderable = append(orderable, v)
+		}
+	}
+	matched, err := s.verificationNodes(ctx, orderable)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range orderable {
+		if matched[v.ID] {
 			return v, nil
 		}
 	}
 	return nil, ErrVerificationUnavailable
+}
+
+// verificationNodes отмечает варианты, относящиеся к услуге верификации: по
+// системному коду варианта или его категории либо по библиотечному поведению.
+func (s *ExecutorVerificationService) verificationNodes(ctx context.Context, variants []*repository.ServiceNode) (map[uuid.UUID]bool, error) {
+	parentIDs := []uuid.UUID{}
+	for _, v := range variants {
+		if v.ParentID != nil {
+			parentIDs = append(parentIDs, *v.ParentID)
+		}
+	}
+	parents := map[uuid.UUID]*repository.ServiceNode{}
+	if len(parentIDs) > 0 {
+		found, err := s.catalog.GetNodesByIDs(ctx, parentIDs)
+		if err != nil {
+			return nil, err
+		}
+		parents = found
+	}
+	matched := map[uuid.UUID]bool{}
+	for _, v := range variants {
+		switch {
+		case v.Code == VerificationServiceCode, s.behaviors.Code(v) == VerificationBehaviorCode:
+			matched[v.ID] = true
+		case v.ParentID != nil && parents[*v.ParentID] != nil && parents[*v.ParentID].Code == VerificationServiceCode:
+			matched[v.ID] = true
+		}
+	}
+	return matched, nil
 }
 
 // openOrder возвращает незавершённый заказ пользователя на верификацию.
@@ -245,8 +290,16 @@ func (s *ExecutorVerificationService) openOrder(ctx context.Context, userID uuid
 	if err != nil {
 		return nil, err
 	}
+	variants := make([]*repository.ServiceNode, 0, len(nodes))
+	for _, n := range nodes {
+		variants = append(variants, n)
+	}
+	matched, err := s.verificationNodes(ctx, variants)
+	if err != nil {
+		return nil, err
+	}
 	for _, o := range open {
-		if node, ok := nodes[o.ServiceVariantID]; ok && s.behaviors.Code(node) == VerificationBehaviorCode {
+		if matched[o.ServiceVariantID] {
 			return o, nil
 		}
 	}

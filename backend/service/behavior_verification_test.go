@@ -100,6 +100,8 @@ func (u *verificationUsers) UpdateVerifiedTx(ctx context.Context, q repository.Q
 type verificationCatalog struct {
 	repository.ServiceCatalogRepository
 	node *repository.ServiceNode
+	// parent — необязательная категория варианта.
+	parent *repository.ServiceNode
 }
 
 func (c *verificationCatalog) GetNodeByID(ctx context.Context, id uuid.UUID) (*repository.ServiceNode, error) {
@@ -114,6 +116,9 @@ func (c *verificationCatalog) GetNodesByIDs(ctx context.Context, ids []uuid.UUID
 	for _, id := range ids {
 		if id == c.node.ID {
 			found[id] = c.node
+		}
+		if c.parent != nil && id == c.parent.ID {
+			found[id] = c.parent
 		}
 	}
 	return found, nil

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -218,5 +219,73 @@ func TestExecutorVerificationRefusals(t *testing.T) {
 	w.catalog.node.IsActive = false
 	if _, err := w.svc.Request(ctx, w.applicant.ID, ExecutorVerificationRequest{}); !errors.Is(err, ErrVerificationUnavailable) {
 		t.Errorf("disabled service: err = %v, want ErrVerificationUnavailable", err)
+	}
+}
+
+// forkVerificationScript делает с узлом то же, что сохранение в админке:
+// записывает в него собственную копию библиотечного скрипта, после чего движок
+// зовёт её по id узла, а не по имени поведения.
+func (w *executorVerificationWorld) forkVerificationScript(t *testing.T) {
+	t.Helper()
+	constants, err := os.ReadFile("../behaviors/verification/config.star")
+	if err != nil {
+		t.Fatalf("read config.star: %v", err)
+	}
+	source, err := os.ReadFile("../behaviors/verification/behavior.star")
+	if err != nil {
+		t.Fatalf("read behavior.star: %v", err)
+	}
+	node := w.catalog.node
+	node.Code = "custom_verification"
+	node.BehaviorCode = ""
+	node.BehaviorConstants = string(constants)
+	node.BehaviorSource = string(source)
+	if err := w.behaviors.SyncNode(node); err != nil {
+		t.Fatalf("compile forked script: %v", err)
+	}
+	if w.behaviors.Code(node) == VerificationBehaviorCode {
+		t.Fatal("a forked node must no longer run under the library behaviour name")
+	}
+}
+
+func TestExecutorVerificationFindsServiceByVariantCode(t *testing.T) {
+	w := newExecutorVerificationWorld(t)
+	ctx := context.Background()
+	w.giveAddress(w.applicant.ID)
+	w.forkVerificationScript(t)
+
+	if _, err := w.svc.Request(ctx, w.applicant.ID, ExecutorVerificationRequest{}); !errors.Is(err, ErrVerificationUnavailable) {
+		t.Fatalf("without the system code: err = %v, want ErrVerificationUnavailable", err)
+	}
+
+	w.catalog.node.Code = VerificationServiceCode
+	order, err := w.svc.Request(ctx, w.applicant.ID, ExecutorVerificationRequest{})
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	status, err := w.svc.Status(ctx, w.applicant.ID)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.Order == nil || status.Order.ID != order.ID {
+		t.Errorf("status does not report the open order: %+v", status.Order)
+	}
+}
+
+func TestExecutorVerificationFindsServiceByCategoryCode(t *testing.T) {
+	w := newExecutorVerificationWorld(t)
+	ctx := context.Background()
+	w.giveAddress(w.applicant.ID)
+	w.forkVerificationScript(t)
+
+	category := &repository.ServiceNode{ID: uuid.New(), Code: VerificationServiceCode, NodeType: repository.ServiceNodeTypeCategory, IsActive: true}
+	w.catalog.parent = category
+	w.catalog.node.ParentID = &category.ID
+
+	if _, err := w.svc.Request(ctx, w.applicant.ID, ExecutorVerificationRequest{}); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if err := w.svc.Cancel(ctx, w.applicant.ID); err != nil {
+		t.Errorf("the open order under the category must be found for cancel: %v", err)
 	}
 }
