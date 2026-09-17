@@ -45,8 +45,11 @@ setup-android:
 	@echo "Enabling cleartext traffic in AndroidManifest.xml..."
 	node -e "const fs = require('fs'); const file = 'frontend/android/app/src/main/AndroidManifest.xml'; if (fs.existsSync(file)) { let content = fs.readFileSync(file, 'utf8'); if (!content.includes('usesCleartextTraffic')) { content = content.replace('<application', '<application android:usesCleartextTraffic=\"true\"'); fs.writeFileSync(file, content); } }"
 
+# Зависимости ставятся из lock-файла перед каждой сборкой: иначе сборка идёт на
+# старом node_modules и падает на пакете, добавленном после его установки.
 build-android:
 	@echo "Building frontend for Android..."
+	cd frontend && npm ci --no-audit --no-fund
 	cd frontend && npm run build -- --mode android
 	@echo "Syncing assets to Android project..."
 	cd frontend && npx cap sync
@@ -76,8 +79,10 @@ bump-android-version:
 		fs.writeFileSync(file, content);"
 	@echo "build.gradle updated"
 
+# npm ci — по той же причине, что и в build-android.
 build-android-release: bump-android-version
 	@echo "Building frontend for Android..."
+	cd frontend && npm ci --no-audit --no-fund
 	cd frontend && npm run build -- --mode android
 	@echo "Syncing assets to Android project..."
 	cd frontend && npx cap sync
