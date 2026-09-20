@@ -31,7 +31,19 @@ func (b *bot) runReconcile(ctx context.Context) string {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
-	if resp.StatusCode != http.StatusOK {
+	// 404 и 403 у этого маршрута означают не сбой сверки, а разошедшуюся
+	// настройку, и голый код ответа отправлял искать поломку не там: бэкенд
+	// вовсе не поднимает /internal/*, пока у него пустой OPS_KEY, а при
+	// несовпадении ключей отвечает «forbidden».
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return "❌ Бэкенд не поднял служебные маршруты: у него пустой <code>OPS_KEY</code>. " +
+			"Проверьте переменную в <code>.env</code> рядом с docker-compose и перезапустите бэкенд."
+	case http.StatusForbidden:
+		return "❌ Бэкенд отверг ключ: <code>OPS_KEY</code> у бота и у бэкенда разные. " +
+			"Сверьте <code>.env</code> и <code>.env.monitoring</code>."
+	default:
 		return fmt.Sprintf("❌ Сверка не отработала (HTTP %d)\n<pre>%s</pre>", resp.StatusCode, escape(string(bytes.TrimSpace(body))))
 	}
 

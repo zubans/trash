@@ -233,7 +233,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL,DADATA_API_KEY
+          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL,DADATA_API_KEY,OPS_KEY
           script: |
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
@@ -264,7 +264,11 @@ jobs:
             
             # Write production .env file from GitHub Actions secrets & variables
             echo "Writing production .env file from GitHub Secrets..."
-            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\nDADATA_API_KEY=%s\n" \
+            # OPS_KEY пишется сюда, хотя нужен и мониторингу: этот файл
+            # переписывается целиком, и ключ, добавленный в него как-то иначе,
+            # исчезает на следующем деплое. Без него бэкенд не поднимает
+            # /internal/*, и принудительная сверка из бота отвечает 404.
+            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\nDADATA_API_KEY=%s\nOPS_KEY=%s\n" \
               "${DOCKER_USERNAME}" \
               "${DB_USER:-healthlogin}" \
               "${DB_PASSWORD}" \
@@ -275,7 +279,8 @@ jobs:
               "${SMTP_HOST:-mailserver}" \
               "${CORS_ORIGIN:-https://moya-usluga.ru}" \
               "${APP_BASE_URL:-https://moya-usluga.ru}" \
-              "${DADATA_API_KEY}" > .env
+              "${DADATA_API_KEY}" \
+              "${OPS_KEY}" > .env
             chmod 600 .env
 
             echo "Restarting services via make restart..."
@@ -297,6 +302,8 @@ jobs:
           CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL || secrets.APP_BASE_URL }}
           DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
+          # Тот же секрет, что у мониторинга: бот и бэкенд сверяют его друг с другом.
+          OPS_KEY: ${{ secrets.OPS_KEY }}
 
       # Релиз APK — отдельный шаг, а не хвост деплоя.
       #

@@ -124,16 +124,19 @@ groups:
           description: "Письма подтверждения и коды сброса пароля не доставляются. Пользователь этого не видит — он видит, что код «не пришёл»."
 
       # Only the workers that run on a short timer. Their intervals are 5s
-      # (matching), 30s (sla) and 1m (auction, shift_autoclose), so fifteen
+      # (matching, behavior_dispatch), 15s (achievement_dispatch), 30s (sla)
+      # and 1m (auction, shift_autoclose, geocode_backfill), so fifteen
       # minutes of silence from any of them is real.
       #
-      # reconcile is excluded because it runs once a day: a single threshold
-      # across every worker fired on it about twenty minutes after each restart
-      # and then never stopped. Its own staleness is covered, with the right
-      # horizon, by ReconciliationNotRunning below.
+      # The slow ones are excluded by name, because a threshold shorter than a
+      # worker's own interval fires on every healthy pass:
+      #   * reconcile runs once a day — covered by ReconciliationNotRunning;
+      #   * penalty_sweep runs once an hour — covered by HourlyWorkerStalled.
+      # This list is the one thing to change when a worker's interval changes:
+      # a new slow worker added without a line here alerts every interval.
       - alert: BackgroundWorkerStalled
         expr: |
-          time() - max by (worker) (healthlogin_worker_last_success_timestamp_seconds{worker!="reconcile"}) > 900
+          time() - max by (worker) (healthlogin_worker_last_success_timestamp_seconds{worker!~"reconcile|penalty_sweep"}) > 900
           and on() up{job="backend"} == 1
         for: 5m
         labels:
@@ -141,6 +144,20 @@ groups:
         annotations:
           summary: "Фоновый обработчик {{ $labels.worker }} не отрабатывал 15 минут"
           description: "Процесс жив, но проход не завершался успешно. matching — заказы не назначаются; shift_autoclose — смены не закрываются; sla — срочные заказы не понижаются; auction — просроченные аукционы не отменяются."
+
+      # penalty_sweep gets its own horizon: it runs hourly, so silence matters
+      # only after several intervals. Two missed passes mean expired penalty
+      # points keep counting and silent blocks are not lifted on time.
+      - alert: HourlyWorkerStalled
+        expr: |
+          time() - max by (worker) (healthlogin_worker_last_success_timestamp_seconds{worker="penalty_sweep"}) > 10800
+          and on() up{job="backend"} == 1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Фоновый обработчик {{ $labels.worker }} не отрабатывал 3 часа"
+          description: "penalty_sweep ходит раз в час: истёкшие штрафные баллы продолжают считаться, тихие блокировки не снимаются в срок, старые точки трека не удаляются."
 
       - alert: OrdersQueuedWithNoExecutors
         expr: healthlogin_orders_searching > 0 and healthlogin_shifts_active == 0

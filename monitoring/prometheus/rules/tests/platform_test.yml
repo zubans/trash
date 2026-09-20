@@ -23,6 +23,32 @@ tests:
         alertname: BackgroundWorkerStalled
         exp_alerts: []
 
+  # penalty_sweep runs once an hour. The 15-minute threshold fired on it after
+  # every healthy pass — the same mistake reconcile had, repeated for the next
+  # slow worker; three hours of silence is its real failure.
+  - interval: 1m
+    input_series:
+      - series: 'healthlogin_worker_last_success_timestamp_seconds{worker="penalty_sweep"}'
+        values: '0x300'
+      - series: 'up{job="backend"}'
+        values: '1x300'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: BackgroundWorkerStalled
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: HourlyWorkerStalled
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: HourlyWorkerStalled
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              worker: penalty_sweep
+            exp_annotations:
+              summary: "Фоновый обработчик penalty_sweep не отрабатывал 3 часа"
+              description: "penalty_sweep ходит раз в час: истёкшие штрафные баллы продолжают считаться, тихие блокировки не снимаются в срок, старые точки трека не удаляются."
+
   # A worker that really is on a short timer must still be caught.
   - interval: 1m
     input_series:

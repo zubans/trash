@@ -182,3 +182,33 @@ func TestPlainTextIsIgnored(t *testing.T) {
 		t.Fatalf("answered ordinary chatter: %q", *sent)
 	}
 }
+
+// Пустой OPS_KEY у бэкенда выключает /internal/* целиком, а неверный ключ даёт
+// «forbidden». И то и другое — расхождение настроек, а не сбой сверки, и бот
+// обязан называть его: голый «HTTP 404» отправлял искать поломку в книгах.
+func TestReconcileExplainsOpsKeyProblems(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   string
+	}{
+		{"routes disabled", http.StatusNotFound, "пустой"},
+		{"key mismatch", http.StatusForbidden, "разные"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "nope", c.status)
+			}))
+			defer backend.Close()
+
+			b, _ := newTestBot(t, config{reconcileURL: backend.URL + "/internal/reconcile", opsKey: "k"})
+			b.http = backend.Client()
+
+			got := b.runReconcile(context.Background())
+			if !strings.Contains(got, "OPS_KEY") || !strings.Contains(got, c.want) {
+				t.Errorf("ответ бота = %q; ожидалось объяснение про OPS_KEY (%q)", got, c.want)
+			}
+		})
+	}
+}
