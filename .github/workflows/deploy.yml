@@ -56,7 +56,14 @@ jobs:
           # Paths that should redeploy monitoring. Wider than the set above: the
           # opsbot shares a Go module with the backend and is started by the
           # Makefile, so both move it.
-          TOUCHES_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/go\.(mod|sum)$|Makefile$)'
+          #
+          # backend/cmd/opsbot/ is the bot itself: without it a fix in the bot
+          # passed tests, deployed the application and left the old bot running
+          # — exactly what happened to the reconciliation reply. money/ and
+          # repository/reconcile.go are here because the bot decodes the
+          # backend's own report type: change the wire format there and the
+          # running bot stops understanding the answer.
+          TOUCHES_MONITORING='^(monitoring/|docker-compose\.monitoring\.yml$|backend/go\.(mod|sum)$|backend/cmd/opsbot/|backend/money/|backend/repository/reconcile\.go$|Makefile$)'
 
           run_all() {
             echo "Deploying both halves."
