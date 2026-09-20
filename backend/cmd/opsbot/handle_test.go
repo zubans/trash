@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"healthlogin/backend/money"
+	"healthlogin/backend/repository"
 )
 
 // newTestBot собирает бота, чьи вызовы Telegram уходят на локальную заглушку,
@@ -210,5 +214,43 @@ func TestReconcileExplainsOpsKeyProblems(t *testing.T) {
 				t.Errorf("ответ бота = %q; ожидалось объяснение про OPS_KEY (%q)", got, c.want)
 			}
 		})
+	}
+}
+
+// Ответ сверки бот разбирает тем же типом, которым бэкенд его кодирует, и тест
+// это проверяет сквозь настоящий JSON: своя копия структуры уже разошлась с
+// оригиналом — суммы приезжают числами, а «ok» и «summary» отчёт считает
+// методами и наружу не отдаёт вовсе.
+func TestReconcileParsesRealBackendReport(t *testing.T) {
+	report := repository.ReconciliationReport{
+		UsersChecked: 42,
+		Books: repository.BooksSummary{
+			UserTotal:    money.FromRubles(1500),
+			AccountTotal: money.FromRubles(1500),
+		},
+	}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(report)
+	}))
+	defer backend.Close()
+
+	b, _ := newTestBot(t, config{reconcileURL: backend.URL + "/internal/reconcile", opsKey: "k"})
+	b.http = backend.Client()
+
+	got := b.runReconcile(context.Background())
+	if strings.Contains(got, "не разобран") {
+		t.Fatalf("ответ бэкенда не разобрался: %s", got)
+	}
+	if !strings.Contains(got, "книги сходятся") {
+		t.Errorf("сошедшиеся книги показаны как расхождение: %s", got)
+	}
+	// Сводку отчёт считает методом; пустая строка здесь означала бы, что бот
+	// снова ждёт её полем.
+	if !strings.Contains(got, "42") {
+		t.Errorf("в ответе нет сводки сверки: %s", got)
+	}
+	if !strings.Contains(got, "1500.00") {
+		t.Errorf("суммы не отрисованы: %s", got)
 	}
 }

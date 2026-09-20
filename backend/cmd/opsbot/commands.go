@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"healthlogin/backend/repository"
 )
 
 // runReconcile просит бэкенд выполнить сверку книг. Бот намеренно не выполняет
@@ -47,43 +49,27 @@ func (b *bot) runReconcile(ctx context.Context) string {
 		return fmt.Sprintf("❌ Сверка не отработала (HTTP %d)\n<pre>%s</pre>", resp.StatusCode, escape(string(bytes.TrimSpace(body))))
 	}
 
-	var report struct {
-		OK            bool   `json:"ok"`
-		Summary       string `json:"summary"`
-		UsersChecked  int    `json:"users_checked"`
-		Discrepancies []struct {
-			Phone      string `json:"phone"`
-			Difference string `json:"difference"`
-		} `json:"discrepancies"`
-		HoldAnomalies []struct {
-			OrderID    string `json:"order_id"`
-			Status     string `json:"status"`
-			HoldAmount string `json:"hold_amount"`
-		} `json:"hold_anomalies"`
-		Books struct {
-			UserTotal    string `json:"user_total"`
-			AccountTotal string `json:"account_total"`
-			Difference   string `json:"difference"`
-			EscrowDrift  string `json:"escrow_drift"`
-		} `json:"books"`
-		BooksOpen      bool `json:"books_open"`
-		EscrowMismatch bool `json:"escrow_mismatch"`
-	}
+	// Разбирается тип самого бэкенда, а не его копия здесь. Копия была, и она
+	// разошлась дважды разом: суммы (money.Amount) приходят числами, а не
+	// строками, а «ok» и «summary» в ответе не поля, а методы отчёта — бот
+	// молча показывал бы «найдено расхождение» с пустым пояснением на
+	// сошедшихся книгах.
+	var report repository.ReconciliationReport
 	if err := json.Unmarshal(body, &report); err != nil {
 		return "❌ Ответ сверки не разобран: " + escape(err.Error())
 	}
 
 	var out strings.Builder
-	if report.OK {
+	if report.OK() {
 		out.WriteString("✅ <b>Сверка: книги сходятся</b>\n")
 	} else {
 		out.WriteString("🔴 <b>Сверка: найдено расхождение</b>\n")
 	}
-	fmt.Fprintf(&out, "<i>%s</i>\n\n", escape(report.Summary))
+	fmt.Fprintf(&out, "<i>%s</i>\n\n", escape(report.Summary()))
 	fmt.Fprintf(&out, "У пользователей: <b>%s</b>\nНа счетах: <b>%s</b>\nРазница: <b>%s</b>\n",
-		escape(report.Books.UserTotal), escape(report.Books.AccountTotal), escape(report.Books.Difference))
+		escape(report.Books.UserTotal.String()), escape(report.Books.AccountTotal.String()), escape(report.Books.Difference.String()))
 	if report.EscrowMismatch {
-		fmt.Fprintf(&out, "Расхождение эскроу: <b>%s</b>\n", escape(report.Books.EscrowDrift))
+		fmt.Fprintf(&out, "Расхождение эскроу: <b>%s</b>\n", escape(report.Books.EscrowDrift.String()))
 	}
 
 	if n := len(report.Discrepancies); n > 0 {
@@ -93,7 +79,7 @@ func (b *bot) runReconcile(ctx context.Context) string {
 				fmt.Fprintf(&out, "…и ещё %d\n", n-i)
 				break
 			}
-			fmt.Fprintf(&out, "• %s: %s\n", escape(d.Phone), escape(d.Difference))
+			fmt.Fprintf(&out, "• %s: %s\n", escape(d.Phone), escape(d.Difference.String()))
 		}
 	}
 	if n := len(report.HoldAnomalies); n > 0 {
