@@ -46,6 +46,16 @@ const (
 	// решил как «неизвестно». Удержание целиком вернулось заказчику, поэтому её
 	// финансирует не заказчик, а счёт платформы DISPUTES.
 	TransactionTypeDisputeReward TransactionType = "DISPUTE_REWARD"
+	// TransactionTypeShopPurchase списывает с пользователя оплату покупки в
+	// магазине на счёт SHOP; TransactionTypeShopRefund возвращает её при отмене
+	// покупки (SHOP может уйти в минус, если выручку уже вывели — возврат
+	// покупателю обязанность платформы, а не функция остатка);
+	// TransactionTypeShopPayout фиксирует вывод выручки админом из системы —
+	// как и вывод комиссии, он двигается между системными счетами и не трогает
+	// баланс пользователя.
+	TransactionTypeShopPurchase TransactionType = "SHOP_PURCHASE"
+	TransactionTypeShopRefund   TransactionType = "SHOP_REFUND"
+	TransactionTypeShopPayout   TransactionType = "SHOP_PAYOUT"
 )
 
 // ledgerSigns объявляет, как каждый тип транзакции двигает баланс пользователя.
@@ -83,6 +93,12 @@ var ledgerSigns = map[TransactionType]int{
 	// Выплата по спору с неизвестным исходом устроена как бонус: зачисляет
 	// исполнителю, а DISPUTES уходит в минус на ту же сумму.
 	TransactionTypeDisputeReward: +1,
+	// Покупка в магазине списывает деньги с баланса покупателя, её отмена
+	// возвращает их обратно; вывод выручки происходит между системными счетами
+	// и баланса пользователя не касается.
+	TransactionTypeShopPurchase: -1,
+	TransactionTypeShopRefund:   +1,
+	TransactionTypeShopPayout:   0,
 }
 
 // LedgerSign сообщает, как тип транзакции двигает баланс и известен ли тип

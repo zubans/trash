@@ -50,6 +50,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `054_photo_proof.sql` | Photo proof: `watermark_symbols` (gestures, six seeded, soft deletion, a stable `number` per gesture), `order_photo_proofs` (one photo per kind per order, idempotent by `client_key`, EXIF and device time and coordinates, check results), and on `orders` — `photo_required`, `watermark_symbol_id`, `proof_key`, `executed_at_device`. |
 | `055_executor_positions.sql` | The executor track `executor_positions` (appended, never updated: coordinates, the device clock and the server clock, source `LIVE`/`PHOTO`, an idempotency key for offline batches), plus `photo_proof_max_track_gap_min` and `executor_track_days`. |
 | `056_order_executed_at.sql` | `orders.executed_at`: when the executor marked the order executed, by the server clock (the device time is `executed_at_device` from 054). Older executed orders keep NULL. |
+| `058_shop_money.sql` | Money side of the shop: the `SHOP` system account for shop revenue and the `SHOP_PURCHASE` / `SHOP_REFUND` / `SHOP_PAYOUT` transaction types. Runs without a transaction (`ALTER TYPE ... ADD VALUE`); the tables that use them arrive in `059_shop.sql`. See [`implementation_plan_shop.md`](./implementation_plan_shop.md). |
 
 ## How to run manually
 
