@@ -983,6 +983,7 @@ func newMockAccounts() *mockAccounts {
 		repository.AccountPayouts:    0,
 		repository.AccountCommission: 0,
 		repository.AccountBonuses:    0,
+		repository.AccountShop:       0,
 	}}
 }
 

@@ -221,6 +221,35 @@ func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uui
 	return l.record(ctx, tx, entry{UserID: userID, AdminID: adminID, Type: kind, Account: from, Amount: amount})
 }
 
+// ShopCharge переносит оплату покупки в магазине с баланса покупателя на счёт
+// SHOP, внутри транзакции покупки. Это Reserve, а не Charge: купить в долг
+// нельзя — min_balance_limit, который позволяет исполнителю быть в минусе ради
+// штрафов, к магазину не относится.
+//
+// Возвращает repository.ErrInsufficientFunds, когда баланса не хватает; тогда
+// не двигается ни баланс, ни счёт.
+func (l *Ledger) ShopCharge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount) error {
+	return l.Reserve(ctx, tx, userID, repository.AccountShop, amount, repository.TransactionTypeShopPurchase, nil)
+}
+
+// ShopRefund возвращает покупателю деньги за отменённую покупку со счёта SHOP.
+// Списание не охраняется намеренно: если выручку уже вывели и на счёте меньше
+// суммы возврата, SHOP уходит в минус — возврат покупателю обязанность
+// платформы, а не функция остатка. Этот минус и показывает сверка.
+func (l *Ledger) ShopRefund(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount, adminID *uuid.UUID) error {
+	return l.Release(ctx, tx, repository.AccountShop, userID, amount, repository.TransactionTypeShopRefund, nil, adminID)
+}
+
+// ShopPayout выводит собранную выручку магазина во внешний мир через DEPOSITS,
+// по образцу вывода комиссии: списание охраняемое, поэтому два одновременных
+// вывода не заберут больше, чем собрано. Проводка записывается против админа,
+// который вывел.
+//
+// Возвращает repository.ErrInsufficientFunds, когда на счёте меньше.
+func (l *Ledger) ShopPayout(ctx context.Context, tx *sql.Tx, adminID uuid.UUID, amount money.Amount) error {
+	return l.Payout(ctx, tx, repository.AccountShop, adminID, amount, repository.TransactionTypeShopPayout, &adminID)
+}
+
 // Bonus платит пользователю из собственного кармана платформы: вознаграждение,
 // присуждённое скриптом поведения за работу, которую не оплачивал ни один
 // заказчик, например за подтверждение чьей-то личности. Деньги приходят с
