@@ -51,6 +51,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `055_executor_positions.sql` | The executor track `executor_positions` (appended, never updated: coordinates, the device clock and the server clock, source `LIVE`/`PHOTO`, an idempotency key for offline batches), plus `photo_proof_max_track_gap_min` and `executor_track_days`. |
 | `056_order_executed_at.sql` | `orders.executed_at`: when the executor marked the order executed, by the server clock (the device time is `executed_at_device` from 054). Older executed orders keep NULL. |
 | `058_shop_money.sql` | Money side of the shop: the `SHOP` system account for shop revenue and the `SHOP_PURCHASE` / `SHOP_REFUND` / `SHOP_PAYOUT` transaction types. Runs without a transaction (`ALTER TYPE ... ADD VALUE`); the tables that use them arrive in `059_shop.sql`. See [`implementation_plan_shop.md`](./implementation_plan_shop.md). |
+| `059_shop.sql` | Shop tables: `shop_products` (with CHECKs tying the fields to the product kind and the perk value to the perk kind), `shop_orders`, `user_perks`, `shop_pickup_points`; `user_gifts.shop_order_id`, `orders.commission_perk_id`, and `transactions.shop_order_id` linking a ledger entry to its purchase. Everything starts switched off (`shop_enabled = 0`, products `is_active = FALSE`). |
 
 ## How to run manually
 

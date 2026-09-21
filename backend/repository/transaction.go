@@ -206,13 +206,23 @@ func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = time.Now()
 	}
-	query := `INSERT INTO transactions (id, user_id, order_id, type, amount, admin_id, created_at)
-	          VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	// Counterparty и ShopOrderID пишутся тем же оператором: первая нужна отчётам
+	// по счетам, вторая — карточке покупки, и проводка без них рождалась бы
+	// сиротой, которую ни к чему не привязать.
+	var counterparty interface{}
+	if t.Counterparty != "" {
+		// Пустая строка — это NULL: частичный индекс по counterparty живёт на
+		// IS NOT NULL, и '' попадала бы в него как будто счёт известен.
+		counterparty = t.Counterparty
+	}
+	query := `INSERT INTO transactions (id, user_id, order_id, shop_order_id, type, amount, counterparty, admin_id, created_at)
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	args := []interface{}{t.ID, t.UserID, t.OrderID, t.ShopOrderID, t.Type, t.Amount, counterparty, t.AdminID, t.CreatedAt}
 	if tx != nil {
-		_, err := tx.ExecContext(ctx, query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
+		_, err := tx.ExecContext(ctx, query, args...)
 		return err
 	}
-	_, err := r.db.ExecContext(ctx, query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 

@@ -27,8 +27,9 @@ func TestShopChargeMovesPaymentToShopAccount(t *testing.T) {
 	opening := booksTotal(txRepo, accounts)
 
 	price := money.FromRubles(1500)
+	shopOrderID := uuid.New()
 	if err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-		return ledger.ShopCharge(context.Background(), tx, userID, price)
+		return ledger.ShopCharge(context.Background(), tx, userID, price, &shopOrderID)
 	}); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -46,6 +47,11 @@ func TestShopChargeMovesPaymentToShopAccount(t *testing.T) {
 	for _, entry := range txRepo.txs {
 		if entry.Type == string(repository.TransactionTypeShopPurchase) {
 			entries++
+			// Проводка знает свою покупку: без этого по карточке покупки не
+			// найти ни оплату, ни возвраты.
+			if entry.ShopOrderID == nil || *entry.ShopOrderID != shopOrderID {
+				t.Errorf("SHOP_PURCHASE is not linked to its purchase: %v", entry.ShopOrderID)
+			}
 		}
 	}
 	if entries != 1 {
@@ -66,7 +72,7 @@ func TestShopChargeRefusesWhenBalanceIsShort(t *testing.T) {
 	}
 
 	err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-		return ledger.ShopCharge(context.Background(), tx, userID, mockDefaultBalance.Add(money.FromRubles(1)))
+		return ledger.ShopCharge(context.Background(), tx, userID, mockDefaultBalance.Add(money.FromRubles(1)), nil)
 	})
 	if !errors.Is(err, repository.ErrInsufficientFunds) {
 		t.Fatalf("expected ErrInsufficientFunds, got %v", err)
@@ -97,10 +103,13 @@ func TestShopRefundDrivesShopNegativeWhenRevenuePaidOut(t *testing.T) {
 	opening := booksTotal(txRepo, accounts)
 
 	price := money.FromRubles(1000)
+	shopOrderID := uuid.New()
 	steps := []func(tx *sql.Tx) error{
-		func(tx *sql.Tx) error { return ledger.ShopCharge(context.Background(), tx, userID, price) },
+		func(tx *sql.Tx) error { return ledger.ShopCharge(context.Background(), tx, userID, price, &shopOrderID) },
 		func(tx *sql.Tx) error { return ledger.ShopPayout(context.Background(), tx, adminID, price) },
-		func(tx *sql.Tx) error { return ledger.ShopRefund(context.Background(), tx, userID, price, &adminID) },
+		func(tx *sql.Tx) error {
+			return ledger.ShopRefund(context.Background(), tx, userID, price, &shopOrderID, &adminID)
+		},
 	}
 	for i, step := range steps {
 		if err := ledger.RunInTx(context.Background(), step); err != nil {
@@ -158,14 +167,24 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 		adminID, "+7999"+adminID.String()[:7]); err != nil {
 		t.Fatalf("seed admin: %v", err)
 	}
+	// Тест двигает общие счета на общей базе, поэтому запоминает оба баланса и
+	// возвращает их как было: иначе следующий прогон начал бы с несведённых книг.
+	var shopBefore, depositsBefore money.Amount
+	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountShop).Scan(&shopBefore); err != nil {
+		t.Fatalf("shop balance before: %v", err)
+	}
+	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountDeposits).Scan(&depositsBefore); err != nil {
+		t.Fatalf("deposits balance before: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM transactions WHERE user_id IN ($1, $2)`, buyerID, adminID)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1, $2)`, buyerID, adminID)
-		_, _ = db.Exec(`UPDATE system_accounts SET balance = 0 WHERE code = $1`, repository.AccountShop)
+		_, _ = db.Exec(`UPDATE system_accounts SET balance = $2 WHERE code = $1`, repository.AccountShop, shopBefore)
+		_, _ = db.Exec(`UPDATE system_accounts SET balance = $2 WHERE code = $1`, repository.AccountDeposits, depositsBefore)
 	})
 
 	if err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-		return ledger.ShopCharge(context.Background(), tx, buyerID, money.FromRubles(100))
+		return ledger.ShopCharge(context.Background(), tx, buyerID, money.FromRubles(100), nil)
 	}); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -198,7 +217,7 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountShop).Scan(&balance); err != nil {
 		t.Fatalf("shop balance: %v", err)
 	}
-	if balance != money.FromRubles(40) {
-		t.Errorf("shop account = %s, expected 40.00 after one payout of 60 out of 100", balance)
+	if want := shopBefore.Add(money.FromRubles(40)); balance != want {
+		t.Errorf("shop account = %s, expected %s after one payout of 60 out of 100", balance, want)
 	}
 }

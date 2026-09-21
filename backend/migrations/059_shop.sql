@@ -42,13 +42,25 @@ CREATE TABLE shop_products (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (kind <> 'PERK' OR (perk_kind IS NOT NULL AND perk_days IS NOT NULL)),
-    -- The value must fit its kind: the database does not accept a product that
-    -- Go would have to discard as a money incident.
+    -- И обратно: у привилегии нет подарка, а у вещи и сертификата — полей
+    -- привилегии. Поля чужого рода — это всегда ошибка ввода, и молча хранить
+    -- их — значит показывать в админке то, что не работает.
+    CHECK (kind <> 'PERK' OR gift_code IS NULL),
+    CHECK (kind = 'PERK' OR (perk_kind IS NULL AND perk_value IS NULL
+                             AND perk_days IS NULL AND max_active_per_user IS NULL)),
+    -- Значение обязано подходить своему виду: база не пропускает товар,
+    -- который в Go пришлось бы отбрасывать инцидентом.
     CHECK (perk_kind IS NULL
            OR (perk_kind = 'COMMISSION_MULTIPLIER' AND perk_value > 0 AND perk_value <= 1)
            OR (perk_kind = 'COMMISSION_DISCOUNT_PP' AND perk_value > 0)
            OR (perk_kind = 'COMMISSION_FREE' AND perk_value IS NULL)),
-    CHECK (kind = 'PERK' OR gift_code IS NOT NULL)
+    CHECK (kind = 'PERK' OR gift_code IS NOT NULL),
+    -- Денежные и количественные поля не бывают отрицательными, а «старая цена»
+    -- без превышения над ценой зачёркивать нечего.
+    CHECK (compare_at_price IS NULL OR compare_at_price > price),
+    CHECK (max_qty_per_order > 0),
+    CHECK (per_user_limit IS NULL OR per_user_limit > 0),
+    CHECK (max_active_per_user IS NULL OR max_active_per_user > 0)
 );
 
 CREATE TABLE shop_orders (
@@ -60,7 +72,7 @@ CREATE TABLE shop_orders (
     product_snapshot JSONB NOT NULL,                    -- название, род, параметры привилегии
     variant         VARCHAR(32) NULL,
     quantity        INT NOT NULL CHECK (quantity > 0),
-    unit_price      BIGINT NOT NULL,
+    unit_price      BIGINT NOT NULL CHECK (unit_price > 0),
     total           BIGINT NOT NULL,
     status          VARCHAR(16) NOT NULL
                     CHECK (status IN ('PAID', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'CANCELED')),
@@ -71,13 +83,26 @@ CREATE TABLE shop_orders (
     canceled_by     UUID NULL REFERENCES users(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (user_id, request_id)
+    UNIQUE (user_id, request_id),
+    -- Итог — это цена, умноженная на количество, а возвраты не превышают
+    -- уплаченного: оба правила дешевле держать в базе, чем искать расхождение
+    -- сверкой после факта.
+    CHECK (total = unit_price * quantity),
+    CHECK (refunded_amount >= 0 AND refunded_amount <= total)
 );
 CREATE INDEX idx_shop_orders_user ON shop_orders (user_id, created_at DESC);
 CREATE INDEX idx_shop_orders_status ON shop_orders (status, created_at);
 
 -- Купоны покупки: одна строка user_gifts на единицу товара.
 ALTER TABLE user_gifts ADD COLUMN IF NOT EXISTS shop_order_id UUID NULL REFERENCES shop_orders(id);
+
+-- Проводки магазина ссылаются на покупку: transactions.order_id занят заказами
+-- и ссылается на orders, поэтому без своей колонки по покупке не найти ни её
+-- оплату, ни её возвраты — а без этого не работают карточка покупки с
+-- проводками и контроль «возвращено не больше уплаченного».
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shop_order_id UUID NULL REFERENCES shop_orders(id);
+CREATE INDEX IF NOT EXISTS idx_transactions_shop_order
+    ON transactions (shop_order_id) WHERE shop_order_id IS NOT NULL;
 
 CREATE TABLE user_perks (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -90,7 +115,14 @@ CREATE TABLE user_perks (
     revoked_at    TIMESTAMPTZ NULL,
     revoked_by    UUID NULL REFERENCES users(id),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (expires_at > starts_at)
+    CHECK (expires_at > starts_at),
+    -- Те же правила, что у товара: ручная выдача привилегии пишет сюда напрямую,
+    -- и множитель 1.5 база принимать не должна — иначе в Go его пришлось бы
+    -- отбрасывать денежным инцидентом при каждом подтверждении заказа.
+    CHECK (kind IN ('COMMISSION_MULTIPLIER', 'COMMISSION_DISCOUNT_PP', 'COMMISSION_FREE')),
+    CHECK ((kind = 'COMMISSION_MULTIPLIER' AND value > 0 AND value <= 1)
+           OR (kind = 'COMMISSION_DISCOUNT_PP' AND value > 0)
+           OR (kind = 'COMMISSION_FREE' AND value IS NULL))
 );
 CREATE INDEX idx_user_perks_active ON user_perks (user_id, kind, expires_at) WHERE revoked_at IS NULL;
 

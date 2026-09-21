@@ -89,9 +89,11 @@ type ShopProductFilter struct {
 	Category *string
 	// ActiveOnly ограничивает список витриной; админка видит всё.
 	ActiveOnly bool
-	// Roles — роли смотрящего. Пустой срез — «без фильтра по ролям» (админка);
-	// для витрины сервис передаёт роли пользователя, и товар чужой роли из
-	// списка не попадает.
+	// AllRoles отключает фильтр по ролям — это право админки. Витрина фильтрует
+	// всегда: товар чужой роли из списка не попадает, и «передали nil по
+	// ошибке» не может превратиться в «показали всё всем».
+	AllRoles bool
+	// Roles — роли смотрящего. При AllRoles не читается.
 	Roles []string
 }
 
@@ -116,8 +118,10 @@ type ShopRepository interface {
 
 	ListPickupPoints(ctx context.Context, activeOnly bool) ([]*ShopPickupPoint, error)
 	CreatePickupPoint(ctx context.Context, p *ShopPickupPoint) error
+	// Удаления пункта нет: он только выключается через is_active, DELETE в API
+	// не предусмотрен — выключенный пункт перестаёт предлагаться при
+	// оформлении и остаётся в справочнике.
 	UpdatePickupPoint(ctx context.Context, p *ShopPickupPoint) error
-	DeletePickupPoint(ctx context.Context, id uuid.UUID) error
 }
 
 type shopRepo struct {
@@ -144,13 +148,16 @@ const shopProductColumns = `p.id, p.kind, p.category, p.title, p.description, p.
 
 // shopStockSelect подцепляет остаток одним запросом: склад подарка для вещи и
 // число свободных кодов для сертификата. Считать это отдельным запросом на
-// товар означало бы N+1 на каждой странице витрины.
+// товар означало бы N+1 на каждой странице витрины. Активность подарка нужна
+// тут же: выключенный подарок — это «нет в наличии», и витрина обязана сказать
+// об этом раньше, чем покупка упадёт на out_of_stock.
 const shopStockSelect = `,
 	CASE p.kind
 		WHEN 'PERK' THEN NULL
 		WHEN 'PHYSICAL' THEN g.stock
 		ELSE COALESCE(fc.free_codes, 0)
-	END AS stock_count`
+	END AS stock_count,
+	g.is_active AS gift_active`
 
 const shopStockJoin = `
 	LEFT JOIN gifts g ON g.code = p.gift_code
@@ -167,22 +174,22 @@ func (r *shopRepo) ListProducts(ctx context.Context, filter ShopProductFilter) (
 	)
 	if filter.Kind != nil {
 		args = append(args, *filter.Kind)
-		where = append(where, "p.kind = $"+itoa(len(args)))
+		where = append(where, "p.kind = $"+strconv.Itoa(len(args)))
 	}
 	if filter.Category != nil {
 		args = append(args, *filter.Category)
-		where = append(where, "p.category = $"+itoa(len(args)))
+		where = append(where, "p.category = $"+strconv.Itoa(len(args)))
 	}
 	if filter.ActiveOnly {
 		where = append(where, "p.is_active")
 	}
-	if filter.Roles != nil {
+	if !filter.AllRoles {
 		args = append(args, pq.Array(filter.Roles))
 		// Пустой набор ролей на товаре — «всем».
-		where = append(where, "(p.roles = '{}' OR p.roles && $"+itoa(len(args))+")")
+		where = append(where, "(p.roles = '{}' OR p.roles && $"+strconv.Itoa(len(args))+")")
 	}
 	if len(where) > 0 {
-		query += " WHERE " + joinAnd(where)
+		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY p.sort_order, p.created_at"
 
@@ -235,12 +242,13 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 	var giftCode, perkKind sql.NullString
 	var perkValue sql.NullFloat64
 	var stock sql.NullInt64
+	var giftActive sql.NullBool
 
 	if err := row.Scan(&p.ID, &p.Kind, &p.Category, &title, &description, &images,
 		&price, &compareAt, pq.Array(&roles), &p.RequiresVerified, &perUserLimit, &p.MaxQtyPerOrder,
 		&giftCode, &variants, pq.Array(&fulfillment),
 		&perkKind, &perkValue, &perkDays, &maxActivePerUser,
-		&p.SortOrder, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &stock); err != nil {
+		&p.SortOrder, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &stock, &giftActive); err != nil {
 		return nil, err
 	}
 	if len(title) > 0 {
@@ -285,7 +293,7 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 		value := int(maxActivePerUser.Int64)
 		p.MaxActivePerUser = &value
 	}
-	p.InStock = shopInStock(p.Kind, stock)
+	p.InStock = shopInStock(p.Kind, stock, giftActive)
 	if stock.Valid {
 		value := int(stock.Int64)
 		p.StockCount = &value
@@ -294,14 +302,21 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 }
 
 // shopInStock сводит остаток к булеву «можно выдать»: склад NULL у вещи — «не
-// ограничен», как и у подарков ачивок.
-func shopInStock(kind string, stock sql.NullInt64) bool {
+// ограничен», как и у подарков ачивок, но выключенный подарок не выдаётся,
+// что бы ни показывал его склад.
+func shopInStock(kind string, stock sql.NullInt64, giftActive sql.NullBool) bool {
 	switch kind {
 	case ShopKindPerk:
 		return true
 	case ShopKindPhysical:
+		if giftActive.Valid && !giftActive.Bool {
+			return false
+		}
 		return !stock.Valid || stock.Int64 > 0
 	default: // CERTIFICATE: свободных кодов 0 — выдавать нечего.
+		if giftActive.Valid && !giftActive.Bool {
+			return false
+		}
 		return stock.Valid && stock.Int64 > 0
 	}
 }
@@ -324,6 +339,12 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 	if p.Variants == nil {
 		p.Variants = []ShopProductVariant{}
 	}
+	// Незаполненное количество — это «одна единица в заказе», как и DEFAULT в
+	// миграции: переданный ноль заглушил бы DEFAULT и записал 0, который CHECK
+	// отклоняет, а покупка — считала бы разрешённым нулевое количество.
+	if p.MaxQtyPerOrder <= 0 {
+		p.MaxQtyPerOrder = 1
+	}
 	title, err := json.Marshal(p.Title)
 	if err != nil {
 		return err
@@ -339,6 +360,14 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 	variants, err := json.Marshal(p.Variants)
 	if err != nil {
 		return err
+	}
+	// Цены уходят в BIGINT копеек числом. *money.Amount здесь нельзя: его
+	// Valuer отдаёт десятичную строку в рублях, и вставка с «старой ценой»
+	// падала бы на «invalid input syntax for type bigint».
+	var compareAt *int64
+	if p.CompareAtPrice != nil {
+		v := int64(*p.CompareAtPrice)
+		compareAt = &v
 	}
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO shop_products (id, kind, category, title, description, images,
@@ -359,7 +388,7 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 			sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active,
 			updated_at = now()
 	`, p.ID, p.Kind, p.Category, title, description, images,
-		int64(p.Price), p.CompareAtPrice, pq.Array(p.Roles), p.RequiresVerified, p.PerUserLimit, p.MaxQtyPerOrder,
+		int64(p.Price), compareAt, pq.Array(p.Roles), p.RequiresVerified, p.PerUserLimit, p.MaxQtyPerOrder,
 		p.GiftCode, variants, pq.Array(p.FulfillmentMethods),
 		p.PerkKind, p.PerkValue, p.PerkDays, p.MaxActivePerUser, p.SortOrder, p.IsActive)
 	return err
@@ -426,22 +455,4 @@ func (r *shopRepo) UpdatePickupPoint(ctx context.Context, p *ShopPickupPoint) er
 		return ErrShopPickupPointNotFound
 	}
 	return err
-}
-
-func (r *shopRepo) DeletePickupPoint(ctx context.Context, id uuid.UUID) error {
-	err := execExpectingOne(ctx, r.db, `DELETE FROM shop_pickup_points WHERE id = $1`, id)
-	if errors.Is(err, ErrConflict) {
-		return ErrShopPickupPointNotFound
-	}
-	return err
-}
-
-// itoa и joinAnd — маленькие помощники сборки запроса, чтобы условия фильтра
-// читались списком, а не конкатенацией с ручной нумерацией параметров.
-func itoa(n int) string {
-	return strconv.Itoa(n)
-}
-
-func joinAnd(parts []string) string {
-	return strings.Join(parts, " AND ")
 }

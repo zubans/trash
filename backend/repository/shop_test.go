@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -53,7 +54,8 @@ func TestShopProductRoundTrip(t *testing.T) {
 		{
 			Kind: repository.ShopKindPerk, Category: "perks",
 			Title: map[string]interface{}{"ru": "Комиссия вдвое меньше", "en": "Half commission"},
-			Price: money.FromRubles(1000), PerkKind: strPtr("COMMISSION_MULTIPLIER"),
+			Price: money.FromRubles(1000), CompareAtPrice: amountPtr(money.FromRubles(1990)),
+			PerkKind: strPtr("COMMISSION_MULTIPLIER"),
 			PerkValue: &multiplier, PerkDays: &days, MaxActivePerUser: &limit,
 			Roles: []string{"EXECUTOR"}, IsActive: true, SortOrder: 1,
 			Images: []string{"/uploads/shop/perk.png"},
@@ -89,6 +91,11 @@ func TestShopProductRoundTrip(t *testing.T) {
 	}
 	if got.Price != products[0].Price {
 		t.Errorf("price = %s, expected %s", got.Price, products[0].Price)
+	}
+	// «Старая цена» тоже проходит чтение-запись: она — та же колонка BIGINT в
+	// копейках, и её потеря когда-то роняла любое сохранение такого товара.
+	if got.CompareAtPrice == nil || *got.CompareAtPrice != money.FromRubles(1990) {
+		t.Errorf("compare_at_price = %v, expected 1990.00", got.CompareAtPrice)
 	}
 	if got.PerkKind == nil || *got.PerkKind != "COMMISSION_MULTIPLIER" {
 		t.Errorf("perk kind = %v", got.PerkKind)
@@ -186,13 +193,26 @@ func TestShopListFiltersByActivityAndRoles(t *testing.T) {
 		t.Error("customer storefront should include the shared product")
 	}
 
-	// Админка без фильтров видит всё, включая неактивное.
-	list, err = repo.ListProducts(ctx, repository.ShopProductFilter{})
+	// Админка видит всё, включая неактивное, — и только через явный AllRoles:
+	// забытый флаг означает пустой список в админке, а не витрину без фильтра.
+	list, err = repo.ListProducts(ctx, repository.ShopProductFilter{AllRoles: true})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if shopProductByID(list, inactive.ID) == nil {
 		t.Error("admin list should include the inactive product")
+	}
+
+	// Витрина без ролей — это не «все роли»: видны только общие товары.
+	list, err = repo.ListProducts(ctx, repository.ShopProductFilter{ActiveOnly: true})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if shopProductByID(list, executorOnly.ID) != nil {
+		t.Error("a storefront without roles must not include role-restricted products")
+	}
+	if shopProductByID(list, forAll.ID) == nil {
+		t.Error("a storefront without roles should still include shared products")
 	}
 }
 
@@ -206,6 +226,11 @@ func TestShopStockComesFromTheSharedShelf(t *testing.T) {
 	seedShopGift(t, db, "shop-empty-shirt", repository.GiftKindPhysical, &zero)
 	seedShopGift(t, db, "shop-unlimited-shirt", repository.GiftKindPhysical, nil)
 	seedShopGift(t, db, "shop-cert", repository.GiftKindCertificate, nil)
+	stock5 := 5
+	seedShopGift(t, db, "shop-disabled-shirt", repository.GiftKindPhysical, &stock5)
+	if _, err := db.Exec(`UPDATE gifts SET is_active = FALSE WHERE code = 'shop-disabled-shirt'`); err != nil {
+		t.Fatalf("disable gift: %v", err)
+	}
 
 	empty := &repository.ShopProduct{Kind: repository.ShopKindPhysical, Category: "merch",
 		Title: map[string]interface{}{"ru": "x"}, Price: 1, GiftCode: strPtr("shop-empty-shirt"), IsActive: true}
@@ -213,13 +238,15 @@ func TestShopStockComesFromTheSharedShelf(t *testing.T) {
 		Title: map[string]interface{}{"ru": "y"}, Price: 1, GiftCode: strPtr("shop-unlimited-shirt"), IsActive: true}
 	cert := &repository.ShopProduct{Kind: repository.ShopKindCertificate, Category: "certs",
 		Title: map[string]interface{}{"ru": "z"}, Price: 1, GiftCode: strPtr("shop-cert"), IsActive: true}
-	for _, p := range []*repository.ShopProduct{empty, unlimited, cert} {
+	disabled := &repository.ShopProduct{Kind: repository.ShopKindPhysical, Category: "merch",
+		Title: map[string]interface{}{"ru": "w"}, Price: 1, GiftCode: strPtr("shop-disabled-shirt"), IsActive: true}
+	for _, p := range []*repository.ShopProduct{empty, unlimited, cert, disabled} {
 		if err := repo.UpsertProduct(ctx, p); err != nil {
 			t.Fatalf("upsert: %v", err)
 		}
 	}
 	t.Cleanup(func() {
-		for _, p := range []*repository.ShopProduct{empty, unlimited, cert} {
+		for _, p := range []*repository.ShopProduct{empty, unlimited, cert, disabled} {
 			_, _ = db.Exec(`DELETE FROM shop_products WHERE id = $1`, p.ID)
 		}
 	})
@@ -240,6 +267,11 @@ func TestShopStockComesFromTheSharedShelf(t *testing.T) {
 	}
 	if p := get(cert.ID); p.InStock {
 		t.Error("a certificate without free codes must be out of stock")
+	}
+	// Склад полон, но сам подарок выключен — витрина обязана сказать «нет в
+	// наличии» раньше, чем покупка упадёт на out_of_stock.
+	if p := get(disabled.ID); p.InStock {
+		t.Error("a product of a disabled gift must be out of stock even with stock left")
 	}
 
 	if _, err := gifts.AddCodes(ctx, "shop-cert", []string{"SECRET-1", "SECRET-2"}); err != nil {
@@ -279,6 +311,46 @@ func TestShopLockProductReadsInsideTransaction(t *testing.T) {
 	}
 	if _, err := repo.LockProduct(ctx, tx, uuid.New()); !errors.Is(err, repository.ErrShopProductNotFound) {
 		t.Errorf("expected ErrShopProductNotFound, got %v", err)
+	}
+
+	// Сама блокировка: вторая транзакция, читающая тот же товар под LockProduct,
+	// ждёт первую, а не читает устаревшую цену. Именно это держит «поменяли цену
+	// между показом и оплатой» атомарным.
+	type lockResult struct {
+		product *repository.ShopProduct
+		err     error
+	}
+	waiting := make(chan lockResult, 1)
+	go func() {
+		tx2, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			waiting <- lockResult{err: err}
+			return
+		}
+		defer tx2.Rollback()
+		product, err := repo.LockProduct(ctx, tx2, p.ID)
+		waiting <- lockResult{product: product, err: err}
+	}()
+
+	select {
+	case res := <-waiting:
+		t.Fatalf("the second lock returned before the first transaction ended: %v", res.err)
+	case <-time.After(200 * time.Millisecond):
+		// Всё ещё ждёт — так и должно быть.
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	select {
+	case res := <-waiting:
+		if res.err != nil {
+			t.Fatalf("second lock after commit: %v", res.err)
+		}
+		if res.product.Price != p.Price {
+			t.Errorf("second lock read price %s, expected %s", res.product.Price, p.Price)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second lock did not return after the first transaction committed")
 	}
 }
 
@@ -335,13 +407,8 @@ func TestShopPickupPointsCRUD(t *testing.T) {
 	if err := repo.UpdatePickupPoint(ctx, &repository.ShopPickupPoint{ID: uuid.New(), Title: map[string]interface{}{"ru": "x"}}); !errors.Is(err, repository.ErrShopPickupPointNotFound) {
 		t.Errorf("expected ErrShopPickupPointNotFound on update, got %v", err)
 	}
-	if err := repo.DeletePickupPoint(ctx, point.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if err := repo.DeletePickupPoint(ctx, point.ID); !errors.Is(err, repository.ErrShopPickupPointNotFound) {
-		t.Errorf("expected ErrShopPickupPointNotFound on re-delete, got %v", err)
-	}
 }
 
-func strPtr(s string) *string { return &s }
-func intPtr(n int) *int       { return &n }
+func strPtr(s string) *string            { return &s }
+func intPtr(n int) *int                  { return &n }
+func amountPtr(a money.Amount) *money.Amount { return &a }
