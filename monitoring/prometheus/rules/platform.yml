@@ -124,9 +124,9 @@ groups:
           description: "Письма подтверждения и коды сброса пароля не доставляются. Пользователь этого не видит — он видит, что код «не пришёл»."
 
       # Only the workers that run on a short timer. Their intervals are 5s
-      # (matching, behavior_dispatch), 15s (achievement_dispatch), 30s (sla)
-      # and 1m (auction, shift_autoclose, geocode_backfill), so fifteen
-      # minutes of silence from any of them is real.
+      # (matching, behavior_dispatch), 15s (achievement_dispatch), 30s (sla),
+      # 1m (auction, shift_autoclose, geocode_backfill) and 10m
+      # (perk_reminder), so fifteen minutes of silence from any of them is real.
       #
       # The slow ones are excluded by name, because a threshold shorter than a
       # worker's own interval fires on every healthy pass:

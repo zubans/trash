@@ -53,6 +53,7 @@ The project uses PostgreSQL 16. Migrations are applied automatically when the da
 | `058_shop_money.sql` | Money side of the shop: the `SHOP` system account for shop revenue and the `SHOP_PURCHASE` / `SHOP_REFUND` / `SHOP_PAYOUT` transaction types. Runs without a transaction (`ALTER TYPE ... ADD VALUE`); the tables that use them arrive in `059_shop.sql`. See [`implementation_plan_shop.md`](./implementation_plan_shop.md). |
 | `059_shop.sql` | Shop tables: `shop_products` (with CHECKs tying the fields to the product kind and the perk value to the perk kind), `shop_orders`, `user_perks`, `shop_pickup_points`; `user_gifts.shop_order_id`, `orders.commission_perk_id`, and `transactions.shop_order_id` linking a ledger entry to its purchase. Everything starts switched off (`shop_enabled = 0`, products `is_active = FALSE`). |
 | `060_transaction_counterparty.sql` | Only a comment on `transactions.counterparty`; its `applied_at` in `schema_migrations` marks when the column started being written and is the boundary `repair_books_gap.sql` and `locate_books_gap.sql` read. No backfill. See [`financial_system.md`](./financial_system.md#граница-откуда-counterparty--доказательство). |
+| `061_shop_perks_and_mail.sql` | Shop: who granted a perk by hand and why (`user_perks.granted_by`, `reason`), the "perk ends soon" reminder mark (`reminded_at`), index on `user_perks.shop_order_id`, the `SHOP` kind of internal mail. See [`shop.md`](./shop.md). |
 
 ## How to run manually
 
