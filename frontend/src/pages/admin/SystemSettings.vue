@@ -163,10 +163,13 @@
               </div>
               <div class="input-wrapper has-prefix">
                 <span class="input-prefix">км</span>
+                <!-- Шаг 0.1, а не 0.5: при min 0.1 шаг 0.5 допускал только 0.1,
+                     0.6, 1.1…, и значение по умолчанию 0.5 не давало сохранить
+                     форму целиком. -->
                 <input
                   v-model="values.accept_radius_km"
                   type="number"
-                  step="0.5"
+                  step="0.1"
                   min="0.1"
                   required
                 />
@@ -187,7 +190,7 @@
                 <input
                   v-model="values.map_overview_radius_km"
                   type="number"
-                  step="1"
+                  step="0.5"
                   min="0.5"
                   max="50"
                   required
@@ -263,7 +266,7 @@
                 <div class="input-hint">Арбитраж подсвечивает снимок, сделанный дальше этого от адреса заказа.</div>
               </div>
               <div class="input-wrapper">
-                <input v-model="values.photo_proof_max_distance_m" type="number" step="10" min="1" max="100000" required />
+                <input v-model="values.photo_proof_max_distance_m" type="number" step="1" min="1" max="100000" required />
               </div>
             </div>
             <div class="input-group">

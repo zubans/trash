@@ -497,9 +497,10 @@ export default defineComponent({
       fieldErrors.value = {}
       try {
         const saved = await adminSaveProduct(editingId.value, payload(draft.value))
-        successMsg.value = t('shop.admin.saved')
         await load()
         edit(saved)
+        // После edit: он сбрасывает сообщение прошлого сохранения.
+        successMsg.value = t('shop.admin.saved')
       } catch (err) {
         const e = shopError(err)
         fieldErrors.value = e?.fields || {}

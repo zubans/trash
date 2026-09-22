@@ -1,9 +1,14 @@
 <template>
   <div class="quote">
     <div class="columns">
+      <!-- Пока действует другая привилегия, «сейчас» и «по уровню» — разные
+           числа. Новая начнётся после неё и применится к ставке по уровню. -->
       <div class="column">
-        <div class="label">{{ $t('shop.perk.now') }}</div>
+        <div class="label">{{ hasActivePerk ? $t('shop.perk.byLevel') : $t('shop.perk.now') }}</div>
         <div class="value">{{ formatPercent(quote.level_percent) }} %</div>
+        <div v-if="hasActivePerk" class="hint muted-hint" data-test="current">
+          {{ $t('shop.perk.currentWithPerk', { percent: formatPercent(quote.current_percent) }) }}
+        </div>
       </div>
       <i class="ph-bold ph-arrow-right arrow"></i>
       <div class="column accent">
@@ -37,7 +42,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, type PropType } from 'vue'
+import { computed, defineComponent, type PropType } from 'vue'
 import type { PerkQuote, ShopProduct } from '../../api/shop'
 import { formatPercent, perkFormula, perkStartLine } from '../../utils/perk'
 
@@ -54,7 +59,8 @@ export default defineComponent({
   setup(props) {
     const money = (value: number) =>
       `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ${props.currencySymbol}`
-    return { money, formatPercent, perkFormula, perkStartLine }
+    const hasActivePerk = computed(() => props.quote.current_percent !== props.quote.level_percent)
+    return { money, formatPercent, perkFormula, perkStartLine, hasActivePerk }
   },
 })
 </script>
@@ -95,6 +101,9 @@ export default defineComponent({
 .hint {
   font-size: 12px;
   color: #047857;
+}
+.muted-hint {
+  color: #64748b;
 }
 .formula {
   font-size: 14px;

@@ -558,7 +558,9 @@
       "badge": "Commission {formula} until {date}",
       "next": "next: {what} from {date}",
       "cta": "Lower your commission",
-      "notApplied": "Platform bonuses and tips are not affected by perks."
+      "notApplied": "Platform bonuses and tips are not affected by perks.",
+      "byLevel": "By level",
+      "currentWithPerk": "A perk applies now: {percent}%"
     },
     "card": {
       "buy": "Buy for {price}",

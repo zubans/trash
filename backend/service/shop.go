@@ -722,6 +722,9 @@ func (s *ShopService) withDetails(ctx context.Context, order *repository.ShopOrd
 	if !admin {
 		return order, nil
 	}
+	if order.UserPhone, order.UserName, err = s.orders.Buyer(ctx, order.UserID); err != nil {
+		return nil, err
+	}
 	if order.Transactions, err = s.orders.Transactions(ctx, order.ID); err != nil {
 		return nil, err
 	}

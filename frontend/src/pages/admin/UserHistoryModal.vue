@@ -409,7 +409,7 @@
 
       <div class="history-foot">
         <span class="muted">
-          <template v-if="total">Показано {{ shown }} из {{ total }}</template>
+          <template v-if="total && (tab === 'transactions' || tab === 'orders')">Показано {{ shown }} из {{ total }}</template>
         </span>
         <div class="foot-actions">
           <button

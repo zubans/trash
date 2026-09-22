@@ -57,7 +57,7 @@
               <td>{{ money(o.total) }}</td>
               <td>
                 <span class="badge" :class="statusClass(o.status)">{{ $t('shop.status.' + o.status) }}</span>
-                <span v-if="o.refund_request_at" class="badge" :class="requestOld(o) ? 'danger' : 'warn'">
+                <span v-if="o.refund_request_at && o.status !== 'CANCELED'" class="badge" :class="requestOld(o) ? 'danger' : 'warn'">
                   {{ requestOld(o) ? $t('shop.admin.refundOld') : $t('shop.admin.refundRequested') }}
                 </span>
               </td>
@@ -129,7 +129,7 @@
         </template>
         <dt></dt>
         <dd class="muted">{{ $t('shop.admin.offerVersion', { version: selected.offer_version }) }}</dd>
-        <template v-if="selected.refund_request_at">
+        <template v-if="selected.refund_request_at && selected.status !== 'CANCELED'">
           <dt>{{ $t('shop.admin.refundRequested') }}</dt>
           <dd :class="requestOld(selected) ? 'danger-text' : ''">{{ formatDate(selected.refund_request_at) }}</dd>
         </template>

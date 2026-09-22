@@ -128,6 +128,8 @@ type ShopOrderRepository interface {
 	// RefundRequestAt — неотвеченное обращение о возврате по одной покупке,
 	// так же, как его видит список.
 	RefundRequestAt(ctx context.Context, id uuid.UUID) (*time.Time, error)
+	// Buyer — телефон и имя покупателя для карточки покупки в админке.
+	Buyer(ctx context.Context, userID uuid.UUID) (phone, name string, err error)
 	// SupportChatID — чат поддержки пользователя, если он уже заведён.
 	SupportChatID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
 	// Transactions — проводки покупки: оплата и возвраты.
@@ -309,7 +311,8 @@ func (r *shopOrderRepo) List(ctx context.Context, filter ShopOrderFilter) ([]*Sh
 		}
 	}
 	if filter.RefundRequested {
-		where = append(where, refundRequestSelect+" IS NOT NULL")
+		// Обращение по отменённой покупке уже разобрано: отмена и есть ответ.
+		where = append(where, "o.status <> "+arg(ShopOrderCanceled), refundRequestSelect+" IS NOT NULL")
 	}
 	cond := ""
 	if len(where) > 0 {
@@ -433,6 +436,14 @@ func (r *shopOrderRepo) Numbers(ctx context.Context, userID uuid.UUID, numbers [
 		out[n] = id
 	}
 	return out, rows.Err()
+}
+
+func (r *shopOrderRepo) Buyer(ctx context.Context, userID uuid.UUID) (string, string, error) {
+	var phone, name string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT phone, TRIM(CONCAT_WS(' ', last_name, first_name, patronymic)) FROM users WHERE id = $1`,
+		userID).Scan(&phone, &name)
+	return phone, name, err
 }
 
 func (r *shopOrderRepo) SupportChatID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error) {

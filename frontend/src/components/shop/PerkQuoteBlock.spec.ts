@@ -46,6 +46,12 @@ describe('PerkQuoteBlock', () => {
     expect(w.find('[data-test=start]').text()).toBe('Начнёт действовать 3 октября')
   })
 
+  it('separates the level rate from the current one while another perk applies', () => {
+    const w = render(product('COMMISSION_FREE'), quote(0, { current_percent: 5, queued: true }))
+    expect(w.text()).toContain('По уровню')
+    expect(w.find('[data-test=current]').text()).toBe('Сейчас действует привилегия: 5 %')
+  })
+
   it('says the perk starts right away when nothing is queued', () => {
     const w = render(product('COMMISSION_MULTIPLIER', 0.5), quote(3.5))
     expect(w.find('[data-test=start]').text()).toBe('Начнёт действовать сразу после оплаты')
