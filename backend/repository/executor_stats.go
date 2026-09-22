@@ -80,14 +80,14 @@ func (r *executorStatsRepo) exec(q Querier) Querier {
 
 func (r *executorStatsRepo) Get(ctx context.Context, q Querier, userID uuid.UUID) (*ExecutorStats, error) {
 	stats := &ExecutorStats{UserID: userID}
-	var fastest sql.NullInt64
+	var fastest, earned sql.NullInt64
 	err := r.exec(q).QueryRowContext(ctx, `
         SELECT orders_completed, orders_completed_month, month_key, distinct_customers,
                fastest_completion_min, five_star_streak, rating_count, cancels, earned_total, updated_at
         FROM executor_stats WHERE user_id = $1
     `, userID).Scan(&stats.OrdersCompleted, &stats.OrdersCompletedMonth, &stats.MonthKey,
 		&stats.DistinctCustomers, &fastest, &stats.FiveStarStreak, &stats.RatingCount,
-		&stats.Cancels, &stats.EarnedTotal, &stats.UpdatedAt)
+		&stats.Cancels, &earned, &stats.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Исполнитель без единого заказа — это нули, а не отсутствие ответа.
 		return stats, nil
@@ -97,6 +97,10 @@ func (r *executorStatsRepo) Get(ctx context.Context, q Querier, userID uuid.UUID
 	}
 	if fastest.Valid {
 		stats.FastestCompletionMin = int(fastest.Int64)
+	}
+	// earned_total — BIGINT в копейках; Amount.Scan прочёл бы целое как рубли.
+	if earned.Valid {
+		stats.EarnedTotal = money.FromKopecks(earned.Int64)
 	}
 	// Счётчик месяца обнуляется сравнением, а не ночным проходом: строка,
 	// помеченная прошлым месяцем, для текущего значит ноль.
@@ -219,7 +223,8 @@ func (r *executorStatsRepo) Recalculate(ctx context.Context, userID uuid.UUID) e
                MIN(EXTRACT(EPOCH FROM (completed_at - created_at)) / 60)
                    FILTER (WHERE status = 'COMPLETED' AND completed_at IS NOT NULL),
                COUNT(*) FILTER (WHERE status = 'CANCELED'),
-               COALESCE(SUM(final_amount) FILTER (WHERE status = 'COMPLETED'), 0),
+               -- final_amount — NUMERIC в рублях, earned_total — BIGINT в копейках.
+               COALESCE(ROUND(SUM(final_amount) FILTER (WHERE status = 'COMPLETED') * 100), 0),
                now()
         FROM orders WHERE executor_id = $1
         ON CONFLICT (user_id) DO UPDATE SET

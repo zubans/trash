@@ -172,11 +172,12 @@ func (r *giftRepo) Get(ctx context.Context, code string) (*Gift, error) {
 func scanGift(row rowScanner) (*Gift, error) {
 	var g Gift
 	var title, description []byte
-	var stock, validDays sql.NullInt64
-	if err := row.Scan(&g.Code, &g.Kind, &title, &description, &g.ImageURL, &g.Amount,
+	var amount, stock, validDays sql.NullInt64
+	if err := row.Scan(&g.Code, &g.Kind, &title, &description, &g.ImageURL, &amount,
 		&g.Partner, &g.PromoCode, &stock, &validDays, &g.IsActive, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return nil, err
 	}
+	g.Amount = giftAmount(amount)
 	if len(title) > 0 {
 		_ = json.Unmarshal(title, &g.Title)
 	}
@@ -192,6 +193,16 @@ func scanGift(row rowScanner) (*Gift, error) {
 		g.ValidDays = &value
 	}
 	return &g, nil
+}
+
+// giftAmount читает gifts.amount. Колонка — BIGINT в копейках, а не NUMERIC в
+// рублях, поэтому сканировать её прямо в money.Amount нельзя: Amount.Scan
+// считает целое число рублями и умножил бы сумму на сто.
+func giftAmount(v sql.NullInt64) money.Amount {
+	if !v.Valid {
+		return money.Zero
+	}
+	return money.FromKopecks(v.Int64)
 }
 
 func (r *giftRepo) Upsert(ctx context.Context, gift *Gift) error {
@@ -387,13 +398,14 @@ func scanUserGifts(rows *sql.Rows) ([]*UserGift, error) {
 		var fulfillment []byte
 		var g Gift
 		var title, description []byte
-		var stock, validDays sql.NullInt64
+		var amount, stock, validDays sql.NullInt64
 		if err := rows.Scan(&ug.ID, &ug.UserID, &ug.GiftCode, &ug.GiftCodeID, &ug.AchievementID, &ug.ShopOrderID,
 			&ug.CouponCode, &ug.Status, &fulfillment, &ug.GrantedAt, &ug.ExpiresAt, &ug.RevealedAt, &ug.RedeemedAt,
-			&g.Code, &g.Kind, &title, &description, &g.ImageURL, &g.Amount, &g.Partner, &g.PromoCode,
+			&g.Code, &g.Kind, &title, &description, &g.ImageURL, &amount, &g.Partner, &g.PromoCode,
 			&stock, &validDays, &g.IsActive, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
+		g.Amount = giftAmount(amount)
 		if len(fulfillment) > 0 {
 			_ = json.Unmarshal(fulfillment, &ug.Fulfillment)
 		}

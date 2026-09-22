@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -734,5 +735,90 @@ func TestFirstRepentanceGrantedOnConcession(t *testing.T) {
 	}
 	if len(self.achievements.granted) != 0 {
 		t.Fatalf("self-dealt concession granted %+v", self.achievements.granted)
+	}
+}
+
+// dbGifts читает каталог из настоящей базы — именно чтение и сканирование
+// суммы здесь проверяется, — а выдачу купона подменяет: остальная обвязка
+// диспетчера живёт без базы и транзакции у неё нет.
+type dbGifts struct {
+	repository.GiftRepository
+	issued []*repository.UserGift
+}
+
+func (g *dbGifts) Issue(ctx context.Context, q repository.Querier, gift *repository.Gift, userID uuid.UUID, achievementID *uuid.UUID) (*repository.UserGift, error) {
+	issued := &repository.UserGift{
+		ID: uuid.New(), UserID: userID, GiftCode: gift.Code, AchievementID: achievementID,
+		CouponCode: "TEST-TEST-TEST", Status: repository.GiftStatusIssued, Gift: gift,
+	}
+	g.issued = append(g.issued, issued)
+	return issued, nil
+}
+
+// Денежный подарок на 500 ₽ платит ровно 500 ₽: сумма из каталога доходит до
+// проводки без масштаба, не упирается в потолок и не порождает инцидента.
+func TestBonusGiftPaysCatalogAmount(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	code := "test_bonus_" + uuid.New().String()[:8]
+	defer db.Exec(`DELETE FROM gifts WHERE code = $1`, code)
+	want := money.FromRubles(500)
+	gifts := &dbGifts{GiftRepository: repository.NewGiftRepository(db)}
+	if err := gifts.Upsert(ctx, &repository.Gift{
+		Code: code, Kind: repository.GiftKindBonus, Amount: want, IsActive: true,
+		Title: map[string]interface{}{"ru": "Бонус"},
+	}); err != nil {
+		t.Fatalf("upsert gift: %v", err)
+	}
+
+	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
+	engine := achievement.New(achievement.DefaultLimits)
+	if err := engine.Compile("test_award", "achievement.star", []byte(`
+MANIFEST = {
+    "title": "С бонусом",
+    "audience": "EXECUTOR",
+    "events": ["order.confirmed"],
+    "once_per_user": True,
+    "weight": 25,
+}
+
+def check(f):
+    if f.order == None or f.order.executor_id != f.user.id:
+        return None
+    return grant(points = 25, order_id = f.order.id, effects = [gift(code = "`+code+`")])
+`)); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	h.dispatcher.engine = engine
+	h.dispatcher.gifts = gifts
+	txs := &mockTransactionRepo{}
+	h.dispatcher.ledger = NewLedger(txs, newMockAccounts())
+
+	h.confirm(t)
+
+	var paid money.Amount
+	for _, tx := range txs.txs {
+		if tx.Type == string(repository.TransactionTypeBonus) && tx.UserID == h.executorID {
+			paid = paid.Add(tx.Amount)
+		}
+	}
+	if paid != want {
+		t.Fatalf("bonus paid = %s, want %s", paid, want)
+	}
+	if len(h.incidents.recorded) != 0 {
+		t.Errorf("incidents = %+v, want none for a gift under the cap", h.incidents.recorded)
+	}
+	if len(gifts.issued) != 1 {
+		t.Fatalf("issued %d gifts, want 1", len(gifts.issued))
+	}
+	var body string
+	for _, m := range h.mail.sent {
+		if m.Kind == repository.MailKindGift {
+			body = m.Body
+		}
+	}
+	if !strings.Contains(body, want.String()) {
+		t.Errorf("gift mail body %q, want it to name %s", body, want)
 	}
 }
