@@ -355,7 +355,7 @@
           <tbody>
             <tr v-for="p in shopPerks" :key="p.id" :class="{ revoked: p.revoked_at || isPast(p.expires_at) }">
               <td>
-                {{ perkTitle(p.kind, p.value) }}
+                {{ ruleText(p.rule_title, p.config) }}
                 <div class="muted">
                   <template v-if="p.shop_order_number">№{{ p.shop_order_number }}</template>
                   <template v-else>{{ $t('shop.admin.granted') }}<template v-if="p.reason">: {{ p.reason }}</template></template>
@@ -384,23 +384,22 @@
         <div v-if="canEditShop" class="grant-perk">
           <div class="penalty-role-title">{{ $t('shop.admin.grant') }}</div>
           <div class="grant-row">
-            <select v-model="perkDraft.kind" class="input">
-              <option value="COMMISSION_MULTIPLIER">{{ $t('shop.admin.perkKinds.COMMISSION_MULTIPLIER') }}</option>
-              <option value="COMMISSION_DISCOUNT_PP">{{ $t('shop.admin.perkKinds.COMMISSION_DISCOUNT_PP') }}</option>
-              <option value="COMMISSION_FREE">{{ $t('shop.admin.perkKinds.COMMISSION_FREE') }}</option>
+            <select v-model="perkDraft.rule" class="input" @change="resetGrantConfig">
+              <option v-for="r in grantRules" :key="r.code" :value="r.code">{{ r.title }}</option>
             </select>
             <input
-              v-if="perkDraft.kind !== 'COMMISSION_FREE'"
-              v-model.number="perkDraft.value"
+              v-for="key in Object.keys(perkDraft.config)"
+              :key="key"
+              v-model.number="perkDraft.config[key]"
               type="number"
-              step="0.01"
-              min="0"
+              step="any"
               class="input short"
-              :placeholder="$t('shop.admin.fields.perkValue')"
+              :placeholder="key"
+              :title="key"
             />
             <input v-model.number="perkDraft.days" type="number" min="1" class="input short" :placeholder="$t('shop.admin.fields.perkDays')" />
             <input v-model="perkDraft.reason" class="input" :placeholder="$t('shop.admin.grantReason')" />
-            <button type="button" class="btn-more" :disabled="busy || !perkDraft.reason.trim() || !perkDraft.days" @click="grantShopPerk">
+            <button type="button" class="btn-more" :disabled="busy || !perkDraft.rule || !perkDraft.reason.trim() || !perkDraft.days" @click="grantShopPerk">
               {{ $t('shop.admin.grant') }}
             </button>
           </div>
@@ -451,8 +450,8 @@ import {
   type UserGrant,
 } from '../../api/achievements'
 import { useAuthStore } from '../../stores/auth-store'
-import { adminGetUserShop, adminGrantPerk, adminRevokePerk, type PerkKind, type ShopOrder, type UserPerk } from '../../api/shop'
-import { perkTitle } from '../../utils/perk'
+import { adminGetUserShop, adminGrantPerk, adminPerkRules, adminRevokePerk, type PerkConfig, type PerkRule, type ShopOrder, type UserPerk } from '../../api/shop'
+import { ruleText } from '../../utils/perk'
 import {
   ORDER_STATUS_LABELS,
   RETURN_TO_WORK_CONFIRM,
@@ -539,7 +538,14 @@ export default defineComponent({
     const canEditShop = computed(() => authStore.can('shop_orders.edit'))
     const shopOrders = ref<ShopOrder[]>([])
     const shopPerks = ref<UserPerk[]>([])
-    const perkDraft = reactive({ kind: 'COMMISSION_MULTIPLIER' as PerkKind, value: 0.5 as number | null, days: 1, reason: '' })
+    const perkDraft = reactive({ rule: '', config: {} as PerkConfig, days: 1, reason: '' })
+    // Правила для ручной выдачи — включённые. Справочник охраняется своим
+    // правом: без него список пуст и выдать нечего.
+    const perkRules = ref<PerkRule[]>([])
+    const grantRules = computed(() => perkRules.value.filter((r) => r.is_active))
+    const resetGrantConfig = () => {
+      perkDraft.config = { ...(perkRules.value.find((r) => r.code === perkDraft.rule)?.defaults || {}) }
+    }
 
     // Выдать вручную можно только включённую ачивку с загруженным скриптом —
     // ровно то, что разрешает сервер. Предлагать в списке большее значило бы
@@ -604,9 +610,17 @@ export default defineComponent({
         if (tab.value === 'achievements') {
           await loadAchievements()
         } else if (tab.value === 'shop') {
-          const res = await adminGetUserShop(props.user.id)
+          const [res, rules] = await Promise.all([
+            adminGetUserShop(props.user.id),
+            canEditShop.value ? adminPerkRules().catch(() => []) : Promise.resolve([]),
+          ])
           shopOrders.value = res.orders
           shopPerks.value = res.perks
+          perkRules.value = rules
+          if (!perkDraft.rule && grantRules.value.length) {
+            perkDraft.rule = grantRules.value[0].code
+            resetGrantConfig()
+          }
           total.value = res.orders.length
         } else if (tab.value === 'penalties') {
           penalties.value = await getUserPenalties(props.user.id)
@@ -745,8 +759,8 @@ export default defineComponent({
     const grantShopPerk = () =>
       runShopAction(async () => {
         await adminGrantPerk(props.user.id, {
-          kind: perkDraft.kind,
-          value: perkDraft.kind === 'COMMISSION_FREE' ? null : perkDraft.value,
+          rule: perkDraft.rule,
+          config: perkDraft.config,
           days: Number(perkDraft.days),
           reason: perkDraft.reason.trim(),
         })
@@ -831,7 +845,7 @@ export default defineComponent({
       isPast,
       grantShopPerk,
       revokeShopPerk,
-      perkTitle,
+      ruleText, grantRules, resetGrantConfig,
       tab,
       transactions,
       orders,

@@ -183,6 +183,12 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'shop.view', bare: true },
       },
       {
+        path: 'shop/perk-rules',
+        name: 'admin-shop-perk-rules',
+        component: () => import('../pages/admin/ShopPerkRules.vue'),
+        meta: { permission: 'perk_rules.view', bare: true },
+      },
+      {
         path: 'shop/orders',
         name: 'admin-shop-orders',
         component: () => import('../pages/admin/ShopOrders.vue'),
@@ -377,6 +383,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/disputes', permission: 'disputes.view' },
   { path: '/admin/watermark-symbols', permission: 'watermarks.view' },
   { path: '/admin/shop/products', permission: 'shop.view' },
+  { path: '/admin/shop/perk-rules', permission: 'perk_rules.view' },
   { path: '/admin/shop/orders', permission: 'shop_orders.view' },
   { path: '/admin/shop/revenue', permission: 'shop_revenue.view' },
   { path: '/admin/settings', permission: 'settings.view' },

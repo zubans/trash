@@ -86,8 +86,8 @@
         <dt>{{ $t('shop.admin.snapshot') }}</dt>
         <dd>
           {{ selected.product_snapshot.title?.ru }} · {{ $t('shop.kinds.' + (selected.product_snapshot.kind || 'PHYSICAL')) }}
-          <template v-if="selected.product_snapshot.perk_kind">
-            · {{ perkTitle(selected.product_snapshot.perk_kind, selected.product_snapshot.perk_value) }},
+          <template v-if="selected.product_snapshot.perk_rule">
+            · {{ ruleSummary(selected.product_snapshot.perk_rule, selected.product_snapshot.perk_config) }},
             {{ selected.product_snapshot.perk_days }} дн.
           </template>
         </dd>
@@ -151,7 +151,7 @@
       <template v-if="selected.perks?.length">
         <h3>{{ $t('shop.admin.userPerks') }}</h3>
         <div v-for="p in selected.perks" :key="p.id" class="muted">
-          {{ perkTitle(p.kind, p.value) }} —
+          {{ ruleText(p.rule_title, p.config) }} —
           {{ $t('shop.orders.perkPeriod', { from: formatDate(p.starts_at), to: formatDate(p.expires_at) }) }}
           <span v-if="p.revoked_at">({{ $t('shop.orders.revoked') }})</span>
         </div>
@@ -244,7 +244,7 @@ import {
   type ShopOrder,
   type ShopOrderStatus,
 } from '../../api/shop'
-import { perkTitle } from '../../utils/perk'
+import { ruleSummary, ruleText } from '../../utils/perk'
 
 const STATUSES: ShopOrderStatus[] = ['PAID', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'CANCELED']
 // Переход вперёд для вещи; отмена — отдельным путём с возвратом.
@@ -436,7 +436,7 @@ export default defineComponent({
     return {
       can, statuses: STATUSES, filters, pageSize, offset, orders, total, loading, busy, errorMsg, successMsg,
       fieldErrors, selected, track, cancelOpen, quote, cancel, cardRef, money, formatDate, statusClass,
-      requestOld, nextStatus, load, applyFilters, page, open, close, advance, openCancel, doCancel, perkTitle,
+      requestOld, nextStatus, load, applyFilters, page, open, close, advance, openCancel, doCancel, ruleSummary, ruleText,
     }
   },
 })

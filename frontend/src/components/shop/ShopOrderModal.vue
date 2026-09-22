@@ -52,7 +52,7 @@
       </div>
 
       <div v-for="perk in order.perks || []" :key="perk.id" class="note">
-        <strong>{{ perkTitle(perk.kind, perk.value) }}</strong> —
+        <strong>{{ ruleText(perk.rule_title, perk.config) }}</strong> —
         {{ $t('shop.orders.perkPeriod', { from: formatDate(perk.starts_at), to: formatDate(perk.expires_at) }) }}
         <span v-if="perk.revoked_at">({{ $t('shop.orders.revoked') }})</span>
       </div>
@@ -102,7 +102,7 @@ import { computed, defineComponent, reactive, ref, type PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { revealGift, type UserGift } from '../../api/achievements'
 import { localized as pick, type Localized, type ShopOrder } from '../../api/shop'
-import { perkTitle } from '../../utils/perk'
+import { ruleText } from '../../utils/perk'
 import { formatApiError } from '../../services/api'
 
 export default defineComponent({
@@ -144,7 +144,7 @@ export default defineComponent({
       }
     }
 
-    return { secrets, revealing, error, title, money, formatDate, localized, canReveal, reveal, perkTitle }
+    return { secrets, revealing, error, title, money, formatDate, localized, canReveal, reveal, ruleText }
   },
 })
 </script>

@@ -48,15 +48,14 @@ func TestShopProductRoundTrip(t *testing.T) {
 	stock := 10
 	seedShopGift(t, db, "shop-roundtrip-shirt", repository.GiftKindPhysical, &stock)
 
-	multiplier, discount := 0.5, 5.0
 	days, limit := 30, 3
 	products := []*repository.ShopProduct{
 		{
 			Kind: repository.ShopKindPerk, Category: "perks",
 			Title: map[string]interface{}{"ru": "Комиссия вдвое меньше", "en": "Half commission"},
 			Price: money.FromRubles(1000), CompareAtPrice: amountPtr(money.FromRubles(1990)),
-			PerkKind:  strPtr("COMMISSION_MULTIPLIER"),
-			PerkValue: &multiplier, PerkDays: &days, MaxActivePerUser: &limit,
+			PerkRule:   strPtr("commission_multiplier"),
+			PerkConfig: map[string]interface{}{"VALUE": 0.5}, PerkDays: &days, MaxActivePerUser: &limit,
 			Roles: []string{"EXECUTOR"}, IsActive: true, SortOrder: 1,
 			Images: []string{"/uploads/shop/perk.png"},
 		},
@@ -70,7 +69,7 @@ func TestShopProductRoundTrip(t *testing.T) {
 		{
 			Kind: repository.ShopKindPerk, Category: "perks",
 			Title: map[string]interface{}{"ru": "Минус 5 пунктов"}, Price: money.FromRubles(700),
-			PerkKind: strPtr("COMMISSION_DISCOUNT_PP"), PerkValue: &discount, PerkDays: &days,
+			PerkRule: strPtr("commission_discount_pp"), PerkConfig: map[string]interface{}{"VALUE": 5.0}, PerkDays: &days,
 			IsActive: false,
 		},
 	}
@@ -97,11 +96,11 @@ func TestShopProductRoundTrip(t *testing.T) {
 	if got.CompareAtPrice == nil || *got.CompareAtPrice != money.FromRubles(1990) {
 		t.Errorf("compare_at_price = %v, expected 1990.00", got.CompareAtPrice)
 	}
-	if got.PerkKind == nil || *got.PerkKind != "COMMISSION_MULTIPLIER" {
-		t.Errorf("perk kind = %v", got.PerkKind)
+	if got.PerkRule == nil || *got.PerkRule != "commission_multiplier" {
+		t.Errorf("perk rule = %v", got.PerkRule)
 	}
-	if got.PerkValue == nil || *got.PerkValue != 0.5 {
-		t.Errorf("perk value = %v", got.PerkValue)
+	if got.PerkConfig["VALUE"] != 0.5 {
+		t.Errorf("perk config = %v", got.PerkConfig)
 	}
 	if got.PerkDays == nil || *got.PerkDays != 30 {
 		t.Errorf("perk days = %v", got.PerkDays)
@@ -143,19 +142,19 @@ func TestShopListFiltersByActivityAndRoles(t *testing.T) {
 	executorOnly := &repository.ShopProduct{
 		Kind: repository.ShopKindPerk, Category: "perks",
 		Title: map[string]interface{}{"ru": "x"}, Price: money.FromRubles(100),
-		PerkKind: strPtr("COMMISSION_FREE"), PerkDays: intPtr(1),
+		PerkRule: strPtr("commission_free"), PerkDays: intPtr(1),
 		Roles: []string{"EXECUTOR"}, IsActive: true,
 	}
 	forAll := &repository.ShopProduct{
 		Kind: repository.ShopKindPerk, Category: "perks",
 		Title: map[string]interface{}{"ru": "y"}, Price: money.FromRubles(100),
-		PerkKind: strPtr("COMMISSION_FREE"), PerkDays: intPtr(1),
+		PerkRule: strPtr("commission_free"), PerkDays: intPtr(1),
 		IsActive: true,
 	}
 	inactive := &repository.ShopProduct{
 		Kind: repository.ShopKindPerk, Category: "perks",
 		Title: map[string]interface{}{"ru": "z"}, Price: money.FromRubles(100),
-		PerkKind: strPtr("COMMISSION_FREE"), PerkDays: intPtr(1),
+		PerkRule: strPtr("commission_free"), PerkDays: intPtr(1),
 		IsActive: false,
 	}
 	for _, p := range []*repository.ShopProduct{executorOnly, forAll, inactive} {
@@ -290,7 +289,7 @@ func TestShopLockProductReadsInsideTransaction(t *testing.T) {
 	p := &repository.ShopProduct{
 		Kind: repository.ShopKindPerk, Category: "perks",
 		Title: map[string]interface{}{"ru": "x"}, Price: money.FromRubles(100),
-		PerkKind: strPtr("COMMISSION_FREE"), PerkDays: intPtr(1), IsActive: true,
+		PerkRule: strPtr("commission_free"), PerkDays: intPtr(1), IsActive: true,
 	}
 	if err := repo.UpsertProduct(ctx, p); err != nil {
 		t.Fatalf("upsert: %v", err)

@@ -23,14 +23,14 @@ type activePerks struct {
 	active []*repository.UserPerk
 }
 
-func (p *activePerks) Active(ctx context.Context, q repository.Querier, userID uuid.UUID, kinds []string, now time.Time) ([]*repository.UserPerk, error) {
+func (p *activePerks) Active(ctx context.Context, q repository.Querier, userID uuid.UUID, now time.Time) ([]*repository.UserPerk, error) {
 	return p.active, nil
 }
 
-func perk(kind string, value *float64) *repository.UserPerk {
+func userPerk(rule string, value *float64) *repository.UserPerk {
 	now := time.Now()
 	return &repository.UserPerk{
-		ID: uuid.New(), UserID: uuid.New(), Kind: kind, Value: value,
+		ID: uuid.New(), UserID: uuid.New(), RuleCode: rule, Config: perkValue(value),
 		StartsAt: now.Add(-time.Hour), ExpiresAt: now.AddDate(0, 0, 30),
 	}
 }
@@ -46,15 +46,15 @@ func TestPerkAppliesAfterTheLevel(t *testing.T) {
 		perk *repository.UserPerk
 		want float64
 	}{
-		{"multiplier halves the level rate", perk(PerkKindCommissionMultiplier, floatPtr(0.5)), 3.5},
-		{"discount subtracts points from the level rate", perk(PerkKindCommissionDiscountPP, floatPtr(5)), 2},
-		{"discount below zero clamps to zero", perk(PerkKindCommissionDiscountPP, floatPtr(9)), 0},
-		{"free period zeroes the rate", perk(PerkKindCommissionFree, nil), 0},
+		{"multiplier halves the level rate", userPerk(ruleMultiplier, floatPtr(0.5)), 3.5},
+		{"discount subtracts points from the level rate", userPerk(ruleDiscountPP, floatPtr(5)), 2},
+		{"discount below zero clamps to zero", userPerk(ruleDiscountPP, floatPtr(9)), 0},
+		{"free period zeroes the rate", userPerk(ruleFree, nil), 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			levels := NewLevels(&pointsRepo{points: 1500}, settings).
-				WithPerks(&activePerks{active: []*repository.UserPerk{tc.perk}}, nil)
+				WithPerks(&activePerks{active: []*repository.UserPerk{tc.perk}}, newTestPerkRules(t, newFakePerkRules(), settings), nil)
 			level := levels.For(ctx, nil, uuid.New())
 			if level.LevelPercent != 7 {
 				t.Fatalf("level rate = %v, want 7", level.LevelPercent)
@@ -72,10 +72,11 @@ func TestPerkAppliesAfterTheLevel(t *testing.T) {
 // Две привилегии сразу бывают только по ошибке админа. Тогда берётся самая
 // выгодная покупателю, а не «минус 5 пунктов от половины».
 func TestTheBestOfSeveralPerksWinsInsteadOfComposing(t *testing.T) {
-	multiplier := perk(PerkKindCommissionMultiplier, floatPtr(0.5))
-	discount := perk(PerkKindCommissionDiscountPP, floatPtr(5))
-	levels := NewLevels(&pointsRepo{points: 1500}, levelSettings("10", "500", "1")).
-		WithPerks(&activePerks{active: []*repository.UserPerk{multiplier, discount}}, nil)
+	multiplier := userPerk(ruleMultiplier, floatPtr(0.5))
+	discount := userPerk(ruleDiscountPP, floatPtr(5))
+	settings := levelSettings("10", "500", "1")
+	levels := NewLevels(&pointsRepo{points: 1500}, settings).
+		WithPerks(&activePerks{active: []*repository.UserPerk{multiplier, discount}}, newTestPerkRules(t, newFakePerkRules(), settings), nil)
 
 	level := levels.For(context.Background(), nil, uuid.New())
 	// 7 × 0.5 = 3.5, 7 − 5 = 2: выигрывают пункты. Композиция дала бы 0 или −1.5.
@@ -87,20 +88,24 @@ func TestTheBestOfSeveralPerksWinsInsteadOfComposing(t *testing.T) {
 	}
 }
 
-// Привилегию, которую формула применить не может, ставка не видит, а
-// инцидент — видит.
-func TestAnInapplicablePerkIsIgnoredAndRecorded(t *testing.T) {
+// Упавшее правило ставку не трогает — заказ закрывается по ставке уровня, — а
+// инцидент его видит.
+func TestAFailingPerkRuleIsIgnoredAndRecorded(t *testing.T) {
 	incidents := &recordingIncidents{}
-	broken := perk("COMMISSION_BOGUS", floatPtr(0.5))
-	levels := NewLevels(&pointsRepo{points: 0}, levelSettings("10", "500", "1")).
-		WithPerks(&activePerks{active: []*repository.UserPerk{broken}}, incidents)
+	// Собственное правило, чьей версии нет: так выглядит правка мимо приложения.
+	broken := userPerk("vanished_rule", floatPtr(0.5))
+	missing := uuid.New()
+	broken.RuleVersionID = &missing
+	settings := levelSettings("10", "500", "1")
+	levels := NewLevels(&pointsRepo{points: 0}, settings).
+		WithPerks(&activePerks{active: []*repository.UserPerk{broken}}, newTestPerkRules(t, newFakePerkRules(), settings), incidents)
 
 	level := levels.For(context.Background(), nil, uuid.New())
 	if level.Percent != 10 || level.PerkID != nil {
 		t.Errorf("rate = %v with perk %v, want the plain 10%%", level.Percent, level.PerkID)
 	}
-	if len(incidents.recorded) != 1 || incidents.recorded[0].Kind != repository.IncidentPerkInvalid {
-		t.Errorf("incidents = %+v, want one perk_invalid", incidents.recorded)
+	if len(incidents.recorded) != 1 || incidents.recorded[0].Kind != repository.IncidentPerkScriptFailed {
+		t.Errorf("incidents = %+v, want one perk_script_failed", incidents.recorded)
 	}
 }
 
@@ -114,10 +119,10 @@ func TestConfirmOrderAppliesThePerkAndRecordsIt(t *testing.T) {
 		commission money.Amount
 	}{
 		// База 15 %, уровень 5: 10 % по уровню.
-		{"half commission", perk(PerkKindCommissionMultiplier, floatPtr(0.5)), money.FromRubles(5)},
-		{"minus five points", perk(PerkKindCommissionDiscountPP, floatPtr(5)), money.FromRubles(5)},
+		{"half commission", userPerk(ruleMultiplier, floatPtr(0.5)), money.FromRubles(5)},
+		{"minus five points", userPerk(ruleDiscountPP, floatPtr(5)), money.FromRubles(5)},
 		// Нулевая комиссия: исполнитель получает всю сумму, COMMISSION не двигается.
-		{"commission-free day", perk(PerkKindCommissionFree, nil), 0},
+		{"commission-free day", userPerk(ruleFree, nil), 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			txRepo := &mockTransactionRepo{}
@@ -126,7 +131,7 @@ func TestConfirmOrderAppliesThePerkAndRecordsIt(t *testing.T) {
 			settings := levelSettings("15", "500", "1")
 			ledger := NewLedger(txRepo, accounts)
 			levels := NewLevels(&pointsRepo{points: 2500}, settings).
-				WithPerks(&activePerks{active: []*repository.UserPerk{tc.perk}}, nil)
+				WithPerks(&activePerks{active: []*repository.UserPerk{tc.perk}}, newTestPerkRules(t, newFakePerkRules(), settings), nil)
 			srv := NewOrderService(orderRepo, ledger, settings,
 				newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil).
 				WithAchievements(levels, nil)

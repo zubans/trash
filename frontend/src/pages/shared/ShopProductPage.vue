@@ -31,7 +31,7 @@
           </div>
           <p v-if="description" class="description">{{ description }}</p>
           <div v-if="product.kind === 'PERK'" class="perk-name">
-            {{ perkTitle(product.perk_kind, product.perk_value) }} · {{ $t('shop.perk.days', { days: product.perk_days }) }}
+            {{ $t('shop.perk.days', { days: product.perk_days }) }}
           </div>
           <div v-if="product.requires_verified" class="note">{{ $t('shop.card.verified') }}</div>
           <div v-if="product.per_user_limit" class="note">
@@ -84,7 +84,7 @@ import CheckoutModal from '../../components/shop/CheckoutModal.vue'
 import PerkQuoteBlock from '../../components/shop/PerkQuoteBlock.vue'
 import { forgetShopPurchaseCaches } from '../../composables/useShop'
 import { getProductCard, localized as pick, shopErrorText, type ProductCard, type ShopOrder } from '../../api/shop'
-import { formatPerkDate, perkTitle } from '../../utils/perk'
+import { formatPerkDate } from '../../utils/perk'
 
 type Role = 'EXECUTOR' | 'CUSTOMER'
 const HOME: Record<Role, string> = { EXECUTOR: '/executor', CUSTOMER: '/customer' }
@@ -163,7 +163,7 @@ export default defineComponent({
     return {
       card, loading, notFound, showCheckout, offerVersion, product, quote, currencySymbol, money,
       title, description, imageUrl, blockedReason, onPriceChanged, onPurchased, goBack,
-      perkTitle, formatPerkDate,
+      formatPerkDate,
     }
   },
 })

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { i18n } from '../i18n'
-import { formatPercent, perkBadge, perkFormula, perkQueueLines, perkStartLine, perkTitle } from './perk'
+import { formatPercent, perkBadge, perkFormula, perkQueueLines, perkStartLine, ruleText } from './perk'
 import type { UserPerk } from '../api/shop'
 
 describe('perk text', () => {
@@ -14,43 +14,43 @@ describe('perk text', () => {
     expect(formatPercent(2.3333)).toBe('2.33')
   })
 
-  it('writes the formula for each of the three kinds', () => {
-    expect(perkFormula(7, 3.5, 'COMMISSION_MULTIPLIER', 0.5)).toBe('7 % × 0.5 = 3.5 %')
-    expect(perkFormula(7, 2, 'COMMISSION_DISCOUNT_PP', 5)).toBe('7 % − 5 = 2 %')
-    expect(perkFormula(7, 0, 'COMMISSION_FREE')).toBe('0 %')
+  it('writes the rate before and after, whatever the rule', () => {
+    expect(perkFormula(7, 3.5)).toBe('7 % → 3.5 %')
+    expect(perkFormula(7, 0)).toBe('7 % → 0 %')
+    expect(perkFormula(0, 0)).toBe('0 %')
   })
 
-  it('names each kind', () => {
-    expect(perkTitle('COMMISSION_MULTIPLIER', 0.5)).toBe('Комиссия ×0.5')
-    expect(perkTitle('COMMISSION_DISCOUNT_PP', 5)).toBe('Комиссия минус 5 п.п.')
-    expect(perkTitle('COMMISSION_FREE')).toBe('Без комиссии')
+  it('puts the constants into the rule title', () => {
+    expect(ruleText('Комиссия умножается на VALUE', { VALUE: 0.5 })).toBe('Комиссия умножается на 0.5')
+    expect(ruleText('Комиссия минус VALUE пунктов', { VALUE: 5 })).toBe('Комиссия минус 5 пунктов')
+    expect(ruleText('Без комиссии', {})).toBe('Без комиссии')
+    // Константа заменяется только целым словом.
+    expect(ruleText('VALUES и VALUE', { VALUE: 1 })).toBe('VALUES и 1')
   })
 
   it('shows the badge only while a perk applies', () => {
     const base = { level_percent: 7, percent: 3.5 }
     expect(perkBadge(base)).toBe('')
-    expect(
-      perkBadge({ ...base, perk_kind: 'COMMISSION_MULTIPLIER', perk_value: 0.5, perk_expires_at: '2026-10-17T12:00:00Z' }),
-    ).toBe('Комиссия 7 % × 0.5 = 3.5 % до 17 октября')
-    expect(perkBadge({ level_percent: 7, percent: 0, perk_kind: 'COMMISSION_FREE', perk_expires_at: '2026-09-20T12:00:00Z' })).toBe(
-      'Комиссия 0 % до 20 сентября',
+    expect(perkBadge({ ...base, perk_rule: 'commission_multiplier', perk_expires_at: '2026-10-17T12:00:00Z' })).toBe(
+      'Комиссия 7 % → 3.5 % до 17 октября',
     )
   })
 
-  it('lists only the queued perks, of any kind', () => {
+  it('lists only the queued perks, of any rule', () => {
     const now = new Date('2026-09-10T12:00:00Z')
-    const perk = (kind: UserPerk['kind'], starts: string, value?: number): UserPerk => ({
-      id: starts, user_id: 'u', kind, value, starts_at: starts, expires_at: starts, created_at: starts,
+    const perk = (title: string, starts: string, config: UserPerk['config'] = {}): UserPerk => ({
+      id: starts, user_id: 'u', rule_code: 'r', rule_title: title, config,
+      starts_at: starts, expires_at: starts, created_at: starts,
     })
     const lines = perkQueueLines(
       [
-        perk('COMMISSION_MULTIPLIER', '2026-09-01T12:00:00Z', 0.5), // действует — на плашке, не в очереди
-        perk('COMMISSION_DISCOUNT_PP', '2026-09-20T12:00:00Z', 5),
-        perk('COMMISSION_FREE', '2026-10-20T12:00:00Z'),
+        perk('Комиссия умножается на VALUE', '2026-09-01T12:00:00Z', { VALUE: 0.5 }), // действует — на плашке
+        perk('Комиссия минус VALUE пунктов', '2026-09-20T12:00:00Z', { VALUE: 5 }),
+        perk('Без комиссии', '2026-10-20T12:00:00Z'),
       ],
       now,
     )
-    expect(lines).toEqual(['дальше: Комиссия минус 5 п.п. с 20 сентября', 'дальше: Без комиссии с 20 октября'])
+    expect(lines).toEqual(['дальше: Комиссия минус 5 пунктов с 20 сентября', 'дальше: Без комиссии с 20 октября'])
   })
 
   it('says when a queued perk starts', () => {

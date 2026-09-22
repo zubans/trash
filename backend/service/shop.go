@@ -92,6 +92,7 @@ type ShopService struct {
 	shop     repository.ShopRepository
 	orders   repository.ShopOrderRepository
 	perks    repository.PerkRepository
+	rules    *PerkRules
 	gifts    repository.GiftRepository
 	ledger   *Ledger
 	levels   *Levels
@@ -104,9 +105,9 @@ type ShopService struct {
 
 // NewShopService собирает магазин.
 func NewShopService(shop repository.ShopRepository, orders repository.ShopOrderRepository,
-	perks repository.PerkRepository, gifts repository.GiftRepository, ledger *Ledger,
+	perks repository.PerkRepository, rules *PerkRules, gifts repository.GiftRepository, ledger *Ledger,
 	levels *Levels, settings repository.SettingsRepository) *ShopService {
-	return &ShopService{shop: shop, orders: orders, perks: perks, gifts: gifts, ledger: ledger,
+	return &ShopService{shop: shop, orders: orders, perks: perks, rules: rules, gifts: gifts, ledger: ledger,
 		levels: levels, settings: settings, now: time.Now}
 }
 
@@ -265,6 +266,13 @@ func maxQueued(p *repository.ShopProduct) int {
 	return defaultMaxQueuedPerks
 }
 
+func perkRule(p *repository.ShopProduct) string {
+	if p.PerkRule == nil {
+		return ""
+	}
+	return *p.PerkRule
+}
+
 func perkDays(p *repository.ShopProduct) int {
 	if p.PerkDays == nil {
 		return 0
@@ -275,12 +283,10 @@ func perkDays(p *repository.ShopProduct) int {
 func (s *ShopService) perkQuote(ctx context.Context, userID uuid.UUID, p *repository.ShopProduct) (*PerkQuote, error) {
 	now := s.now()
 	level := s.levels.For(ctx, nil, userID)
-	kind := ""
-	if p.PerkKind != nil {
-		kind = *p.PerkKind
-	}
-	withPerk, ok := ApplyPerk(level.LevelPercent, level.BasePercent, kind, p.PerkValue)
-	if !ok {
+	withPerk, err := s.rules.Preview(ctx, perkRule(p), p.PerkConfig, level.BasePercent, level.LevelPercent, level.Level)
+	if err != nil {
+		// Карточка товара, чьё правило сломали после сохранения, не падает:
+		// она показывает «без изменений», а купить его не даст покупка.
 		withPerk = level.LevelPercent
 	}
 	days := perkDays(p)
@@ -298,27 +304,24 @@ func (s *ShopService) perkQuote(ctx context.Context, userID uuid.UUID, p *reposi
 
 	reduction := level.LevelPercent - withPerk
 	if level.LevelPercent > 0 && reduction > 0 {
-		if kind == PerkKindCommissionFree {
-			// Беспроцентный период — прямой отказ от выручки за срок, поэтому
-			// экономия считается от средней дневной комиссии, а не от месяца.
-			quote.Savings = paid.Scale(float64(days) / 30)
-		} else {
-			quote.Savings = paid.Scale(reduction / level.LevelPercent)
-		}
+		// Экономия — доля снятой комиссии от уплаченной за 30 дней, в пересчёте
+		// на срок привилегии: одна формула для любого правила, от «вдвое
+		// меньше» на месяц до «дня без комиссии».
+		quote.Savings = paid.Scale(reduction / level.LevelPercent * float64(days) / 30)
 		// Оборот, при котором экономия за срок покрывает цену:
 		// цена / (снижение ставки в долях).
 		breakeven := p.Price.Scale(100 / reduction)
 		quote.BreakevenTurnover = &breakeven
 	}
 
-	start, err := s.perks.NextStart(ctx, nil, userID, CommissionPerkKinds, now)
+	start, err := s.perks.NextStart(ctx, nil, userID, now)
 	if err != nil {
 		return nil, err
 	}
 	quote.StartsAt = start
 	quote.ExpiresAt = start.AddDate(0, 0, days)
 	quote.Queued = start.After(now)
-	if quote.QueueLength, err = s.perks.CountQueued(ctx, nil, userID, CommissionPerkKinds, now); err != nil {
+	if quote.QueueLength, err = s.perks.CountQueued(ctx, nil, userID, now); err != nil {
 		return nil, err
 	}
 	return quote, nil
@@ -493,12 +496,12 @@ func (s *ShopService) preparePerk(ctx context.Context, tx *sql.Tx, userID uuid.U
 	if err := s.perks.LockQueue(ctx, tx, userID); err != nil {
 		return nil, err
 	}
-	kind := ""
-	if product.PerkKind != nil {
-		kind = *product.PerkKind
-	}
-	if err := ValidatePerk(kind, product.PerkValue, perkDays(product)); err != nil {
+	sellable, err := s.rules.Sellable(ctx, perkRule(product), product.PerkConfig)
+	if errors.Is(err, ErrInvalidPerk) || (err == nil && perkDays(product) <= 0) {
 		return nil, shopErr(http.StatusConflict, ShopErrProductUnavailable, "Товар настроен неверно и не продаётся")
+	}
+	if err != nil {
+		return nil, err
 	}
 	// Проверяется ставка по уровню, без привилегий: во время беспроцентной
 	// недели ставка тоже 0, но купить следующую в очередь можно.
@@ -507,7 +510,7 @@ func (s *ShopService) preparePerk(ctx context.Context, tx *sql.Tx, userID uuid.U
 			"Ваша комиссия уже 0 %: привилегия ничего не изменит")
 	}
 	now := s.now()
-	queued, err := s.perks.CountQueued(ctx, tx, userID, CommissionPerkKinds, now)
+	queued, err := s.perks.CountQueued(ctx, tx, userID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -515,12 +518,12 @@ func (s *ShopService) preparePerk(ctx context.Context, tx *sql.Tx, userID uuid.U
 		return nil, shopErr(http.StatusConflict, ShopErrLimitReached,
 			"Куплено вперёд максимальное число привилегий")
 	}
-	start, err := s.perks.NextStart(ctx, tx, userID, CommissionPerkKinds, now)
+	start, err := s.perks.NextStart(ctx, tx, userID, now)
 	if err != nil {
 		return nil, err
 	}
 	return &repository.UserPerk{
-		UserID: userID, Kind: kind, Value: product.PerkValue,
+		UserID: userID, RuleCode: sellable.RuleCode, RuleVersionID: sellable.VersionID, Config: sellable.Config,
 		StartsAt: start, ExpiresAt: start.AddDate(0, 0, perkDays(product)),
 	}, nil
 }
@@ -641,11 +644,9 @@ func productSnapshot(p *repository.ShopProduct) map[string]interface{} {
 	if p.GiftCode != nil {
 		snapshot["gift_code"] = *p.GiftCode
 	}
-	if p.PerkKind != nil {
-		snapshot["perk_kind"] = *p.PerkKind
-	}
-	if p.PerkValue != nil {
-		snapshot["perk_value"] = *p.PerkValue
+	if p.PerkRule != nil {
+		snapshot["perk_rule"] = *p.PerkRule
+		snapshot["perk_config"] = p.PerkConfig
 	}
 	if p.PerkDays != nil {
 		snapshot["perk_days"] = *p.PerkDays
@@ -771,7 +772,7 @@ type MyPerks struct {
 
 // MyPerks возвращает действующую привилегию и очередь.
 func (s *ShopService) MyPerks(ctx context.Context, user *repository.User) (*MyPerks, error) {
-	queue, err := s.perks.ListQueue(ctx, user.ID, CommissionPerkKinds, s.now())
+	queue, err := s.perks.ListQueue(ctx, user.ID, s.now())
 	if err != nil {
 		return nil, err
 	}

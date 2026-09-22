@@ -538,17 +538,13 @@
       "CERTIFICATE": "Certificate"
     },
     "perk": {
-      "multiplier": "Commission ×{value}",
-      "discount": "Commission minus {value} pp",
-      "free": "No commission",
       "days": "{days} days",
       "now": "Now",
       "withPerk": "With the perk",
       "payback": "Payback",
       "forDays": "for {days} days",
       "paid30": "In the last 30 days you paid {paid} in commission.",
-      "savings": "The perk would have saved {savings}.",
-      "savingsFree": "At your average commission that is {savings} over the period.",
+      "savings": "Over {days} days the perk would have saved {savings}, going by your commission for the last 30 days.",
       "breakeven": "Pays off if you complete orders worth {amount} over the period.",
       "startsAt": "Starts {date}",
       "startsNow": "Starts right after payment",
@@ -681,22 +677,13 @@
         "gift": "Gift (stock and codes)",
         "variants": "Variants (codes, comma-separated)",
         "methods": "Ways to receive",
-        "perkKind": "Perk kind",
-        "perkValue": "Value",
-        "perkMultiplier": "Multiplier (0; 1]",
-        "perkPoints": "Percentage points",
         "perkDays": "Duration, days",
         "maxQueued": "Max bought in advance",
         "sortOrder": "Order",
         "isActive": "On sale",
-        "images": "Images (up to 5)"
+        "images": "Images (up to 5)",
+        "perkRule": "Perk rule"
       },
-      "perkKinds": {
-        "COMMISSION_MULTIPLIER": "Commission multiplier",
-        "COMMISSION_DISCOUNT_PP": "Minus points",
-        "COMMISSION_FREE": "No commission"
-      },
-      "freeNoValue": "A commission-free period has no value.",
       "giftsLink": "Restock in Gifts",
       "upload": "Upload",
       "preview": "What the buyer sees",
@@ -752,7 +739,26 @@
       "grantReason": "Reason (compensation, promotion)",
       "shopEnabled": "Shop is open",
       "shopEnabledHint": "A closed shop hides the store and refuses purchases; the admin panel keeps working.",
-      "offerVersionHint": "The current edition number. Increase it when publishing a new text: buyers will accept the new edition again."
+      "offerVersionHint": "The current edition number. Increase it when publishing a new text: buyers will accept the new edition again.",
+      "rules": {
+        "menu": "Perk rules",
+        "sub": "A rule computes the commission rate under a perk. Shipped rules come with the build and can only be switched on or off; your own rules are written here and checked against a grid of rates and levels before saving. Editing makes a new version: perks already sold keep theirs.",
+        "new": "New rule",
+        "shipped": "Shipped",
+        "own": "Own",
+        "shippedHint": "A shipped rule changes only with a release. Here you can switch it on or off and use its text as a template.",
+        "code": "Code",
+        "title": "Title (constants as in the script: VALUE)",
+        "source": "Script",
+        "active": "Rule enabled — products on it are sold",
+        "copy": "Make my own from it",
+        "check": "Check against the grid",
+        "grid": "Grid run",
+        "base": "Base",
+        "level": "Level",
+        "levelPercent": "By level",
+        "percent": "With perk"
+      }
     },
     "coupon": {
       "ISSUED": "Awaiting pickup",

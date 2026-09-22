@@ -38,12 +38,13 @@ var shopImageTypes = map[string]string{
 // ShopHandler обслуживает магазин: витрину и покупку для покупателя, каталог,
 // обработку покупок и выручку для админки.
 type ShopHandler struct {
-	shop *service.ShopService
+	shop  *service.ShopService
+	rules *service.PerkRules
 }
 
 // NewShopHandler создаёт ShopHandler.
-func NewShopHandler(shop *service.ShopService) *ShopHandler {
-	return &ShopHandler{shop: shop}
+func NewShopHandler(shop *service.ShopService, rules *service.PerkRules) *ShopHandler {
+	return &ShopHandler{shop: shop, rules: rules}
 }
 
 // RegisterUserRoutes подключает маршруты покупателя. purchase — ограничитель
@@ -82,6 +83,11 @@ func (h *ShopHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(ht
 	r.With(can("shop_orders.view")).Get("/admin/users/{id}/shop", h.AdminUserShop)
 	r.With(can("shop_orders.edit")).Post("/admin/users/{id}/perks", h.AdminGrantPerk)
 	r.With(can("shop_orders.edit")).Delete("/admin/perks/{id}", h.AdminRevokePerk)
+
+	r.With(can("perk_rules.view")).Get("/admin/shop/perk-rules", h.AdminPerkRules)
+	r.With(can("perk_rules.view")).Post("/admin/shop/perk-rules/check", h.AdminCheckPerkRule)
+	r.With(can("perk_rules.create")).Post("/admin/shop/perk-rules", h.AdminCreatePerkRule)
+	r.With(can("perk_rules.edit")).Put("/admin/shop/perk-rules/{code}", h.AdminUpdatePerkRule)
 
 	r.With(can("shop_revenue.view")).Get("/admin/finances/shop", h.AdminRevenue)
 	r.With(can("shop_revenue.edit")).Post("/admin/finances/shop/payout", h.AdminPayout)

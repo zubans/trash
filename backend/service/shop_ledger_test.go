@@ -172,8 +172,8 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 	}
 	// Проводка оплаты ссылается на покупку, поэтому покупка нужна настоящая.
 	if _, err := db.Exec(
-		`INSERT INTO shop_products (id, kind, category, title, price, perk_kind, perk_days)
-		 VALUES ($1, 'PERK', 'perks', '{"ru":"x"}', $2, 'COMMISSION_FREE', 1)`,
+		`INSERT INTO shop_products (id, kind, category, title, price, perk_rule, perk_days)
+		 VALUES ($1, 'PERK', 'perks', '{"ru":"x"}', $2, 'commission_free', 1)`,
 		productID, int64(price)); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}

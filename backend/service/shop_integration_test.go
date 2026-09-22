@@ -14,6 +14,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"healthlogin/backend/money"
+	"healthlogin/backend/perks"
 	"healthlogin/backend/repository"
 )
 
@@ -52,8 +53,12 @@ func newShopFixture(t *testing.T, overrides map[string]string) *shopFixture {
 		gifts: repository.NewGiftRepository(db), shop: repository.NewShopRepository(db),
 		perks: repository.NewPerkRepository(db), orders: repository.NewShopOrderRepository(db)}
 	ledger := NewLedger(repository.NewTransactionRepository(db), repository.NewSystemAccountRepository(db))
-	levels := NewLevels(repository.NewAchievementRepository(db), settings).WithPerks(f.perks, nil)
-	f.srv = NewShopService(f.shop, f.orders, f.perks, f.gifts, ledger, levels, settings).
+	rules, err := NewPerkRules(repository.NewPerkRuleRepository(db), settings, perks.FS)
+	if err != nil {
+		t.Fatalf("perk rules: %v", err)
+	}
+	levels := NewLevels(repository.NewAchievementRepository(db), settings).WithPerks(f.perks, rules, nil)
+	f.srv = NewShopService(f.shop, f.orders, f.perks, rules, f.gifts, ledger, levels, settings).
 		WithEvents(repository.NewEventRepository(db)).
 		WithMail(repository.NewMailRepository(db)).
 		WithRoles(repository.NewRoleRepository(db))
@@ -121,10 +126,10 @@ func (f *shopFixture) product(p *repository.ShopProduct) *repository.ShopProduct
 	return p
 }
 
-func (f *shopFixture) perkProduct(kind string, value *float64, price money.Amount, limit *int) *repository.ShopProduct {
+func (f *shopFixture) perkProduct(rule string, value *float64, price money.Amount, limit *int) *repository.ShopProduct {
 	days := 30
 	return f.product(&repository.ShopProduct{
-		Kind: repository.ShopKindPerk, PerkKind: &kind, PerkValue: value, PerkDays: &days,
+		Kind: repository.ShopKindPerk, PerkRule: &rule, PerkConfig: perkValue(value), PerkDays: &days,
 		Price: price, Roles: []string{"EXECUTOR"}, MaxActivePerUser: limit,
 	})
 }
@@ -182,7 +187,7 @@ func TestShopPurchasePerkQueuesAndIsIdempotentIntegration(t *testing.T) {
 	buyer := f.user("EXECUTOR", money.FromRubles(5000))
 	price := money.FromRubles(1000)
 	limit := 2
-	product := f.perkProduct(PerkKindCommissionMultiplier, floatPtr(0.5), price, &limit)
+	product := f.perkProduct(ruleMultiplier, floatPtr(0.5), price, &limit)
 
 	req := buy(product)
 	first, err := f.srv.Purchase(ctx, buyer, req)
@@ -240,13 +245,13 @@ func TestShopGrantedPerkQueuesBehindThePurchasedOneIntegration(t *testing.T) {
 	ctx := context.Background()
 	buyer := f.user("EXECUTOR", money.FromRubles(5000))
 	admin := f.user("ADMIN", 0)
-	product := f.perkProduct(PerkKindCommissionMultiplier, floatPtr(0.5), money.FromRubles(1000), nil)
+	product := f.perkProduct(ruleMultiplier, floatPtr(0.5), money.FromRubles(1000), nil)
 
 	bought, err := f.srv.Purchase(ctx, buyer, buy(product))
 	if err != nil {
 		t.Fatalf("purchase: %v", err)
 	}
-	granted, err := f.srv.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Kind: PerkKindCommissionFree, Days: 1, Reason: "компенсация"})
+	granted, err := f.srv.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Rule: ruleFree, Days: 1, Reason: "компенсация"})
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -255,11 +260,11 @@ func TestShopGrantedPerkQueuesBehindThePurchasedOneIntegration(t *testing.T) {
 	}
 	// Сейчас действует купленный множитель, а не бесплатный день.
 	level := f.srv.levels.For(ctx, nil, buyer.ID)
-	if level.PerkKind != PerkKindCommissionMultiplier || level.Percent != 5 {
-		t.Errorf("active perk %s at %v%%, want the multiplier at 5%%", level.PerkKind, level.Percent)
+	if level.PerkRule != ruleMultiplier || level.Percent != 5 {
+		t.Errorf("active perk %s at %v%%, want the multiplier at 5%%", level.PerkRule, level.Percent)
 	}
 
-	if _, err := f.srv.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Kind: PerkKindCommissionMultiplier, Value: floatPtr(1.5), Days: 3, Reason: "x"}); shopCode(err) != ShopErrValidation {
+	if _, err := f.srv.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Rule: ruleMultiplier, Config: perkValue(floatPtr(1.5)), Days: 3, Reason: "x"}); shopCode(err) != ShopErrValidation {
 		t.Errorf("multiplier 1.5 granted: %v", err)
 	}
 	if _, err := f.srv.RevokePerk(ctx, admin.ID, granted.ID); err != nil {
@@ -274,7 +279,7 @@ func TestShopGrantedPerkQueuesBehindThePurchasedOneIntegration(t *testing.T) {
 func TestShopRefusesAUselessPerkIntegration(t *testing.T) {
 	f := newShopFixture(t, map[string]string{SettingOrderCommissionPercent: "0"})
 	buyer := f.user("EXECUTOR", money.FromRubles(5000))
-	product := f.perkProduct(PerkKindCommissionMultiplier, floatPtr(0.5), money.FromRubles(1000), nil)
+	product := f.perkProduct(ruleMultiplier, floatPtr(0.5), money.FromRubles(1000), nil)
 
 	card, err := f.srv.Product(context.Background(), buyer, product.ID)
 	if err != nil || card.PerkQuote == nil || !card.PerkQuote.Useless {
@@ -293,7 +298,7 @@ func TestShopRefusalsChargeNothingIntegration(t *testing.T) {
 	f := newShopFixture(t, nil)
 	ctx := context.Background()
 	shirt, code := f.physical(3)
-	perkForExecutors := f.perkProduct(PerkKindCommissionMultiplier, floatPtr(0.5), money.FromRubles(1000), nil)
+	perkForExecutors := f.perkProduct(ruleMultiplier, floatPtr(0.5), money.FromRubles(1000), nil)
 	buyer := f.user("CUSTOMER", money.FromRubles(2000))
 	poor := f.user("CUSTOMER", money.FromRubles(100))
 
@@ -487,7 +492,7 @@ func TestShopCancelQueuedPerkRefundsInFullIntegration(t *testing.T) {
 	ctx := context.Background()
 	buyer := f.user("EXECUTOR", money.FromRubles(5000))
 	admin := f.user("ADMIN", 0)
-	product := f.perkProduct(PerkKindCommissionDiscountPP, floatPtr(5), money.FromRubles(1000), nil)
+	product := f.perkProduct(ruleDiscountPP, floatPtr(5), money.FromRubles(1000), nil)
 
 	if _, err := f.srv.Purchase(ctx, buyer, buy(product)); err != nil {
 		t.Fatalf("first purchase: %v", err)
@@ -551,9 +556,9 @@ func TestShopPerkReminderIsSentOnceIntegration(t *testing.T) {
 	followed := f.user("EXECUTOR", 0)
 	now := time.Now()
 	for _, p := range []*repository.UserPerk{
-		{UserID: alone.ID, Kind: PerkKindCommissionFree, StartsAt: now.AddDate(0, 0, -5), ExpiresAt: now.Add(48 * time.Hour)},
-		{UserID: followed.ID, Kind: PerkKindCommissionFree, StartsAt: now.AddDate(0, 0, -5), ExpiresAt: now.Add(48 * time.Hour)},
-		{UserID: followed.ID, Kind: PerkKindCommissionFree, StartsAt: now.Add(48 * time.Hour), ExpiresAt: now.AddDate(0, 0, 10)},
+		{UserID: alone.ID, RuleCode: ruleFree, StartsAt: now.AddDate(0, 0, -5), ExpiresAt: now.Add(48 * time.Hour)},
+		{UserID: followed.ID, RuleCode: ruleFree, StartsAt: now.AddDate(0, 0, -5), ExpiresAt: now.Add(48 * time.Hour)},
+		{UserID: followed.ID, RuleCode: ruleFree, StartsAt: now.Add(48 * time.Hour), ExpiresAt: now.AddDate(0, 0, 10)},
 	} {
 		if err := f.perks.Create(ctx, nil, p); err != nil {
 			t.Fatalf("seed perk: %v", err)
@@ -586,7 +591,7 @@ func TestShopConcurrentPerkPurchasesDoNotOverlapIntegration(t *testing.T) {
 	f := newShopFixture(t, nil)
 	ctx := context.Background()
 	buyer := f.user("EXECUTOR", money.FromRubles(5000))
-	product := f.perkProduct(PerkKindCommissionFree, nil, money.FromRubles(500), nil)
+	product := f.perkProduct(ruleFree, nil, money.FromRubles(500), nil)
 
 	var wg sync.WaitGroup
 	orders := make([]*repository.ShopOrder, 2)
@@ -616,7 +621,7 @@ func TestShopDisabledHidesTheStorefrontIntegration(t *testing.T) {
 	f := newShopFixture(t, map[string]string{SettingShopEnabled: "0"})
 	ctx := context.Background()
 	buyer := f.user("EXECUTOR", money.FromRubles(5000))
-	product := f.perkProduct(PerkKindCommissionFree, nil, money.FromRubles(500), nil)
+	product := f.perkProduct(ruleFree, nil, money.FromRubles(500), nil)
 
 	front, err := f.srv.Storefront(ctx, buyer, "")
 	if err != nil || front.Enabled || len(front.Products) != 0 {
@@ -646,7 +651,7 @@ func TestShopSaveProductValidatesByKindIntegration(t *testing.T) {
 	perkBase := func() *repository.ShopProduct {
 		return &repository.ShopProduct{Kind: repository.ShopKindPerk, Category: "perks",
 			Title: map[string]interface{}{"ru": "Комиссия вдвое меньше"}, Price: money.FromRubles(1000),
-			PerkKind: strp(PerkKindCommissionMultiplier), PerkValue: floatPtr(0.5), PerkDays: intp(30)}
+			PerkRule: strp(ruleMultiplier), PerkConfig: perkValue(floatPtr(0.5)), PerkDays: intp(30)}
 	}
 	shirtBase := func() *repository.ShopProduct {
 		return &repository.ShopProduct{Kind: repository.ShopKindPhysical, Category: "merch",
@@ -674,14 +679,15 @@ func TestShopSaveProductValidatesByKindIntegration(t *testing.T) {
 		{"bad category", func() *repository.ShopProduct { p := perkBase(); p.Category = "Привилегии"; return p }, "category"},
 		{"unknown role", func() *repository.ShopProduct { p := perkBase(); p.Roles = []string{"NOBODY"}; return p }, "roles"},
 		{"foreign image", func() *repository.ShopProduct { p := perkBase(); p.Images = []string{"/uploads/chat/x.png"}; return p }, "images"},
-		{"perk without kind", func() *repository.ShopProduct { p := perkBase(); p.PerkKind = nil; return p }, "perk_kind"},
-		{"multiplier 1.5", func() *repository.ShopProduct { p := perkBase(); p.PerkValue = floatPtr(1.5); return p }, "perk_value"},
+		{"perk without a rule", func() *repository.ShopProduct { p := perkBase(); p.PerkRule = nil; return p }, "perk_rule"},
+		{"multiplier 1.5", func() *repository.ShopProduct { p := perkBase(); p.PerkConfig = perkValue(floatPtr(1.5)); return p }, "perk_config"},
+		{"unknown rule", func() *repository.ShopProduct { p := perkBase(); p.PerkRule = strp("no_such_rule"); return p }, "perk_config"},
 		{"perk without days", func() *repository.ShopProduct { p := perkBase(); p.PerkDays = nil; return p }, "perk_days"},
 		{"free period with a value", func() *repository.ShopProduct {
 			p := perkBase()
-			p.PerkKind = strp(PerkKindCommissionFree)
+			p.PerkRule = strp(ruleFree)
 			return p
-		}, "perk_value"},
+		}, "perk_config"},
 		{"perk with a gift", func() *repository.ShopProduct { p := perkBase(); p.GiftCode = strp(shirtGift); return p }, "gift_code"},
 		{"perk with delivery", func() *repository.ShopProduct {
 			p := perkBase()
@@ -692,7 +698,7 @@ func TestShopSaveProductValidatesByKindIntegration(t *testing.T) {
 		{"shirt with a missing gift", func() *repository.ShopProduct { p := shirtBase(); p.GiftCode = strp("no-such-gift"); return p }, "gift_code"},
 		{"shirt on a certificate gift", func() *repository.ShopProduct { p := shirtBase(); p.GiftCode = strp(certGift); return p }, "gift_code"},
 		{"shirt without a way to get it", func() *repository.ShopProduct { p := shirtBase(); p.FulfillmentMethods = nil; return p }, "fulfillment_methods"},
-		{"shirt with perk fields", func() *repository.ShopProduct { p := shirtBase(); p.PerkDays = intp(3); return p }, "perk_kind"},
+		{"shirt with perk fields", func() *repository.ShopProduct { p := shirtBase(); p.PerkDays = intp(3); return p }, "perk_rule"},
 		{"duplicate variants", func() *repository.ShopProduct {
 			p := shirtBase()
 			p.Variants = []repository.ShopProductVariant{{Code: "M"}, {Code: "M"}}
@@ -764,8 +770,8 @@ func TestShopStorefrontVisibilityIntegration(t *testing.T) {
 	f := newShopFixture(t, nil)
 	ctx := context.Background()
 	shirt, _ := f.physical(5)
-	perk := f.perkProduct(PerkKindCommissionFree, nil, money.FromRubles(300), nil)
-	hidden := f.perkProduct(PerkKindCommissionFree, nil, money.FromRubles(300), nil)
+	perk := f.perkProduct(ruleFree, nil, money.FromRubles(300), nil)
+	hidden := f.perkProduct(ruleFree, nil, money.FromRubles(300), nil)
 	hidden.IsActive = false
 	if err := f.shop.UpsertProduct(ctx, hidden); err != nil {
 		t.Fatalf("hide product: %v", err)
@@ -803,10 +809,10 @@ func TestShopStorefrontVisibilityIntegration(t *testing.T) {
 func TestShopUpdatingAMissingProductIsNotFoundIntegration(t *testing.T) {
 	f := newShopFixture(t, nil)
 	admin := f.user("ADMIN", 0)
-	days, kind := 1, PerkKindCommissionFree
+	days, rule := 1, ruleFree
 	_, err := f.srv.SaveProduct(context.Background(), admin.ID, &repository.ShopProduct{
 		ID: uuid.New(), Kind: repository.ShopKindPerk, Category: "perks",
-		Title: map[string]interface{}{"ru": "x"}, Price: money.FromRubles(100), PerkKind: &kind, PerkDays: &days,
+		Title: map[string]interface{}{"ru": "x"}, Price: money.FromRubles(100), PerkRule: &rule, PerkDays: &days,
 	})
 	if shopCode(err) != ShopErrNotFound {
 		t.Fatalf("update of a missing product: %v, want not_found", err)

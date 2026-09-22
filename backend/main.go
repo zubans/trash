@@ -25,6 +25,7 @@ import (
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
+	"healthlogin/backend/perks"
 	"healthlogin/backend/photoproof"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
@@ -188,8 +189,15 @@ func main() {
 	// Уровни — единственное место, где баллы превращаются в ставку комиссии.
 	// Привилегия магазина применяется здесь же, после уровня: это та же точка,
 	// через которую ходит подтверждение заказа и решение спора.
+	// Правила привилегий — скрипты; поставляемые компилируются здесь, и
+	// сломанное поставляемое правило — ошибка сборки, а не повод стартовать:
+	// на нём стоят купленные привилегии.
+	perkRules, err := service.NewPerkRules(repository.NewPerkRuleRepository(db), settingsRepo, perks.FS)
+	if err != nil {
+		log.Fatalf("[perk] shipped rules: %v", err)
+	}
 	levels := service.NewLevels(achievementRepo, settingsRepo).
-		WithPerks(perkRepo, incidentRepo)
+		WithPerks(perkRepo, perkRules, incidentRepo)
 
 	// DaData — единственный источник адресных данных: и подсказок, и разрешения
 	// координат. Запасного варианта намеренно нет: у альтернативы не было данных о
@@ -256,7 +264,7 @@ func main() {
 	chatService := service.NewChatService(chatRepo, orderRepo)
 	// Магазин платит тем же реестром и выдаёт вещи теми же подарками, что и
 	// ачивки: склад у них один.
-	shopService := service.NewShopService(shopRepo, shopOrderRepo, perkRepo, giftRepo, ledger, levels, settingsRepo).
+	shopService := service.NewShopService(shopRepo, shopOrderRepo, perkRepo, perkRules, giftRepo, ledger, levels, settingsRepo).
 		WithEvents(eventRepo).
 		WithMail(mailRepo).
 		WithRoles(roleRepo)
@@ -368,7 +376,7 @@ func main() {
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService).WithShopLinks(shopService.ShopOrderLinks)
-	shh := handler.NewShopHandler(shopService)
+	shh := handler.NewShopHandler(shopService, perkRules)
 	gh := handler.NewGeoHandler(addressSuggester)
 	sch := handler.NewServiceCatalogHandler(catalogRepo).WithPenalties(penaltyService).WithBehaviors(serviceBehaviors)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))

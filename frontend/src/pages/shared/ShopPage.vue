@@ -64,7 +64,7 @@
               <div class="product-body">
                 <div class="product-title">{{ localized(p.title) }}</div>
                 <div v-if="p.kind === 'PERK'" class="product-sub">
-                  {{ perkTitle(p.perk_kind, p.perk_value) }} · {{ $t('shop.perk.days', { days: p.perk_days }) }}
+                  {{ $t('shop.perk.days', { days: p.perk_days }) }}
                 </div>
                 <div class="product-price">
                   <span>{{ money(p.price) }}</span>
@@ -138,7 +138,6 @@ import SkeletonList from '../../components/SkeletonList.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import ShopOrderModal from '../../components/shop/ShopOrderModal.vue'
 import { getMyOrder, getMyOrders, localized as pick, type Localized, type ShopOrder } from '../../api/shop'
-import { perkTitle } from '../../utils/perk'
 
 type Role = 'EXECUTOR' | 'CUSTOMER'
 type Tab = 'store' | 'orders'
@@ -262,7 +261,7 @@ export default defineComponent({
       tabs, tab, category, store, storefront, ordersResource, orders, currencySymbol, balance,
       money, localized, formatDate, imageUrl, kindIcon, categories, categoryTitle, visibleProducts,
       setTab, openProduct, selectedOrder, openOrder, closeOrder, showSupport, supportPrefill,
-      requestRefund, goHome, perkTitle,
+      requestRefund, goHome,
     }
   },
 })

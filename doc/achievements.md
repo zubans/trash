@@ -308,7 +308,12 @@ SELECT COALESCE(SUM(points), 0)
    AND (expires_at IS NULL OR expires_at > now());
 ```
 
-Индекс `(user_id) WHERE revoked_at IS NULL` — этого достаточно; Starlark на
+Индекс `(user_id) WHERE revoked_at IS NULL` — этого достаточно. Единственное
+исключение из правила ниже — правило привилегии магазина: ставка по уровню
+известна только при подтверждении, поэтому `rate` вызывается там, но это
+арифметика над четырьмя числами с жёстким лимитом шагов, прошедшая проверку по
+сетке, и её отказ закрывает заказ по ставке уровня, а не роняет его
+([`implementation_plan_delivery_passport.md`](./implementation_plan_delivery_passport.md) §1.3). Starlark на
 пути подтверждения заказа не запускается никогда.
 
 ### Привилегия магазина — после уровня

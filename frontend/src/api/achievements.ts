@@ -1,5 +1,5 @@
 import api from '../services/api'
-import type { PerkKind, UserPerk } from './shop'
+import type { UserPerk } from './shop'
 
 // Геймификация исполнителя: значки, уровень и подарки. Письма, которыми о них
 // сообщают, живут в api/mail.ts.
@@ -42,8 +42,8 @@ export interface ExecutorLevel {
   // пока привилегия действует.
   level_percent: number
   perk_id?: string
-  perk_kind?: PerkKind
-  perk_value?: number
+  perk_rule?: string
+  perk_title?: string
   perk_expires_at?: string
   // Действующая привилегия и очередь за ней — для строки «дальше: …».
   perk_queue?: UserPerk[]

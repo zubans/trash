@@ -64,16 +64,17 @@ type ShopProduct struct {
 	GiftCode           *string              `json:"gift_code,omitempty"`
 	Variants           []ShopProductVariant `json:"variants"`
 	FulfillmentMethods []string             `json:"fulfillment_methods"`
-	// Параметры привилегии. У COMMISSION_FREE значения нет вовсе — смысл
-	// PerkValue задаёт вид: множитель (0;1] или пункты процента (>0).
-	PerkKind         *string   `json:"perk_kind,omitempty"`
-	PerkValue        *float64  `json:"perk_value,omitempty"`
-	PerkDays         *int      `json:"perk_days,omitempty"`
-	MaxActivePerUser *int      `json:"max_active_per_user,omitempty"`
-	SortOrder        int       `json:"sort_order"`
-	IsActive         bool      `json:"is_active"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	// Параметры привилегии: правило, которое считает ставку, и его
+	// константы. Смысл констант задаёт правило, границы проверяет прогон по
+	// сетке при сохранении товара.
+	PerkRule         *string                `json:"perk_rule,omitempty"`
+	PerkConfig       map[string]interface{} `json:"perk_config,omitempty"`
+	PerkDays         *int                   `json:"perk_days,omitempty"`
+	MaxActivePerUser *int                   `json:"max_active_per_user,omitempty"`
+	SortOrder        int                    `json:"sort_order"`
+	IsActive         bool                   `json:"is_active"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
 	// InStock — можно ли выдать товар прямо сейчас: не ограничен у PERK,
 	// склад подарка у PHYSICAL, свободные коды у CERTIFICATE. Считается
 	// запросом списка, а не хранится.
@@ -147,7 +148,7 @@ func (r *shopRepo) exec(q Querier) Querier {
 const shopProductColumns = `p.id, p.kind, p.category, p.title, p.description, p.images,
 	p.price, p.compare_at_price, p.roles, p.requires_verified, p.per_user_limit, p.max_qty_per_order,
 	p.gift_code, p.variants, p.fulfillment_methods,
-	p.perk_kind, p.perk_value, p.perk_days, p.max_active_per_user,
+	p.perk_rule, p.perk_config, p.perk_days, p.max_active_per_user,
 	p.sort_order, p.is_active, p.created_at, p.updated_at`
 
 // shopStockSelect подцепляет остаток одним запросом: склад подарка для вещи и
@@ -243,15 +244,15 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 	// NUMERIC в рублях и домножил бы копейки на сто.
 	var price, compareAt sql.NullInt64
 	var perUserLimit, maxActivePerUser, perkDays sql.NullInt64
-	var giftCode, perkKind sql.NullString
-	var perkValue sql.NullFloat64
+	var giftCode, perkRule sql.NullString
+	var perkConfig []byte
 	var stock sql.NullInt64
 	var giftActive sql.NullBool
 
 	if err := row.Scan(&p.ID, &p.Kind, &p.Category, &title, &description, &images,
 		&price, &compareAt, pq.Array(&roles), &p.RequiresVerified, &perUserLimit, &p.MaxQtyPerOrder,
 		&giftCode, &variants, pq.Array(&fulfillment),
-		&perkKind, &perkValue, &perkDays, &maxActivePerUser,
+		&perkRule, &perkConfig, &perkDays, &maxActivePerUser,
 		&p.SortOrder, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &stock, &giftActive); err != nil {
 		return nil, err
 	}
@@ -283,11 +284,11 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 	if giftCode.Valid {
 		p.GiftCode = &giftCode.String
 	}
-	if perkKind.Valid {
-		p.PerkKind = &perkKind.String
+	if perkRule.Valid {
+		p.PerkRule = &perkRule.String
 	}
-	if perkValue.Valid {
-		p.PerkValue = &perkValue.Float64
+	if len(perkConfig) > 0 && string(perkConfig) != "{}" {
+		_ = json.Unmarshal(perkConfig, &p.PerkConfig)
 	}
 	if perkDays.Valid {
 		value := int(perkDays.Int64)
@@ -365,6 +366,13 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 	if err != nil {
 		return err
 	}
+	if p.PerkConfig == nil {
+		p.PerkConfig = map[string]interface{}{}
+	}
+	perkConfig, err := json.Marshal(p.PerkConfig)
+	if err != nil {
+		return err
+	}
 	// Цены уходят в BIGINT копеек числом. *money.Amount здесь нельзя: его
 	// Valuer отдаёт десятичную строку в рублях, и вставка с «старой ценой»
 	// падала бы на «invalid input syntax for type bigint».
@@ -377,7 +385,7 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 		INSERT INTO shop_products (id, kind, category, title, description, images,
 			price, compare_at_price, roles, requires_verified, per_user_limit, max_qty_per_order,
 			gift_code, variants, fulfillment_methods,
-			perk_kind, perk_value, perk_days, max_active_per_user, sort_order, is_active)
+			perk_rule, perk_config, perk_days, max_active_per_user, sort_order, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		ON CONFLICT (id) DO UPDATE SET
 			kind = EXCLUDED.kind, category = EXCLUDED.category, title = EXCLUDED.title,
@@ -387,14 +395,14 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 			per_user_limit = EXCLUDED.per_user_limit, max_qty_per_order = EXCLUDED.max_qty_per_order,
 			gift_code = EXCLUDED.gift_code, variants = EXCLUDED.variants,
 			fulfillment_methods = EXCLUDED.fulfillment_methods,
-			perk_kind = EXCLUDED.perk_kind, perk_value = EXCLUDED.perk_value,
+			perk_rule = EXCLUDED.perk_rule, perk_config = EXCLUDED.perk_config,
 			perk_days = EXCLUDED.perk_days, max_active_per_user = EXCLUDED.max_active_per_user,
 			sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active,
 			updated_at = now()
 	`, p.ID, p.Kind, p.Category, title, description, images,
 		int64(p.Price), compareAt, pq.Array(p.Roles), p.RequiresVerified, p.PerUserLimit, p.MaxQtyPerOrder,
 		p.GiftCode, variants, pq.Array(p.FulfillmentMethods),
-		p.PerkKind, p.PerkValue, p.PerkDays, p.MaxActivePerUser, p.SortOrder, p.IsActive)
+		p.PerkRule, perkConfig, p.PerkDays, p.MaxActivePerUser, p.SortOrder, p.IsActive)
 	return err
 }
 

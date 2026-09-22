@@ -7,7 +7,8 @@ import type { UserGift } from './achievements'
 // ожидаемую цену с текущей.
 
 export type ShopKind = 'PERK' | 'PHYSICAL' | 'CERTIFICATE'
-export type PerkKind = 'COMMISSION_MULTIPLIER' | 'COMMISSION_DISCOUNT_PP' | 'COMMISSION_FREE'
+// Константы правила привилегии: {"VALUE": 0.5}. Смысл им задаёт правило.
+export type PerkConfig = Record<string, number | string | boolean>
 export type FulfillmentMethod = 'PICKUP' | 'DELIVERY'
 export type ShopOrderStatus = 'PAID' | 'PROCESSING' | 'SHIPPED' | 'COMPLETED' | 'CANCELED'
 
@@ -34,8 +35,9 @@ export interface ShopProduct {
   gift_code?: string
   variants: ShopVariant[]
   fulfillment_methods: FulfillmentMethod[]
-  perk_kind?: PerkKind
-  perk_value?: number
+  // Правило, которое считает ставку, и его константы.
+  perk_rule?: string
+  perk_config?: PerkConfig
   perk_days?: number
   max_active_per_user?: number
   sort_order: number
@@ -89,8 +91,11 @@ export interface PickupPoint {
 export interface UserPerk {
   id: string
   user_id: string
-  kind: PerkKind
-  value?: number
+  rule_code: string
+  // Название правила; константы в нём подставляет ruleText.
+  rule_title: string
+  rule_version_id?: string
+  config: PerkConfig
   starts_at: string
   expires_at: string
   shop_order_id?: string
@@ -123,8 +128,8 @@ export interface ShopOrder {
     image?: string
     price?: number
     gift_code?: string
-    perk_kind?: PerkKind
-    perk_value?: number
+    perk_rule?: string
+    perk_config?: PerkConfig
     perk_days?: number
   }
   variant?: string
@@ -263,8 +268,8 @@ export interface MyPerks {
     level_percent: number
     percent: number
     perk_id?: string
-    perk_kind?: PerkKind
-    perk_value?: number
+    perk_rule?: string
+    perk_title?: string
     perk_expires_at?: string
   }
   queue: UserPerk[]
@@ -386,7 +391,7 @@ export async function adminGetUserShop(userId: string): Promise<{ orders: ShopOr
 
 export async function adminGrantPerk(
   userId: string,
-  payload: { kind: PerkKind; value?: number | null; days: number; reason: string },
+  payload: { rule: string; config: PerkConfig; days: number; reason: string },
 ): Promise<UserPerk> {
   const response = await api.post(`/admin/users/${userId}/perks`, payload)
   return response.data
@@ -427,4 +432,46 @@ export async function adminGetRevenue(from?: string, to?: string): Promise<ShopR
 export async function adminPayoutRevenue(amount: number): Promise<number> {
   const response = await api.post('/admin/finances/shop/payout', { amount })
   return Number(response.data?.balance) || 0
+}
+
+// Правила привилегий (implementation_plan_delivery_passport.md §1): скрипты,
+// которые считают ставку. Поставляемые приезжают со сборкой и только
+// включаются, собственные пишутся здесь.
+export interface PerkRule {
+  code: string
+  title: string
+  origin: 'SHIPPED' | 'OWN'
+  is_active: boolean
+  description: string
+  defaults: PerkConfig
+  source: string
+  version_id?: string
+}
+
+// Строка прогона по сетке: какую ставку правило даёт при такой базе и уровне.
+export interface PerkGridRow {
+  base: number
+  level: number
+  level_percent: number
+  percent: number
+}
+
+export async function adminPerkRules(): Promise<PerkRule[]> {
+  const response = await api.get('/admin/shop/perk-rules')
+  return Array.isArray(response.data) ? response.data : []
+}
+
+export async function adminCheckPerkRule(source: string): Promise<{ grid: PerkGridRow[]; defaults: PerkConfig }> {
+  const response = await api.post('/admin/shop/perk-rules/check', { source })
+  return { grid: response.data?.grid ?? [], defaults: response.data?.defaults ?? {} }
+}
+
+export async function adminSavePerkRule(
+  payload: { code: string; title: string; source: string; is_active: boolean },
+  create: boolean,
+): Promise<{ rule: PerkRule; grid: PerkGridRow[] }> {
+  const response = create
+    ? await api.post('/admin/shop/perk-rules', payload)
+    : await api.put(`/admin/shop/perk-rules/${payload.code}`, payload)
+  return { rule: response.data?.rule, grid: response.data?.grid ?? [] }
 }

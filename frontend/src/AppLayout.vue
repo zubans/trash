@@ -153,6 +153,11 @@
             <span v-if="!sidebarMinimized || isMobile">{{ $t('shop.admin.products') }}</span>
           </router-link>
 
+          <router-link v-if="can('perk_rules.view')" to="/admin/shop/perk-rules" class="nav-item" :class="{ active: currentRouteName === 'admin-shop-perk-rules' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-function"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('shop.admin.rules.menu') }}</span>
+          </router-link>
+
           <router-link v-if="can('shop_orders.view')" to="/admin/shop/orders" class="nav-item" :class="{ active: currentRouteName === 'admin-shop-orders' }" @click="closeSidebarOnMobile">
             <div class="nav-icon-wrap">
               <i class="ph ph-shopping-bag"></i>
@@ -278,7 +283,7 @@ export default defineComponent({
        'commission.view', 'transactions.view', 'reconciliation.view', 'incidents.view',
        'broadcasts.view', 'mail.view'].some(can),
     )
-    const showShopSection = computed(() => ['shop.view', 'shop_orders.view', 'shop_revenue.view'].some(can))
+    const showShopSection = computed(() => ['shop.view', 'perk_rules.view', 'shop_orders.view', 'shop_revenue.view'].some(can))
     const showSystemSection = computed(() =>
       ['shifts.view', 'orders.view', 'service_catalog.view', 'achievements.view',
        'gifts.view', 'escalations.view', 'disputes.view', 'watermarks.view', 'settings.view'].some(can),

@@ -17,7 +17,7 @@ import { computed, defineComponent, type PropType } from 'vue'
 import type { UserPerk } from '../../api/shop'
 import { perkBadge, perkQueueLines } from '../../utils/perk'
 
-// Плашка привилегии: «Комиссия 7 % × 0.5 = 3.5 % до 17 октября» и очередь за
+// Плашка привилегии: «Комиссия 7 % → 3.5 % до 17 октября» и очередь за
 // ней. Стоит там, где исполнитель уже видит свою ставку, — на странице
 // достижений и на дашборде (implementation_plan_shop.md §3.6).
 export default defineComponent({
@@ -27,8 +27,7 @@ export default defineComponent({
       type: Object as PropType<{
         level_percent: number
         percent: number
-        perk_kind?: string
-        perk_value?: number
+        perk_rule?: string
         perk_expires_at?: string
       } | null>,
       default: null,

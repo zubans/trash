@@ -117,19 +117,17 @@ func (s *ShopService) validateProduct(ctx context.Context, p *repository.ShopPro
 
 	switch p.Kind {
 	case repository.ShopKindPerk:
-		kind := ""
-		if p.PerkKind != nil {
-			kind = *p.PerkKind
+		// Правило и константы проверяются прогоном по сетке — тем же, что и
+		// при покупке: товар, который потом не продастся, не сохраняется.
+		if perkRule(p) == "" {
+			fields["perk_rule"] = "Выберите правило привилегии"
+		} else if _, err := s.rules.Sellable(ctx, perkRule(p), p.PerkConfig); errors.Is(err, ErrInvalidPerk) {
+			fields["perk_config"] = strings.TrimPrefix(err.Error(), ErrInvalidPerk.Error()+": ")
+		} else if err != nil {
+			return err
 		}
-		if err := ValidatePerk(kind, p.PerkValue, perkDays(p)); err != nil {
-			switch {
-			case kind == "":
-				fields["perk_kind"] = "Выберите вид привилегии"
-			case perkDays(p) <= 0 && validatePerkValue(kind, p.PerkValue) == nil:
-				fields["perk_days"] = "Срок обязателен и больше нуля"
-			default:
-				fields["perk_value"] = strings.TrimPrefix(err.Error(), ErrInvalidPerk.Error()+": ")
-			}
+		if perkDays(p) <= 0 {
+			fields["perk_days"] = "Срок обязателен и больше нуля"
 		}
 		if p.MaxActivePerUser != nil && *p.MaxActivePerUser <= 0 {
 			fields["max_active_per_user"] = "Больше нуля или пусто"
@@ -146,8 +144,8 @@ func (s *ShopService) validateProduct(ctx context.Context, p *repository.ShopPro
 		// выбирал: привилегия продаётся по одной.
 		p.MaxQtyPerOrder = 1
 	case repository.ShopKindPhysical, repository.ShopKindCertificate:
-		if p.PerkKind != nil || p.PerkValue != nil || p.PerkDays != nil || p.MaxActivePerUser != nil {
-			fields["perk_kind"] = "Поля привилегии есть только у привилегии"
+		if p.PerkRule != nil || len(p.PerkConfig) > 0 || p.PerkDays != nil || p.MaxActivePerUser != nil {
+			fields["perk_rule"] = "Поля привилегии есть только у привилегии"
 		}
 		if p.GiftCode == nil || *p.GiftCode == "" {
 			fields["gift_code"] = "Выберите подарок, которым выдаётся товар"
@@ -564,10 +562,10 @@ func (s *ShopService) Cancel(ctx context.Context, adminID, id uuid.UUID, req Can
 
 // GrantPerkRequest — ручная выдача привилегии: компенсация, акция.
 type GrantPerkRequest struct {
-	Kind   string   `json:"kind"`
-	Value  *float64 `json:"value"`
-	Days   int      `json:"days"`
-	Reason string   `json:"reason"`
+	Rule   string                 `json:"rule"`
+	Config map[string]interface{} `json:"config"`
+	Days   int                    `json:"days"`
+	Reason string                 `json:"reason"`
 }
 
 // GrantPerk выдаёт привилегию без денег. Она встаёт в ту же общую очередь,
@@ -575,8 +573,14 @@ type GrantPerkRequest struct {
 // его оставшиеся дни.
 func (s *ShopService) GrantPerk(ctx context.Context, adminID, userID uuid.UUID, req GrantPerkRequest) (*repository.UserPerk, error) {
 	fields := map[string]string{}
-	if err := ValidatePerk(req.Kind, req.Value, req.Days); err != nil {
-		fields["kind"] = strings.TrimPrefix(err.Error(), ErrInvalidPerk.Error()+": ")
+	sellable, err := s.rules.Sellable(ctx, req.Rule, req.Config)
+	if errors.Is(err, ErrInvalidPerk) {
+		fields["rule"] = strings.TrimPrefix(err.Error(), ErrInvalidPerk.Error()+": ")
+	} else if err != nil {
+		return nil, err
+	}
+	if req.Days <= 0 {
+		fields["days"] = "Срок обязателен и больше нуля"
 	}
 	req.Reason = strings.TrimSpace(req.Reason)
 	if req.Reason == "" {
@@ -585,15 +589,16 @@ func (s *ShopService) GrantPerk(ctx context.Context, adminID, userID uuid.UUID, 
 	if len(fields) > 0 {
 		return nil, shopValidation(fields)
 	}
-	perk := &repository.UserPerk{UserID: userID, Kind: req.Kind, Value: req.Value, GrantedBy: &adminID, Reason: &req.Reason}
-	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+	perk := &repository.UserPerk{UserID: userID, RuleCode: sellable.RuleCode, RuleVersionID: sellable.VersionID,
+		Config: sellable.Config, GrantedBy: &adminID, Reason: &req.Reason}
+	err = s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		if err := s.perks.LockQueue(ctx, tx, userID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return shopNotFound()
 			}
 			return err
 		}
-		start, err := s.perks.NextStart(ctx, tx, userID, CommissionPerkKinds, s.now())
+		start, err := s.perks.NextStart(ctx, tx, userID, s.now())
 		if err != nil {
 			return err
 		}
@@ -616,7 +621,7 @@ func (s *ShopService) GrantPerk(ctx context.Context, adminID, userID uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("[AUDIT] admin %s granted perk %s (%s, %d days) to user %s: %s", adminID, perk.ID, perk.Kind, req.Days, userID, req.Reason)
+	log.Printf("[AUDIT] admin %s granted perk %s (%s, %d days) to user %s: %s", adminID, perk.ID, perk.RuleCode, req.Days, userID, req.Reason)
 	return perk, nil
 }
 
@@ -759,7 +764,7 @@ func (s *ShopService) SendPerkReminders(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	now := s.now()
-	due, err := s.perks.DueReminders(ctx, CommissionPerkKinds, now, now.Add(perkReminderLead), 200)
+	due, err := s.perks.DueReminders(ctx, now, now.Add(perkReminderLead), 200)
 	if err != nil {
 		return 0, err
 	}

@@ -19,17 +19,13 @@
     </div>
 
     <div class="formula" data-test="formula">
-      {{ perkFormula(quote.level_percent, quote.percent_with_perk, product.perk_kind, product.perk_value) }}
+      {{ perkFormula(quote.level_percent, quote.percent_with_perk) }}
     </div>
 
     <div class="payback">
       <div class="label">{{ $t('shop.perk.payback') }}</div>
       <p>{{ $t('shop.perk.paid30', { paid: money(quote.commission_paid) }) }}</p>
-      <p v-if="quote.savings > 0">
-        {{ product.perk_kind === 'COMMISSION_FREE'
-          ? $t('shop.perk.savingsFree', { savings: money(quote.savings) })
-          : $t('shop.perk.savings', { savings: money(quote.savings) }) }}
-      </p>
+      <p v-if="quote.savings > 0">{{ $t('shop.perk.savings', { savings: money(quote.savings), days: product.perk_days }) }}</p>
       <p v-if="quote.breakeven_turnover" data-test="breakeven">
         {{ $t('shop.perk.breakeven', { amount: money(quote.breakeven_turnover) }) }}
       </p>

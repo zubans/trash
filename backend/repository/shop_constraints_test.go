@@ -27,8 +27,8 @@ func TestShopConstraints(t *testing.T) {
 
 	productID := uuid.New()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO shop_products (id, kind, category, title, price, perk_kind, perk_days)
-		VALUES ($1, 'PERK', 'perks', '{"ru":"x"}', 100, 'COMMISSION_FREE', 1)`, productID); err != nil {
+		INSERT INTO shop_products (id, kind, category, title, price, perk_rule, perk_days)
+		VALUES ($1, 'PERK', 'perks', '{"ru":"x"}', 100, 'commission_free', 1)`, productID); err != nil {
 		t.Fatalf("control product: %v", err)
 	}
 	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM shop_products WHERE id = $1`, productID) })
@@ -38,33 +38,33 @@ func TestShopConstraints(t *testing.T) {
 		query string
 		args  []interface{}
 	}{
+		// Смысл констант задаёт правило, а их границы проверяет прогон по сетке
+		// в Go (implementation_plan_delivery_passport.md §1.3); база держит
+		// согласованность полей рода.
 		{"привилегия без срока",
-			`INSERT INTO shop_products (kind, category, title, price, perk_kind, perk_value)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'COMMISSION_MULTIPLIER', 0.5)`, nil},
+			`INSERT INTO shop_products (kind, category, title, price, perk_rule, perk_config)
+			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'commission_multiplier', '{"VALUE": 0.5}')`, nil},
+		{"привилегия без правила",
+			`INSERT INTO shop_products (kind, category, title, price, perk_days)
+			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 30)`, nil},
 		{"вещь без подарка",
 			`INSERT INTO shop_products (kind, category, title, price)
 			 VALUES ('PHYSICAL', 'merch', '{"ru":"x"}', 100)`, nil},
-		{"множитель 1.5",
-			`INSERT INTO shop_products (kind, category, title, price, perk_kind, perk_value, perk_days)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'COMMISSION_MULTIPLIER', 1.5, 30)`, nil},
-		{"пункты −1",
-			`INSERT INTO shop_products (kind, category, title, price, perk_kind, perk_value, perk_days)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'COMMISSION_DISCOUNT_PP', -1, 30)`, nil},
-		{"«без комиссии» со значением",
-			`INSERT INTO shop_products (kind, category, title, price, perk_kind, perk_value, perk_days)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'COMMISSION_FREE', 0.5, 1)`, nil},
 		{"привилегия с подарком",
-			`INSERT INTO shop_products (kind, category, title, price, gift_code, perk_kind, perk_days)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'shop-constraints-shirt', 'COMMISSION_FREE', 1)`, nil},
-		{"вещь с видом привилегии",
-			`INSERT INTO shop_products (kind, category, title, price, gift_code, perk_kind)
-			 VALUES ('PHYSICAL', 'merch', '{"ru":"x"}', 100, 'shop-constraints-shirt', 'COMMISSION_FREE')`, nil},
+			`INSERT INTO shop_products (kind, category, title, price, gift_code, perk_rule, perk_days)
+			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'shop-constraints-shirt', 'commission_free', 1)`, nil},
+		{"вещь с правилом привилегии",
+			`INSERT INTO shop_products (kind, category, title, price, gift_code, perk_rule)
+			 VALUES ('PHYSICAL', 'merch', '{"ru":"x"}', 100, 'shop-constraints-shirt', 'commission_free')`, nil},
+		{"вещь с константами привилегии",
+			`INSERT INTO shop_products (kind, category, title, price, gift_code, perk_config)
+			 VALUES ('PHYSICAL', 'merch', '{"ru":"x"}', 100, 'shop-constraints-shirt', '{"VALUE": 1}')`, nil},
 		{"старая цена ниже цены",
-			`INSERT INTO shop_products (kind, category, title, price, compare_at_price, perk_kind, perk_days)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 99, 'COMMISSION_FREE', 1)`, nil},
+			`INSERT INTO shop_products (kind, category, title, price, compare_at_price, perk_rule, perk_days)
+			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 99, 'commission_free', 1)`, nil},
 		{"ноль единиц в заказе",
-			`INSERT INTO shop_products (kind, category, title, price, perk_kind, perk_days, max_qty_per_order)
-			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'COMMISSION_FREE', 1, 0)`, nil},
+			`INSERT INTO shop_products (kind, category, title, price, perk_rule, perk_days, max_qty_per_order)
+			 VALUES ('PERK', 'perks', '{"ru":"x"}', 100, 'commission_free', 1, 0)`, nil},
 		{"итог не сходится с ценой и количеством",
 			`INSERT INTO shop_orders (user_id, request_id, product_id, product_snapshot, quantity, unit_price, total, status, offer_version)
 			 VALUES ($1, $2, $3, '{}', 2, 100, 150, 'PAID', 1)`,
@@ -73,21 +73,9 @@ func TestShopConstraints(t *testing.T) {
 			`INSERT INTO shop_orders (user_id, request_id, product_id, product_snapshot, quantity, unit_price, total, status, offer_version, refunded_amount)
 			 VALUES ($1, $2, $3, '{}', 1, 100, 100, 'PAID', 1, 101)`,
 			[]interface{}{userID, uuid.New(), productID}},
-		{"выданная вручную привилегия с множителем 1.5",
-			`INSERT INTO user_perks (user_id, kind, value, starts_at, expires_at)
-			 VALUES ($1, 'COMMISSION_MULTIPLIER', 1.5, now(), now() + interval '1 day')`,
-			[]interface{}{userID}},
-		{"привилегия неизвестного вида",
-			`INSERT INTO user_perks (user_id, kind, value, starts_at, expires_at)
-			 VALUES ($1, 'HALF_OFF', 0.5, now(), now() + interval '1 day')`,
-			[]interface{}{userID}},
-		{"беспроцентный период со значением",
-			`INSERT INTO user_perks (user_id, kind, value, starts_at, expires_at)
-			 VALUES ($1, 'COMMISSION_FREE', 0.5, now(), now() + interval '1 day')`,
-			[]interface{}{userID}},
 		{"срок задом наперёд",
-			`INSERT INTO user_perks (user_id, kind, starts_at, expires_at)
-			 VALUES ($1, 'COMMISSION_FREE', now() + interval '1 day', now())`,
+			`INSERT INTO user_perks (user_id, rule_code, starts_at, expires_at)
+			 VALUES ($1, 'commission_free', now() + interval '1 day', now())`,
 			[]interface{}{userID}},
 	}
 	for _, tc := range rejected {
@@ -118,8 +106,8 @@ func TestShopConstraints(t *testing.T) {
 		t.Errorf("transaction linked to the purchase: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO user_perks (user_id, kind, value, starts_at, expires_at)
-		VALUES ($1, 'COMMISSION_MULTIPLIER', 0.5, now(), now() + interval '30 days')`, userID); err != nil {
+		INSERT INTO user_perks (user_id, rule_code, config, starts_at, expires_at)
+		VALUES ($1, 'commission_multiplier', '{"VALUE": 0.5}', now(), now() + interval '30 days')`, userID); err != nil {
 		t.Errorf("control perk: %v", err)
 	}
 	t.Cleanup(func() {

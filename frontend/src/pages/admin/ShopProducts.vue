@@ -63,7 +63,7 @@
               </td>
               <td>
                 {{ $t('shop.kinds.' + p.kind) }}
-                <div v-if="p.kind === 'PERK'" class="muted">{{ perkTitle(p.perk_kind, p.perk_value) }}, {{ p.perk_days }} дн.</div>
+                <div v-if="p.kind === 'PERK'" class="muted">{{ ruleSummary(p.perk_rule, p.perk_config) }}, {{ p.perk_days }} дн.</div>
               </td>
               <td>{{ money(p.price) }}</td>
               <td>{{ stockLabel(p) }}</td>
@@ -138,24 +138,22 @@
           <input v-model.number="draft.sortOrder" type="number" class="input" />
         </label>
 
-        <!-- Привилегия: поля по виду. У беспроцентного периода значения нет. -->
+        <!-- Привилегия: правило из справочника и его константы. Что константы
+             значат, знает правило; сервер проверяет товар прогоном по сетке. -->
         <template v-if="draft.kind === 'PERK'">
           <label class="field">
-            <span>{{ $t('shop.admin.fields.perkKind') }}</span>
-            <select v-model="draft.perkKind" class="input" :class="{ invalid: fieldErrors.perk_kind }">
-              <option v-for="k in perkKinds" :key="k" :value="k">{{ $t('shop.admin.perkKinds.' + k) }}</option>
+            <span>{{ $t('shop.admin.fields.perkRule') }}</span>
+            <select v-model="draft.perkRule" class="input" :class="{ invalid: fieldErrors.perk_rule }" @change="resetPerkConfig">
+              <option v-for="r in perkRuleOptions" :key="r.code" :value="r.code">{{ r.title }}</option>
             </select>
-            <span v-if="fieldErrors.perk_kind" class="field-error">{{ fieldErrors.perk_kind }}</span>
+            <span v-if="selectedRule?.description" class="muted">{{ selectedRule.description }}</span>
+            <span v-if="fieldErrors.perk_rule" class="field-error">{{ fieldErrors.perk_rule }}</span>
           </label>
-          <label v-if="draft.perkKind !== 'COMMISSION_FREE'" class="field">
-            <span>{{ draft.perkKind === 'COMMISSION_MULTIPLIER' ? $t('shop.admin.fields.perkMultiplier') : $t('shop.admin.fields.perkPoints') }}</span>
-            <input v-model.number="draft.perkValue" type="number" step="0.01" min="0" class="input" :class="{ invalid: fieldErrors.perk_value }" />
-            <span v-if="fieldErrors.perk_value" class="field-error">{{ fieldErrors.perk_value }}</span>
+          <label v-for="key in Object.keys(draft.perkConfig)" :key="key" class="field">
+            <span>{{ key }}</span>
+            <input v-model.number="draft.perkConfig[key]" type="number" step="any" class="input" :class="{ invalid: fieldErrors.perk_config }" />
           </label>
-          <div v-else class="field">
-            <span>{{ $t('shop.admin.fields.perkValue') }}</span>
-            <span class="muted">{{ $t('shop.admin.freeNoValue') }}</span>
-          </div>
+          <span v-if="fieldErrors.perk_config" class="field-error">{{ fieldErrors.perk_config }}</span>
           <label class="field">
             <span>{{ $t('shop.admin.fields.perkDays') }}</span>
             <input v-model.number="draft.perkDays" type="number" min="1" class="input" :class="{ invalid: fieldErrors.perk_days }" />
@@ -248,7 +246,7 @@
         <div class="preview-body">
           <div class="preview-title">{{ draft.titleRu || '—' }}</div>
           <div v-if="draft.kind === 'PERK'" class="muted">
-            {{ perkTitle(draft.perkKind, draft.perkKind === 'COMMISSION_FREE' ? null : draft.perkValue) }} · {{ draft.perkDays || '?' }} дн.
+            {{ ruleText(selectedRule?.title, draft.perkConfig) }} · {{ draft.perkDays || '?' }} дн.
           </div>
           <div class="preview-price">
             {{ money(draft.price || 0) }}
@@ -284,17 +282,19 @@ import { adminGetGifts, type Gift } from '../../api/achievements'
 import { getRoles, type Role } from '../../api/roles'
 import {
   adminGetProducts,
+  adminPerkRules,
   adminSaveProduct,
   adminUploadImage,
   shopError,
   shopErrorText,
   type FulfillmentMethod,
-  type PerkKind,
+  type PerkConfig,
+  type PerkRule,
   type ProductPayload,
   type ShopKind,
   type ShopProduct,
 } from '../../api/shop'
-import { perkTitle } from '../../utils/perk'
+import { ruleSummary, ruleText } from '../../utils/perk'
 
 interface Draft {
   kind: ShopKind
@@ -312,8 +312,8 @@ interface Draft {
   giftCode: string
   variants: string
   methods: FulfillmentMethod[]
-  perkKind: PerkKind
-  perkValue: number | null
+  perkRule: string
+  perkConfig: PerkConfig
   perkDays: number | null
   maxQueued: number | null
   sortOrder: number
@@ -324,7 +324,7 @@ interface Draft {
 const emptyDraft = (): Draft => ({
   kind: 'PERK', category: 'perks', titleRu: '', titleEn: '', descriptionRu: '', descriptionEn: '',
   price: 0, compareAt: null, roles: ['EXECUTOR'], requiresVerified: false, perUserLimit: null, maxQty: 1,
-  giftCode: '', variants: '', methods: ['PICKUP'], perkKind: 'COMMISSION_MULTIPLIER', perkValue: 0.5,
+  giftCode: '', variants: '', methods: ['PICKUP'], perkRule: '', perkConfig: {},
   perkDays: 30, maxQueued: null, sortOrder: 0, isActive: false, images: [],
 })
 
@@ -342,12 +342,12 @@ export default defineComponent({
     const can = (permission: string) => authStore.can(permission)
 
     const kinds: ShopKind[] = ['PERK', 'PHYSICAL', 'CERTIFICATE']
-    const perkKinds: PerkKind[] = ['COMMISSION_MULTIPLIER', 'COMMISSION_DISCOUNT_PP', 'COMMISSION_FREE']
     const methods: FulfillmentMethod[] = ['PICKUP', 'DELIVERY']
 
     const products = ref<ShopProduct[]>([])
     const gifts = ref<(Gift & { free_codes: number })[]>([])
     const roles = ref<Role[]>([])
+    const perkRules = ref<PerkRule[]>([])
     const loading = ref(false)
     const saving = ref(false)
     const uploading = ref(false)
@@ -371,6 +371,17 @@ export default defineComponent({
         (p) => (!filterKind.value || p.kind === filterKind.value) && (!filterCategory.value || p.category === filterCategory.value),
       ),
     )
+    // В списке — включённые правила и то, на котором товар уже стоит, даже
+    // если его выключили: иначе форма молча подменила бы правило.
+    const perkRuleOptions = computed(() =>
+      perkRules.value.filter((r) => r.is_active || r.code === draft.value?.perkRule),
+    )
+    const selectedRule = computed(() => perkRules.value.find((r) => r.code === draft.value?.perkRule))
+    // Смена правила — его константы по умолчанию: у другого правила они другие.
+    const resetPerkConfig = () => {
+      if (draft.value) draft.value.perkConfig = { ...(selectedRule.value?.defaults || {}) }
+    }
+
     const giftsOfKind = computed(() => gifts.value.filter((g) => g.kind === draft.value?.kind))
 
     const giftStock = (g: Gift & { free_codes: number }) =>
@@ -392,14 +403,16 @@ export default defineComponent({
         // Подарки и роли охраняются своими правами. Роль, которой дали только
         // «Товары магазина», всё равно должна видеть список: без справочников
         // форма предлагает системные роли и пустой список подарков.
-        const [list, giftList, roleList] = await Promise.all([
+        const [list, giftList, roleList, ruleList] = await Promise.all([
           adminGetProducts(),
           adminGetGifts().catch(() => []),
           getRoles().catch(() => FALLBACK_ROLES),
+          adminPerkRules().catch(() => []),
         ])
         products.value = list
         gifts.value = giftList
         roles.value = roleList
+        perkRules.value = ruleList
       } catch (err) {
         errorMsg.value = shopErrorText(err, t, t('shop.loadFailed'))
       } finally {
@@ -413,6 +426,11 @@ export default defineComponent({
       editingId.value = null
       editingOriginal.value = null
       draft.value = emptyDraft()
+      const first = perkRules.value.find((r) => r.is_active)
+      if (first) {
+        draft.value.perkRule = first.code
+        resetPerkConfig()
+      }
       fieldErrors.value = {}
       successMsg.value = ''
       scrollToForm()
@@ -430,8 +448,8 @@ export default defineComponent({
         price: p.price, compareAt: p.compare_at_price ?? null, roles: [...(p.roles || [])],
         requiresVerified: p.requires_verified, perUserLimit: p.per_user_limit ?? null, maxQty: p.max_qty_per_order,
         giftCode: p.gift_code || '', variants: (p.variants || []).map((v) => v.code).join(', '),
-        methods: [...(p.fulfillment_methods || [])], perkKind: p.perk_kind || 'COMMISSION_MULTIPLIER',
-        perkValue: p.perk_value ?? null, perkDays: p.perk_days ?? null, maxQueued: p.max_active_per_user ?? null,
+        methods: [...(p.fulfillment_methods || [])], perkRule: p.perk_rule || '',
+        perkConfig: { ...(p.perk_config || {}) }, perkDays: p.perk_days ?? null, maxQueued: p.max_active_per_user ?? null,
         sortOrder: p.sort_order, isActive: p.is_active, images: [...(p.images || [])],
       }
       scrollToForm()
@@ -458,8 +476,7 @@ export default defineComponent({
       } as ProductPayload
       if (d.kind === 'PERK') {
         return {
-          ...base, perk_kind: d.perkKind,
-          perk_value: d.perkKind === 'COMMISSION_FREE' ? undefined : optionalNumber(d.perkValue),
+          ...base, perk_rule: d.perkRule || undefined, perk_config: d.perkConfig,
           perk_days: optionalNumber(d.perkDays), max_active_per_user: optionalNumber(d.maxQueued),
         }
       }
@@ -537,10 +554,10 @@ export default defineComponent({
     onMounted(load)
 
     return {
-      can, kinds, perkKinds, methods, products, roles, loading, saving, uploading, errorMsg, successMsg,
+      can, kinds, methods, perkRuleOptions, selectedRule, resetPerkConfig, products, roles, loading, saving, uploading, errorMsg, successMsg,
       filterKind, filterCategory, draft, editingId, fieldErrors, showPriceConfirm, formRef,
       money, imageUrl, categories, filtered, giftsOfKind, giftStock, stockLabel, load, startNew, edit,
-      cancelEdit, canSave, priceConfirmText, confirmSave, save, upload, moveImage, perkTitle,
+      cancelEdit, canSave, priceConfirmText, confirmSave, save, upload, moveImage, ruleSummary, ruleText,
     }
   },
 })
