@@ -156,8 +156,10 @@ func (n *ServiceNode) HasOwnScript() bool {
 	return n != nil && strings.TrimSpace(n.BehaviorSource) != ""
 }
 
-// nullableCode хранит пустой код поведения как NULL, чтобы «нет поведения» было
-// в базе одним значением, а не двумя.
+// nullableCode хранит пустой код как NULL, чтобы «кода нет» было в базе одним
+// значением, а не двумя. Применяется к коду поведения и к системному счёту в
+// transactions.counterparty: там столбец ещё и внешний ключ, поэтому пустая
+// строка не просто дублировала бы NULL, а не прошла бы вовсе.
 func nullableCode(code string) interface{} {
 	if code == "" {
 		return nil
