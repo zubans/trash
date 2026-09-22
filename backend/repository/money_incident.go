@@ -27,6 +27,10 @@ const (
 	// IncidentPointsCapHit — суточный потолок баллов сработал. Не авария, но
 	// след, по которому видно накрутку.
 	IncidentPointsCapHit = "points_cap_hit"
+	// IncidentPerkInvalid — привилегия магазина, которую формула не может
+	// применить: неизвестный вид или значение не того вида. Ставка тогда
+	// берётся без неё.
+	IncidentPerkInvalid = "perk_invalid"
 )
 
 // Уровни. CRITICAL будит человека, WARNING ждёт рабочего дня.

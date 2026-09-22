@@ -950,7 +950,7 @@ func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.U
 	}
 	// Ставка и уровень сохраняются в заказе: без них через месяц никто не
 	// объяснит, почему по двум одинаковым заказам разная комиссия.
-	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level); err != nil {
+	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level, level.PerkID); err != nil {
 		return err
 	}
 	if err := s.recordCompletion(ctx, tx, order, finalAmount); err != nil {
@@ -982,7 +982,7 @@ func (s *OrderService) payableAmount(ctx context.Context, order *repository.Orde
 func (s *OrderService) commissionLevel(ctx context.Context, tx *sql.Tx, executorID uuid.UUID) Level {
 	if s.levels == nil {
 		base := commissionPercent(s.loadSettings(ctx))
-		return Level{BasePercent: base, Percent: base}
+		return Level{BasePercent: base, Percent: base, LevelPercent: base}
 	}
 	return s.levels.For(ctx, tx, executorID)
 }

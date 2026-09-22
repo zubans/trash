@@ -162,8 +162,9 @@ type OrderRepository interface {
 	Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error
 	// SetCommission сохраняет ставку, по которой заказ закрыли, и уровень
 	// исполнителя на тот момент. Ставка стала персональной, и без этой записи
-	// разницу между двумя одинаковыми заказами объяснить нечем.
-	SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int) error
+	// разницу между двумя одинаковыми заказами объяснить нечем. perkID —
+	// привилегия магазина, снизившая ставку, nil — без неё.
+	SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int, perkID *uuid.UUID) error
 	Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error
 	Unassign(ctx context.Context, q Querier, orderID uuid.UUID) error
 	LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error)
@@ -499,10 +500,10 @@ func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, f
 	)
 }
 
-func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int) error {
+func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int, perkID *uuid.UUID) error {
 	_, err := r.exec(ctx, q).ExecContext(ctx,
-		`UPDATE orders SET commission_percent = $2, commission_level = $3 WHERE id = $1`,
-		orderID, percent, level)
+		`UPDATE orders SET commission_percent = $2, commission_level = $3, commission_perk_id = $4 WHERE id = $1`,
+		orderID, percent, level, perkID)
 	return err
 }
 

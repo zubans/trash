@@ -632,6 +632,11 @@ func (s *ChatService) authorizeSupportChat(ctx context.Context, chatID, userID u
 	return nil
 }
 
+// SupportChatOwner — пользователь, которому принадлежит чат поддержки.
+func (s *ChatService) SupportChatOwner(ctx context.Context, chatID uuid.UUID) (uuid.UUID, error) {
+	return s.chatRepo.SupportChatOwner(ctx, chatID)
+}
+
 // GetSupportMessages возвращает окно чата поддержки, которым владеет вызывающий.
 func (s *ChatService) GetSupportMessages(ctx context.Context, chatID, userID uuid.UUID, role string, q repository.MessageQuery) ([]*repository.Message, error) {
 	if err := s.authorizeSupportChat(ctx, chatID, userID, role); err != nil {

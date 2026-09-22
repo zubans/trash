@@ -348,7 +348,7 @@ func (s *OrderService) settleUnknownDisputeTx(ctx context.Context, tx *sql.Tx, o
 	if err := s.orderRepo.Confirm(ctx, tx, orderID, payout, isDowngraded); err != nil {
 		return err
 	}
-	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level); err != nil {
+	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level, level.PerkID); err != nil {
 		return err
 	}
 	return s.recordCompletion(ctx, tx, order, payout)

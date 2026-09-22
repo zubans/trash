@@ -127,6 +127,10 @@ func main() {
 	giftRepo := repository.NewGiftRepository(db)
 	mailRepo := repository.NewMailRepository(db)
 	incidentRepo := repository.NewMoneyIncidentRepository(db)
+	// Магазин: каталог, покупки и привилегии на комиссию.
+	shopRepo := repository.NewShopRepository(db)
+	perkRepo := repository.NewPerkRepository(db)
+	shopOrderRepo := repository.NewShopOrderRepository(db)
 
 	// Сервисы
 	// Любое движение денег идёт через реестр, который всегда затрагивает и баланс
@@ -182,7 +186,10 @@ func main() {
 		log.Printf("[achievement] WARNING: %v", err)
 	}
 	// Уровни — единственное место, где баллы превращаются в ставку комиссии.
-	levels := service.NewLevels(achievementRepo, settingsRepo)
+	// Привилегия магазина применяется здесь же, после уровня: это та же точка,
+	// через которую ходит подтверждение заказа и решение спора.
+	levels := service.NewLevels(achievementRepo, settingsRepo).
+		WithPerks(perkRepo, incidentRepo)
 
 	// DaData — единственный источник адресных данных: и подсказок, и разрешения
 	// координат. Запасного варианта намеренно нет: у альтернативы не было данных о
@@ -247,6 +254,12 @@ func main() {
 		WithBehaviors(serviceBehaviors, eventRepo).
 		WithPenalties(penaltyService)
 	chatService := service.NewChatService(chatRepo, orderRepo)
+	// Магазин платит тем же реестром и выдаёт вещи теми же подарками, что и
+	// ачивки: склад у них один.
+	shopService := service.NewShopService(shopRepo, shopOrderRepo, perkRepo, giftRepo, ledger, levels, settingsRepo).
+		WithEvents(eventRepo).
+		WithMail(mailRepo).
+		WithRoles(roleRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo).
 		WithExecutorStats(executorStatsRepo)
 
@@ -321,6 +334,11 @@ func main() {
 		WithLeader(leader, "penalty_sweep")
 	penaltyWorker.Start(1 * time.Hour)
 
+	// Напоминание о конце привилегии магазина за три дня.
+	perkReminderWorker := worker.NewPerkReminderWorker(shopService).
+		WithLeader(leader, "perk_reminder")
+	perkReminderWorker.Start(10 * time.Minute)
+
 	// Ночная проверка книг. Она только сообщает и никогда не чинит: баланс,
 	// разошедшийся со своим реестром, — это баг, который надо видеть, а не число, которое надо переписать.
 	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
@@ -349,7 +367,8 @@ func main() {
 		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService))
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
-	ch := handler.NewChatHandler(chatService)
+	ch := handler.NewChatHandler(chatService).WithShopLinks(shopService.ShopOrderLinks)
+	shh := handler.NewShopHandler(shopService)
 	gh := handler.NewGeoHandler(addressSuggester)
 	sch := handler.NewServiceCatalogHandler(catalogRepo).WithPenalties(penaltyService).WithBehaviors(serviceBehaviors)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
@@ -362,7 +381,8 @@ func main() {
 	mh := handler.NewMailHandler(mailRepo, userRepo)
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
-		WithDispatcher(achievementDispatcher)
+		WithDispatcher(achievementDispatcher).
+		WithShop(shopService)
 
 	// Ограничители частоты для эндпоинтов, которые есть смысл перебирать.
 	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
@@ -375,6 +395,9 @@ func main() {
 	// приложений, и общий с /login лимит в 10 запросов в минуту отказывал бы им
 	// в обновлении, то есть выбрасывал бы их из аккаунта.
 	refreshLimiter := middleware.NewRateLimiter(120, time.Minute)
+	// Покупка идемпотентна по request_id, но каждая попытка держит блокировку
+	// товара: частые повторы с одного адреса ограничиваются.
+	shopPurchaseLimiter := middleware.NewRateLimiter(30, time.Minute)
 
 	r := chi.NewRouter()
 	// StripQueryToken выполняется до логгера, чтобы учётные данные, переданные
@@ -479,6 +502,13 @@ func main() {
 			r.Get("/orders/{id}/reviews/mine", rh.GetOrderReview)
 			r.Post("/finances/withdrawals", ah.CreateWithdrawalRequestHandler)
 			r.Post("/logout", ph.LogoutHandler)
+			// Магазин: витрина и покупка открыты любой роли — какие товары
+			// кому видны, решают роли на самом товаре.
+			shh.RegisterUserRoutes(r, shopPurchaseLimiter.Middleware)
+			// Купоны: и подарки ачивок, и купленное в магазине. У заказчика
+			// ачивок нет, но купоны на купленные вещи есть.
+			r.Get("/user/gifts", ach.GetGifts)
+			r.Post("/user/gifts/{id}/reveal", ach.RevealGift)
 		})
 
 		// Аутентифицированные маршруты исполнителя
@@ -618,6 +648,7 @@ func main() {
 			pph.RegisterAdminRoutes(r, can)
 			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
 			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
+			shh.RegisterAdminRoutes(r, can)
 		})
 	}
 
@@ -640,6 +671,10 @@ func main() {
 	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir(getEnv("RELEASES_DIR", "releases")))).ServeHTTP)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware.RequireAuth)
+		// Изображения товаров — свой маршрут: общий /uploads/* отдаёт
+		// вложения только участникам переписки и всегда на скачивание.
+		r.Get("/uploads/shop/{name}", shh.ServeImage)
+		r.Get("/api/uploads/shop/{name}", shh.ServeImage)
 		r.Get("/uploads/*", ch.ServeAttachmentHandler)
 		r.Get("/api/uploads/*", ch.ServeAttachmentHandler)
 	})

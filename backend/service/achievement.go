@@ -53,6 +53,17 @@ type Level struct {
 	// MaxUsefulLevel — уровень, на котором комиссия достигает нуля. Дальше
 	// ачивки продолжают начисляться, но на деньги уже не влияют.
 	MaxUsefulLevel int `json:"max_useful_level"`
+
+	// LevelPercent — ставка по уровню, до привилегии магазина. Percent
+	// отличается от неё, только пока действует привилегия. Витрина проверяет
+	// именно её: во время беспроцентной недели Percent тоже 0, но купить
+	// следующую привилегию в очередь это мешать не должно.
+	LevelPercent float64 `json:"level_percent"`
+	// Привилегия, снизившая ставку, — её id уходит в заказ рядом со ставкой.
+	PerkID        *uuid.UUID `json:"perk_id,omitempty"`
+	PerkKind      string     `json:"perk_kind,omitempty"`
+	PerkValue     *float64   `json:"perk_value,omitempty"`
+	PerkExpiresAt *time.Time `json:"perk_expires_at,omitempty"`
 }
 
 // Levels выводит уровень из баллов, а ставку комиссии — из уровня.
@@ -64,12 +75,33 @@ type Level struct {
 type Levels struct {
 	achievements repository.AchievementRepository
 	settings     repository.SettingsRepository
+	// perks — привилегии магазина. Без них ставка — это ставка по уровню.
+	perks repository.PerkRepository
+	// incidents принимает привилегию, которую нельзя применить.
+	incidents repository.MoneyIncidentRepository
+	// now подменяется тестами очереди.
+	now func() time.Time
 }
 
 // NewLevels собирает вычислитель уровней. Безопасен к nil: установка без ачивок
 // возвращает нулевой уровень, то есть базовую ставку для всех.
 func NewLevels(achievements repository.AchievementRepository, settings repository.SettingsRepository) *Levels {
-	return &Levels{achievements: achievements, settings: settings}
+	return &Levels{achievements: achievements, settings: settings, now: time.Now}
+}
+
+// WithPerks подключает привилегии магазина: они применяются после уровня
+// (implementation_plan_shop.md §3.3). incidents необязателен.
+func (l *Levels) WithPerks(perks repository.PerkRepository, incidents repository.MoneyIncidentRepository) *Levels {
+	l.perks = perks
+	l.incidents = incidents
+	return l
+}
+
+func (l *Levels) clock() time.Time {
+	if l == nil || l.now == nil {
+		return time.Now()
+	}
+	return l.now()
 }
 
 // Points возвращает сумму действующих баллов пользователя. Читает через
@@ -91,8 +123,86 @@ func (l *Levels) Points(ctx context.Context, q repository.Querier, userID uuid.U
 }
 
 // For описывает уровень пользователя целиком — для экрана и для расчёта.
+//
+// Это единственная точка, где определяется ставка исполнителя: через неё
+// ходят подтверждение заказа и решение спора «неизвестно», поэтому привилегия
+// магазина применяется здесь, а не в каждом месте вызова.
 func (l *Levels) For(ctx context.Context, q repository.Querier, userID uuid.UUID) Level {
-	return l.fromPoints(ctx, l.Points(ctx, q, userID))
+	return l.withPerk(ctx, q, userID, l.fromPoints(ctx, l.Points(ctx, q, userID)))
+}
+
+// withPerk применяет действующую привилегию после уровня.
+//
+// Привилегии не складываются: если по ошибке админа действуют несколько
+// сразу, берётся самая выгодная покупателю — дающая наименьшую ставку, — а не
+// их композиция (implementation_plan_shop.md §3.4). Сравнивать их можно только
+// формулой: «минус 5 пунктов» и «×0.5» дают разную ставку при разном уровне.
+func (l *Levels) withPerk(ctx context.Context, q repository.Querier, userID uuid.UUID, level Level) Level {
+	if l == nil || l.perks == nil {
+		return level
+	}
+	active, err := l.perks.Active(ctx, q, userID, CommissionPerkKinds, l.clock())
+	if err != nil {
+		// Как и с баллами: ошибка чтения не ломает подтверждение заказа, а
+		// берёт ставку без привилегии. Ошибиться в свою пользу платформе здесь
+		// можно, в пользу скидки — нет.
+		log.Printf("[levels] cannot read perks of %s, assuming none: %v", userID, err)
+		return level
+	}
+	var best *repository.UserPerk
+	bestPercent := level.LevelPercent
+	for _, perk := range active {
+		percent, ok := ApplyPerk(level.LevelPercent, level.BasePercent, perk.Kind, perk.Value)
+		if !ok {
+			l.recordInvalidPerk(ctx, q, perk)
+			continue
+		}
+		if best == nil || percent < bestPercent {
+			best, bestPercent = perk, percent
+		}
+	}
+	if best == nil {
+		return level
+	}
+	level.Percent = bestPercent
+	id, expires := best.ID, best.ExpiresAt
+	level.PerkID = &id
+	level.PerkKind = best.Kind
+	level.PerkValue = best.Value
+	level.PerkExpiresAt = &expires
+	return level
+}
+
+// recordInvalidPerk пишет денежный инцидент о привилегии, которую нельзя
+// применить. База такую не пропускает (CHECK в миграции 059), поэтому здесь
+// это либо новый вид, о котором формула ещё не знает, либо правка мимо
+// приложения — в обоих случаях молча оставить ставку нельзя, но и отменить
+// подтверждение заказа из-за чужой опечатки нельзя.
+func (l *Levels) recordInvalidPerk(ctx context.Context, q repository.Querier, perk *repository.UserPerk) {
+	log.Printf("[levels] perk %s of %s (%s) cannot be applied, ignoring it", perk.ID, perk.UserID, perk.Kind)
+	if l.incidents == nil {
+		return
+	}
+	userID := perk.UserID
+	details := map[string]interface{}{"perk_id": perk.ID.String(), "kind": perk.Kind}
+	if perk.Value != nil {
+		details["value"] = *perk.Value
+	}
+	if err := l.incidents.Record(ctx, q, &repository.MoneyIncident{
+		Kind: repository.IncidentPerkInvalid, Severity: repository.IncidentSeverityWarning,
+		UserID: &userID, Details: details,
+	}); err != nil {
+		log.Printf("[levels] cannot record perk incident: %v", err)
+	}
+}
+
+// Queue возвращает действующую привилегию и ждущие своей очереди — для
+// плашки на экране уровня. Без подключённых привилегий очередь пуста.
+func (l *Levels) Queue(ctx context.Context, userID uuid.UUID) ([]*repository.UserPerk, error) {
+	if l == nil || l.perks == nil {
+		return []*repository.UserPerk{}, nil
+	}
+	return l.perks.ListQueue(ctx, userID, CommissionPerkKinds, l.clock())
 }
 
 // fromPoints — сама формула, отделённая от чтения, чтобы её можно было
@@ -111,7 +221,7 @@ func (l *Levels) fromPoints(ctx context.Context, points int) Level {
 	if base > 100 {
 		base = 100
 	}
-	result := Level{Points: points, BasePercent: base, Percent: base}
+	result := Level{Points: points, BasePercent: base, Percent: base, LevelPercent: base}
 	if perLevel <= 0 || discountPP <= 0 {
 		// Уровни выключены настройкой: все на базовой ставке.
 		return result
@@ -129,6 +239,7 @@ func (l *Levels) fromPoints(ctx context.Context, points int) Level {
 	if result.Percent < 0 {
 		result.Percent = 0
 	}
+	result.LevelPercent = result.Percent
 
 	result.MaxUsefulLevel = int(base / discountPP)
 	if result.Level < result.MaxUsefulLevel {

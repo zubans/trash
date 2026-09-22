@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,15 @@ import (
 // ChatHandler хранит зависимости эндпоинтов чат-комнат.
 type ChatHandler struct {
 	chatService *service.ChatService
+	// shopLinks размечает номера покупок в чате поддержки ссылками на их
+	// карточки — только для того, кто читает чужой чат, то есть поддержки.
+	shopLinks func(ctx context.Context, ownerID uuid.UUID, messages []*repository.Message) error
+}
+
+// WithShopLinks подключает разметку номеров покупок в чате поддержки.
+func (h *ChatHandler) WithShopLinks(links func(ctx context.Context, ownerID uuid.UUID, messages []*repository.Message) error) *ChatHandler {
+	h.shopLinks = links
+	return h
 }
 
 // NewChatHandler создаёт новый ChatHandler.
@@ -488,6 +498,13 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		writeChatError(w, err)
 		return
+	}
+	if h.shopLinks != nil {
+		if owner, err := h.chatService.SupportChatOwner(r.Context(), chatID); err == nil && owner != user.ID {
+			if err := h.shopLinks(r.Context(), owner, messages); err != nil {
+				log.Printf("[chat] cannot link shop orders in support chat %s: %v", chatID, err)
+			}
+		}
 	}
 	_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user.ID, user.Role)
 

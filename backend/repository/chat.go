@@ -32,6 +32,16 @@ type Message struct {
 	CreatedAt time.Time  `json:"created_at"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	// ShopOrders — покупки, упомянутые в сообщении номером «№1042». Заполняется
+	// только для поддержки, читающей чат покупателя: так номер становится
+	// ссылкой на карточку покупки.
+	ShopOrders []ShopOrderRef `json:"shop_orders,omitempty"`
+}
+
+// ShopOrderRef — ссылка на покупку из сообщения.
+type ShopOrderRef struct {
+	Number int64     `json:"number"`
+	ID     uuid.UUID `json:"id"`
 }
 
 // SupportChat представляет переписку пользователя с админами в поддержке.
