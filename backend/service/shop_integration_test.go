@@ -756,3 +756,108 @@ func TestShopSoldProductKeepsItsKindAndGiftIntegration(t *testing.T) {
 		t.Fatalf("repricing a sold product: %v", err)
 	}
 }
+
+// Витрина открывает товар по любой роли пользователя, а не только по основной,
+// и не выдаёт точный остаток. Снятый с витрины товар и товар чужой роли
+// неотличимы от несуществующего.
+func TestShopStorefrontVisibilityIntegration(t *testing.T) {
+	f := newShopFixture(t, nil)
+	ctx := context.Background()
+	shirt, _ := f.physical(5)
+	perk := f.perkProduct(PerkKindCommissionFree, nil, money.FromRubles(300), nil)
+	hidden := f.perkProduct(PerkKindCommissionFree, nil, money.FromRubles(300), nil)
+	hidden.IsActive = false
+	if err := f.shop.UpsertProduct(ctx, hidden); err != nil {
+		t.Fatalf("hide product: %v", err)
+	}
+
+	both := f.user("CUSTOMER", 0)
+	both.Roles = []string{"CUSTOMER", "EXECUTOR"}
+	front, err := f.srv.Storefront(ctx, both, "")
+	if err != nil {
+		t.Fatalf("storefront: %v", err)
+	}
+	seen := map[uuid.UUID]*repository.ShopProduct{}
+	for _, p := range front.Products {
+		seen[p.ID] = p
+	}
+	if seen[perk.ID] == nil {
+		t.Error("a product of the user's second role is missing from the storefront")
+	}
+	if seen[hidden.ID] != nil {
+		t.Error("an inactive product is on the storefront")
+	}
+	if p := seen[shirt.ID]; p == nil || p.StockCount != nil || !p.InStock {
+		t.Errorf("shirt on the storefront = %+v, want in stock without the exact count", p)
+	}
+
+	customer := f.user("CUSTOMER", 0)
+	for name, id := range map[string]uuid.UUID{"foreign role": perk.ID, "inactive": hidden.ID} {
+		if _, err := f.srv.Product(ctx, customer, id); shopCode(err) != ShopErrNotFound {
+			t.Errorf("%s product: %v, want not_found", name, err)
+		}
+	}
+}
+
+// Правка несуществующего товара — 404, а не тихое создание.
+func TestShopUpdatingAMissingProductIsNotFoundIntegration(t *testing.T) {
+	f := newShopFixture(t, nil)
+	admin := f.user("ADMIN", 0)
+	days, kind := 1, PerkKindCommissionFree
+	_, err := f.srv.SaveProduct(context.Background(), admin.ID, &repository.ShopProduct{
+		ID: uuid.New(), Kind: repository.ShopKindPerk, Category: "perks",
+		Title: map[string]interface{}{"ru": "x"}, Price: money.FromRubles(100), PerkKind: &kind, PerkDays: &days,
+	})
+	if shopCode(err) != ShopErrNotFound {
+		t.Fatalf("update of a missing product: %v, want not_found", err)
+	}
+}
+
+// Пункт выдачи заводится и правится; покупатель видит только включённые и
+// только в открытом магазине.
+func TestShopPickupPointsIntegration(t *testing.T) {
+	f := newShopFixture(t, nil)
+	ctx := context.Background()
+	admin := f.user("ADMIN", 0)
+	point, err := f.srv.SavePickupPoint(ctx, admin.ID, &repository.ShopPickupPoint{
+		Title: map[string]interface{}{"ru": "Офис"}, Address: "Москва, Тверская, 1", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create point: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Exec(`DELETE FROM shop_pickup_points WHERE id = $1`, point.ID) })
+
+	listed := func(srv *ShopService) bool {
+		points, err := srv.PickupPoints(ctx)
+		if err != nil {
+			t.Fatalf("pickup points: %v", err)
+		}
+		for _, p := range points {
+			if p.ID == point.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if !listed(f.srv) {
+		t.Error("an active point is not offered")
+	}
+	point.IsActive = false
+	if _, err := f.srv.SavePickupPoint(ctx, admin.ID, point); err != nil {
+		t.Fatalf("disable point: %v", err)
+	}
+	if listed(f.srv) {
+		t.Error("a disabled point is still offered")
+	}
+	if _, err := f.srv.SavePickupPoint(ctx, admin.ID, &repository.ShopPickupPoint{Title: map[string]interface{}{"ru": "x"}}); shopCode(err) != ShopErrValidation {
+		t.Errorf("point without an address: %v", err)
+	}
+
+	point.IsActive = true
+	if _, err := f.srv.SavePickupPoint(ctx, admin.ID, point); err != nil {
+		t.Fatalf("enable point: %v", err)
+	}
+	if listed(newShopFixture(t, map[string]string{SettingShopEnabled: "0"}).srv) {
+		t.Error("a closed shop offers pickup points")
+	}
+}
