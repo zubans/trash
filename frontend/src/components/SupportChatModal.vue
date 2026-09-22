@@ -148,6 +148,13 @@ export default defineComponent({
       type: Boolean,
       required: true,
     },
+    // Текст, который подставляется в поле ввода при открытии: «Возврат по
+    // покупке №1042: ». Отправляет его сам человек, дописав причину, —
+    // модалка ничего не шлёт за него.
+    prefill: {
+      type: String,
+      default: '',
+    },
   },
   emits: ['update:show', 'close'],
   setup(props, { emit }) {
@@ -437,6 +444,7 @@ export default defineComponent({
       () => props.show,
       (newVal) => {
         if (newVal) {
+          if (props.prefill && !inputText.value.trim()) inputText.value = props.prefill
           loadSupportChat()
         } else {
           stopPolling()

@@ -51,20 +51,12 @@ func newShopFixture(t *testing.T, overrides map[string]string) *shopFixture {
 	f := &shopFixture{t: t, db: db,
 		gifts: repository.NewGiftRepository(db), shop: repository.NewShopRepository(db),
 		perks: repository.NewPerkRepository(db), orders: repository.NewShopOrderRepository(db)}
-	// Покупки и возвраты двигают общий счёт SHOP на общей базе. Его баланс
-	// возвращается как был: другие тесты считают от него вывод выручки.
-	var shopBefore money.Amount
-	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountShop).Scan(&shopBefore); err != nil {
-		t.Fatalf("shop balance: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(`UPDATE system_accounts SET balance = $2 WHERE code = $1`, repository.AccountShop, shopBefore)
-	})
 	ledger := NewLedger(repository.NewTransactionRepository(db), repository.NewSystemAccountRepository(db))
 	levels := NewLevels(repository.NewAchievementRepository(db), settings).WithPerks(f.perks, nil)
 	f.srv = NewShopService(f.shop, f.orders, f.perks, f.gifts, ledger, levels, settings).
 		WithEvents(repository.NewEventRepository(db)).
-		WithMail(repository.NewMailRepository(db))
+		WithMail(repository.NewMailRepository(db)).
+		WithRoles(repository.NewRoleRepository(db))
 	return f
 }
 
@@ -79,6 +71,12 @@ func (f *shopFixture) user(role string, balance money.Amount) *repository.User {
 		f.t.Fatalf("seed user: %v", err)
 	}
 	f.t.Cleanup(func() {
+		// Счёт SHOP общий для всей тестовой базы, а пакеты тестов идут
+		// параллельно: очистка снимает ровно свои движения, а не пишет старый
+		// баланс поверх чужих.
+		_, _ = f.db.Exec(`UPDATE system_accounts SET balance = balance - (
+			SELECT COALESCE(SUM(CASE type WHEN 'SHOP_PURCHASE' THEN amount WHEN 'SHOP_REFUND' THEN -amount ELSE 0 END), 0)
+			FROM transactions WHERE user_id = $1) WHERE code = 'SHOP'`, id)
 		for _, q := range []string{
 			`DELETE FROM transactions WHERE user_id = $1`,
 			`DELETE FROM user_gifts WHERE user_id = $1`,
@@ -626,5 +624,135 @@ func TestShopDisabledHidesTheStorefrontIntegration(t *testing.T) {
 	}
 	if _, err := f.srv.Purchase(ctx, buyer, buy(product)); shopCode(err) != ShopErrShopDisabled {
 		t.Errorf("purchase in a closed shop: %v", err)
+	}
+}
+
+// Товар проверяется по своему роду, ошибки приходят по полям. Поля чужого рода
+// — ошибка ввода, а не то, что можно молча выбросить.
+func TestShopSaveProductValidatesByKindIntegration(t *testing.T) {
+	f := newShopFixture(t, nil)
+	ctx := context.Background()
+	admin := f.user("ADMIN", 0)
+	_, shirtGift := f.physical(5)
+	certGift := "shop-it-cert-" + uuid.New().String()[:8]
+	if err := f.gifts.Upsert(ctx, &repository.Gift{Code: certGift, Kind: repository.GiftKindCertificate,
+		Title: map[string]interface{}{"ru": "Сертификат"}, IsActive: true}); err != nil {
+		t.Fatalf("seed certificate: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Exec(`DELETE FROM gifts WHERE code = $1`, certGift) })
+
+	strp := func(v string) *string { return &v }
+	intp := func(v int) *int { return &v }
+	perkBase := func() *repository.ShopProduct {
+		return &repository.ShopProduct{Kind: repository.ShopKindPerk, Category: "perks",
+			Title: map[string]interface{}{"ru": "Комиссия вдвое меньше"}, Price: money.FromRubles(1000),
+			PerkKind: strp(PerkKindCommissionMultiplier), PerkValue: floatPtr(0.5), PerkDays: intp(30)}
+	}
+	shirtBase := func() *repository.ShopProduct {
+		return &repository.ShopProduct{Kind: repository.ShopKindPhysical, Category: "merch",
+			Title: map[string]interface{}{"ru": "Футболка"}, Price: money.FromRubles(1500),
+			GiftCode: strp(shirtGift), FulfillmentMethods: []string{repository.ShopFulfillmentPickup}}
+	}
+	certBase := func() *repository.ShopProduct {
+		return &repository.ShopProduct{Kind: repository.ShopKindCertificate, Category: "certificates",
+			Title: map[string]interface{}{"ru": "Сертификат"}, Price: money.FromRubles(500), GiftCode: strp(certGift)}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		build func() *repository.ShopProduct
+		field string
+	}{
+		{"no title", func() *repository.ShopProduct { p := perkBase(); p.Title = map[string]interface{}{}; return p }, "title"},
+		{"zero price", func() *repository.ShopProduct { p := perkBase(); p.Price = 0; return p }, "price"},
+		{"old price below price", func() *repository.ShopProduct {
+			p := perkBase()
+			old := money.FromRubles(900)
+			p.CompareAtPrice = &old
+			return p
+		}, "compare_at_price"},
+		{"bad category", func() *repository.ShopProduct { p := perkBase(); p.Category = "Привилегии"; return p }, "category"},
+		{"unknown role", func() *repository.ShopProduct { p := perkBase(); p.Roles = []string{"NOBODY"}; return p }, "roles"},
+		{"foreign image", func() *repository.ShopProduct { p := perkBase(); p.Images = []string{"/uploads/chat/x.png"}; return p }, "images"},
+		{"perk without kind", func() *repository.ShopProduct { p := perkBase(); p.PerkKind = nil; return p }, "perk_kind"},
+		{"multiplier 1.5", func() *repository.ShopProduct { p := perkBase(); p.PerkValue = floatPtr(1.5); return p }, "perk_value"},
+		{"perk without days", func() *repository.ShopProduct { p := perkBase(); p.PerkDays = nil; return p }, "perk_days"},
+		{"free period with a value", func() *repository.ShopProduct {
+			p := perkBase()
+			p.PerkKind = strp(PerkKindCommissionFree)
+			return p
+		}, "perk_value"},
+		{"perk with a gift", func() *repository.ShopProduct { p := perkBase(); p.GiftCode = strp(shirtGift); return p }, "gift_code"},
+		{"perk with delivery", func() *repository.ShopProduct {
+			p := perkBase()
+			p.FulfillmentMethods = []string{repository.ShopFulfillmentDelivery}
+			return p
+		}, "fulfillment_methods"},
+		{"shirt without a gift", func() *repository.ShopProduct { p := shirtBase(); p.GiftCode = nil; return p }, "gift_code"},
+		{"shirt with a missing gift", func() *repository.ShopProduct { p := shirtBase(); p.GiftCode = strp("no-such-gift"); return p }, "gift_code"},
+		{"shirt on a certificate gift", func() *repository.ShopProduct { p := shirtBase(); p.GiftCode = strp(certGift); return p }, "gift_code"},
+		{"shirt without a way to get it", func() *repository.ShopProduct { p := shirtBase(); p.FulfillmentMethods = nil; return p }, "fulfillment_methods"},
+		{"shirt with perk fields", func() *repository.ShopProduct { p := shirtBase(); p.PerkDays = intp(3); return p }, "perk_kind"},
+		{"duplicate variants", func() *repository.ShopProduct {
+			p := shirtBase()
+			p.Variants = []repository.ShopProductVariant{{Code: "M"}, {Code: "M"}}
+			return p
+		}, "variants"},
+		{"certificate with delivery", func() *repository.ShopProduct {
+			p := certBase()
+			p.FulfillmentMethods = []string{repository.ShopFulfillmentDelivery}
+			return p
+		}, "fulfillment_methods"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := f.srv.SaveProduct(ctx, admin.ID, tc.build())
+			var shopErr *ShopError
+			if !errors.As(err, &shopErr) || shopErr.Code != ShopErrValidation || shopErr.Fields[tc.field] == "" {
+				t.Fatalf("got %v, want a validation error on %q", err, tc.field)
+			}
+		})
+	}
+
+	// Каждый род сохраняется; привилегия и сертификат — всегда по одному.
+	for _, build := range []func() *repository.ShopProduct{perkBase, shirtBase, certBase} {
+		p := build()
+		p.MaxQtyPerOrder = 7
+		saved, err := f.srv.SaveProduct(ctx, admin.ID, p)
+		if err != nil {
+			t.Fatalf("save %s: %v", p.Kind, err)
+		}
+		t.Cleanup(func() { _, _ = f.db.Exec(`DELETE FROM shop_products WHERE id = $1`, saved.ID) })
+		want := 7
+		if p.Kind != repository.ShopKindPhysical {
+			want = 1
+		}
+		if saved.MaxQtyPerOrder != want {
+			t.Errorf("%s saved with max qty %d, want %d", p.Kind, saved.MaxQtyPerOrder, want)
+		}
+	}
+}
+
+// У товара с продажами род и подарок не меняются: снимки покупок и купоны
+// ссылаются на них. Цену менять можно.
+func TestShopSoldProductKeepsItsKindAndGiftIntegration(t *testing.T) {
+	f := newShopFixture(t, nil)
+	ctx := context.Background()
+	admin := f.user("ADMIN", 0)
+	buyer := f.user("CUSTOMER", money.FromRubles(5000))
+	shirt, _ := f.physical(5)
+	_, otherGift := f.physical(5)
+
+	if _, err := f.srv.Purchase(ctx, buyer, buyShirt(shirt)); err != nil {
+		t.Fatalf("purchase: %v", err)
+	}
+	moved := *shirt
+	moved.GiftCode = &otherGift
+	if _, err := f.srv.SaveProduct(ctx, admin.ID, &moved); shopCode(err) != ShopErrValidation {
+		t.Fatalf("changing the gift of a sold product: %v", err)
+	}
+	repriced := *shirt
+	repriced.Price = money.FromRubles(1700)
+	if _, err := f.srv.SaveProduct(ctx, admin.ID, &repriced); err != nil {
+		t.Fatalf("repricing a sold product: %v", err)
 	}
 }

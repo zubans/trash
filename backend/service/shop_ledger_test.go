@@ -29,7 +29,7 @@ func TestShopChargeMovesPaymentToShopAccount(t *testing.T) {
 	price := money.FromRubles(1500)
 	shopOrderID := uuid.New()
 	if err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-		return ledger.ShopCharge(context.Background(), tx, userID, price, &shopOrderID)
+		return ledger.ShopCharge(context.Background(), tx, userID, price, shopOrderID)
 	}); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestShopChargeRefusesWhenBalanceIsShort(t *testing.T) {
 	}
 
 	err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-		return ledger.ShopCharge(context.Background(), tx, userID, mockDefaultBalance.Add(money.FromRubles(1)), nil)
+		return ledger.ShopCharge(context.Background(), tx, userID, mockDefaultBalance.Add(money.FromRubles(1)), uuid.New())
 	})
 	if !errors.Is(err, repository.ErrInsufficientFunds) {
 		t.Fatalf("expected ErrInsufficientFunds, got %v", err)
@@ -105,10 +105,10 @@ func TestShopRefundDrivesShopNegativeWhenRevenuePaidOut(t *testing.T) {
 	price := money.FromRubles(1000)
 	shopOrderID := uuid.New()
 	steps := []func(tx *sql.Tx) error{
-		func(tx *sql.Tx) error { return ledger.ShopCharge(context.Background(), tx, userID, price, &shopOrderID) },
+		func(tx *sql.Tx) error { return ledger.ShopCharge(context.Background(), tx, userID, price, shopOrderID) },
 		func(tx *sql.Tx) error { return ledger.ShopPayout(context.Background(), tx, adminID, price) },
 		func(tx *sql.Tx) error {
-			return ledger.ShopRefund(context.Background(), tx, userID, price, &shopOrderID, &adminID)
+			return ledger.ShopRefund(context.Background(), tx, userID, price, shopOrderID, adminID)
 		},
 	}
 	for i, step := range steps {
@@ -155,11 +155,14 @@ func TestShopPayoutRefusesMoreThanCollected(t *testing.T) {
 func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 	db := openTestDB(t)
 	ledger := NewLedger(repository.NewTransactionRepository(db), repository.NewSystemAccountRepository(db))
+	ctx := context.Background()
 
 	buyerID, adminID := uuid.New(), uuid.New()
+	productID, shopOrderID := uuid.New(), uuid.New()
+	price := money.FromRubles(100)
 	if _, err := db.Exec(
 		`INSERT INTO users (id, role, phone, password, balance, status) VALUES ($1, 'CUSTOMER', $2, 'x', $3, 'ACTIVE')`,
-		buyerID, "+7999"+buyerID.String()[:7], money.FromRubles(100)); err != nil {
+		buyerID, "+7999"+buyerID.String()[:7], price); err != nil {
 		t.Fatalf("seed buyer: %v", err)
 	}
 	if _, err := db.Exec(
@@ -167,27 +170,47 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 		adminID, "+7999"+adminID.String()[:7]); err != nil {
 		t.Fatalf("seed admin: %v", err)
 	}
-	// Тест двигает общие счета на общей базе, поэтому запоминает оба баланса и
-	// возвращает их как было: иначе следующий прогон начал бы с несведённых книг.
-	var shopBefore, depositsBefore money.Amount
-	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountShop).Scan(&shopBefore); err != nil {
-		t.Fatalf("shop balance before: %v", err)
+	// Проводка оплаты ссылается на покупку, поэтому покупка нужна настоящая.
+	if _, err := db.Exec(
+		`INSERT INTO shop_products (id, kind, category, title, price, perk_kind, perk_days)
+		 VALUES ($1, 'PERK', 'perks', '{"ru":"x"}', $2, 'COMMISSION_FREE', 1)`,
+		productID, int64(price)); err != nil {
+		t.Fatalf("seed product: %v", err)
 	}
-	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountDeposits).Scan(&depositsBefore); err != nil {
-		t.Fatalf("deposits balance before: %v", err)
+	if _, err := db.Exec(
+		`INSERT INTO shop_orders (id, user_id, request_id, product_id, product_snapshot, quantity, unit_price, total, status, offer_version)
+		 VALUES ($1, $2, $3, $4, '{}', 1, $5, $5, 'COMPLETED', 1)`,
+		shopOrderID, buyerID, uuid.New(), productID, int64(price)); err != nil {
+		t.Fatalf("seed purchase: %v", err)
 	}
+
+	// Счета общие для всей тестовой базы, а пакеты тестов идут параллельно,
+	// поэтому очистка снимает ровно свои движения, а не пишет старые значения
+	// поверх чужих.
+	var shopMoved, depositsMoved money.Amount
 	t.Cleanup(func() {
+		_, _ = db.Exec(`UPDATE system_accounts SET balance = balance - $2 WHERE code = $1`, repository.AccountShop, shopMoved)
+		_, _ = db.Exec(`UPDATE system_accounts SET balance = balance - $2 WHERE code = $1`, repository.AccountDeposits, depositsMoved)
 		_, _ = db.Exec(`DELETE FROM transactions WHERE user_id IN ($1, $2)`, buyerID, adminID)
+		_, _ = db.Exec(`DELETE FROM shop_orders WHERE id = $1`, shopOrderID)
+		_, _ = db.Exec(`DELETE FROM shop_products WHERE id = $1`, productID)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1, $2)`, buyerID, adminID)
-		_, _ = db.Exec(`UPDATE system_accounts SET balance = $2 WHERE code = $1`, repository.AccountShop, shopBefore)
-		_, _ = db.Exec(`UPDATE system_accounts SET balance = $2 WHERE code = $1`, repository.AccountDeposits, depositsBefore)
 	})
 
-	if err := ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-		return ledger.ShopCharge(context.Background(), tx, buyerID, money.FromRubles(100), nil)
+	if err := ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		return ledger.ShopCharge(ctx, tx, buyerID, price, shopOrderID)
 	}); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
+	shopMoved = price
+
+	// Каждый вывод — больше половины остатка, каким бы он ни был до теста:
+	// оба пройти не могут.
+	var before money.Amount
+	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountShop).Scan(&before); err != nil {
+		t.Fatalf("shop balance: %v", err)
+	}
+	payout := before.Scale(0.6)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -195,8 +218,8 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = ledger.RunInTx(context.Background(), func(tx *sql.Tx) error {
-				return ledger.ShopPayout(context.Background(), tx, adminID, money.FromRubles(60))
+			errs[i] = ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+				return ledger.ShopPayout(ctx, tx, adminID, payout)
 			})
 		}(i)
 	}
@@ -210,6 +233,8 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 			t.Errorf("unexpected payout error: %v", err)
 		}
 	}
+	shopMoved = shopMoved.Sub(payout.Scale(float64(succeeded)))
+	depositsMoved = payout.Scale(float64(succeeded))
 	if succeeded != 1 {
 		t.Errorf("expected exactly one of the two payouts to succeed, got %d", succeeded)
 	}
@@ -217,7 +242,7 @@ func TestShopPayoutRaceNeverOverdraws(t *testing.T) {
 	if err := db.QueryRow(`SELECT balance FROM system_accounts WHERE code = $1`, repository.AccountShop).Scan(&balance); err != nil {
 		t.Fatalf("shop balance: %v", err)
 	}
-	if want := shopBefore.Add(money.FromRubles(40)); balance != want {
-		t.Errorf("shop account = %s, expected %s after one payout of 60 out of 100", balance, want)
+	if want := before.Sub(payout); balance != want {
+		t.Errorf("shop account = %s, expected %s after one payout of %s", balance, want, payout)
 	}
 }

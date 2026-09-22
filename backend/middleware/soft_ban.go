@@ -73,7 +73,6 @@ var softBanAllowedRoutes = map[string]struct{}{
 	"GET /me/perks":                {},
 	"GET /user/gifts":              {},
 	"POST /user/gifts/{id}/reveal": {},
-	"GET /uploads/shop/{name}":     {},
 
 	// Исполнитель: взятые заказы до конца и закрытие смены.
 	"GET /executor/orders/assigned":              {},

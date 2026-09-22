@@ -65,6 +65,11 @@ func (s *ShopService) SaveProduct(ctx context.Context, adminID uuid.UUID, p *rep
 	if err := s.validateProduct(ctx, p); err != nil {
 		return nil, err
 	}
+	if previous != nil {
+		if err := s.guardSalesFreeze(ctx, previous, p); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.shop.UpsertProduct(ctx, p); err != nil {
 		return nil, err
 	}
@@ -118,7 +123,7 @@ func (s *ShopService) validateProduct(ctx context.Context, p *repository.ShopPro
 		}
 		if err := ValidatePerk(kind, p.PerkValue, perkDays(p)); err != nil {
 			switch {
-			case p.PerkKind == nil || kind == "":
+			case kind == "":
 				fields["perk_kind"] = "Выберите вид привилегии"
 			case perkDays(p) <= 0 && validatePerkValue(kind, p.PerkValue) == nil:
 				fields["perk_days"] = "Срок обязателен и больше нуля"
@@ -129,20 +134,42 @@ func (s *ShopService) validateProduct(ctx context.Context, p *repository.ShopPro
 		if p.MaxActivePerUser != nil && *p.MaxActivePerUser <= 0 {
 			fields["max_active_per_user"] = "Больше нуля или пусто"
 		}
-		// Поля чужого рода отбрасываются, а не хранятся: база их не примет.
-		p.GiftCode, p.Variants, p.FulfillmentMethods = nil, nil, nil
+		// Поля чужого рода — всегда ошибка ввода: у привилегии нет подарка,
+		// вариантов и способов получения, она выдаётся строкой user_perks.
+		if p.GiftCode != nil {
+			fields["gift_code"] = "У привилегии нет подарка"
+		}
+		if len(p.Variants) > 0 || len(p.FulfillmentMethods) > 0 {
+			fields["fulfillment_methods"] = "У привилегии нет вариантов и способов получения"
+		}
+		// Две привилегии в одной покупке встали бы в очередь, которую никто не
+		// выбирал: привилегия продаётся по одной.
 		p.MaxQtyPerOrder = 1
 	case repository.ShopKindPhysical, repository.ShopKindCertificate:
+		if p.PerkKind != nil || p.PerkValue != nil || p.PerkDays != nil || p.MaxActivePerUser != nil {
+			fields["perk_kind"] = "Поля привилегии есть только у привилегии"
+		}
 		if p.GiftCode == nil || *p.GiftCode == "" {
 			fields["gift_code"] = "Выберите подарок, которым выдаётся товар"
-		} else if gift, err := s.gifts.Get(ctx, *p.GiftCode); err != nil || gift == nil {
-			fields["gift_code"] = "Такого подарка нет"
-		} else if gift.Kind != p.Kind {
-			fields["gift_code"] = "Подарок другого рода"
+		} else {
+			gift, err := s.gifts.Get(ctx, *p.GiftCode)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				fields["gift_code"] = "Такого подарка нет"
+			case err != nil:
+				return err
+			case gift.Kind != p.Kind:
+				// Склад и пул кодов общие с ачивками: подарок другого рода
+				// сломал бы выдачу на первой же покупке.
+				fields["gift_code"] = "Подарок другого рода"
+			}
 		}
-		p.PerkKind, p.PerkValue, p.PerkDays, p.MaxActivePerUser = nil, nil, nil, nil
 		if p.Kind == repository.ShopKindCertificate {
-			p.Variants, p.FulfillmentMethods = nil, nil
+			// Код показывается в приложении: получать его негде, и «количества»
+			// у кода нет.
+			if len(p.Variants) > 0 || len(p.FulfillmentMethods) > 0 {
+				fields["fulfillment_methods"] = "У сертификата нет вариантов и способов получения"
+			}
 			p.MaxQtyPerOrder = 1
 			break
 		}
@@ -173,6 +200,27 @@ func (s *ShopService) validateProduct(ctx context.Context, p *repository.ShopPro
 	return nil
 }
 
+// guardSalesFreeze запрещает менять род и подарок у товара с продажами:
+// снимок в покупке говорит, что человек купил, а купоны уже лежат на складе
+// этого подарка. Цену, название и активность менять можно.
+func (s *ShopService) guardSalesFreeze(ctx context.Context, previous, next *repository.ShopProduct) error {
+	sameGift := (previous.GiftCode == nil && next.GiftCode == nil) ||
+		(previous.GiftCode != nil && next.GiftCode != nil && *previous.GiftCode == *next.GiftCode)
+	if previous.Kind == next.Kind && sameGift {
+		return nil
+	}
+	sold, err := s.shop.CountProductOrders(ctx, previous.ID)
+	if err != nil {
+		return err
+	}
+	if sold > 0 {
+		return shopValidation(map[string]string{
+			"kind": "У товара есть продажи: род и подарок менять нельзя — снимите его с витрины и заведите новый",
+		})
+	}
+	return nil
+}
+
 func (s *ShopService) validateRoles(ctx context.Context, roles []string) string {
 	if len(roles) == 0 || s.roles == nil {
 		return ""
@@ -198,8 +246,10 @@ func (s *ShopService) AdminPickupPoints(ctx context.Context) ([]*repository.Shop
 	return s.shop.ListPickupPoints(ctx, false)
 }
 
-// SavePickupPoint заводит или правит пункт выдачи.
-func (s *ShopService) SavePickupPoint(ctx context.Context, p *repository.ShopPickupPoint) (*repository.ShopPickupPoint, error) {
+// SavePickupPoint заводит или правит пункт выдачи. Удаления нет: пункт
+// выключается и перестаёт предлагаться при оформлении, а покупки, которые на
+// него ссылаются, остаются читаемыми.
+func (s *ShopService) SavePickupPoint(ctx context.Context, adminID uuid.UUID, p *repository.ShopPickupPoint) (*repository.ShopPickupPoint, error) {
 	fields := map[string]string{}
 	if title, _ := p.Title["ru"].(string); strings.TrimSpace(title) == "" {
 		fields["title"] = "Название обязательно"
@@ -220,7 +270,11 @@ func (s *ShopService) SavePickupPoint(ctx context.Context, p *repository.ShopPic
 	if errors.Is(err, repository.ErrShopPickupPointNotFound) {
 		return nil, shopNotFound()
 	}
-	return p, err
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[AUDIT] admin %s saved pickup point %s (active=%v)", adminID, p.ID, p.IsActive)
+	return p, nil
 }
 
 // AdminOrders — список покупок для админки.
@@ -486,7 +540,7 @@ func (s *ShopService) Cancel(ctx context.Context, adminID, id uuid.UUID, req Can
 			}
 		}
 
-		if err := s.ledger.ShopRefund(ctx, tx, order.UserID, refund, &order.ID, &adminID); err != nil {
+		if err := s.ledger.ShopRefund(ctx, tx, order.UserID, refund, order.ID, adminID); err != nil {
 			return err
 		}
 		if err := s.orders.Cancel(ctx, tx, order.ID, req.Reason, adminID, refund); err != nil {

@@ -669,12 +669,12 @@ func main() {
 	// их отдаёт аутентифицированный обработчик, проверяющий, что вызывающий
 	// участвует в переписке, которой принадлежит файл.
 	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir(getEnv("RELEASES_DIR", "releases")))).ServeHTTP)
+	// Изображения витрины публичны, в отличие от вложений чата: у них свой
+	// маршрут, отдающий только файлы, которые сервер назвал сам.
+	r.Get("/uploads/shop/{name}", shh.ServeImage)
+	r.Get("/api/uploads/shop/{name}", shh.ServeImage)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware.RequireAuth)
-		// Изображения товаров — свой маршрут: общий /uploads/* отдаёт
-		// вложения только участникам переписки и всегда на скачивание.
-		r.Get("/uploads/shop/{name}", shh.ServeImage)
-		r.Get("/api/uploads/shop/{name}", shh.ServeImage)
 		r.Get("/uploads/*", ch.ServeAttachmentHandler)
 		r.Get("/api/uploads/*", ch.ServeAttachmentHandler)
 	})

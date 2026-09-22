@@ -115,16 +115,22 @@ func (l *Ledger) record(ctx context.Context, tx *sql.Tx, e entry) error {
 //
 // Возвращает repository.ErrInsufficientFunds, когда баланса слишком мало.
 func (l *Ledger) Reserve(ctx context.Context, tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
-	if !amount.IsPositive() {
+	return l.reserve(ctx, tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
+}
+
+// reserve — тело Reserve над готовой записью журнала: e.UserID платит
+// e.Amount на счёт e.Account.
+func (l *Ledger) reserve(ctx context.Context, tx *sql.Tx, e entry) error {
+	if !e.Amount.IsPositive() {
 		return nil
 	}
-	if err := l.transactions.Debit(ctx, tx, userID, amount); err != nil {
+	if err := l.transactions.Debit(ctx, tx, e.UserID, e.Amount); err != nil {
 		return err
 	}
-	if err := l.accounts.Credit(ctx, tx, account, amount); err != nil {
+	if err := l.accounts.Credit(ctx, tx, e.Account, e.Amount); err != nil {
 		return err
 	}
-	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
+	return l.record(ctx, tx, e)
 }
 
 // Charge переносит деньги от пользователя на системный счёт без проверки
@@ -146,16 +152,22 @@ func (l *Ledger) Charge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, accou
 // Release переносит деньги с системного счёта пользователю: возврат из эскроу,
 // вознаграждение исполнителя, возвращённый резерв вывода.
 func (l *Ledger) Release(ctx context.Context, tx *sql.Tx, account string, userID uuid.UUID, amount money.Amount, kind repository.TransactionType, orderID, adminID *uuid.UUID) error {
-	if !amount.IsPositive() {
+	return l.release(ctx, tx, entry{UserID: userID, OrderID: orderID, AdminID: adminID, Type: kind, Account: account, Amount: amount})
+}
+
+// release — тело Release над готовой записью журнала: счёт e.Account платит
+// e.Amount пользователю e.UserID.
+func (l *Ledger) release(ctx context.Context, tx *sql.Tx, e entry) error {
+	if !e.Amount.IsPositive() {
 		return nil
 	}
-	if err := l.accounts.Debit(ctx, tx, account, amount); err != nil {
+	if err := l.accounts.Debit(ctx, tx, e.Account, e.Amount); err != nil {
 		return err
 	}
-	if err := l.transactions.UpdateBalance(ctx, tx, userID, amount); err != nil {
+	if err := l.transactions.UpdateBalance(ctx, tx, e.UserID, e.Amount); err != nil {
 		return err
 	}
-	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, AdminID: adminID, Type: kind, Account: account, Amount: amount})
+	return l.record(ctx, tx, e)
 }
 
 // Deposit вводит деньги извне: одобренное пополнение. DEPOSITS уходит в минус
@@ -233,18 +245,9 @@ func (l *Ledger) Payout(ctx context.Context, tx *sql.Tx, from string, userID uui
 //
 // Возвращает repository.ErrInsufficientFunds, когда баланса не хватает; тогда
 // не двигается ни баланс, ни счёт.
-func (l *Ledger) ShopCharge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount, shopOrderID *uuid.UUID) error {
-	if !amount.IsPositive() {
-		return nil
-	}
-	if err := l.transactions.Debit(ctx, tx, userID, amount); err != nil {
-		return err
-	}
-	if err := l.accounts.Credit(ctx, tx, repository.AccountShop, amount); err != nil {
-		return err
-	}
-	return l.record(ctx, tx, entry{
-		UserID: userID, ShopOrderID: shopOrderID,
+func (l *Ledger) ShopCharge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount, shopOrderID uuid.UUID) error {
+	return l.reserve(ctx, tx, entry{
+		UserID: userID, ShopOrderID: &shopOrderID,
 		Type: repository.TransactionTypeShopPurchase, Account: repository.AccountShop, Amount: amount,
 	})
 }
@@ -253,18 +256,9 @@ func (l *Ledger) ShopCharge(ctx context.Context, tx *sql.Tx, userID uuid.UUID, a
 // Списание не охраняется намеренно: если выручку уже вывели и на счёте меньше
 // суммы возврата, SHOP уходит в минус — возврат покупателю обязанность
 // платформы, а не функция остатка. Этот минус и показывает сверка.
-func (l *Ledger) ShopRefund(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount, shopOrderID, adminID *uuid.UUID) error {
-	if !amount.IsPositive() {
-		return nil
-	}
-	if err := l.accounts.Debit(ctx, tx, repository.AccountShop, amount); err != nil {
-		return err
-	}
-	if err := l.transactions.UpdateBalance(ctx, tx, userID, amount); err != nil {
-		return err
-	}
-	return l.record(ctx, tx, entry{
-		UserID: userID, ShopOrderID: shopOrderID, AdminID: adminID,
+func (l *Ledger) ShopRefund(ctx context.Context, tx *sql.Tx, userID uuid.UUID, amount money.Amount, shopOrderID, adminID uuid.UUID) error {
+	return l.release(ctx, tx, entry{
+		UserID: userID, ShopOrderID: &shopOrderID, AdminID: &adminID,
 		Type: repository.TransactionTypeShopRefund, Account: repository.AccountShop, Amount: amount,
 	})
 }

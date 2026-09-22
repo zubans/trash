@@ -21,17 +21,18 @@ import (
 )
 
 // maxShopImageBytes — потолок одного изображения товара.
-const maxShopImageBytes = 5 << 20
+const maxShopImageBytes = 10 << 20
 
 // shopImageName — имя, которое сервер сам дал изображению. Всё прочее под
 // /uploads/shop/ не отдаётся: так путь не превращается в чтение произвольного
 // файла.
-var shopImageName = regexp.MustCompile(`^[0-9a-f-]{36}\.(jpg|png|webp)$`)
+var shopImageName = regexp.MustCompile(`^[0-9a-f-]{36}\.(jpg|png|webp|gif)$`)
 
 var shopImageTypes = map[string]string{
 	"image/jpeg": ".jpg",
 	"image/png":  ".png",
 	"image/webp": ".webp",
+	"image/gif":  ".gif",
 }
 
 // ShopHandler обслуживает магазин: витрину и покупку для покупателя, каталог,
@@ -227,9 +228,9 @@ func (h *ShopHandler) MyPerks(w http.ResponseWriter, r *http.Request) {
 // ServeImage обслуживает GET /uploads/shop/{name}.
 //
 // Общий /uploads/* отдаёт только вложения переписки её участникам и всегда как
-// файл на скачивание. Изображение товара видит любой, кто вошёл в приложение,
-// и показывается картинкой, поэтому у него свой маршрут — но только для имён,
-// которые сервер выдал сам.
+// файл на скачивание. Изображение витрины не вложение: оно публично и
+// показывается картинкой, поэтому у него свой маршрут без аутентификации — но
+// только для имён, которые сервер выдал сам.
 func (h *ShopHandler) ServeImage(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if !shopImageName.MatchString(name) {
@@ -247,11 +248,13 @@ func (h *ShopHandler) ServeImage(w http.ResponseWriter, r *http.Request) {
 		contentType = "image/png"
 	case ".webp":
 		contentType = "image/webp"
+	case ".gif":
+		contentType = "image/gif"
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// Имя уникально и файл не переписывается — кэшировать можно долго.
-	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
 	http.ServeFile(w, r, full)
 }
 
@@ -261,7 +264,7 @@ func (h *ShopHandler) AdminUploadImage(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxShopImageBytes+(64<<10))
 	if err := r.ParseMultipartForm(maxShopImageBytes); err != nil {
 		writeShopError(w, &service.ShopError{Status: http.StatusBadRequest, Code: service.ShopErrValidation,
-			Message: "Файл больше 5 МБ", Fields: map[string]string{"images": "Файл больше 5 МБ"}})
+			Message: "Файл больше 10 МБ", Fields: map[string]string{"images": "Файл больше 10 МБ"}})
 		return
 	}
 	file, _, err := r.FormFile("file")
@@ -278,7 +281,7 @@ func (h *ShopHandler) AdminUploadImage(w http.ResponseWriter, r *http.Request) {
 	ext, ok := shopImageTypes[http.DetectContentType(head[:n])]
 	if !ok {
 		writeShopError(w, &service.ShopError{Status: http.StatusBadRequest, Code: service.ShopErrValidation,
-			Message: "Только JPEG, PNG или WebP", Fields: map[string]string{"images": "Только JPEG, PNG или WebP"}})
+			Message: "Только JPEG, PNG, WebP или GIF", Fields: map[string]string{"images": "Только JPEG, PNG, WebP или GIF"}})
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -292,17 +295,30 @@ func (h *ShopHandler) AdminUploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := uuid.New().String() + ext
-	dst, err := os.Create(filepath.Join(dir, name))
-	if err != nil {
-		writeShopError(w, err)
-		return
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
+	if err := saveShopImage(filepath.Join(dir, name), file); err != nil {
 		writeShopError(w, err)
 		return
 	}
 	writeJSON(w, map[string]string{"url": service.ShopImagePrefix + name})
+}
+
+// saveShopImage пишет файл целиком или не оставляет ничего: недописанный файл
+// удаляется, иначе на витрину попала бы обрезанная картинка.
+func saveShopImage(path string, src io.Reader) error {
+	dst, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
+	return nil
 }
 
 // AdminProducts обслуживает GET /admin/shop/products.
@@ -373,13 +389,17 @@ func (h *ShopHandler) AdminPickupPoints(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *ShopHandler) savePickupPoint(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	admin := h.caller(w, r)
+	if admin == nil {
+		return
+	}
 	var point repository.ShopPickupPoint
 	if err := json.NewDecoder(r.Body).Decode(&point); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	point.ID = id
-	saved, err := h.shop.SavePickupPoint(r.Context(), &point)
+	saved, err := h.shop.SavePickupPoint(r.Context(), admin.ID, &point)
 	if err != nil {
 		writeShopError(w, err)
 		return

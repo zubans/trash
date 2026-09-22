@@ -324,8 +324,12 @@ func (s *ShopService) perkQuote(ctx context.Context, userID uuid.UUID, p *reposi
 	return quote, nil
 }
 
-// PickupPoints — пункты выдачи, которые можно выбрать при оформлении.
+// PickupPoints — пункты выдачи, которые можно выбрать при оформлении. У
+// закрытого магазина их нет, как нет и витрины.
 func (s *ShopService) PickupPoints(ctx context.Context) ([]*repository.ShopPickupPoint, error) {
+	if !s.Enabled(ctx) {
+		return []*repository.ShopPickupPoint{}, nil
+	}
 	return s.shop.ListPickupPoints(ctx, true)
 }
 
@@ -456,7 +460,7 @@ func (s *ShopService) Purchase(ctx context.Context, user *repository.User, req P
 			return err
 		}
 
-		if err := s.ledger.ShopCharge(ctx, tx, user.ID, order.Total, &order.ID); err != nil {
+		if err := s.ledger.ShopCharge(ctx, tx, user.ID, order.Total, order.ID); err != nil {
 			if errors.Is(err, repository.ErrInsufficientFunds) {
 				return shopErr(http.StatusUnprocessableEntity, ShopErrInsufficientFunds, "Недостаточно средств на балансе")
 			}

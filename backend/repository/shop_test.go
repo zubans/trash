@@ -55,7 +55,7 @@ func TestShopProductRoundTrip(t *testing.T) {
 			Kind: repository.ShopKindPerk, Category: "perks",
 			Title: map[string]interface{}{"ru": "Комиссия вдвое меньше", "en": "Half commission"},
 			Price: money.FromRubles(1000), CompareAtPrice: amountPtr(money.FromRubles(1990)),
-			PerkKind: strPtr("COMMISSION_MULTIPLIER"),
+			PerkKind:  strPtr("COMMISSION_MULTIPLIER"),
 			PerkValue: &multiplier, PerkDays: &days, MaxActivePerUser: &limit,
 			Roles: []string{"EXECUTOR"}, IsActive: true, SortOrder: 1,
 			Images: []string{"/uploads/shop/perk.png"},
@@ -64,7 +64,7 @@ func TestShopProductRoundTrip(t *testing.T) {
 			Kind: repository.ShopKindPhysical, Category: "merch",
 			Title: map[string]interface{}{"ru": "Футболка"}, Price: money.FromRubles(1500),
 			GiftCode: strPtr("shop-roundtrip-shirt"), MaxQtyPerOrder: 5,
-			Variants: []repository.ShopProductVariant{{Code: "M", Title: map[string]interface{}{"ru": "M"}}},
+			Variants:           []repository.ShopProductVariant{{Code: "M", Title: map[string]interface{}{"ru": "M"}}},
 			FulfillmentMethods: []string{"PICKUP", "DELIVERY"}, IsActive: true,
 		},
 		{
@@ -409,6 +409,6 @@ func TestShopPickupPointsCRUD(t *testing.T) {
 	}
 }
 
-func strPtr(s string) *string            { return &s }
-func intPtr(n int) *int                  { return &n }
+func strPtr(s string) *string                { return &s }
+func intPtr(n int) *int                      { return &n }
 func amountPtr(a money.Amount) *money.Amount { return &a }

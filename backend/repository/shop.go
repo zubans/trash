@@ -49,15 +49,15 @@ type ShopProduct struct {
 	Title       map[string]interface{} `json:"title"`
 	Description map[string]interface{} `json:"description"`
 	// Images — до пяти путей вида /uploads/shop/…, в порядке показа.
-	Images          []string     `json:"images"`
-	Price           money.Amount `json:"price"`
-	CompareAtPrice  *money.Amount `json:"compare_at_price,omitempty"`
+	Images         []string      `json:"images"`
+	Price          money.Amount  `json:"price"`
+	CompareAtPrice *money.Amount `json:"compare_at_price,omitempty"`
 	// Roles — кому виден и доступен товар. Пустой набор — всем.
 	Roles            []string `json:"roles"`
 	RequiresVerified bool     `json:"requires_verified"`
 	// PerUserLimit — сколько всего раз можно купить одному человеку. nil — без лимита.
-	PerUserLimit    *int `json:"per_user_limit,omitempty"`
-	MaxQtyPerOrder  int  `json:"max_qty_per_order"`
+	PerUserLimit   *int `json:"per_user_limit,omitempty"`
+	MaxQtyPerOrder int  `json:"max_qty_per_order"`
 	// GiftCode — подарок, которым выдаётся товар родов PHYSICAL и CERTIFICATE.
 	// Склад один на ачивки и магазин: футболка за «Марафонца» и футболка за
 	// 1500 ₽ лежат на одной полке.
@@ -66,14 +66,14 @@ type ShopProduct struct {
 	FulfillmentMethods []string             `json:"fulfillment_methods"`
 	// Параметры привилегии. У COMMISSION_FREE значения нет вовсе — смысл
 	// PerkValue задаёт вид: множитель (0;1] или пункты процента (>0).
-	PerkKind          *string  `json:"perk_kind,omitempty"`
-	PerkValue         *float64 `json:"perk_value,omitempty"`
-	PerkDays          *int     `json:"perk_days,omitempty"`
-	MaxActivePerUser  *int     `json:"max_active_per_user,omitempty"`
-	SortOrder         int      `json:"sort_order"`
-	IsActive          bool     `json:"is_active"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	PerkKind         *string   `json:"perk_kind,omitempty"`
+	PerkValue        *float64  `json:"perk_value,omitempty"`
+	PerkDays         *int      `json:"perk_days,omitempty"`
+	MaxActivePerUser *int      `json:"max_active_per_user,omitempty"`
+	SortOrder        int       `json:"sort_order"`
+	IsActive         bool      `json:"is_active"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 	// InStock — можно ли выдать товар прямо сейчас: не ограничен у PERK,
 	// склад подарка у PHYSICAL, свободные коды у CERTIFICATE. Считается
 	// запросом списка, а не хранится.
@@ -115,6 +115,10 @@ type ShopRepository interface {
 	// коммита.
 	LockProduct(ctx context.Context, q Querier, id uuid.UUID) (*ShopProduct, error)
 	UpsertProduct(ctx context.Context, p *ShopProduct) error
+	// CountProductOrders считает покупки товара. Род и подарок товара с
+	// продажами менять нельзя: на них уже ссылаются снимки покупок, и тихая
+	// смена превратила бы прошлые продажи в то, чего не было.
+	CountProductOrders(ctx context.Context, productID uuid.UUID) (int, error)
 
 	ListPickupPoints(ctx context.Context, activeOnly bool) ([]*ShopPickupPoint, error)
 	CreatePickupPoint(ctx context.Context, p *ShopPickupPoint) error
@@ -392,6 +396,13 @@ func (r *shopRepo) UpsertProduct(ctx context.Context, p *ShopProduct) error {
 		p.GiftCode, variants, pq.Array(p.FulfillmentMethods),
 		p.PerkKind, p.PerkValue, p.PerkDays, p.MaxActivePerUser, p.SortOrder, p.IsActive)
 	return err
+}
+
+func (r *shopRepo) CountProductOrders(ctx context.Context, productID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM shop_orders WHERE product_id = $1`, productID).Scan(&count)
+	return count, err
 }
 
 func (r *shopRepo) ListPickupPoints(ctx context.Context, activeOnly bool) ([]*ShopPickupPoint, error) {
