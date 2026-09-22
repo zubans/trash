@@ -143,6 +143,35 @@
             <span v-if="!sidebarMinimized || isMobile">{{ $t('app.settings') }}</span>
           </router-link>
         </div>
+
+        <!-- Магазин — свой раздел: товары, заказы и выручка охраняются тремя
+             разными правами, потому что их ведут разные люди. -->
+        <div v-if="(!sidebarMinimized || isMobile) && showShopSection" class="nav-section">{{ $t('shop.admin.sections') }}</div>
+        <div class="nav-list">
+          <router-link v-if="can('shop.view')" to="/admin/shop/products" class="nav-item" :class="{ active: currentRouteName === 'admin-shop-products' || currentRouteName === 'admin-shop-pickup-points' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-storefront"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('shop.admin.products') }}</span>
+          </router-link>
+
+          <router-link v-if="can('perk_rules.view')" to="/admin/shop/perk-rules" class="nav-item" :class="{ active: currentRouteName === 'admin-shop-perk-rules' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-function"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('shop.admin.rules.menu') }}</span>
+          </router-link>
+
+          <router-link v-if="can('shop_orders.view')" to="/admin/shop/orders" class="nav-item" :class="{ active: currentRouteName === 'admin-shop-orders' }" @click="closeSidebarOnMobile">
+            <div class="nav-icon-wrap">
+              <i class="ph ph-shopping-bag"></i>
+              <span v-if="paidShopOrders > 0 && sidebarMinimized && !isMobile" class="nav-dot-badge"></span>
+            </div>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('shop.admin.orders') }}</span>
+            <span v-if="paidShopOrders > 0 && (!sidebarMinimized || isMobile)" class="nav-badge">{{ paidShopOrders }}</span>
+          </router-link>
+
+          <router-link v-if="can('shop_revenue.view')" to="/admin/shop/revenue" class="nav-item" :class="{ active: currentRouteName === 'admin-shop-revenue' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-cash-register"></i>
+            <span v-if="!sidebarMinimized || isMobile">{{ $t('shop.admin.revenue') }}</span>
+          </router-link>
+        </div>
       </div>
 
       <!-- Язык живёт здесь; выход — наверху рядом с логотипом. В свёрнутом виде
@@ -189,6 +218,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
 import { adminGetMailUnread } from './api/mail'
+import { adminCountPaid } from './api/shop'
 import { useI18n } from './i18n'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import AppLogo from './components/AppLogo.vue'
@@ -217,6 +247,10 @@ const PAGE_TITLE_KEYS: Record<string, string> = {
   'admin-incidents': 'incidents',
   'admin-service-scripts-help': 'serviceScriptsHelp',
   'admin-settings': 'settings',
+  'admin-shop-products': 'shopProducts',
+  'admin-shop-pickup-points': 'shopPickupPoints',
+  'admin-shop-orders': 'shopOrders',
+  'admin-shop-revenue': 'shopRevenue',
 }
 
 export default defineComponent({
@@ -233,6 +267,8 @@ export default defineComponent({
     const sidebarMinimized = ref(window.innerWidth < 768)
     const unreadSupportCount = ref(0)
     const unreadMailCount = ref(0)
+    // Оплаченные покупки, которые ещё никто не взял в работу.
+    const paidShopOrders = ref(0)
     let unreadTimer: any = null
 
     // can решает, показывать ли пункт меню. Права приходят с /auth/me и
@@ -247,6 +283,7 @@ export default defineComponent({
        'commission.view', 'transactions.view', 'reconciliation.view', 'incidents.view',
        'broadcasts.view', 'mail.view'].some(can),
     )
+    const showShopSection = computed(() => ['shop.view', 'perk_rules.view', 'shop_orders.view', 'shop_revenue.view'].some(can))
     const showSystemSection = computed(() =>
       ['shifts.view', 'orders.view', 'service_catalog.view', 'achievements.view',
        'gifts.view', 'escalations.view', 'disputes.view', 'watermarks.view', 'settings.view'].some(can),
@@ -258,6 +295,13 @@ export default defineComponent({
       if (!can('mail.view')) return
       try {
         unreadMailCount.value = await adminGetMailUnread()
+      } catch (err) {}
+    }
+
+    const fetchPaidShopOrders = async () => {
+      if (!can('shop_orders.view')) return
+      try {
+        paidShopOrders.value = await adminCountPaid()
       } catch (err) {}
     }
 
@@ -285,6 +329,7 @@ export default defineComponent({
       window.addEventListener('support-unread-updated', fetchUnreadSupport)
       fetchUnreadSupport()
       fetchUnreadMail()
+      fetchPaidShopOrders()
       // 15 с, а не 3: этот бейдж считает непрочитанные сообщения поддержки по всем
       // чатам, а это скан таблицы сообщений на сервере. Ответ поддержки — не то, о
       // чём админу нужно узнать в течение трёх секунд, а платила за это каждая
@@ -292,6 +337,7 @@ export default defineComponent({
       unreadTimer = setInterval(() => {
         fetchUnreadSupport()
         fetchUnreadMail()
+        fetchPaidShopOrders()
       }, 15000)
     })
 
@@ -337,6 +383,8 @@ export default defineComponent({
 
     return {
       can,
+      showShopSection,
+      paidShopOrders,
       showManagementSection,
       showSystemSection,
       phone,

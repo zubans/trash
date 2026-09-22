@@ -33,6 +33,9 @@ var allTransactionTypes = []TransactionType{
 	TransactionTypeCommissionPayout,
 	TransactionTypeBonus,
 	TransactionTypeDisputeReward,
+	TransactionTypeShopPurchase,
+	TransactionTypeShopRefund,
+	TransactionTypeShopPayout,
 }
 
 func TestEveryTransactionTypeHasALedgerSign(t *testing.T) {
@@ -73,6 +76,11 @@ func TestLedgerSignsMatchTheServiceBehaviour(t *testing.T) {
 		// сторона не трогает баланс пользователя, против которого она записана.
 		TransactionTypeCommission:       0,
 		TransactionTypeCommissionPayout: 0,
+		// Покупка в магазине списывает деньги с покупателя, её отмена возвращает
+		// их; вывод выручки идёт между системными счетами, как и вывод комиссии.
+		TransactionTypeShopPurchase: -1,
+		TransactionTypeShopRefund:   +1,
+		TransactionTypeShopPayout:   0,
 	}
 
 	for tt, want := range cases {

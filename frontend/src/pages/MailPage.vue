@@ -62,6 +62,14 @@
             >
               Посмотреть достижения
             </button>
+            <button
+              v-else-if="message.ref_type === 'shop_order' || message.ref_type === 'perk'"
+              type="button"
+              class="btn-link"
+              @click.stop="goToShop(message)"
+            >
+              {{ message.ref_type === 'perk' ? $t('shop.perk.cta') : $t('shop.tabs.orders') }}
+            </button>
           </div>
           <button type="button" class="btn-delete" title="Удалить" @click.stop="remove(message)">
             <i class="ph ph-trash"></i>
@@ -129,6 +137,7 @@
 <script lang="ts">
 import { computed, defineComponent, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth-store'
 
 import {
   deleteMail,
@@ -147,12 +156,14 @@ const KIND_ICONS: Record<string, string> = {
   NEWS: 'ph-fill ph-newspaper',
   SYSTEM: 'ph-fill ph-info',
   DIRECT: 'ph-fill ph-chats-circle',
+  SHOP: 'ph-fill ph-storefront',
 }
 
 export default defineComponent({
   name: 'MailPage',
   setup() {
     const router = useRouter()
+    const authStore = useAuthStore()
 
     const messages = ref<MailMessage[]>([])
     const unread = ref(0)
@@ -334,6 +345,16 @@ export default defineComponent({
     const goBack = () => router.back()
     const goToGifts = () => router.push('/executor/gifts')
     const goToAchievements = () => router.push('/executor/achievements')
+    // Письма магазина ведут в «Мои покупки» той роли, в которой человек сейчас,
+    // а о привилегии — в магазин исполнителя, где её продлевают.
+    const goToShop = (message: MailMessage) => {
+      if (message.ref_type === 'perk') {
+        router.push('/executor/shop')
+        return
+      }
+      const home = authStore.activeRole === 'EXECUTOR' ? '/executor' : '/customer'
+      router.push({ path: `${home}/shop`, query: { tab: 'orders', order: message.ref_id } })
+    }
 
     onMounted(load)
 
@@ -363,6 +384,7 @@ export default defineComponent({
       goBack,
       goToGifts,
       goToAchievements,
+      goToShop,
     }
   },
 })

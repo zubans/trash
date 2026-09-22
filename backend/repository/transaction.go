@@ -46,6 +46,16 @@ const (
 	// решил как «неизвестно». Удержание целиком вернулось заказчику, поэтому её
 	// финансирует не заказчик, а счёт платформы DISPUTES.
 	TransactionTypeDisputeReward TransactionType = "DISPUTE_REWARD"
+	// TransactionTypeShopPurchase списывает с пользователя оплату покупки в
+	// магазине на счёт SHOP; TransactionTypeShopRefund возвращает её при отмене
+	// покупки (SHOP может уйти в минус, если выручку уже вывели — возврат
+	// покупателю обязанность платформы, а не функция остатка);
+	// TransactionTypeShopPayout фиксирует вывод выручки админом из системы —
+	// как и вывод комиссии, он двигается между системными счетами и не трогает
+	// баланс пользователя.
+	TransactionTypeShopPurchase TransactionType = "SHOP_PURCHASE"
+	TransactionTypeShopRefund   TransactionType = "SHOP_REFUND"
+	TransactionTypeShopPayout   TransactionType = "SHOP_PAYOUT"
 )
 
 // ledgerSigns объявляет, как каждый тип транзакции двигает баланс пользователя.
@@ -83,6 +93,12 @@ var ledgerSigns = map[TransactionType]int{
 	// Выплата по спору с неизвестным исходом устроена как бонус: зачисляет
 	// исполнителю, а DISPUTES уходит в минус на ту же сумму.
 	TransactionTypeDisputeReward: +1,
+	// Покупка в магазине списывает деньги с баланса покупателя, её отмена
+	// возвращает их обратно; вывод выручки происходит между системными счетами
+	// и баланса пользователя не касается.
+	TransactionTypeShopPurchase: -1,
+	TransactionTypeShopRefund:   +1,
+	TransactionTypeShopPayout:   0,
 }
 
 // LedgerSign сообщает, как тип транзакции двигает баланс и известен ли тип
@@ -183,6 +199,17 @@ func (r *transactionRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) e
 	return tx.Commit()
 }
 
+// CreateTransaction записывает проводку. Counterparty пишется вместе с ней: без
+// этого столбца строка не говорит, какой системный счёт стоял по другую сторону
+// движения, а по NULL в нём scripts/repair_books_gap.sql узнаёт проводку мимо
+// Ledger. Доказательством NULL служит только после миграции 060, которая вышла
+// вместе с этой записью: до неё столбец терялся у всех строк, поэтому граница
+// берётся из schema_migrations, а не из данных. Пустая строка означает «счёт
+// не назван» и ложится в NULL, а не в значение, которого нет в system_accounts:
+// столбец — внешний ключ, и пустая строка его нарушила бы.
+//
+// Ветка tx и ветка без неё сведены в одну: раньше это были два одинаковых
+// вызова с одним и тем же списком аргументов, и разойтись им ничто не мешало.
 func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *Transaction) error {
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()
@@ -190,13 +217,12 @@ func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = time.Now()
 	}
-	query := `INSERT INTO transactions (id, user_id, order_id, type, amount, admin_id, created_at)
-	          VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	if tx != nil {
-		_, err := tx.ExecContext(ctx, query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
-		return err
-	}
-	_, err := r.db.ExecContext(ctx, query, t.ID, t.UserID, t.OrderID, t.Type, t.Amount, t.AdminID, t.CreatedAt)
+	// ShopOrderID привязывает проводку к покупке магазина: order_id занят заказами.
+	_, err := r.querier(ctx, tx).ExecContext(ctx,
+		`INSERT INTO transactions (id, user_id, order_id, shop_order_id, type, amount, counterparty, admin_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		t.ID, t.UserID, t.OrderID, t.ShopOrderID, t.Type, t.Amount,
+		nullableCode(t.Counterparty), t.AdminID, t.CreatedAt)
 	return err
 }
 

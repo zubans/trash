@@ -57,6 +57,14 @@
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/history')">
               <i class="ph-fill ph-clock-counter-clockwise"></i> История заказов
             </button>
+            <template v-if="shopEnabled">
+              <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/shop')">
+                <i class="ph-fill ph-storefront"></i> {{ $t('shop.menu') }}
+              </button>
+              <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/customer/gifts')">
+                <i class="ph-fill ph-ticket"></i> {{ $t('shop.orders.coupons') }}
+              </button>
+            </template>
             <button type="button" class="nav-item position-relative" @click="menuOpen = false; $router.push('/mail')">
               <i class="ph-fill ph-envelope-simple"></i> Почта
               <span v-if="mailUnread > 0" class="support-unread-dot nav-dot mail-nav-dot"></span>
@@ -516,6 +524,7 @@ import ReviewModal from './components/ReviewModal.vue'
 import DisputeClaimModal from './components/DisputeClaimModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
+import { useStorefront } from '../../composables/useShop'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { pollIntervalMs } from '../../services/api'
 import { getMailUnread } from '../../api/mail'
@@ -553,6 +562,11 @@ export default defineComponent({
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()
+
+    // Пункт «Магазин» виден, только пока магазин открыт: флаг из кэша сразу,
+    // из сети — вместе со второстепенным.
+    const shopStore = useStorefront()
+    const shopEnabled = computed(() => shopStore.data.value.enabled)
 
     const phone = ref('79207050707')
     // Читает напрямую из хранилища авторизации: ни локальной копии, ни
@@ -1566,6 +1580,7 @@ export default defineComponent({
       // рисуется прошлым состоянием целиком, ещё до первого запроса.
       ordersResource.hydrate()
       profileResource.hydrate()
+      shopStore.hydrate()
 
       // Порядок сетевых запросов задаётся смыслом: на мобильной сети они делят
       // одно соединение, и запущенные разом означают, что главное приедет последним.
@@ -1578,7 +1593,7 @@ export default defineComponent({
           () => getServiceCategories().then((cats) => { serviceCategories.value = cats }),
         ],
         // 2. Второстепенное: почта и штрафной статус.
-        [checkMail, fetchPenaltyStatus],
+        [checkMail, fetchPenaltyStatus, shopStore.refresh],
         // 3. Прогрев фотографий активных заказов. Идёт после всего, потому что
         //    это подготовка к будущему нажатию, а не содержимое экрана: чат
         //    открывают ради фотографий, и ждать их в момент открытия не должен
@@ -1603,6 +1618,7 @@ export default defineComponent({
     })
 
     return {
+      shopEnabled,
       authStore,
       userEmail,
       fullName,

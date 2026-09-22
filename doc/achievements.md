@@ -308,8 +308,24 @@ SELECT COALESCE(SUM(points), 0)
    AND (expires_at IS NULL OR expires_at > now());
 ```
 
-Индекс `(user_id) WHERE revoked_at IS NULL` — этого достаточно; Starlark на
+Индекс `(user_id) WHERE revoked_at IS NULL` — этого достаточно. Единственное
+исключение из правила ниже — правило привилегии магазина: ставка по уровню
+известна только при подтверждении, поэтому `rate` вызывается там, но это
+арифметика над четырьмя числами с жёстким лимитом шагов, прошедшая проверку по
+сетке, и её отказ закрывает заказ по ставке уровня, а не роняет его
+([`implementation_plan_delivery_passport.md`](./implementation_plan_delivery_passport.md) §1.3). Starlark на
 пути подтверждения заказа не запускается никогда.
+
+### Привилегия магазина — после уровня
+
+Купленная в магазине или выданная вручную привилегия применяется в том же
+`Levels.For`, после уровня: `COMMISSION_MULTIPLIER` умножает ставку по уровню,
+`COMMISSION_DISCOUNT_PP` вычитает пункты, `COMMISSION_FREE` обнуляет её, зажим
+тот же — `[0, base]`. Привилегии не складываются, а встают в общую очередь;
+если по ошибке действуют несколько сразу, берётся дающая наименьшую ставку. В
+`Level` это `level_percent` (ставка по уровню) и поля `perk_*`, в заказе —
+`commission_perk_id` рядом со ставкой. Вознаграждения из `BONUSES` привилегия
+не трогает. Подробно — [`shop.md`](./shop.md#4-привилегии-в-ставке-комиссии).
 
 ### Уровень может снизиться
 
@@ -437,6 +453,8 @@ CREATE TABLE gifts (
     description JSONB NOT NULL DEFAULT '{}'::jsonb,
     image_url  TEXT NULL,
     -- BONUS: сумма начисления в копейках. Остальные: номинал, справочно.
+    -- Читается через sql.NullInt64 + money.FromKopecks: Amount.Scan считает
+    -- целое рублями и умножил бы сумму на сто.
     amount     BIGINT NOT NULL DEFAULT 0,
     partner    VARCHAR(64) NULL,
     -- Остаток. NULL — не ограничен (BONUS, PROMO). Для PHYSICAL — склад,
@@ -482,6 +500,42 @@ CREATE TABLE user_gifts (
     redeemed_by    UUID NULL REFERENCES users(id)   -- администратор
 );
 ```
+
+**Ошибка масштаба (исправлена).** До исправления `gifts.amount` и
+`executor_stats.earned_total` читались прямо в `money.Amount`, а его `Scan`
+считает целое число рублями — копейки превращались в сумму в сто раз больше.
+Денежный подарок на 500 ₽ читался как 50 000 ₽, упирался в потолок
+`achievement_max_bonus` и выплачивался потолком, 5 000 ₽, с инцидентом
+`COMMISSION_OUT_OF_RANGE`. Пересчёт статистики по истории, наоборот, писал в
+`earned_total` рубли вместо копеек.
+
+Что сделать после выката исправления:
+
+* найти переплаченные бонусы — каждая урезанная выплата оставила инцидент:
+
+  ```sql
+  SELECT user_id, details->>'gift' AS gift, actual / 100 AS owed, applied AS paid,
+         applied - actual / 100 AS overpaid, created_at
+  FROM money_incidents
+  WHERE kind = 'COMMISSION_OUT_OF_RANGE' AND details ? 'gift'
+  ORDER BY created_at;
+  ```
+
+  `actual` — сумма, прочитанная в сто раз больше, `applied` — выплаченная.
+  Что делать с переплатой — решает человек. Сверка её не покажет: переплата
+  прошла обеими сторонами через `BONUSES`;
+* привести `earned_total` к журналу заказов. Строки, накопленные при
+  подтверждении, верны, строки после пересчёта хранят сумму в сто раз
+  меньше, а какие из них какие — не узнать; журнал заказов прав всегда:
+
+  ```sql
+  UPDATE executor_stats s
+  SET earned_total = COALESCE((
+          SELECT ROUND(SUM(final_amount) * 100)
+          FROM orders
+          WHERE executor_id = s.user_id AND status = 'COMPLETED'), 0),
+      updated_at = now();
+  ```
 
 Остаток снимается тем же приёмом, что и код:
 `UPDATE gifts SET stock = stock - 1 WHERE code = $1 AND (stock IS NULL OR stock > 0) RETURNING stock`.

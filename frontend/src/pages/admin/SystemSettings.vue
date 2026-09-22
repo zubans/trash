@@ -163,10 +163,13 @@
               </div>
               <div class="input-wrapper has-prefix">
                 <span class="input-prefix">км</span>
+                <!-- Шаг 0.1, а не 0.5: при min 0.1 шаг 0.5 допускал только 0.1,
+                     0.6, 1.1…, и значение по умолчанию 0.5 не давало сохранить
+                     форму целиком. -->
                 <input
                   v-model="values.accept_radius_km"
                   type="number"
-                  step="0.5"
+                  step="0.1"
                   min="0.1"
                   required
                 />
@@ -187,7 +190,7 @@
                 <input
                   v-model="values.map_overview_radius_km"
                   type="number"
-                  step="1"
+                  step="0.5"
                   min="0.5"
                   max="50"
                   required
@@ -263,7 +266,7 @@
                 <div class="input-hint">Арбитраж подсвечивает снимок, сделанный дальше этого от адреса заказа.</div>
               </div>
               <div class="input-wrapper">
-                <input v-model="values.photo_proof_max_distance_m" type="number" step="10" min="1" max="100000" required />
+                <input v-model="values.photo_proof_max_distance_m" type="number" step="1" min="1" max="100000" required />
               </div>
             </div>
             <div class="input-group">
@@ -419,6 +422,45 @@
           </div>
 
         </div>
+
+        <!-- Карточка 5: Магазин. Выключатель и редакция оферты: новая редакция
+             заставляет покупателя принять её заново (offer_changed). -->
+        <div class="settings-card">
+          <div class="section-header">
+            <div class="section-icon icon-neutral">
+              <i class="ph-fill ph-storefront"></i>
+            </div>
+            <div class="section-title-group">
+              <div class="section-title">{{ $t('shop.admin.sections') }}</div>
+              <div class="section-desc">{{ $t('shop.admin.shopEnabledHint') }}</div>
+            </div>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-text">
+              <label class="input-label">{{ $t('shop.admin.shopEnabled') }}</label>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                v-model="values.shop_enabled"
+                true-value="1"
+                false-value="0"
+              />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="input-group">
+            <div class="input-header">
+              <label class="input-label">{{ $t('shop.offer.title') }}</label>
+              <div class="input-hint">{{ $t('shop.admin.offerVersionHint') }}</div>
+            </div>
+            <div class="input-wrapper">
+              <input v-model="values.shop_offer_version" type="number" min="1" step="1" required />
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Липкая панель действий -->
@@ -488,6 +530,9 @@ export default defineComponent({
       photo_proof_max_distance_m: '300',
       photo_proof_max_track_gap_min: '15',
       executor_track_days: '30',
+      // Магазин: значения миграции 059 — закрыт, редакция оферты № 1.
+      shop_enabled: '0',
+      shop_offer_version: '1',
     })
 
     // Тот же список, что принимает бэкенд (service.ShiftDurationsHours): смену,

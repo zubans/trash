@@ -33,6 +33,9 @@ const (
 	EventDisputeConceded = "dispute.conceded"
 	// EventDisputeResolved — спор закрыт решением арбитра.
 	EventDisputeResolved = "dispute.resolved"
+	// EventShopPurchased — покупка в магазине оплачена. Ачивки могут на неё
+	// реагировать («первая покупка»); субъект — покупатель.
+	EventShopPurchased = "shop.purchased"
 )
 
 // Типы субъектов события. Субъект решает, кому событие доставят: событие заказа

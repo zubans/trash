@@ -49,6 +49,15 @@
         >
           Штрафы
         </button>
+        <button
+          v-if="canSeeShop"
+          type="button"
+          class="tab"
+          :class="{ active: tab === 'shop' }"
+          @click="switchTo('shop')"
+        >
+          {{ $t('shop.admin.userTab') }}
+        </button>
       </div>
 
       <p v-if="errorMsg" class="alert error">{{ errorMsg }}</p>
@@ -310,9 +319,96 @@
         </template>
       </div>
 
+      <!-- Покупки в магазине и привилегии. Выдать и отозвать привилегию —
+           право shop_orders.edit: это те же люди, что отменяют покупки. -->
+      <div v-if="tab === 'shop'" class="penalties">
+        <p v-if="actionMsg" class="alert success">{{ actionMsg }}</p>
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Товар</th>
+              <th>Сумма</th>
+              <th>Статус</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="o in shopOrders" :key="o.id">
+              <td class="nowrap">
+                <router-link :to="{ path: '/admin/shop/orders', query: { order: o.id } }">{{ o.number }}</router-link>
+              </td>
+              <td>
+                {{ o.product_snapshot.title?.ru }}
+                <div class="muted">{{ formatDate(o.created_at) }}</div>
+              </td>
+              <td class="nowrap">{{ formatAmount(o.total) }}</td>
+              <td>{{ $t('shop.status.' + o.status) }}</td>
+            </tr>
+            <tr v-if="!shopOrders.length">
+              <td colspan="4" class="empty">{{ $t('shop.orders.empty') }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="penalty-role-title perks-title">{{ $t('shop.admin.userPerks') }}</div>
+        <table class="history-table">
+          <tbody>
+            <tr v-for="p in shopPerks" :key="p.id" :class="{ revoked: p.revoked_at || isPast(p.expires_at) }">
+              <td>
+                {{ ruleText(p.rule_title, p.config) }}
+                <div class="muted">
+                  <template v-if="p.shop_order_number">№{{ p.shop_order_number }}</template>
+                  <template v-else>{{ $t('shop.admin.granted') }}<template v-if="p.reason">: {{ p.reason }}</template></template>
+                </div>
+              </td>
+              <td class="nowrap">{{ formatDate(p.starts_at) }} — {{ formatDate(p.expires_at) }}</td>
+              <td>
+                <template v-if="p.revoked_at">{{ $t('shop.orders.revoked') }}</template>
+                <button
+                  v-else-if="canEditShop && !isPast(p.expires_at)"
+                  type="button"
+                  class="btn-link danger"
+                  :disabled="busy"
+                  @click="revokeShopPerk(p)"
+                >
+                  {{ $t('shop.admin.revoke') }}
+                </button>
+              </td>
+            </tr>
+            <tr v-if="!shopPerks.length">
+              <td colspan="3" class="empty">—</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div v-if="canEditShop" class="grant-perk">
+          <div class="penalty-role-title">{{ $t('shop.admin.grant') }}</div>
+          <div class="grant-row">
+            <select v-model="perkDraft.rule" class="input" @change="resetGrantConfig">
+              <option v-for="r in grantRules" :key="r.code" :value="r.code">{{ r.title }}</option>
+            </select>
+            <input
+              v-for="key in Object.keys(perkDraft.config)"
+              :key="key"
+              v-model.number="perkDraft.config[key]"
+              type="number"
+              step="any"
+              class="input short"
+              :placeholder="key"
+              :title="key"
+            />
+            <input v-model.number="perkDraft.days" type="number" min="1" class="input short" :placeholder="$t('shop.admin.fields.perkDays')" />
+            <input v-model="perkDraft.reason" class="input" :placeholder="$t('shop.admin.grantReason')" />
+            <button type="button" class="btn-more" :disabled="busy || !perkDraft.rule || !perkDraft.reason.trim() || !perkDraft.days" @click="grantShopPerk">
+              {{ $t('shop.admin.grant') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="history-foot">
         <span class="muted">
-          <template v-if="total">Показано {{ shown }} из {{ total }}</template>
+          <template v-if="total && (tab === 'transactions' || tab === 'orders')">Показано {{ shown }} из {{ total }}</template>
         </span>
         <div class="foot-actions">
           <button
@@ -334,7 +430,8 @@
 </template>
 
 <script lang="ts">
-import { computed, defineComponent, PropType, ref, watch } from 'vue'
+import { computed, defineComponent, PropType, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   getUserOrders,
   getUserTransactions,
@@ -353,6 +450,8 @@ import {
   type UserGrant,
 } from '../../api/achievements'
 import { useAuthStore } from '../../stores/auth-store'
+import { adminGetUserShop, adminGrantPerk, adminPerkRules, adminRevokePerk, type PerkConfig, type PerkRule, type ShopOrder, type UserPerk } from '../../api/shop'
+import { ruleText } from '../../utils/perk'
 import {
   ORDER_STATUS_LABELS,
   RETURN_TO_WORK_CONFIRM,
@@ -384,9 +483,11 @@ const TYPE_LABELS: Record<string, string> = {
   COMMISSION: 'Комиссия платформы',
   BONUS: 'Бонус',
   DISPUTE_REWARD: 'Оплата по спору',
+  SHOP_PURCHASE: 'Покупка в магазине',
+  SHOP_REFUND: 'Возврат покупки',
 }
 
-type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties'
+type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties' | 'shop'
 
 
 export default defineComponent({
@@ -403,6 +504,7 @@ export default defineComponent({
   emits: ['update:modelValue'],
   setup(props) {
     const authStore = useAuthStore()
+    const { t } = useI18n()
     const tab = ref<Tab>(props.initialTab)
     const transactions = ref<UserTransaction[]>([])
     const orders = ref<UserOrder[]>([])
@@ -429,6 +531,21 @@ export default defineComponent({
     const canSeePenalties = computed(() => authStore.can('users.view'))
     const canEditPenalties = computed(() => authStore.can('penalties.edit'))
     const canEditOrders = computed(() => authStore.can('orders.edit'))
+
+    // Магазин: покупки видит тот, кто видит заказы магазина; выдать и отозвать
+    // привилегию — право на их правку.
+    const canSeeShop = computed(() => authStore.can('shop_orders.view'))
+    const canEditShop = computed(() => authStore.can('shop_orders.edit'))
+    const shopOrders = ref<ShopOrder[]>([])
+    const shopPerks = ref<UserPerk[]>([])
+    const perkDraft = reactive({ rule: '', config: {} as PerkConfig, days: 1, reason: '' })
+    // Правила для ручной выдачи — включённые. Справочник охраняется своим
+    // правом: без него список пуст и выдать нечего.
+    const perkRules = ref<PerkRule[]>([])
+    const grantRules = computed(() => perkRules.value.filter((r) => r.is_active))
+    const resetGrantConfig = () => {
+      perkDraft.config = { ...(perkRules.value.find((r) => r.code === perkDraft.rule)?.defaults || {}) }
+    }
 
     // Выдать вручную можно только включённую ачивку с загруженным скриптом —
     // ровно то, что разрешает сервер. Предлагать в списке большее значило бы
@@ -458,6 +575,7 @@ export default defineComponent({
       orders: 'История заказов',
       achievements: 'Ачивки пользователя',
       penalties: 'Штрафные баллы',
+      shop: 'Покупки в магазине',
     }
     const title = computed(() => TITLES[tab.value])
 
@@ -491,6 +609,19 @@ export default defineComponent({
         const offset = append ? shown.value : 0
         if (tab.value === 'achievements') {
           await loadAchievements()
+        } else if (tab.value === 'shop') {
+          const [res, rules] = await Promise.all([
+            adminGetUserShop(props.user.id),
+            canEditShop.value ? adminPerkRules().catch(() => []) : Promise.resolve([]),
+          ])
+          shopOrders.value = res.orders
+          shopPerks.value = res.perks
+          perkRules.value = rules
+          if (!perkDraft.rule && grantRules.value.length) {
+            perkDraft.rule = grantRules.value[0].code
+            resetGrantConfig()
+          }
+          total.value = res.orders.length
         } else if (tab.value === 'penalties') {
           penalties.value = await getUserPenalties(props.user.id)
           total.value = penalties.value.points.length
@@ -606,6 +737,45 @@ export default defineComponent({
         return 'Флаг прошлой тихой блокировки снят.'
       })
 
+    const isPast = (value: string) => new Date(value).getTime() <= Date.now()
+
+    const runShopAction = async (job: () => Promise<string>) => {
+      if (!props.user || busy.value) return
+      busy.value = true
+      errorMsg.value = ''
+      actionMsg.value = ''
+      try {
+        actionMsg.value = await job()
+        await load()
+      } catch (err: any) {
+        const data = err?.response?.data
+        errorMsg.value = data?.fields ? Object.values(data.fields).join('; ') : data?.message || 'Не удалось выполнить действие'
+      } finally {
+        busy.value = false
+      }
+    }
+
+    // Выданная вручную привилегия встаёт в общую очередь за купленными.
+    const grantShopPerk = () =>
+      runShopAction(async () => {
+        await adminGrantPerk(props.user.id, {
+          rule: perkDraft.rule,
+          config: perkDraft.config,
+          days: Number(perkDraft.days),
+          reason: perkDraft.reason.trim(),
+        })
+        perkDraft.reason = ''
+        return 'Привилегия выдана.'
+      })
+
+    const revokeShopPerk = (perk: UserPerk) => {
+      if (!window.confirm(t('shop.admin.revokeConfirm'))) return
+      runShopAction(async () => {
+        await adminRevokePerk(perk.id)
+        return 'Привилегия отозвана.'
+      })
+    }
+
     const statusFor = (role: string) => penalties.value?.statuses.find((st) => st.role === role) || null
     const activeUntil = (value?: string) => !!value && new Date(value).getTime() > Date.now()
 
@@ -631,6 +801,8 @@ export default defineComponent({
         orders.value = []
         grants.value = []
         penalties.value = null
+        shopOrders.value = []
+        shopPerks.value = []
         actionMsg.value = ''
         grantCode.value = ''
         grantReason.value = ''
@@ -665,6 +837,15 @@ export default defineComponent({
     }
 
     return {
+      canSeeShop,
+      canEditShop,
+      shopOrders,
+      shopPerks,
+      perkDraft,
+      isPast,
+      grantShopPerk,
+      revokeShopPerk,
+      ruleText, grantRules, resetGrantConfig,
       tab,
       transactions,
       orders,
@@ -718,6 +899,32 @@ export default defineComponent({
   color: #6b7280;
   font-size: 13px;
   margin: 0 0 12px;
+}
+
+.perks-title {
+  margin-top: 16px;
+}
+
+.grant-perk {
+  margin-top: 16px;
+}
+
+.grant-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.grant-row .input {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.grant-row .input.short {
+  width: 110px;
 }
 
 .tabs {

@@ -35,6 +35,15 @@ type AchievementHandler struct {
 	scripts *service.Achievements
 	// dispatcher выдаёт ачивки — и по событию, и по кнопке администратора.
 	dispatcher *service.AchievementDispatcher
+	// shop закрывает покупку магазина, когда погашен её последний купон.
+	shop *service.ShopService
+}
+
+// WithShop подключает магазин: купон вещи из магазина гасится тем же
+// эндпоинтом, что и подарок ачивки.
+func (h *AchievementHandler) WithShop(shop *service.ShopService) *AchievementHandler {
+	h.shop = shop
+	return h
 }
 
 // WithScripts подключает компиляцию собственных скриптов ачивок.
@@ -193,7 +202,17 @@ func (h *AchievementHandler) GetLevel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, h.levels.For(r.Context(), nil, user.ID))
+	// Вместе с уровнем — привилегии магазина: действующая и очередь за ней,
+	// чтобы плашка показала «дальше: …» без второго запроса.
+	queue, err := h.levels.Queue(r.Context(), user.ID)
+	if err != nil {
+		log.Printf("[achievements] cannot read perk queue of %s: %v", user.ID, err)
+		queue = []*repository.UserPerk{}
+	}
+	writeJSON(w, struct {
+		service.Level
+		PerkQueue []*repository.UserPerk `json:"perk_queue"`
+	}{h.levels.For(r.Context(), nil, user.ID), queue})
 }
 
 // factsFor собирает факты для хуков, которые вызываются не диспетчером, а
@@ -746,6 +765,13 @@ func (h *AchievementHandler) AdminRedeemCoupon(w http.ResponseWriter, r *http.Re
 		return
 	}
 	log.Printf("[AUDIT] admin %s redeemed coupon %s of user %s", admin.ID, coupon, gift.UserID)
+	if h.shop != nil {
+		// Сбой здесь не отменяет погашения: вещь уже выдана, а покупку можно
+		// закрыть руками из её карточки.
+		if err := h.shop.OnCouponRedeemed(r.Context(), gift); err != nil {
+			log.Printf("[shop] cannot complete order of coupon %s: %v", coupon, err)
+		}
+	}
 	writeJSON(w, gift)
 }
 

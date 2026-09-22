@@ -1,0 +1,240 @@
+/* Разделы магазина в админке — та же панельная система, что у «Подарков»
+   (pages/admin/Gifts.vue): белые панели на сером фоне, плотные таблицы. */
+.shop-admin {
+  padding: 20px;
+  max-width: 1100px;
+}
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.page-sub,
+.panel-sub {
+  color: #6b7280;
+  font-size: 13px;
+  margin: 0 0 12px;
+  max-width: 680px;
+  line-height: 1.45;
+}
+h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+h3 {
+  font-size: 13px;
+  margin: 12px 0 6px;
+  color: #374151;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn-refresh {
+  border: none;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.alert.error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.alert.success {
+  background: #ecfdf5;
+  color: #047857;
+}
+.alert.warn {
+  background: #fffbeb;
+  color: #92400e;
+}
+.panel {
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border: 1px solid #eef0f4;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.input {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+.input.invalid {
+  border-color: #f87171;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+}
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-primary {
+  background: #111827;
+  color: #fff;
+}
+.btn-secondary {
+  background: #f3f4f6;
+  color: #111827;
+}
+.btn-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-link {
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  color: #9ca3af;
+  font-weight: 500;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.table td {
+  padding: 8px;
+  border-top: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+.table tr.clickable {
+  cursor: pointer;
+}
+.table tr.clickable:hover td {
+  background: #f9fafb;
+}
+.table tr.selected td {
+  background: #eef2ff;
+}
+.table-wrap {
+  overflow-x: auto;
+}
+.thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f3f4f6;
+}
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.badge.ok {
+  background: #ecfdf5;
+  color: #059669;
+}
+.badge.warn {
+  background: #fffbeb;
+  color: #b45309;
+}
+.badge.danger {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.badge.info {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.empty {
+  color: #9ca3af;
+  text-align: center;
+  padding: 16px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #4b5563;
+}
+.field.wide {
+  grid-column: 1 / -1;
+}
+.field.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.field-error {
+  color: #b91c1c;
+  font-size: 12px;
+}
+.muted {
+  color: #9ca3af;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 6px 12px;
+  font-size: 13px;
+}
+.kv dt {
+  color: #6b7280;
+}
+.kv dd {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .shop-admin {
+    padding: 12px;
+  }
+  .kv {
+    grid-template-columns: 1fr;
+  }
+}

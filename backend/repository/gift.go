@@ -64,18 +64,21 @@ type Gift struct {
 
 // UserGift — то, что человек получил, и в каком состоянии оно находится.
 type UserGift struct {
-	ID            uuid.UUID              `json:"id"`
-	UserID        uuid.UUID              `json:"user_id"`
-	GiftCode      string                 `json:"gift_code"`
-	GiftCodeID    *uuid.UUID             `json:"-"`
-	AchievementID *uuid.UUID             `json:"achievement_id,omitempty"`
-	CouponCode    string                 `json:"coupon_code"`
-	Status        string                 `json:"status"`
-	Fulfillment   map[string]interface{} `json:"fulfillment,omitempty"`
-	GrantedAt     time.Time              `json:"granted_at"`
-	ExpiresAt     *time.Time             `json:"expires_at,omitempty"`
-	RevealedAt    *time.Time             `json:"revealed_at,omitempty"`
-	RedeemedAt    *time.Time             `json:"redeemed_at,omitempty"`
+	ID            uuid.UUID  `json:"id"`
+	UserID        uuid.UUID  `json:"user_id"`
+	GiftCode      string     `json:"gift_code"`
+	GiftCodeID    *uuid.UUID `json:"-"`
+	AchievementID *uuid.UUID `json:"achievement_id,omitempty"`
+	// ShopOrderID — покупка в магазине, которой выдан купон. У подарков
+	// ачивок пусто; экран подарков по нему ставит пометку «куплено».
+	ShopOrderID *uuid.UUID             `json:"shop_order_id,omitempty"`
+	CouponCode  string                 `json:"coupon_code"`
+	Status      string                 `json:"status"`
+	Fulfillment map[string]interface{} `json:"fulfillment,omitempty"`
+	GrantedAt   time.Time              `json:"granted_at"`
+	ExpiresAt   *time.Time             `json:"expires_at,omitempty"`
+	RevealedAt  *time.Time             `json:"revealed_at,omitempty"`
+	RedeemedAt  *time.Time             `json:"redeemed_at,omitempty"`
 	// Gift — сам подарок, когда список отдают пользователю.
 	Gift *Gift `json:"gift,omitempty"`
 	// Secret — код сертификата. Заполняется только на явный запрос показать его
@@ -97,6 +100,20 @@ type GiftRepository interface {
 	// Issue выдаёт подарок в транзакции вызывающего: занимает код или единицу
 	// склада и создаёт купон. Возвращает ErrGiftUnavailable, когда брать нечего.
 	Issue(ctx context.Context, q Querier, gift *Gift, userID uuid.UUID, achievementID *uuid.UUID) (*UserGift, error)
+	// IssueForShop выдаёт единицу купленного товара тем же способом, что и
+	// подарок ачивки, но с привязкой к покупке и с её выбором — размером,
+	// пунктом выдачи или адресом — в fulfillment. Пустой склад здесь не мягкий
+	// отказ: ErrGiftUnavailable откатывает всю покупку вместе с оплатой.
+	IssueForShop(ctx context.Context, q Querier, gift *Gift, userID, shopOrderID uuid.UUID, fulfillment map[string]interface{}) (*UserGift, error)
+	// ListByShopOrder — купоны одной покупки, без секретов.
+	ListByShopOrder(ctx context.Context, q Querier, shopOrderID uuid.UUID) ([]*UserGift, error)
+	// CancelShopCoupons аннулирует непогашенные купоны покупки при её отмене.
+	// Код сертификата, который владелец ещё не открывал, возвращается в пул;
+	// показанный — нет: кто его прочитал, тот мог им и воспользоваться.
+	CancelShopCoupons(ctx context.Context, q Querier, shopOrderID uuid.UUID) (int, error)
+	// RestoreStock возвращает единицы на склад подарка с ограниченным
+	// остатком. У неограниченного склада возвращать некуда.
+	RestoreStock(ctx context.Context, q Querier, giftCode string, units int) error
 	// ListForUser возвращает подарки пользователя вместе с их описанием, но
 	// никогда — с секретом.
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]*UserGift, error)
@@ -155,11 +172,12 @@ func (r *giftRepo) Get(ctx context.Context, code string) (*Gift, error) {
 func scanGift(row rowScanner) (*Gift, error) {
 	var g Gift
 	var title, description []byte
-	var stock, validDays sql.NullInt64
-	if err := row.Scan(&g.Code, &g.Kind, &title, &description, &g.ImageURL, &g.Amount,
+	var amount, stock, validDays sql.NullInt64
+	if err := row.Scan(&g.Code, &g.Kind, &title, &description, &g.ImageURL, &amount,
 		&g.Partner, &g.PromoCode, &stock, &validDays, &g.IsActive, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return nil, err
 	}
+	g.Amount = giftAmount(amount)
 	if len(title) > 0 {
 		_ = json.Unmarshal(title, &g.Title)
 	}
@@ -175,6 +193,16 @@ func scanGift(row rowScanner) (*Gift, error) {
 		g.ValidDays = &value
 	}
 	return &g, nil
+}
+
+// giftAmount читает gifts.amount. Колонка — BIGINT в копейках, а не NUMERIC в
+// рублях, поэтому сканировать её прямо в money.Amount нельзя: Amount.Scan
+// считает целое число рублями и умножил бы сумму на сто.
+func giftAmount(v sql.NullInt64) money.Amount {
+	if !v.Valid {
+		return money.Zero
+	}
+	return money.FromKopecks(v.Int64)
 }
 
 func (r *giftRepo) Upsert(ctx context.Context, gift *Gift) error {
@@ -227,6 +255,14 @@ func (r *giftRepo) CountFreeCodes(ctx context.Context, giftCode string) (int, er
 }
 
 func (r *giftRepo) Issue(ctx context.Context, q Querier, gift *Gift, userID uuid.UUID, achievementID *uuid.UUID) (*UserGift, error) {
+	return r.issue(ctx, q, gift, userID, achievementID, nil, nil)
+}
+
+func (r *giftRepo) IssueForShop(ctx context.Context, q Querier, gift *Gift, userID, shopOrderID uuid.UUID, fulfillment map[string]interface{}) (*UserGift, error) {
+	return r.issue(ctx, q, gift, userID, nil, &shopOrderID, fulfillment)
+}
+
+func (r *giftRepo) issue(ctx context.Context, q Querier, gift *Gift, userID uuid.UUID, achievementID, shopOrderID *uuid.UUID, fulfillment map[string]interface{}) (*UserGift, error) {
 	if gift == nil || !gift.IsActive {
 		return nil, ErrGiftUnavailable
 	}
@@ -281,15 +317,23 @@ func (r *giftRepo) Issue(ctx context.Context, q Querier, gift *Gift, userID uuid
 
 	issued := &UserGift{
 		ID: uuid.New(), UserID: userID, GiftCode: gift.Code, GiftCodeID: codeID,
-		AchievementID: achievementID, CouponCode: coupon, Status: GiftStatusIssued,
-		ExpiresAt: expiresAt, Gift: gift,
+		AchievementID: achievementID, ShopOrderID: shopOrderID, CouponCode: coupon, Status: GiftStatusIssued,
+		ExpiresAt: expiresAt, Gift: gift, Fulfillment: fulfillment,
+	}
+	if fulfillment == nil {
+		fulfillment = map[string]interface{}{}
+	}
+	rawFulfillment, err := json.Marshal(fulfillment)
+	if err != nil {
+		return nil, err
 	}
 	err = exec.QueryRowContext(ctx, `
-        INSERT INTO user_gifts (id, user_id, gift_code, gift_code_id, achievement_id, coupon_code, status, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO user_gifts (id, user_id, gift_code, gift_code_id, achievement_id, shop_order_id,
+                                coupon_code, status, expires_at, fulfillment)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING granted_at
-    `, issued.ID, issued.UserID, issued.GiftCode, issued.GiftCodeID, issued.AchievementID,
-		issued.CouponCode, issued.Status, issued.ExpiresAt).Scan(&issued.GrantedAt)
+    `, issued.ID, issued.UserID, issued.GiftCode, issued.GiftCodeID, issued.AchievementID, issued.ShopOrderID,
+		issued.CouponCode, issued.Status, issued.ExpiresAt, rawFulfillment).Scan(&issued.GrantedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -315,9 +359,7 @@ func newCouponCode() (string, error) {
 
 func (r *giftRepo) ListForUser(ctx context.Context, userID uuid.UUID) ([]*UserGift, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT ug.id, ug.user_id, ug.gift_code, ug.gift_code_id, ug.achievement_id, ug.coupon_code,
-               ug.status, ug.fulfillment, ug.granted_at, ug.expires_at, ug.revealed_at, ug.redeemed_at,
-               `+giftColumnsPrefixed+`
+        SELECT `+userGiftColumns+`
         FROM user_gifts ug
         JOIN gifts g ON g.code = ug.gift_code
         WHERE ug.user_id = $1
@@ -326,6 +368,28 @@ func (r *giftRepo) ListForUser(ctx context.Context, userID uuid.UUID) ([]*UserGi
 	if err != nil {
 		return nil, err
 	}
+	return scanUserGifts(rows)
+}
+
+func (r *giftRepo) ListByShopOrder(ctx context.Context, q Querier, shopOrderID uuid.UUID) ([]*UserGift, error) {
+	rows, err := r.exec(q).QueryContext(ctx, `
+        SELECT `+userGiftColumns+`
+        FROM user_gifts ug
+        JOIN gifts g ON g.code = ug.gift_code
+        WHERE ug.shop_order_id = $1
+        ORDER BY ug.granted_at, ug.coupon_code
+    `, shopOrderID)
+	if err != nil {
+		return nil, err
+	}
+	return scanUserGifts(rows)
+}
+
+const userGiftColumns = `ug.id, ug.user_id, ug.gift_code, ug.gift_code_id, ug.achievement_id, ug.shop_order_id,
+               ug.coupon_code, ug.status, ug.fulfillment, ug.granted_at, ug.expires_at, ug.revealed_at, ug.redeemed_at,
+               ` + giftColumnsPrefixed
+
+func scanUserGifts(rows *sql.Rows) ([]*UserGift, error) {
 	defer rows.Close()
 
 	out := make([]*UserGift, 0)
@@ -334,13 +398,14 @@ func (r *giftRepo) ListForUser(ctx context.Context, userID uuid.UUID) ([]*UserGi
 		var fulfillment []byte
 		var g Gift
 		var title, description []byte
-		var stock, validDays sql.NullInt64
-		if err := rows.Scan(&ug.ID, &ug.UserID, &ug.GiftCode, &ug.GiftCodeID, &ug.AchievementID,
+		var amount, stock, validDays sql.NullInt64
+		if err := rows.Scan(&ug.ID, &ug.UserID, &ug.GiftCode, &ug.GiftCodeID, &ug.AchievementID, &ug.ShopOrderID,
 			&ug.CouponCode, &ug.Status, &fulfillment, &ug.GrantedAt, &ug.ExpiresAt, &ug.RevealedAt, &ug.RedeemedAt,
-			&g.Code, &g.Kind, &title, &description, &g.ImageURL, &g.Amount, &g.Partner, &g.PromoCode,
+			&g.Code, &g.Kind, &title, &description, &g.ImageURL, &amount, &g.Partner, &g.PromoCode,
 			&stock, &validDays, &g.IsActive, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
+		g.Amount = giftAmount(amount)
 		if len(fulfillment) > 0 {
 			_ = json.Unmarshal(fulfillment, &ug.Fulfillment)
 		}
@@ -431,9 +496,9 @@ func (r *giftRepo) RedeemCoupon(ctx context.Context, coupon string, adminID uuid
          WHERE coupon_code = $1
            AND status IN ($4, $5)
            AND (expires_at IS NULL OR expires_at > now())
-        RETURNING id, user_id, gift_code, coupon_code, status, granted_at, expires_at, redeemed_at
+        RETURNING id, user_id, gift_code, shop_order_id, coupon_code, status, granted_at, expires_at, redeemed_at
     `, coupon, adminID, GiftStatusRedeemed, GiftStatusIssued, GiftStatusRevealed).
-		Scan(&ug.ID, &ug.UserID, &ug.GiftCode, &ug.CouponCode, &ug.Status, &ug.GrantedAt, &ug.ExpiresAt, &ug.RedeemedAt)
+		Scan(&ug.ID, &ug.UserID, &ug.GiftCode, &ug.ShopOrderID, &ug.CouponCode, &ug.Status, &ug.GrantedAt, &ug.ExpiresAt, &ug.RedeemedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Купона нет, он уже погашен или просрочен. Различать эти случаи для
 		// того, кто вводит код на пункте выдачи, незачем: во всех трёх вещь не
@@ -441,4 +506,39 @@ func (r *giftRepo) RedeemCoupon(ctx context.Context, coupon string, adminID uuid
 		return nil, ErrGiftUnavailable
 	}
 	return &ug, err
+}
+
+func (r *giftRepo) CancelShopCoupons(ctx context.Context, q Querier, shopOrderID uuid.UUID) (int, error) {
+	exec := r.exec(q)
+	// Сначала коды, пока купоны ещё помнят, какие из них не открывали.
+	if _, err := exec.ExecContext(ctx, `
+        UPDATE gift_codes gc SET issued_to = NULL, issued_at = NULL
+          FROM user_gifts ug
+         WHERE ug.gift_code_id = gc.id AND ug.shop_order_id = $1
+           AND ug.status = $2 AND ug.revealed_at IS NULL
+    `, shopOrderID, GiftStatusIssued); err != nil {
+		return 0, err
+	}
+	res, err := exec.ExecContext(ctx, `
+        UPDATE user_gifts
+           SET status = $2,
+               gift_code_id = CASE WHEN status = $3 AND revealed_at IS NULL THEN NULL ELSE gift_code_id END
+         WHERE shop_order_id = $1 AND status IN ($3, $4, $5)
+    `, shopOrderID, GiftStatusCanceled, GiftStatusIssued, GiftStatusRevealed, GiftStatusExpired)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+func (r *giftRepo) RestoreStock(ctx context.Context, q Querier, giftCode string, units int) error {
+	if units <= 0 {
+		return nil
+	}
+	_, err := r.exec(q).ExecContext(ctx, `
+        UPDATE gifts SET stock = stock + $2, updated_at = now()
+         WHERE code = $1 AND stock IS NOT NULL
+    `, giftCode, units)
+	return err
 }

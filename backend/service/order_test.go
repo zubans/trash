@@ -23,6 +23,7 @@ type mockOrderRepo struct {
 	// Ставка и уровень, с которыми заказ закрыли, — для тестов комиссии.
 	commissionPercent map[uuid.UUID]float64
 	commissionLevel   map[uuid.UUID]int
+	commissionPerk    map[uuid.UUID]*uuid.UUID
 }
 
 func (m *mockOrderRepo) CreateOrderWithHold(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, holdAmount money.Amount, lastGeo string) (*repository.Order, error) {
@@ -321,13 +322,15 @@ func (m *mockOrderRepo) Confirm(ctx context.Context, q repository.Querier, order
 
 // SetCommission запоминает ставку, по которой заказ закрыли: тесты комиссии
 // сверяют её с уровнем исполнителя.
-func (m *mockOrderRepo) SetCommission(ctx context.Context, q repository.Querier, orderID uuid.UUID, percent float64, level int) error {
+func (m *mockOrderRepo) SetCommission(ctx context.Context, q repository.Querier, orderID uuid.UUID, percent float64, level int, perkID *uuid.UUID) error {
 	if m.commissionPercent == nil {
 		m.commissionPercent = map[uuid.UUID]float64{}
 		m.commissionLevel = map[uuid.UUID]int{}
+		m.commissionPerk = map[uuid.UUID]*uuid.UUID{}
 	}
 	m.commissionPercent[orderID] = percent
 	m.commissionLevel[orderID] = level
+	m.commissionPerk[orderID] = perkID
 	return nil
 }
 
@@ -983,6 +986,7 @@ func newMockAccounts() *mockAccounts {
 		repository.AccountPayouts:    0,
 		repository.AccountCommission: 0,
 		repository.AccountBonuses:    0,
+		repository.AccountShop:       0,
 	}}
 }
 

@@ -7,6 +7,13 @@
 -- now was opened afterwards, by one of the raw-SQL paths that still wrote a
 -- transaction row and changed a balance without touching a system account.
 --
+-- Which entries are one-sided is read from transactions.counterparty, and that
+-- column is only evidence from migration 060 on: before it CreateTransaction
+-- dropped the value, so the ledger's own entries carry NULL just like the
+-- raw-SQL ones. Entries between 029 and 060 cannot be classified and are not
+-- looked at; a gap opened there makes this script refuse, and
+-- locate_books_gap.sql is the next step.
+--
 -- What this repairs is therefore the ACCOUNT side only. The user side is
 -- already correct: reconciliation reports zero balance mismatches, meaning
 -- every balance agrees with that user's own transaction log. Writing another
@@ -26,19 +33,20 @@
 
 \set ON_ERROR_STOP on
 
--- The era boundary is found in the data, not guessed from a date: the first
--- entry the ledger ever wrote is where the two-sided world begins.
+-- The boundary is not inferred from the data: the first non-NULL counterparty
+-- is whatever this script last repaired, not where the column became
+-- trustworthy. It is the moment migration 060 ran, recorded by the migration
+-- runner in the same release that started writing the column.
+CREATE TEMP TABLE era ON COMMIT DROP AS
+SELECT (SELECT applied_at FROM schema_migrations WHERE version = '029_system_accounts.sql')        AS ledger_start,
+       (SELECT applied_at FROM schema_migrations WHERE version = '060_transaction_counterparty.sql') AS counterparty_start;
+
 CREATE TEMP TABLE onesided ON COMMIT DROP AS
-WITH era AS (
-    SELECT MIN(created_at) AS ledger_start
-    FROM transactions
-    WHERE counterparty IS NOT NULL
-)
 SELECT t.id, t.type::text AS type, t.amount, t.created_at
 FROM transactions t, era
 WHERE t.counterparty IS NULL
-  AND era.ledger_start IS NOT NULL
-  AND t.created_at >= era.ledger_start;
+  AND era.counterparty_start IS NOT NULL
+  AND t.created_at >= era.counterparty_start;
 
 -- How each type should have faced an account. A user credit is an account
 -- debit and the other way round, which is the whole invariant in one line.
@@ -71,18 +79,21 @@ DECLARE
     gap_after     NUMERIC;
     unmapped      INT;
     rows_found    INT;
-    ledger_rows   INT;
+    unclassified  INT;
     correction_ok BOOLEAN;
 BEGIN
-    -- Before anything else: can the ledger era be located at all? If no entry
-    -- has ever recorded a counterparty the boundary is NULL and the search
-    -- below returns nothing — which reads as "no one-sided entries" when the
-    -- truth would be the opposite, that every entry is one-sided. Those two
-    -- findings must never produce the same message.
-    SELECT count(*) INTO ledger_rows FROM transactions WHERE counterparty IS NOT NULL;
-    IF ledger_rows = 0 THEN
-        RAISE EXCEPTION 'no transaction has ever recorded a counterparty, so the ledger era cannot be located; this script cannot tell a clean history from a wholly one-sided one and refuses to act';
+    -- Before anything else: is there a boundary at all? Without migration 060
+    -- the search below returns nothing — which reads as "no one-sided entries"
+    -- when the truth is that none can be recognised. Those two findings must
+    -- never produce the same message.
+    IF (SELECT counterparty_start FROM era) IS NULL THEN
+        RAISE EXCEPTION 'migration 060 has not run, so no entry can be recognised as one-sided; deploy the release that writes transactions.counterparty first';
     END IF;
+
+    SELECT count(*) INTO unclassified
+    FROM transactions t, era
+    WHERE t.created_at >= COALESCE(era.ledger_start, era.counterparty_start)
+      AND t.created_at < era.counterparty_start;
 
     SELECT COALESCE((SELECT SUM(balance) FROM users), 0)
          + COALESCE((SELECT SUM(balance) FROM system_accounts), 0)
@@ -92,7 +103,8 @@ BEGIN
     SELECT count(*) INTO unmapped FROM correction WHERE account IS NULL;
 
     RAISE NOTICE 'books gap before: %', gap_before;
-    RAISE NOTICE 'one-sided entries after the ledger began: %', rows_found;
+    RAISE NOTICE 'one-sided entries since counterparty is written: %', rows_found;
+    RAISE NOTICE 'entries between migrations 029 and 060, not classifiable and not looked at: %', unclassified;
 
     IF gap_before = 0 THEN
         RAISE EXCEPTION 'the books already close; there is nothing to repair';
@@ -105,7 +117,7 @@ BEGIN
     END IF;
 
     IF rows_found = 0 THEN
-        RAISE EXCEPTION 'the books are open by % but no one-sided entry explains it — the cause is somewhere this script does not look, and a blind correction would only hide it', gap_before;
+        RAISE EXCEPTION 'the books are open by % but no one-sided entry explains it — the cause is somewhere this script does not look (possibly between migrations 029 and 060, see locate_books_gap.sql), and a blind correction would only hide it', gap_before;
     END IF;
 
     -- The corrections must account for the gap exactly. Anything else means the
@@ -123,7 +135,8 @@ BEGIN
     WHERE sa.code = c.account;
 
     -- Give the offending rows their counterparty, so the history stops looking
-    -- one-sided and a later audit can see they were accounted for.
+    -- one-sided and a later audit can see they were accounted for. This no
+    -- longer moves any boundary: the boundary lives in schema_migrations.
     UPDATE transactions t
     SET counterparty = CASE t.type::text
                            WHEN 'TOP_UP'          THEN 'DEPOSITS'

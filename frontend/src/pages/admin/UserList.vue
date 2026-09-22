@@ -173,6 +173,9 @@
                 <button v-if="canSeeUsers" class="dropdown-item" @click="openHistory(u, 'penalties')">
                   <i class="ph-bold ph-scales"></i> Штрафы
                 </button>
+                <button v-if="canSeeShop" class="dropdown-item" @click="openHistory(u, 'shop')">
+                  <i class="ph-bold ph-shopping-bag"></i> {{ $t('shop.admin.userTab') }}
+                </button>
                 <div class="menu-divider"></div>
                 <button
                   v-if="u.status === 'ACTIVE'"
@@ -271,6 +274,9 @@
           </button>
           <button v-if="canSeeUsers" @click="openHistory(u, 'penalties'); cardMenuId = null">
             <i class="ph-bold ph-scales"></i> Штрафы
+          </button>
+          <button v-if="canSeeShop" @click="openHistory(u, 'shop'); cardMenuId = null">
+            <i class="ph-bold ph-shopping-bag"></i> {{ $t('shop.admin.userTab') }}
           </button>
           <button v-if="u.status === 'ACTIVE'" class="danger" @click="softBanUser(u); cardMenuId = null">
             <i class="ph-bold ph-lock-key"></i> Мягкий бан
@@ -520,7 +526,7 @@ export default defineComponent({
     // лишь вкладка, на которой оно открывается.
     const showHistoryModal = ref(false)
     const historyUser = ref<any | null>(null)
-    const historyTab = ref<'transactions' | 'orders' | 'achievements' | 'penalties'>('transactions')
+    const historyTab = ref<'transactions' | 'orders' | 'achievements' | 'penalties' | 'shop'>('transactions')
 
     // Права те же, что охраняют эндпоинты историй: раздел проводок и раздел
     // заказов, а не право на пользователей.
@@ -538,8 +544,10 @@ export default defineComponent({
     const canSeeAchievements = computed(() => authStore.can('achievements.view'))
 
     const canSeeUsers = computed(() => authStore.can('users.view'))
+    // Покупки и привилегии в магазине — вкладка истории для тех, кто видит заказы магазина.
+    const canSeeShop = computed(() => authStore.can('shop_orders.view'))
 
-    const openHistory = (user: any, tab: 'transactions' | 'orders' | 'achievements' | 'penalties') => {
+    const openHistory = (user: any, tab: 'transactions' | 'orders' | 'achievements' | 'penalties' | 'shop') => {
       historyUser.value = user
       historyTab.value = tab
       showHistoryModal.value = true
@@ -952,6 +960,7 @@ export default defineComponent({
       writeMail,
       openHistory,
       canSeeUsers,
+      canSeeShop,
       softBanUser,
       totalUsers,
       page,

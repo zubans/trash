@@ -179,6 +179,19 @@
                   </div>
 
                   <div class="msg-text-content">{{ msg.text }}</div>
+                  <!-- Номер покупки в сообщении — ссылка на её карточку. Сервер
+                       размечает только покупки владельца чата; на деньги это
+                       не влияет, отменяет всегда человек. -->
+                  <div v-if="msg.shop_orders?.length" class="msg-shop-links">
+                    <router-link
+                      v-for="link in msg.shop_orders"
+                      :key="link.id"
+                      :to="{ path: '/admin/shop/orders', query: { order: link.id } }"
+                      class="msg-shop-link"
+                    >
+                      <i class="ph-bold ph-shopping-bag"></i> №{{ link.number }}
+                    </router-link>
+                  </div>
 
                   <div class="msg-time">
                     <span>{{ formatTime(msg.created_at) }}</span>
@@ -244,6 +257,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import api, { resolveFileUrl } from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
 
@@ -251,6 +265,7 @@ export default defineComponent({
   name: 'AdminSupportChats',
   setup() {
     const authStore = useAuthStore()
+    const route = useRoute()
     const currentUserId = computed(() => authStore.userID)
 
     const chats = ref<any[]>([])
@@ -500,8 +515,15 @@ export default defineComponent({
       return `Забанен до ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     }
 
-    onMounted(() => {
-      fetchChats()
+    onMounted(async () => {
+      await fetchChats()
+      // Из карточки покупки магазина чат покупателя открывается сразу:
+      // ?chat=<id> выбирает его в списке.
+      const wanted = route.query.chat
+      if (typeof wanted === 'string') {
+        const chat = chats.value.find((c) => c.chat_id === wanted)
+        if (chat) selectChat(chat)
+      }
       window.addEventListener('click', closeDropdown)
       // Список чатов дорог в пересчёте на строку (последнее сообщение и счётчик
       // непрочитанного разрешаются для каждой переписки), поэтому он обновляется по
@@ -1007,6 +1029,26 @@ export default defineComponent({
   font-weight: 700;
   margin-bottom: 4px;
   opacity: 0.85;
+}
+
+.msg-shop-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.msg-shop-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(79, 70, 229, 0.12);
+  color: #4338ca;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .msg-text-content {

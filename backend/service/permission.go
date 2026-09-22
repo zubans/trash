@@ -104,6 +104,21 @@ var permissionCatalog = []PermissionSection{
 	{Key: "releases", Label: "Релизы приложения", Group: "Система", Route: "",
 		Actions: []string{ActionCreate},
 		Hint:    "Загрузка APK. Отдельного пункта меню нет."},
+	// Магазин — три раздела, а не один: заводить товары (маркетинг),
+	// обрабатывать заказы (склад) и выводить деньги (финансы) — разные люди.
+	{Key: "shop", Label: "Товары магазина", Group: "Магазин", Route: "/admin/shop/products",
+		Actions: []string{ActionView, ActionCreate, ActionEdit},
+		Hint:    "Каталог, цены, изображения и пункты выдачи. Удаления нет: товар с продажами только снимается с витрины."},
+	{Key: "perk_rules", Label: "Правила привилегий", Group: "Магазин", Route: "/admin/shop/perk-rules",
+		Actions: []string{ActionView, ActionCreate, ActionEdit},
+		Hint: "Скрипты, которые считают ставку комиссии по привилегии. Правило, прошедшее проверку по сетке, " +
+			"продаётся товарами; правка — новая версия, купленные привилегии остаются на своей."},
+	{Key: "shop_orders", Label: "Заказы магазина", Group: "Магазин", Route: "/admin/shop/orders",
+		Actions: []string{ActionView, ActionEdit},
+		Hint:    "Правка — смена статуса, отмена с возвратом денег, ручная выдача и отзыв привилегий."},
+	{Key: "shop_revenue", Label: "Выручка магазина", Group: "Магазин", Route: "/admin/shop/revenue",
+		Actions: []string{ActionView, ActionEdit},
+		Hint:    "Правка — вывод выручки со счёта SHOP."},
 }
 
 // PermissionCatalog отдаёт каталог разделов. Копия: вызывающий — обработчик,

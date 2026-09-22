@@ -46,9 +46,13 @@ type Transaction struct {
 	Amount    money.Amount `json:"amount"`
 	// Counterparty — системный счёт по другую сторону этой проводки.
 	// Пусто в строках, записанных до появления системных счетов.
-	Counterparty string     `json:"counterparty,omitempty"`
-	AdminID      *uuid.UUID `json:"admin_id,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
+	Counterparty string `json:"counterparty,omitempty"`
+	// ShopOrderID — покупка магазина, которой принадлежит проводка. Пусто у
+	// проводок заказов: order_id занят ими, а оплату и возвраты покупки иначе
+	// не найти.
+	ShopOrderID *uuid.UUID `json:"shop_order_id,omitempty"`
+	AdminID     *uuid.UUID `json:"admin_id,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 	// Direction — как этот тип двигает баланс пользователя: +1, -1 или 0.
 	// Берётся из ledgerSigns, чтобы клиент не выводил соглашение о знаках
 	// заново: суммы в таблице все положительные, направление живёт в типе.

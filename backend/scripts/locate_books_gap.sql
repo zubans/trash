@@ -12,17 +12,31 @@
 -- other three agree with themselves, the drift is there, meaning money entered
 -- or left the outside world without a matching movement on a user balance.
 --
--- The era boundary is printed first because it decides whether the rest can be
--- trusted at all: with no counterparty ever recorded there is no ledger era to
--- reason about.
+-- The eras are printed first because they decide what the rest can be trusted
+-- for. Both boundaries come from schema_migrations, not from the data: 029 is
+-- where the accounts were seeded and the books closed, 060 is where
+-- transactions.counterparty started being written. Between the two a NULL
+-- counterparty says nothing — the ledger's own entries carry it too — so a gap
+-- opened there is found only by the account checks below, never by entry.
+-- After 060 a NULL counterparty is an entry that went past the Ledger.
 --
 -- Nothing here writes.
 
-SELECT count(*) FILTER (WHERE counterparty IS NOT NULL) AS with_counterparty,
-       count(*) FILTER (WHERE counterparty IS NULL)     AS without_counterparty,
-       min(created_at) FILTER (WHERE counterparty IS NOT NULL)::date AS ledger_era_starts,
-       max(created_at)::date AS newest_entry
-FROM transactions;
+\pset title 'eras'
+WITH era AS (
+    SELECT (SELECT applied_at FROM schema_migrations WHERE version = '029_system_accounts.sql')        AS ledger_start,
+           (SELECT applied_at FROM schema_migrations WHERE version = '060_transaction_counterparty.sql') AS counterparty_start
+)
+SELECT era.ledger_start::date       AS ledger_era_starts,
+       era.counterparty_start::date AS counterparty_written_since,
+       count(t.id) FILTER (WHERE t.created_at < era.ledger_start) AS before_ledger,
+       count(t.id) FILTER (WHERE t.created_at >= era.ledger_start
+                            AND (era.counterparty_start IS NULL OR t.created_at < era.counterparty_start)) AS unclassifiable,
+       count(t.id) FILTER (WHERE t.created_at >= era.counterparty_start AND t.counterparty IS NOT NULL) AS two_sided,
+       count(t.id) FILTER (WHERE t.created_at >= era.counterparty_start AND t.counterparty IS NULL)     AS one_sided,
+       max(t.created_at)::date AS newest_entry
+FROM era LEFT JOIN transactions t ON true
+GROUP BY era.ledger_start, era.counterparty_start;
 
 \pset title 'accounts against their own definitions'
 SELECT 'ESCROW' AS account,

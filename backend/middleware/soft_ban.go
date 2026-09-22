@@ -66,6 +66,14 @@ var softBanAllowedRoutes = map[string]struct{}{
 	"POST /orders/{id}/reviews":          {},
 	"GET /orders/{id}/reviews/mine":      {},
 
+	// Магазин: свои покупки и купоны — это доступ к уже купленному. Витрина и
+	// сама покупка закрыты: трата — ровно то, чего заблокированному нельзя.
+	"GET /shop/orders":             {},
+	"GET /shop/orders/{id}":        {},
+	"GET /me/perks":                {},
+	"GET /user/gifts":              {},
+	"POST /user/gifts/{id}/reveal": {},
+
 	// Исполнитель: взятые заказы до конца и закрытие смены.
 	"GET /executor/orders/assigned":              {},
 	"POST /executor/orders/{id}/execute":         {},
