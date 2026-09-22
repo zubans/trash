@@ -46,6 +46,10 @@
           </div>
         </div>
 
+        <!-- Привилегия магазина — рядом со ставкой по уровню, к которой она
+             применяется: «7 % × 0.5 = 3.5 % до 17 октября» и очередь за ней. -->
+        <PerkBadge :level="level" :queue="level.perk_queue || []" />
+
         <!-- Истекающие баллы показываются заранее и намеренно: уровень
              считается по действующим баллам, поэтому истечение его снижает. -->
         <div v-if="expiring.length" class="level-warning">
@@ -150,6 +154,7 @@ import { computed, defineComponent, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PixelAchievementIcon from '../../components/PixelAchievementIcon.vue'
+import PerkBadge from '../../components/shop/PerkBadge.vue'
 import {
   getAchievements,
   getLevel,
@@ -159,7 +164,7 @@ import {
 
 export default defineComponent({
   name: 'AchievementsPage',
-  components: { PixelAchievementIcon },
+  components: { PixelAchievementIcon, PerkBadge },
   setup() {
     const router = useRouter()
 
@@ -172,6 +177,7 @@ export default defineComponent({
       discount_pp: 0,
       percent: 0,
       max_useful_level: 0,
+      level_percent: 0,
     })
     const loading = ref(true)
     const error = ref('')

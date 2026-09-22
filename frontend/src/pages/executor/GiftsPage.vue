@@ -15,7 +15,8 @@
       <div v-if="loading" class="state-note">Загружаем подарки…</div>
       <div v-else-if="error" class="state-note error">{{ error }}</div>
       <div v-else-if="!gifts.length" class="state-note">
-        Подарков пока нет. Они приходят за достижения — и сюда, и во внутреннюю почту.
+        <template v-if="role === 'CUSTOMER'">Купонов пока нет. Они появляются здесь, когда вы покупаете вещь или сертификат в магазине.</template>
+        <template v-else>Подарков пока нет. Они приходят за достижения и покупки в магазине — и сюда, и во внутреннюю почту.</template>
       </div>
 
       <div v-else class="gift-list">
@@ -28,6 +29,7 @@
 
             <div class="gift-meta">
               <span class="chip">{{ kindLabel(gift) }}</span>
+              <span v-if="gift.shop_order_id" class="chip purchased">{{ $t('shop.orders.purchasedBadge') }}</span>
               <span class="chip" :class="statusChip(gift)">{{ statusLabel(gift) }}</span>
               <span v-if="gift.expires_at" class="chip warn">
                 действует до {{ formatDate(gift.expires_at) }}
@@ -72,7 +74,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, onMounted, ref } from 'vue'
+import { defineComponent, onMounted, ref, type PropType } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { getGifts, revealGift, type UserGift } from '../../api/achievements'
@@ -101,7 +103,12 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default defineComponent({
   name: 'GiftsPage',
-  setup() {
+  props: {
+    // Страница одна: у исполнителя — подарки ачивок и купоны магазина, у
+    // заказчика — только купоны магазина. Роль решает, куда вернуться.
+    role: { type: String as PropType<'EXECUTOR' | 'CUSTOMER'>, default: 'EXECUTOR' },
+  },
+  setup(props) {
     const router = useRouter()
 
     const gifts = ref<UserGift[]>([])
@@ -156,7 +163,7 @@ export default defineComponent({
     const formatDate = (value?: string) =>
       value ? new Date(value).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : ''
 
-    const goBack = () => router.push('/executor')
+    const goBack = () => router.push(props.role === 'CUSTOMER' ? '/customer' : '/executor')
 
     onMounted(load)
 
@@ -303,6 +310,11 @@ export default defineComponent({
   border-radius: 999px;
   background: #f3f4f6;
   color: #4b5563;
+}
+
+.chip.purchased {
+  background: #eef2ff;
+  color: #4338ca;
 }
 
 .chip.ok {

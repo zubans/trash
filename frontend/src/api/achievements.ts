@@ -1,4 +1,5 @@
 import api from '../services/api'
+import type { PerkKind, UserPerk } from './shop'
 
 // Геймификация исполнителя: значки, уровень и подарки. Письма, которыми о них
 // сообщают, живут в api/mail.ts.
@@ -37,6 +38,15 @@ export interface ExecutorLevel {
   discount_pp: number
   percent: number
   max_useful_level: number
+  // Ставка по уровню, до привилегии магазина: percent отличается от неё, только
+  // пока привилегия действует.
+  level_percent: number
+  perk_id?: string
+  perk_kind?: PerkKind
+  perk_value?: number
+  perk_expires_at?: string
+  // Действующая привилегия и очередь за ней — для строки «дальше: …».
+  perk_queue?: UserPerk[]
 }
 
 export interface Gift {
@@ -55,6 +65,8 @@ export interface Gift {
 export interface UserGift {
   id: string
   gift_code: string
+  // Покупка магазина, которой выдан купон; у подарков ачивок пусто.
+  shop_order_id?: string
   coupon_code: string
   status: 'ISSUED' | 'REVEALED' | 'REDEEMED' | 'EXPIRED' | 'CANCELED'
   granted_at: string
@@ -77,13 +89,15 @@ export async function getLevel(): Promise<ExecutorLevel> {
   return response.data
 }
 
+// Купоны живут на общем маршруте: у заказчика ачивок нет, но купоны на
+// купленные в магазине вещи — есть.
 export async function getGifts(): Promise<UserGift[]> {
-  const response = await api.get('/executor/gifts')
+  const response = await api.get('/user/gifts')
   return Array.isArray(response.data) ? response.data : []
 }
 
 export async function revealGift(id: string): Promise<UserGift> {
-  const response = await api.post(`/executor/gifts/${id}/reveal`)
+  const response = await api.post(`/user/gifts/${id}/reveal`)
   return response.data
 }
 

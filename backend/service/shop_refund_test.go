@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -39,5 +40,28 @@ func TestProportionalRefundAtTheBoundaries(t *testing.T) {
 	revoked.RevokedAt = &at
 	if got := proportionalRefund(price, &revoked, start.Add(2*time.Hour)); got != 0 {
 		t.Errorf("revoked perk refunds %s, want nothing", got)
+	}
+}
+
+// Выключатель магазина и редакция оферты правятся на экране настроек, и
+// опечатка там не должна ни открыть витрину, ни сделать каждую покупку
+// «offer_changed».
+func TestUpdateSettingsGuardsTheShopSettings(t *testing.T) {
+	settings := &mockSettingsRepo{settings: map[string]string{}}
+	srv := NewAdminService(newMockUserRepo(), &mockAdminRepo{}, settings, "secret", nil)
+	ctx := context.Background()
+
+	for key, bad := range map[string][]string{
+		SettingShopEnabled:      {"2", "yes", ""},
+		SettingShopOfferVersion: {"0", "-1", "1.5", "abc"},
+	} {
+		for _, value := range bad {
+			if err := srv.UpdateSettings(ctx, map[string]string{key: value}); err == nil {
+				t.Errorf("%s = %q accepted", key, value)
+			}
+		}
+	}
+	if err := srv.UpdateSettings(ctx, map[string]string{SettingShopEnabled: "1", SettingShopOfferVersion: "2"}); err != nil {
+		t.Errorf("valid shop settings refused: %v", err)
 	}
 }

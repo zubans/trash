@@ -169,6 +169,31 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../pages/admin/ServiceScriptHelp.vue'),
         meta: { permission: 'service_catalog.view', bare: true },
       },
+      // Магазин: три раздела прав — товары, заказы, выручка (service/permission.go).
+      {
+        path: 'shop/products',
+        name: 'admin-shop-products',
+        component: () => import('../pages/admin/ShopProducts.vue'),
+        meta: { permission: 'shop.view', bare: true },
+      },
+      {
+        path: 'shop/pickup-points',
+        name: 'admin-shop-pickup-points',
+        component: () => import('../pages/admin/ShopPickupPoints.vue'),
+        meta: { permission: 'shop.view', bare: true },
+      },
+      {
+        path: 'shop/orders',
+        name: 'admin-shop-orders',
+        component: () => import('../pages/admin/ShopOrders.vue'),
+        meta: { permission: 'shop_orders.view', bare: true },
+      },
+      {
+        path: 'shop/revenue',
+        name: 'admin-shop-revenue',
+        component: () => import('../pages/admin/ShopRevenue.vue'),
+        meta: { permission: 'shop_revenue.view' },
+      },
     ],
   },
   {
@@ -225,7 +250,54 @@ const routes: Array<RouteRecordRaw> = [
     path: '/executor/gifts',
     name: 'executor-gifts',
     component: GiftsPageView,
+    props: { role: 'EXECUTOR' },
     meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  // Магазин один на обе роли: что кому видно, решает сервер по ролям на
+  // товаре; маршруты разные, чтобы «назад» вело на свой дашборд.
+  {
+    path: '/customer/shop',
+    name: 'customer-shop',
+    component: () => import('../pages/shared/ShopPage.vue'),
+    props: { role: 'CUSTOMER' },
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
+    path: '/customer/shop/:id',
+    name: 'customer-shop-product',
+    component: () => import('../pages/shared/ShopProductPage.vue'),
+    props: { role: 'CUSTOMER' },
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
+    // Купоны на купленные вещи. У заказчика ачивок нет, поэтому страница
+    // подарков у него — это купоны магазина.
+    path: '/customer/gifts',
+    name: 'customer-gifts',
+    component: GiftsPageView,
+    props: { role: 'CUSTOMER' },
+    meta: { requiresAuth: true, role: 'CUSTOMER' },
+  },
+  {
+    path: '/executor/shop',
+    name: 'executor-shop',
+    component: () => import('../pages/shared/ShopPage.vue'),
+    props: { role: 'EXECUTOR' },
+    meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    path: '/executor/shop/:id',
+    name: 'executor-shop-product',
+    component: () => import('../pages/shared/ShopProductPage.vue'),
+    props: { role: 'EXECUTOR' },
+    meta: { requiresAuth: true, role: 'EXECUTOR' },
+  },
+  {
+    // Оферта без требования роли: её читают из окна оформления любой роли.
+    path: '/shop/offer',
+    name: 'shop-offer',
+    component: () => import('../pages/shared/ShopOfferPage.vue'),
+    meta: { requiresAuth: true },
   },
   {
     // Почта без требования роли: новость адресуется человеку, а не его роли в
@@ -304,6 +376,9 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/escalations', permission: 'escalations.view' },
   { path: '/admin/disputes', permission: 'disputes.view' },
   { path: '/admin/watermark-symbols', permission: 'watermarks.view' },
+  { path: '/admin/shop/products', permission: 'shop.view' },
+  { path: '/admin/shop/orders', permission: 'shop_orders.view' },
+  { path: '/admin/shop/revenue', permission: 'shop_revenue.view' },
   { path: '/admin/settings', permission: 'settings.view' },
 ]
 

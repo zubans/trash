@@ -419,6 +419,45 @@
           </div>
 
         </div>
+
+        <!-- Карточка 5: Магазин. Выключатель и редакция оферты: новая редакция
+             заставляет покупателя принять её заново (offer_changed). -->
+        <div class="settings-card">
+          <div class="section-header">
+            <div class="section-icon icon-neutral">
+              <i class="ph-fill ph-storefront"></i>
+            </div>
+            <div class="section-title-group">
+              <div class="section-title">{{ $t('shop.admin.sections') }}</div>
+              <div class="section-desc">{{ $t('shop.admin.shopEnabledHint') }}</div>
+            </div>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-text">
+              <label class="input-label">{{ $t('shop.admin.shopEnabled') }}</label>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                v-model="values.shop_enabled"
+                true-value="1"
+                false-value="0"
+              />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="input-group">
+            <div class="input-header">
+              <label class="input-label">{{ $t('shop.offer.title') }}</label>
+              <div class="input-hint">{{ $t('shop.admin.offerVersionHint') }}</div>
+            </div>
+            <div class="input-wrapper">
+              <input v-model="values.shop_offer_version" type="number" min="1" step="1" required />
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Липкая панель действий -->
@@ -488,6 +527,9 @@ export default defineComponent({
       photo_proof_max_distance_m: '300',
       photo_proof_max_track_gap_min: '15',
       executor_track_days: '30',
+      // Магазин: значения миграции 059 — закрыт, редакция оферты № 1.
+      shop_enabled: '0',
+      shop_offer_version: '1',
     })
 
     // Тот же список, что принимает бэкенд (service.ShiftDurationsHours): смену,

@@ -54,6 +54,9 @@
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/history')">
               <i class="ph-fill ph-clock-counter-clockwise"></i> История заказов
             </button>
+            <button v-if="shopEnabled" type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/shop')">
+              <i class="ph-fill ph-storefront"></i> {{ $t('shop.menu') }}
+            </button>
             <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/executor/achievements')">
               <i class="ph-fill ph-trophy"></i> Достижения
             </button>
@@ -192,6 +195,15 @@
               <i class="ph-bold ph-arrow-up-right"></i> Вывести
             </button>
           </div>
+          <!-- Привилегия магазина — рядом с деньгами, там, где её эффект виден:
+               действующая ставка и очередь, а без неё — вход в магазин. -->
+          <PerkBadge
+            compact
+            :level="myPerks?.level || null"
+            :queue="myPerks?.queue || []"
+            :offer-cta="shopEnabled"
+            shop-route="/executor/shop"
+          />
         </div>
       </div>
 
@@ -810,6 +822,8 @@ import ExecutorProfileModal from './components/ExecutorProfileModal.vue'
 import VerificationPromptModal from './components/VerificationPromptModal.vue'
 import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
+import PerkBadge from '../../components/shop/PerkBadge.vue'
+import { useMyPerks, useStorefront } from '../../composables/useShop'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
 import api, { pollIntervalMs, getRefreshToken } from '../../services/api'
 import { useCachedResource } from '../../composables/useCachedResource'
@@ -845,11 +859,19 @@ export default defineComponent({
     SupportChatModal,
     SkeletonList,
     RefreshingBadge,
+    PerkBadge,
   },
   setup() {
     const router = useRouter()
     const { t } = useI18n()
     const authStore = useAuthStore()
+
+    // Магазин: открыт ли он (пункт меню) и действующая привилегия (плашка у
+    // баланса). Оба из кэша сразу, из сети — последней ступенью.
+    const shopStore = useStorefront()
+    const shopEnabled = computed(() => shopStore.data.value.enabled)
+    const perksResource = useMyPerks()
+    const myPerks = perksResource.data
 
     const phone = ref('')
     const userEmail = ref('')
@@ -1935,6 +1957,8 @@ export default defineComponent({
       shiftResource.hydrate()
       assignedResource.hydrate()
       availableResource.hydrate()
+      shopStore.hydrate()
+      perksResource.hydrate()
 
       // Порядок сетевых запросов задаётся смыслом, а не порядком строк. На
       // мобильной сети они конкурируют за одно соединение, и запущенные разом
@@ -1952,7 +1976,7 @@ export default defineComponent({
         //    о местоположении: решает их настройка, прочитанная на ступени 2.
         [startGeofenceReporting, availableResource.refresh, updateCurrentPosition],
         // 4. Фон экрана: непрочитанное и уведомление поддержки.
-        [fetchUnreadSummary, checkSupportNotification, checkMail],
+        [fetchUnreadSummary, checkSupportNotification, checkMail, shopStore.refresh, perksResource.refresh],
         // 5. Прогрев фотографий активных заказов. Идёт после всего, потому что
         //    это подготовка к будущему нажатию, а не содержимое экрана: чат
         //    открывают ради фотографий, и ждать их в момент открытия не должен
@@ -1997,6 +2021,8 @@ export default defineComponent({
     })
 
     return {
+      shopEnabled,
+      myPerks,
       authStore,
       menuOpen,
       sidebarStyle,

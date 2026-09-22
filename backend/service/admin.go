@@ -853,6 +853,18 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 			return fmt.Errorf("setting %s must be one of %v", SettingAutoShiftDurationHours, ShiftDurationsHours)
 		}
 	}
+	// Магазин открывается и закрывается только явным «1» или «0»: опечатка не
+	// должна ни открыть витрину, ни закрыть её посреди дня.
+	if v, ok := settings[SettingShopEnabled]; ok && v != "0" && v != "1" {
+		return errors.New("setting " + SettingShopEnabled + " must be 0 or 1")
+	}
+	// Редакция оферты — целое число от 1: покупка сверяет её с той, что
+	// принял покупатель, и «1.5» или «0» не совпали бы ни с одной.
+	if v, ok := settings[SettingShopOfferVersion]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 {
+			return errors.New("setting " + SettingShopOfferVersion + " must be a positive integer")
+		}
+	}
 	numericKeys["reject_penalty_share"] = true
 	// Доля платформы с завершённого заказа. Снизу ограничена вместе с прочими
 	// числовыми настройками, а сверху — прямо здесь, потому что доля выше 100%
