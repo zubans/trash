@@ -803,17 +803,18 @@
       "addPhoto": "Photograph the passport",
       "replacePhoto": "Retake the photo",
       "editViaSupport": "Change via support",
-      "becomeChecked": "Become checked",
-      "checkedHint": "To become checked, fill in the passport, attach its photo and message support.",
-      "checkRequest": "Please mark me as checked. My passport and its photo are in my profile.",
+      "checkedHint": "Fill in the passport and attach a photo — the request for the checked status is sent on its own. No need to contact support.",
       "editRequest": "Please change my passport details: ",
       "loadFailed": "Could not load the passport",
       "saveFailed": "Could not save the passport",
       "saved": "Passport saved",
       "savedAddPhoto": "Passport saved. Now attach a photo of the document.",
       "photoSaved": "Photo saved",
-      "checkPending": "The check request has been sent. A moderator will compare the passport and grant the checked status.",
-      "photoLive": "The photo is taken live — the app opens the camera."
+      "checkPending": "The request was sent automatically — no need to write to support. A moderator will compare the passport and grant the checked status.",
+      "photoLive": "The photo is taken live — the app opens the camera.",
+      "checkedWord": "Checked status",
+      "aboutTitle": "What the checked status is",
+      "about": "A moderator has compared your passport with the account data. A checked customer can order shop delivery, and executors trust their orders more. The request is sent on its own once the profile has both the passport and its photo: there is no need to write to support."
     },
     "verification": {
       "title": "Customer passport",

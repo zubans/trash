@@ -7,10 +7,6 @@
           <i class="ph-bold ph-arrow-left"></i>
           Вернуться на главную
         </button>
-        <div class="page-header-title">
-          <i class="ph-fill ph-user-circle icon-title"></i>
-          Профиль заказчика
-        </div>
       </div>
 
       <div class="profile-card">
@@ -46,10 +42,13 @@
               class="form-input"
               :max="maxBirthDate"
             />
+            <!-- Подтверждённому аккаунту кнопка не нужна: дату уже сверили с
+                 документом, и менять её через форму нельзя. -->
             <button
+              v-if="!birthDateLocked"
               type="button"
               class="btn-save-email"
-              :disabled="birthDateLocked || savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate"
+              :disabled="savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate"
               @click="saveBirthDate"
             >
               <span v-if="savingBirthDate" class="spinner-sm"></span>
@@ -60,7 +59,7 @@
             Ваш возраст: <strong>{{ userAge }} {{ getAgeWord(userAge) }}</strong>
           </div>
           <div v-if="birthDateLocked" class="mt-2 text-sm text-secondary">
-            Аккаунт подтверждён — изменить дату рождения может только администратор
+            Аккаунт подтверждён — изменить дату рождения можно только через поддержку
           </div>
           <div v-if="birthDateMsg" class="email-msg-text" :class="{ error: birthDateMsgIsError }">
             {{ birthDateMsg }}

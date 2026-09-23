@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -46,6 +47,9 @@ func (h *PassportHandler) RegisterAdminRoutes(r chi.Router, can func(string) fun
 	// Статус без паспортных данных: есть ли паспорт и фото, стоит ли
 	// «проверенный». Его видит тот, кто ставит отметку.
 	r.With(can("checks.view")).Get("/admin/users/{id}/passport/status", h.AdminStatus)
+	// Очередь заявок на статус: её ведёт поддержка, а не карточка отдельного
+	// пользователя.
+	r.With(can("checks.view")).Get("/admin/check-requests", h.AdminCheckRequests)
 	r.With(can("passports.view")).Get("/admin/users/{id}/passport", h.AdminView)
 	r.With(can("passports.view")).Get("/admin/users/{id}/passport/photo", h.AdminPhoto)
 	r.With(can("passports.edit")).Put("/admin/users/{id}/passport", h.AdminSave)
@@ -291,6 +295,17 @@ func (h *PassportHandler) AdminStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, status)
+}
+
+// AdminCheckRequests обслуживает GET /admin/check-requests.
+func (h *PassportHandler) AdminCheckRequests(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	requests, err := h.passports.CheckRequests(r.Context(), limit)
+	if err != nil {
+		writePassportError(w, err)
+		return
+	}
+	writeJSON(w, requests)
 }
 
 // AdminView обслуживает GET /admin/users/{id}/passport.

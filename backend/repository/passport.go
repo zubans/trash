@@ -56,6 +56,20 @@ type PassportPhoto struct {
 	TakenAt *time.Time
 }
 
+// CheckRequest — заявка на статус «проверенный» в очереди модерации.
+type CheckRequest struct {
+	UserID      uuid.UUID `json:"user_id"`
+	Phone       string    `json:"phone"`
+	Name        string    `json:"name,omitempty"`
+	Role        string    `json:"role"`
+	Verified    bool      `json:"is_verified"`
+	RequestedAt time.Time `json:"requested_at"`
+	HasPhoto    bool      `json:"has_photo"`
+	// PhotoSeal — вердикт скрытой проверки снимка, чтобы очередь сразу
+	// показывала, на что смотреть внимательнее.
+	PhotoSeal string `json:"photo_seal,omitempty"`
+}
+
 // PassportRepository хранит паспорта, журнал доступа к ним и два флага
 // пользователя, которые от паспорта зависят: «проверенный» и согласие на
 // обработку персональных данных.
@@ -77,6 +91,8 @@ type PassportRepository interface {
 	RequestCheck(ctx context.Context, q Querier, userID uuid.UUID) error
 	// CheckRequestedAt — когда просили подтвердить; nil, если не просили.
 	CheckRequestedAt(ctx context.Context, q Querier, userID uuid.UUID) (*time.Time, error)
+	// CheckRequests — очередь заявок, самая давняя первой.
+	CheckRequests(ctx context.Context, q Querier, limit int) ([]CheckRequest, error)
 	AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error
 }
 
@@ -196,6 +212,35 @@ func (r *passportRepo) CheckRequestedAt(ctx context.Context, q Querier, userID u
 		return nil, nil
 	}
 	return at, err
+}
+
+func (r *passportRepo) CheckRequests(ctx context.Context, q Querier, limit int) ([]CheckRequest, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := r.exec(q).QueryContext(ctx, `
+		SELECT u.id, u.phone, TRIM(CONCAT_WS(' ', u.last_name, u.first_name, u.patronymic)),
+		       u.role::text, u.is_verified, u.check_requested_at,
+		       p.photo_path IS NOT NULL, COALESCE(p.photo_seal, '')
+		FROM users u
+		LEFT JOIN user_passports p ON p.user_id = u.id
+		WHERE u.check_requested_at IS NOT NULL AND u.is_checked = FALSE
+		ORDER BY u.check_requested_at
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CheckRequest{}
+	for rows.Next() {
+		var item CheckRequest
+		if err := rows.Scan(&item.UserID, &item.Phone, &item.Name, &item.Role, &item.Verified,
+			&item.RequestedAt, &item.HasPhoto, &item.PhotoSeal); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 func (r *passportRepo) AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error {

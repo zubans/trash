@@ -87,9 +87,10 @@ var permissionCatalog = []PermissionSection{
 	{Key: "gifts", Label: "Подарки", Group: "Система", Route: "/admin/gifts",
 		Actions: []string{ActionView, ActionCreate, ActionEdit},
 		Hint:    "Правка — в том числе погашение купона на пункте выдачи."},
-	{Key: "checks", Label: "Статус «проверенный»", Group: "Система", Route: "",
+	{Key: "checks", Label: "Статус «проверенный»", Group: "Система", Route: "/admin/check-requests",
 		Actions: []string{ActionView, ActionEdit},
-		Hint:    "Правка — отметить пользователя проверенным или снять отметку. Отметить можно только при паспорте с фото."},
+		Hint: "Просмотр — очередь заявок на статус и состояние паспорта в карточке пользователя. " +
+			"Правка — отметить пользователя проверенным или снять отметку. Отметить можно только при паспорте с фото."},
 	{Key: "passports", Label: "Паспорта", Group: "Система", Route: "",
 		Actions: []string{ActionView, ActionEdit},
 		Hint: "Просмотр паспорта и фото документа в карточке пользователя; каждый просмотр пишется в журнал. " +

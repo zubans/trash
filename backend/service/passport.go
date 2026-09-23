@@ -261,14 +261,18 @@ func (s *PassportService) save(ctx context.Context, owner *repository.User, acto
 	if actor != owner.ID {
 		enteredBy = &actor
 	}
-	return s.repo.RunInTx(ctx, func(tx *sql.Tx) error {
+	if err := s.repo.RunInTx(ctx, func(tx *sql.Tx) error {
 		if err := s.repo.Save(ctx, tx, &repository.PassportRecord{
 			UserID: owner.ID, DataEnc: sealed, Source: source, EnteredBy: enteredBy, KeyVersion: s.cipher.Version(),
 		}); err != nil {
 			return err
 		}
 		return s.repo.LogAccess(ctx, tx, owner.ID, actor, repository.PassportActionWrite)
-	})
+	}); err != nil {
+		return err
+	}
+	// Данные могли прийти к уже загруженному фото: паспорт стал полным.
+	return s.requestCheckIfComplete(ctx, owner)
 }
 
 // verdict — скрытая проверка снимка: подписан ли он приложением и есть ли в
@@ -339,7 +343,42 @@ func (s *PassportService) savePhoto(ctx context.Context, owner *repository.User,
 			log.Printf("[passport] cannot remove the previous photo of %s: %v", owner.ID, err)
 		}
 	}
+	return s.requestCheckIfComplete(ctx, owner)
+}
+
+// requestCheckIfComplete — заявка на статус «проверенный» уходит сама, как
+// только паспорт полон: есть данные и есть фото. Писать в поддержку не нужно —
+// ни владельцу, ни модератору, который внёс паспорт на верификации. Повторная
+// заявка дату не двигает, а решение модератора её снимает.
+func (s *PassportService) requestCheckIfComplete(ctx context.Context, owner *repository.User) error {
+	if owner.Checked {
+		return nil
+	}
+	rec, err := s.repo.Get(ctx, nil, owner.ID)
+	if errors.Is(err, repository.ErrPassportNotFound) || (err == nil && rec.PhotoPath == nil) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	requested, err := s.repo.CheckRequestedAt(ctx, nil, owner.ID)
+	if err != nil {
+		return err
+	}
+	if requested != nil {
+		return nil
+	}
+	if err := s.repo.RequestCheck(ctx, nil, owner.ID); err != nil {
+		return err
+	}
+	log.Printf("[AUDIT] check requested for %s: the passport is complete", owner.ID)
+	s.notifyCheckRequested(ctx, owner.ID)
 	return nil
+}
+
+// CheckRequests — очередь заявок на статус «проверенный».
+func (s *PassportService) CheckRequests(ctx context.Context, limit int) ([]repository.CheckRequest, error) {
+	return s.repo.CheckRequests(ctx, nil, limit)
 }
 
 // Mine — паспорт владельца маской.
@@ -698,26 +737,16 @@ func (s *PassportService) SaveFromVerification(ctx context.Context, orderID, exe
 }
 
 // SavePhotoFromVerification — модератор фотографирует документ заказчика.
-// Паспорт, отданный на хранение прямо на верификации, — это и есть просьба
-// подтвердить данные: заявка ставится сама, без отдельного обращения в
-// поддержку (implementation_plan_delivery_passport.md §2).
+// Заявку на статус ставит savePhoto: паспорт стал полным
+// (implementation_plan_delivery_passport.md §2).
 func (s *PassportService) SavePhotoFromVerification(ctx context.Context, orderID, executorID uuid.UUID, photo []byte,
 	takenAt time.Time) error {
 	owner, err := s.verificationOwner(ctx, orderID, executorID)
 	if err != nil {
 		return err
 	}
-	if err := s.savePhoto(ctx, owner, executorID, photo, orderScope(orderID), takenAt); err != nil {
-		return err
-	}
-	// Заявка — после фото: паспорт без снимка подтверждать нечем, и очередь
-	// модерации не должна наполняться незавершёнными.
-	if err := s.repo.RequestCheck(ctx, nil, owner.ID); err != nil {
-		return err
-	}
-	log.Printf("[AUDIT] %s stored the passport of %s at verification, check requested", executorID, owner.ID)
-	s.notifyCheckRequested(ctx, owner.ID)
-	return nil
+	log.Printf("[AUDIT] %s stored the passport photo of %s at verification", executorID, owner.ID)
+	return s.savePhoto(ctx, owner, executorID, photo, orderScope(orderID), takenAt)
 }
 
 // notifyCheckRequested пишет человеку, что заявка ушла. Сбой письма заявку не

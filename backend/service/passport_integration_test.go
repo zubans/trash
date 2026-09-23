@@ -122,6 +122,10 @@ func TestPassportOwnerFlowIntegration(t *testing.T) {
 	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes, time.Time{}); err != nil {
 		t.Fatalf("photo: %v", err)
 	}
+	// Полный паспорт сам просит подтверждения: обращаться в поддержку не нужно.
+	if requested, err := repo.CheckRequestedAt(ctx, nil, owner.ID); err != nil || requested == nil {
+		t.Fatalf("a complete passport did not ask for the check: %v, %v", requested, err)
+	}
 	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes, time.Time{}); err != nil {
 		t.Fatalf("second photo: %v", err)
 	}

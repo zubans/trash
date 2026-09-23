@@ -4,9 +4,25 @@
       <div class="pc-title">
         <i class="ph-fill ph-identification-card"></i>
         {{ $t('passport.card.title') }}
-        <span v-if="checked" class="pc-badge ok"><i class="ph-bold ph-seal-check"></i> {{ $t('passport.card.checked') }}</span>
+        <!-- Слово-статус нажимается: что такое «проверенный» и зачем он, надо
+             объяснить там же, где человек его видит. -->
+        <button
+          type="button"
+          class="pc-badge"
+          :class="checked ? 'ok' : 'plain'"
+          :aria-expanded="showAbout"
+          @click="showAbout = !showAbout"
+        >
+          <i class="ph-bold" :class="checked ? 'ph-seal-check' : 'ph-question'"></i>
+          {{ checked ? $t('passport.card.checked') : $t('passport.card.checkedWord') }}
+        </button>
       </div>
       <div class="pc-sub">{{ $t('passport.card.sub') }}</div>
+      <div v-if="showAbout" class="pc-about">
+        <strong>{{ $t('passport.card.aboutTitle') }}</strong>
+        <p>{{ $t('passport.card.about') }}</p>
+        <button type="button" class="pc-btn secondary" @click="showAbout = false">{{ $t('common.close') }}</button>
+      </div>
     </div>
 
     <div v-if="loading" class="pc-muted">{{ $t('common.loading') }}</div>
@@ -34,7 +50,7 @@
       <div class="pc-actions">
         <!-- Проверенный паспорт правится через поддержку: иначе его можно было бы подменить. -->
         <template v-if="mask?.locked">
-          <button type="button" class="pc-btn secondary" @click="openSupport('edit')">{{ $t('passport.card.editViaSupport') }}</button>
+          <button type="button" class="pc-btn secondary" @click="openSupport">{{ $t('passport.card.editViaSupport') }}</button>
         </template>
         <template v-else>
           <template v-if="editing">
@@ -47,16 +63,9 @@
             {{ mask.has_photo ? $t('passport.card.replacePhoto') : $t('passport.card.addPhoto') }}
           </button>
         </template>
-        <button
-          v-if="!checked && mask?.exists && mask.has_photo && !mask.check_requested_at"
-          type="button"
-          class="pc-btn accent"
-          @click="openSupport('check')"
-        >
-          {{ $t('passport.card.becomeChecked') }}
-        </button>
       </div>
-      <!-- Заявка уже есть (паспорт отдан на верификации) — просить нечего. -->
+      <!-- Заявка на статус уходит сама, как только паспорт полон: кнопки «стать
+           проверенным» нет и писать в поддержку не нужно. -->
       <div v-if="mask?.exists && !mask.locked" class="pc-muted">{{ $t('passport.card.photoLive') }}</div>
       <div v-if="!checked && mask?.check_requested_at" class="pc-note">{{ $t('passport.card.checkPending') }}</div>
       <div v-else-if="!checked && !(mask?.exists && mask.has_photo)" class="pc-muted">{{ $t('passport.card.checkedHint') }}</div>
@@ -114,6 +123,7 @@ export default defineComponent({
     const message = ref('')
     const messageIsError = ref(false)
     const showSupport = ref(false)
+    const showAbout = ref(false)
     const fileInput = ref<HTMLInputElement | null>(null)
     const supportPrefill = ref('')
 
@@ -231,17 +241,17 @@ export default defineComponent({
       }
     }
 
-    // Статус ставит модератор по обращению — тем же приёмом, что возврат
-    // покупки: чат поддержки с подставленным текстом, отправляет сам человек.
-    const openSupport = (reason: 'check' | 'edit') => {
-      supportPrefill.value = reason === 'check' ? t('passport.card.checkRequest') : t('passport.card.editRequest')
+    // В поддержку идут только за правкой проверенного паспорта: заявку на сам
+    // статус ставит сервер, когда паспорт становится полным.
+    const openSupport = () => {
+      supportPrefill.value = t('passport.card.editRequest')
       showSupport.value = true
     }
 
     onMounted(load)
 
     return {
-      mask, draft, errors, editing, loading, busy, message, messageIsError, showSupport, supportPrefill, fileInput,
+      mask, draft, errors, editing, loading, busy, message, messageIsError, showSupport, supportPrefill, fileInput, showAbout,
       checked, consentRequired, startEdit, save, takePhoto, onFileChosen, accept, openSupport,
     }
   },
@@ -280,9 +290,31 @@ export default defineComponent({
   align-items: center;
   gap: 4px;
 }
+.pc-badge {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
 .pc-badge.ok {
   background: #dcfce7;
   color: #15803d;
+}
+.pc-badge.plain {
+  background: #f1f5f9;
+  color: #475569;
+}
+.pc-about {
+  margin-top: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+}
+.pc-about p {
+  margin: 6px 0 8px;
 }
 .pc-mask {
   border: 1px solid #e2e8f0;

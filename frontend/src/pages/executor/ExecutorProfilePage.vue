@@ -7,10 +7,6 @@
           <i class="ph-bold ph-arrow-left"></i>
           Вернуться на главную
         </button>
-        <div class="page-header-title">
-          <i class="ph-fill ph-user-gear icon-title"></i>
-          Профиль исполнителя
-        </div>
       </div>
 
       <div class="profile-card">
@@ -45,7 +41,15 @@
               :disabled="birthDateLocked"
               class="form-input"
             />
-            <button type="button" class="btn-save-email" :disabled="birthDateLocked || savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate" @click="saveBirthDate">
+            <!-- Подтверждённому аккаунту кнопка не нужна: дату уже сверили с
+                 документом, и менять её через форму нельзя. -->
+            <button
+              v-if="!birthDateLocked"
+              type="button"
+              class="btn-save-email"
+              :disabled="savingBirthDate || !birthDateInput || birthDateInput === currentBirthDate"
+              @click="saveBirthDate"
+            >
               <span v-if="savingBirthDate" class="spinner-sm"></span>
               <template v-else>Сохранить</template>
             </button>
@@ -54,7 +58,7 @@
             Ваш возраст: <strong>{{ userAge }} {{ getAgeWord(userAge) }}</strong>
           </div>
           <div v-if="birthDateLocked" class="mt-2 text-sm text-secondary">
-            Аккаунт подтверждён — изменить дату рождения может только администратор
+            Аккаунт подтверждён — изменить дату рождения можно только через поддержку
           </div>
           <div v-if="birthDateMsg" class="email-msg-text" :class="{ error: birthDateMsgIsError }">
             {{ birthDateMsg }}
@@ -91,37 +95,6 @@
           </div>
         </div>
 
-        <!-- Раздел смены пароля -->
-        <div class="section-header">
-          <div class="section-title">
-            <i class="ph-fill ph-lock-key" style="color: #f59e0b;"></i>
-            Безопасность и пароль
-          </div>
-          <div class="section-subtitle">Смена пароля для входа в кабинет</div>
-        </div>
-
-        <div class="password-box mb-4">
-          <div class="form-group mb-3">
-            <label class="form-label">Текущий пароль</label>
-            <input v-model="oldPassword" type="password" class="form-input" placeholder="••••••••" />
-          </div>
-          <div class="form-group mb-3">
-            <label class="form-label">Новый пароль</label>
-            <input v-model="newPassword" type="password" class="form-input" placeholder="Не менее 6 символов" />
-          </div>
-          <div class="form-group mb-3">
-            <label class="form-label">Подтверждение нового пароля</label>
-            <input v-model="confirmPassword" type="password" class="form-input" placeholder="Повторите новый пароль" />
-          </div>
-          <button type="button" class="btn-save-email" :disabled="changingPassword || !oldPassword || !newPassword" @click="changePassword">
-            <span v-if="changingPassword" class="spinner-sm"></span>
-            <template v-else>Обновить пароль</template>
-          </button>
-          <div v-if="pwdMsg" class="email-msg-text" :class="{ error: pwdMsgIsError }">
-            {{ pwdMsg }}
-          </div>
-        </div>
-
         <!-- Подвал с действиями -->
         <div class="profile-actions">
           <button type="button" class="btn-back-home" @click="goBack">
@@ -137,7 +110,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import api, { storeSession } from '../../services/api'
+import api from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
 import PassportCard from '../../components/passport/PassportCard.vue'
 
@@ -156,13 +129,6 @@ export default defineComponent({
     const savingEmail = ref(false)
     const emailMsg = ref('')
     const emailMsgIsError = ref(false)
-
-    const oldPassword = ref('')
-    const newPassword = ref('')
-    const confirmPassword = ref('')
-    const changingPassword = ref(false)
-    const pwdMsg = ref('')
-    const pwdMsgIsError = ref(false)
 
     const fullName = ref('')
     const birthDateInput = ref('')
@@ -246,38 +212,6 @@ export default defineComponent({
       }
     }
 
-    const changePassword = async () => {
-      if (newPassword.value !== confirmPassword.value) {
-        pwdMsgIsError.value = true
-        pwdMsg.value = 'Пароли не совпадают'
-        return
-      }
-      changingPassword.value = true
-      pwdMsg.value = ''
-      pwdMsgIsError.value = false
-      try {
-        const res = await api.post('/user/change-password', {
-          old_password: oldPassword.value,
-          new_password: newPassword.value
-        })
-        // Смена пароля завершает все сессии; ответ несёт свежую пару, чтобы это
-        // устройство осталось в системе. Без её сохранения следующий запрос отдал бы
-        // 401 и выбросил пользователя на экран входа.
-        if (res.data?.token) {
-          storeSession(res.data.token, res.data.refresh_token)
-        }
-        pwdMsg.value = 'Пароль изменён. На других устройствах потребуется войти заново.'
-        oldPassword.value = ''
-        newPassword.value = ''
-        confirmPassword.value = ''
-      } catch (err: any) {
-        pwdMsgIsError.value = true
-        pwdMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка при смене пароля'
-      } finally {
-        changingPassword.value = false
-      }
-    }
-
     const goBack = () => {
       router.push('/executor')
     }
@@ -304,15 +238,8 @@ export default defineComponent({
       savingEmail,
       emailMsg,
       emailMsgIsError,
-      oldPassword,
-      newPassword,
-      confirmPassword,
-      changingPassword,
-      pwdMsg,
-      pwdMsgIsError,
       currentEmail,
       saveEmail,
-      changePassword,
       goBack
     }
   }
@@ -458,7 +385,7 @@ export default defineComponent({
 }
 
 /* Блок почты и пароля */
-.email-box, .password-box {
+.email-box {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
