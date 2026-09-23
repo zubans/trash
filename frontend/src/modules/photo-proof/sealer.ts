@@ -18,6 +18,14 @@ const STORE = 'keys'
 const KEY_ID = 'queue'
 const IV_BYTES = 12
 
+// WebCrypto принимает буфер, а не срез чужого: подрезанный Uint8Array
+// копируется в собственный ArrayBuffer.
+function bytes(data: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(data.byteLength)
+  new Uint8Array(copy).set(data)
+  return copy
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB, 1)
@@ -60,7 +68,7 @@ export class WebCryptoSealer implements Sealer {
 
   async seal(plain: Uint8Array): Promise<Uint8Array> {
     const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES))
-    const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await this.getKey(), plain as BufferSource))
+    const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await this.getKey(), bytes(plain)))
     const out = new Uint8Array(IV_BYTES + cipher.length)
     out.set(iv)
     out.set(cipher, IV_BYTES)
@@ -68,8 +76,8 @@ export class WebCryptoSealer implements Sealer {
   }
 
   async open(sealed: Uint8Array): Promise<Uint8Array> {
-    const iv = sealed.subarray(0, IV_BYTES)
-    const data = sealed.subarray(IV_BYTES)
-    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await this.getKey(), data as BufferSource))
+    const iv = bytes(sealed.subarray(0, IV_BYTES))
+    const data = bytes(sealed.subarray(IV_BYTES))
+    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await this.getKey(), data))
   }
 }

@@ -118,6 +118,9 @@ type PassportMask struct {
 	// Locked — пользователь «проверенный»: правка паспорта — через поддержку,
 	// иначе проверенный документ можно было бы подменить.
 	Locked bool `json:"locked"`
+	// CheckRequestedAt — заявка на подтверждение уже отправлена; повторно
+	// просить не нужно.
+	CheckRequestedAt *time.Time `json:"check_requested_at,omitempty"`
 }
 
 // PassportFull — паспорт целиком, для права passports.view.
@@ -139,7 +142,9 @@ type PassportService struct {
 	settings repository.SettingsRepository
 	// orders сверяет, что паспорт вносит исполнитель заказа верификации.
 	orders verificationOrders
-	now    func() time.Time
+	// mail сообщает человеку, что заявка на подтверждение отправлена.
+	mail repository.MailRepository
+	now  func() time.Time
 }
 
 // verificationOrders — то, что нужно паспорту от диспетчера поведений:
@@ -154,6 +159,12 @@ func NewPassportService(repo repository.PassportRepository, users repository.Use
 	cipher *passport.Cipher, photosDir string, settings repository.SettingsRepository) *PassportService {
 	return &PassportService{repo: repo, users: users, cipher: cipher,
 		photos: passport.Photos{Dir: photosDir, Cipher: cipher}, settings: settings, now: time.Now}
+}
+
+// WithMail подключает внутреннюю почту: письмо о поданной заявке.
+func (s *PassportService) WithMail(mail repository.MailRepository) *PassportService {
+	s.mail = mail
+	return s
 }
 
 // WithVerification подключает заказы верификации: без них модератор паспорт
@@ -295,6 +306,9 @@ func (s *PassportService) Mine(ctx context.Context, user *repository.User) (*Pas
 		return nil, err
 	}
 	mask.Exists, mask.HasPhoto, mask.Source, mask.UpdatedAt = true, rec.PhotoPath != nil, rec.Source, &rec.UpdatedAt
+	if mask.CheckRequestedAt, err = s.repo.CheckRequestedAt(ctx, nil, user.ID); err != nil {
+		return nil, err
+	}
 	if data, err := s.open(rec); err == nil {
 		mask.Series = data.Series[:2] + " **"
 		mask.Number = "****" + data.Number[len(data.Number)-2:]
@@ -381,6 +395,8 @@ type PassportStatus struct {
 	Source    string     `json:"source,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	Checked   bool       `json:"is_checked"`
+	// CheckRequestedAt — когда просили подтвердить статус; nil — не просили.
+	CheckRequestedAt *time.Time `json:"check_requested_at,omitempty"`
 	// ConsentGiven — пользователь принял согласие на обработку персональных
 	// данных: без него паспорт не вносится.
 	ConsentGiven bool `json:"consent_given"`
@@ -401,6 +417,9 @@ func (s *PassportService) Status(ctx context.Context, userID uuid.UUID) (*Passpo
 		return nil, err
 	}
 	status.Exists, status.HasPhoto, status.Source, status.UpdatedAt = true, rec.PhotoPath != nil, rec.Source, &rec.UpdatedAt
+	if status.CheckRequestedAt, err = s.repo.CheckRequestedAt(ctx, nil, userID); err != nil {
+		return nil, err
+	}
 	return status, nil
 }
 
@@ -568,10 +587,37 @@ func (s *PassportService) SaveFromVerification(ctx context.Context, orderID, exe
 }
 
 // SavePhotoFromVerification — модератор фотографирует документ заказчика.
+// Паспорт, отданный на хранение прямо на верификации, — это и есть просьба
+// подтвердить данные: заявка ставится сама, без отдельного обращения в
+// поддержку (implementation_plan_delivery_passport.md §2).
 func (s *PassportService) SavePhotoFromVerification(ctx context.Context, orderID, executorID uuid.UUID, photo []byte) error {
 	owner, err := s.verificationOwner(ctx, orderID, executorID)
 	if err != nil {
 		return err
 	}
-	return s.savePhoto(ctx, owner, executorID, photo)
+	if err := s.savePhoto(ctx, owner, executorID, photo); err != nil {
+		return err
+	}
+	// Заявка — после фото: паспорт без снимка подтверждать нечем, и очередь
+	// модерации не должна наполняться незавершёнными.
+	if err := s.repo.RequestCheck(ctx, nil, owner.ID); err != nil {
+		return err
+	}
+	log.Printf("[AUDIT] %s stored the passport of %s at verification, check requested", executorID, owner.ID)
+	s.notifyCheckRequested(ctx, owner.ID)
+	return nil
+}
+
+// notifyCheckRequested пишет человеку, что заявка ушла. Сбой письма заявку не
+// отменяет: письмо — уведомление, а не часть решения.
+func (s *PassportService) notifyCheckRequested(ctx context.Context, userID uuid.UUID) {
+	if s.mail == nil {
+		return
+	}
+	if err := s.mail.Send(ctx, nil, &repository.Mail{
+		UserID: userID, Kind: repository.MailKindSystem, Subject: "Заявка на подтверждение отправлена",
+		Body: "Ваш паспорт принят на хранение. Мы сверим данные и сообщим, когда статус «проверенный» будет подтверждён.",
+	}); err != nil {
+		log.Printf("[passport] cannot mail user %s about the check request: %v", userID, err)
+	}
 }

@@ -231,6 +231,27 @@ func TestPassportFromVerificationIntegration(t *testing.T) {
 	if err != nil || rec.Source != repository.PassportSourceVerification || rec.EnteredBy == nil || *rec.EnteredBy != moderator.ID || rec.PhotoPath == nil {
 		t.Fatalf("verification passport: %+v, %v", rec, err)
 	}
+
+	// Паспорт с фото — это и есть заявка на «проверенного»: её ставит сам
+	// сервис, отдельного обращения в поддержку не нужно.
+	requested, err := repo.CheckRequestedAt(ctx, nil, customer.ID)
+	if err != nil || requested == nil {
+		t.Fatalf("check was not requested: %v, %v", requested, err)
+	}
+	if err := srv.SavePhotoFromVerification(ctx, order, moderator.ID, jpegBytes); err != nil {
+		t.Fatalf("second photo: %v", err)
+	}
+	again, err := repo.CheckRequestedAt(ctx, nil, customer.ID)
+	if err != nil || again == nil || !again.Equal(*requested) {
+		t.Errorf("a repeated photo moved the request: %v -> %v, %v", requested, again, err)
+	}
+	// Решение модератора закрывает заявку: в очереди её больше нет.
+	if err := srv.SetChecked(ctx, moderator.ID, customer.ID, true, "паспорт сверен"); err != nil {
+		t.Fatalf("set checked: %v", err)
+	}
+	if left, err := repo.CheckRequestedAt(ctx, nil, customer.ID); err != nil || left != nil {
+		t.Errorf("the request outlived the decision: %v, %v", left, err)
+	}
 }
 
 // Без ключа паспорта не принимаются вовсе — а не хранятся открытыми.

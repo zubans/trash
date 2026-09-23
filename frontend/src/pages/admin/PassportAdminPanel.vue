@@ -14,6 +14,9 @@
         </template>
         <template v-else>{{ $t('passport.admin.none') }}</template>
       </span>
+      <span v-if="!status.is_checked && status.check_requested_at" class="pp-badge wait">
+        {{ $t('passport.admin.checkRequested') }}
+      </span>
       <span v-if="!status.consent_given" class="pp-warn">{{ $t('passport.admin.noConsent') }}</span>
     </div>
 
@@ -270,6 +273,10 @@ export default defineComponent({
 .pp-badge.ok {
   background: #dcfce7;
   color: #15803d;
+}
+.pp-badge.wait {
+  background: #fef3c7;
+  color: #b45309;
 }
 .pp-warn {
   color: #b45309;

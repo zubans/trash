@@ -501,7 +501,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties' | 'shop' | 'passport'
 
-
 export default defineComponent({
   name: 'UserHistoryModal',
   components: { PassportAdminPanel },
@@ -591,6 +590,7 @@ export default defineComponent({
       achievements: 'Ачивки пользователя',
       penalties: 'Штрафные баллы',
       shop: 'Покупки в магазине',
+      passport: 'Паспорт и проверка',
     }
     const title = computed(() => TITLES[tab.value])
 
