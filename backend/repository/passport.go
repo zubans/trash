@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,6 +57,38 @@ type PassportPhoto struct {
 	TakenAt *time.Time
 }
 
+// PassportAccess — строка журнала доступа к документам: кто, к чьему паспорту
+// и что сделал. Телефоны обеих сторон подставляются запросом: журнал читают,
+// чтобы увидеть людей, а не идентификаторы.
+type PassportAccess struct {
+	ID          uuid.UUID `json:"id"`
+	UserID      uuid.UUID `json:"user_id"`
+	UserPhone   string    `json:"user_phone"`
+	UserName    string    `json:"user_name,omitempty"`
+	ViewerID    uuid.UUID `json:"viewer_id"`
+	ViewerPhone string    `json:"viewer_phone"`
+	ViewerName  string    `json:"viewer_name,omitempty"`
+	ViewerRole  string    `json:"viewer_role"`
+	Action      string    `json:"action"`
+	CreatedAt   time.Time `json:"created_at"`
+	// Self — человек обращался к своему паспорту: в аудите это шум, и его видно
+	// сразу, без сравнения идентификаторов.
+	Self bool `json:"self"`
+}
+
+// AccessLogFilter — чем сужают журнал. Пустые поля не сужают ничего.
+type AccessLogFilter struct {
+	UserID   uuid.UUID
+	ViewerID uuid.UUID
+	Action   string
+	// Search — телефон чьего-либо: и субъекта, и смотревшего.
+	Search string
+	// HideSelf убирает обращения к своему паспорту.
+	HideSelf bool
+	Limit    int
+	Offset   int
+}
+
 // CheckRequest — заявка на статус «проверенный» в очереди модерации.
 type CheckRequest struct {
 	UserID      uuid.UUID `json:"user_id"`
@@ -93,6 +126,9 @@ type PassportRepository interface {
 	CheckRequestedAt(ctx context.Context, q Querier, userID uuid.UUID) (*time.Time, error)
 	// CheckRequests — очередь заявок, самая давняя первой.
 	CheckRequests(ctx context.Context, q Querier, limit int) ([]CheckRequest, error)
+	// AccessLog — журнал доступа к документам, свежее первым, и общее число
+	// строк под фильтром.
+	AccessLog(ctx context.Context, q Querier, filter AccessLogFilter) ([]PassportAccess, int, error)
 	AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error
 }
 
@@ -241,6 +277,69 @@ func (r *passportRepo) CheckRequests(ctx context.Context, q Querier, limit int) 
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func (r *passportRepo) AccessLog(ctx context.Context, q Querier, f AccessLogFilter) ([]PassportAccess, int, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	where := "WHERE 1 = 1"
+	var args []interface{}
+	add := func(condition string, value interface{}) {
+		args = append(args, value)
+		where += fmt.Sprintf(condition, len(args))
+	}
+	if f.UserID != uuid.Nil {
+		add(" AND l.user_id = $%d", f.UserID)
+	}
+	if f.ViewerID != uuid.Nil {
+		add(" AND l.viewer_id = $%d", f.ViewerID)
+	}
+	if f.Action != "" {
+		add(" AND l.action = $%d", f.Action)
+	}
+	if f.Search != "" {
+		// Один аргумент, два места: телефон ищется и у субъекта, и у смотревшего.
+		args = append(args, "%"+f.Search+"%")
+		where += fmt.Sprintf(" AND (s.phone LIKE $%d OR v.phone LIKE $%d)", len(args), len(args))
+	}
+	if f.HideSelf {
+		where += " AND l.user_id <> l.viewer_id"
+	}
+
+	from := `FROM passport_access_log l
+		JOIN users v ON v.id = l.viewer_id
+		LEFT JOIN users s ON s.id = l.user_id `
+	var total int
+	if err := r.exec(q).QueryRowContext(ctx, `SELECT COUNT(*) `+from+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, f.Limit, f.Offset)
+	rows, err := r.exec(q).QueryContext(ctx, fmt.Sprintf(`
+		SELECT l.id, l.user_id, COALESCE(s.phone, ''), TRIM(CONCAT_WS(' ', s.last_name, s.first_name, s.patronymic)),
+		       l.viewer_id, v.phone, TRIM(CONCAT_WS(' ', v.last_name, v.first_name, v.patronymic)), v.role::text,
+		       l.action, l.created_at
+		%s%s ORDER BY l.created_at DESC LIMIT $%d OFFSET $%d`, from, where, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []PassportAccess{}
+	for rows.Next() {
+		var item PassportAccess
+		if err := rows.Scan(&item.ID, &item.UserID, &item.UserPhone, &item.UserName,
+			&item.ViewerID, &item.ViewerPhone, &item.ViewerName, &item.ViewerRole,
+			&item.Action, &item.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		item.Self = item.UserID == item.ViewerID
+		out = append(out, item)
+	}
+	return out, total, rows.Err()
 }
 
 func (r *passportRepo) AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error {

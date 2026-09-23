@@ -91,6 +91,10 @@ var permissionCatalog = []PermissionSection{
 		Actions: []string{ActionView, ActionEdit},
 		Hint: "Просмотр — очередь заявок на статус и состояние паспорта в карточке пользователя. " +
 			"Правка — отметить пользователя проверенным или снять отметку. Отметить можно только при паспорте с фото."},
+	{Key: "document_audit", Label: "Аудит документов", Group: "Система", Route: "/admin/document-audit",
+		Actions: []string{ActionView},
+		Hint: "Журнал обращений к паспортам: кто смотрел, кто правил, кто удалял. " +
+			"Само право паспортных данных не открывает."},
 	{Key: "passports", Label: "Паспорта", Group: "Система", Route: "",
 		Actions: []string{ActionView, ActionEdit},
 		Hint: "Просмотр паспорта и фото документа в карточке пользователя; каждый просмотр пишется в журнал. " +

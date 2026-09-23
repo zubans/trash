@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -50,6 +51,10 @@ func (h *PassportHandler) RegisterAdminRoutes(r chi.Router, can func(string) fun
 	// Очередь заявок на статус: её ведёт поддержка, а не карточка отдельного
 	// пользователя.
 	r.With(can("checks.view")).Get("/admin/check-requests", h.AdminCheckRequests)
+	// Журнал обращений к паспортам: по одному человеку — тем, кто видит паспорта;
+	// весь журнал — отдельным правом, которое самих данных не открывает.
+	r.With(can("passports.view")).Get("/admin/users/{id}/passport/access", h.AdminUserAccessLog)
+	r.With(can("document_audit.view")).Get("/admin/passport-access", h.AdminAccessLog)
 	r.With(can("passports.view")).Get("/admin/users/{id}/passport", h.AdminView)
 	r.With(can("passports.view")).Get("/admin/users/{id}/passport/photo", h.AdminPhoto)
 	r.With(can("passports.edit")).Put("/admin/users/{id}/passport", h.AdminSave)
@@ -306,6 +311,60 @@ func (h *PassportHandler) AdminCheckRequests(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, requests)
+}
+
+// accessLogQuery собирает фильтр журнала из строки запроса.
+func accessLogQuery(r *http.Request) repository.AccessLogFilter {
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	page, _ := strconv.Atoi(query.Get("page"))
+	if limit <= 0 {
+		limit = 50
+	}
+	if page < 1 {
+		page = 1
+	}
+	filter := repository.AccessLogFilter{
+		Action:   query.Get("action"),
+		Search:   strings.TrimSpace(query.Get("search")),
+		HideSelf: query.Get("hide_self") == "1",
+		Limit:    limit,
+		Offset:   (page - 1) * limit,
+	}
+	if id, err := uuid.Parse(query.Get("user_id")); err == nil {
+		filter.UserID = id
+	}
+	if id, err := uuid.Parse(query.Get("viewer_id")); err == nil {
+		filter.ViewerID = id
+	}
+	return filter
+}
+
+func (h *PassportHandler) writeAccessLog(w http.ResponseWriter, r *http.Request, filter repository.AccessLogFilter) {
+	items, total, err := h.passports.AccessLog(r.Context(), filter)
+	if err != nil {
+		writePassportError(w, err)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"items": items, "total": total})
+}
+
+// AdminAccessLog обслуживает GET /admin/passport-access — весь журнал.
+func (h *PassportHandler) AdminAccessLog(w http.ResponseWriter, r *http.Request) {
+	h.writeAccessLog(w, r, accessLogQuery(r))
+}
+
+// AdminUserAccessLog обслуживает GET /admin/users/{id}/passport/access —
+// обращения к паспорту одного человека.
+func (h *PassportHandler) AdminUserAccessLog(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseUUIDParam(r, "id")
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	filter := accessLogQuery(r)
+	filter.UserID = userID
+	h.writeAccessLog(w, r, filter)
 }
 
 // AdminView обслуживает GET /admin/users/{id}/passport.

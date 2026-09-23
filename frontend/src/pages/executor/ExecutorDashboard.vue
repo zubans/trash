@@ -154,6 +154,9 @@
             <div class="profile-phone-row">
               <div class="profile-phone">{{ phone || '79997454656' }}</div>
               <div v-if="isVerified" class="verified-badge" title="Верифицирован"><i class="ph-fill ph-check-circle"></i></div>
+              <!-- Проверенный паспорт — свой статус: верификации он не даёт и из
+                   неё не следует, поэтому значок отдельный. -->
+              <div v-if="isChecked" class="checked-badge" title="Паспорт проверен"><i class="ph-fill ph-seal-check"></i></div>
               <button
                 v-else-if="verificationOrder"
                 type="button"
@@ -889,6 +892,7 @@ export default defineComponent({
     // Шаблон всегда рисовал бейдж «верифицирован» по этому значению, а оно нигде не
     // было определено: бейдж не мог появиться ни у кого.
     const isVerified = computed(() => authStore.user?.is_verified ?? false)
+    const isChecked = computed(() => authStore.user?.is_checked ?? false)
     const status = ref('ACTIVE')
     const showProfileModal = ref(false)
     const menuOpen = ref(false)
@@ -2033,6 +2037,7 @@ export default defineComponent({
       sidebarSwipe,
       balanceLoaded,
       isVerified,
+      isChecked,
       showProfileModal,
       userEmail,
       baseAddress,
@@ -2475,6 +2480,7 @@ export default defineComponent({
 }
 .profile-phone { font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); letter-spacing: -0.5px; line-height: 1; }
 .verified-badge { color: #10b981; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+.checked-badge { color: #0e7490; font-size: 20px; display: flex; align-items: center; justify-content: center; }
 .verification-pending-badge { color: #f59e0b; font-size: 20px; display: flex; align-items: center; justify-content: center; background: none; border: none; padding: 0; cursor: pointer; }
 
 .badge-brand {

@@ -88,6 +88,11 @@
               <i :class="u.is_verified ? 'ph-fill ph-check-circle' : 'ph ph-warning-circle'"></i>
               {{ u.is_verified ? 'Верифицирован' : 'Не верифицирован' }}
             </div>
+            <!-- «Проверен» — отдельный статус: он не даёт верификации и не
+                 следует из неё, поэтому и значок свой. -->
+            <div v-if="u.is_checked" class="status-checked" title="Паспорт проверен модератором">
+              <i class="ph-fill ph-seal-check"></i> Проверен
+            </div>
           </div>
 
           <div class="cell-date">
@@ -233,6 +238,9 @@
           <span class="verify-chip" :class="u.is_verified ? 'verified' : 'unverified'">
             <i :class="u.is_verified ? 'ph-fill ph-seal-check' : 'ph ph-seal'"></i>
             {{ u.is_verified ? 'Верифицирован' : 'Не верифицирован' }}
+          </span>
+          <span v-if="u.is_checked" class="checked-chip" title="Паспорт проверен модератором">
+            <i class="ph-fill ph-seal-check"></i> Проверен
           </span>
         </div>
 
@@ -1412,6 +1420,39 @@ export default defineComponent({
 
 .status-verify.verified {
   color: #10b981;
+}
+
+/* «Проверен» отличается от верификации и цветом: это про документ, а не про
+   сверку личности. */
+.status-checked {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0e7490;
+  white-space: nowrap;
+}
+
+.status-checked i {
+  font-size: 14px;
+}
+
+.checked-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #0e7490;
+  background: #ecfeff;
+}
+
+.checked-chip i {
+  font-size: 13px;
 }
 
 .verify-chip {

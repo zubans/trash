@@ -133,6 +133,14 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'checks.view', bare: true },
       },
       {
+        // Журнал обращений к паспортам: отдельное право, паспортных данных на
+        // странице нет.
+        path: 'document-audit',
+        name: 'admin-document-audit',
+        component: () => import('../pages/admin/DocumentAudit.vue'),
+        meta: { permission: 'document_audit.view', bare: true },
+      },
+      {
         path: 'escalations',
         name: 'admin-escalations',
         component: () => import('../pages/admin/Escalations.vue'),
@@ -402,6 +410,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/achievements', permission: 'achievements.view' },
   { path: '/admin/gifts', permission: 'gifts.view' },
   { path: '/admin/check-requests', permission: 'checks.view' },
+  { path: '/admin/document-audit', permission: 'document_audit.view' },
   { path: '/admin/escalations', permission: 'escalations.view' },
   { path: '/admin/disputes', permission: 'disputes.view' },
   { path: '/admin/watermark-symbols', permission: 'watermarks.view' },

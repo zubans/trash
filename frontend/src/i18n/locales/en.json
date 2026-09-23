@@ -862,7 +862,17 @@
         "resaved": "Taken in the app, file re-saved",
         "foreign": "No app signature"
       },
-      "photoOriginHint": "The app signs a photo as it is taken. No signature means the photo was brought ready-made: a reason to look closer, not a refusal."
+      "photoOriginHint": "The app signs a photo as it is taken. No signature means the photo was brought ready-made: a reason to look closer, not a refusal.",
+      "whoLooked": "Who looked at the passport",
+      "accessEmpty": "No access yet.",
+      "accessSelf": "the owner",
+      "wholeAudit": "Open in the document audit",
+      "action": {
+        "VIEW": "viewed the data",
+        "VIEW_PHOTO": "viewed the photo",
+        "WRITE": "entered or edited",
+        "DELETE": "deleted"
+      }
     }
   }
 }

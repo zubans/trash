@@ -376,6 +376,13 @@ func (s *PassportService) requestCheckIfComplete(ctx context.Context, owner *rep
 	return nil
 }
 
+// AccessLog — журнал доступа к документам: кто смотрел, правил и удалял
+// паспорта. Обращение к самому журналу в него не пишется: иначе чтение
+// множило бы само себя.
+func (s *PassportService) AccessLog(ctx context.Context, filter repository.AccessLogFilter) ([]repository.PassportAccess, int, error) {
+	return s.repo.AccessLog(ctx, nil, filter)
+}
+
 // CheckRequests — очередь заявок на статус «проверенный».
 func (s *PassportService) CheckRequests(ctx context.Context, limit int) ([]repository.CheckRequest, error) {
 	return s.repo.CheckRequests(ctx, nil, limit)

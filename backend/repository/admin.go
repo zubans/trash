@@ -266,7 +266,7 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	// берётся отдельно (attachRoles), чтобы отсутствующая таблица user_roles
 	// никогда не могла уронить весь админский список.
 	listQuery := fmt.Sprintf(
-		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at,
+		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.is_checked, u.created_at,
 		        COALESCE((SELECT a.address FROM addresses a WHERE a.user_id = u.id AND a.is_default LIMIT 1), '') AS address,
 		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, ''), u.birth_date
 		 FROM users u
@@ -287,7 +287,7 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 		var birthDate sql.NullTime
 		// Хеш пароля намеренно не выбирается: в админском списке он бесполезен и
 		// вообще не должен путешествовать через приложение.
-		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address,
+		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.Checked, &u.CreatedAt, &u.Address,
 			&u.LastName, &u.FirstName, &u.Patronymic, &birthDate)
 		if err != nil {
 			return nil, 0, err

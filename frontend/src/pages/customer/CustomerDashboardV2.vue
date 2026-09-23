@@ -111,6 +111,11 @@
               <div v-if="isVerified" class="verified-badge" title="Верифицирован">
                 <i class="ph-fill ph-check-circle"></i>
               </div>
+              <!-- Проверенный паспорт — свой статус: верификации он не даёт и из
+                   неё не следует, поэтому значок отдельный. -->
+              <div v-if="isChecked" class="checked-badge" title="Паспорт проверен">
+                <i class="ph-fill ph-seal-check"></i>
+              </div>
               <!-- Жёлтый конвертик появляется только тогда, когда письмо есть, и
                    ничего не перекрывает: он ждёт, пока на него нажмут. -->
               <button
@@ -579,6 +584,7 @@ export default defineComponent({
     // Шаблон всегда рисовал бейдж «верифицирован» по этому значению, а оно нигде не
     // было определено: бейдж не мог появиться ни у кого.
     const isVerified = computed(() => authStore.user?.is_verified ?? false)
+    const isChecked = computed(() => authStore.user?.is_checked ?? false)
     const currencySymbol = computed(() => (authStore.currency === 'RUB' ? '₽' : '$'))
 
     const formattedPhone = computed(() => {
@@ -1632,6 +1638,7 @@ export default defineComponent({
       // Без этого v-if читает undefined, и карточка навсегда показывает прочерк.
       balanceLoaded,
       isVerified,
+      isChecked,
       currencySymbol,
       successMsg,
       errorMsg,
@@ -1937,6 +1944,7 @@ export default defineComponent({
 }
 .profile-phone { font-size: 20px; font-weight: 700; color: var(--text-title, #0f172a); letter-spacing: -0.5px; line-height: 1; }
 .verified-badge { color: #10b981; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+.checked-badge { color: #0e7490; font-size: 20px; display: flex; align-items: center; justify-content: center; }
 
 .badge-brand {
   background: #eef2ff; color: #5c60f5;

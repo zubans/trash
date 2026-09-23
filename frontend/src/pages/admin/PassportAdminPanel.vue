@@ -59,6 +59,29 @@
       </div>
     </template>
 
+    <!-- Кто обращался к этому паспорту. Открывается по кнопке: журнал нужен,
+         когда его спрашивают, а не на каждом открытии карточки. -->
+    <template v-if="can('passports.view')">
+      <button v-if="!accessOpen" type="button" class="btn-link" :disabled="busy" @click="openAccess">
+        <i class="ph-bold ph-eyes"></i> {{ $t('passport.admin.whoLooked') }}
+      </button>
+      <div v-else class="pp-access">
+        <div class="pp-access-head">
+          <strong>{{ $t('passport.admin.whoLooked') }}</strong>
+          <button type="button" class="btn-link" @click="accessOpen = false">{{ $t('common.close') }}</button>
+        </div>
+        <p v-if="access.length === 0" class="muted small">{{ $t('passport.admin.accessEmpty') }}</p>
+        <div v-for="row in access" :key="row.id" class="pp-access-row">
+          <span>{{ formatDate(row.created_at) }}</span>
+          <span>{{ $t('passport.admin.action.' + row.action) }}</span>
+          <span class="muted">{{ row.self ? $t('passport.admin.accessSelf') : (row.viewer_name || row.viewer_phone) }}</span>
+        </div>
+        <router-link v-if="can('document_audit.view')" class="btn-link" :to="{ path: '/admin/document-audit', query: { user_id: userId } }">
+          {{ $t('passport.admin.wholeAudit') }}
+        </router-link>
+      </div>
+    </template>
+
     <!-- Правка: внести, исправить, заменить фото, удалить. -->
     <template v-if="can('passports.edit') && status">
       <div v-if="editing" class="pp-edit">
@@ -100,6 +123,8 @@ import {
   emptyPassport,
   passportError,
   passportErrorText,
+  userPassportAccess,
+  type PassportAccess,
   type PassportData,
   type PassportFull,
   type PassportStatus,
@@ -125,6 +150,8 @@ export default defineComponent({
     const draft = ref<PassportData>(emptyPassport())
     const fieldErrors = ref<Record<string, string>>({})
     const editing = ref(false)
+    const accessOpen = ref(false)
+    const access = ref<PassportAccess[]>([])
     const reason = ref('')
     const busy = ref(false)
     const error = ref('')
@@ -159,6 +186,8 @@ export default defineComponent({
       full.value = null
       dropPhoto()
       editing.value = false
+      accessOpen.value = false
+      access.value = []
       reason.value = ''
       loadStatus()
     }
@@ -223,6 +252,14 @@ export default defineComponent({
       return 'foreign'
     })
 
+    const openAccess = () =>
+      run(async () => {
+        access.value = (await userPassportAccess(props.userId, { limit: 20 })).items
+        accessOpen.value = true
+      })
+
+    const formatDate = (value: string) => new Date(value).toLocaleString('ru-RU')
+
     const setChecked = (checked: boolean) =>
       run(async () => {
         await adminSetChecked(props.userId, checked, reason.value.trim())
@@ -237,6 +274,7 @@ export default defineComponent({
 
     return {
       can, status, full, photoUrl, draft, fieldErrors, editing, reason, busy, error, notice, photoOrigin,
+      accessOpen, access, openAccess, formatDate,
       reveal, showPhoto, startEdit, save, uploadPhoto, remove, setChecked,
     }
   },
@@ -336,6 +374,34 @@ export default defineComponent({
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
+}
+.pp-access {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.pp-access-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.pp-access-row {
+  display: grid;
+  grid-template-columns: 150px 130px 1fr;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .pp-access-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #f1f5f9;
+  }
 }
 .pp-full > div {
   display: flex;
