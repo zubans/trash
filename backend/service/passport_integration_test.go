@@ -319,3 +319,49 @@ func TestPassportPhotoOriginIntegration(t *testing.T) {
 		t.Fatalf("a photo signed for another scope passed: %+v, %v", rec.Photo, err)
 	}
 }
+
+// Аудит документов: журнал читается с фильтрами, обращение владельца к своему
+// паспорту в аудите отличимо от чужого просмотра.
+func TestPassportAccessLogIntegration(t *testing.T) {
+	ctx := context.Background()
+	srv, _, _, newUser := newPassportService(t, true)
+	owner, admin := newUser(true), newUser(true)
+
+	if err := srv.SaveMine(ctx, owner, PassportData{Series: "4510", Number: "123456", IssuedAt: "2015-06-01"}); err != nil {
+		t.Fatal(err)
+	}
+	// Владелец открыл форму правки: это чтение своего паспорта.
+	if _, err := srv.MineForEdit(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.AdminView(ctx, admin.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	log, total, err := srv.AccessLog(ctx, repository.AccessLogFilter{UserID: owner.ID})
+	if err != nil || total != 3 || len(log) != 3 {
+		t.Fatalf("access log: %d rows, total %d, %v", len(log), total, err)
+	}
+	// Свежее первым: последним был просмотр администратором.
+	if log[0].Action != repository.PassportActionView || log[0].ViewerID != admin.ID || log[0].Self {
+		t.Errorf("first row is not the admin view: %+v", log[0])
+	}
+	if log[1].ViewerID != owner.ID || !log[1].Self {
+		t.Errorf("the owner reading their own passport is not marked as self: %+v", log[1])
+	}
+
+	// Фильтр по действию и «без своих» сужают журнал, а не переписывают его.
+	writes, total, err := srv.AccessLog(ctx, repository.AccessLogFilter{
+		UserID: owner.ID, Action: repository.PassportActionWrite,
+	})
+	if err != nil || total != 1 || len(writes) != 1 || writes[0].Action != repository.PassportActionWrite {
+		t.Fatalf("writes: %+v, total %d, %v", writes, total, err)
+	}
+	foreign, total, err := srv.AccessLog(ctx, repository.AccessLogFilter{UserID: owner.ID, HideSelf: true})
+	if err != nil || total != 1 || len(foreign) != 1 || foreign[0].ViewerID != admin.ID {
+		t.Fatalf("foreign access: %+v, total %d, %v", foreign, total, err)
+	}
+	if foreign[0].ViewerPhone != admin.Phone || foreign[0].UserPhone != owner.Phone {
+		t.Errorf("the log does not show who and whose: %+v", foreign[0])
+	}
+}

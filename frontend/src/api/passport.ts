@@ -150,6 +150,46 @@ export interface PassportStatus {
   photo_mark?: 'FOUND' | 'NOT_FOUND' | 'MISMATCH'
 }
 
+// PassportAccess — строка журнала обращений к документам.
+export interface PassportAccess {
+  id: string
+  user_id: string
+  user_phone: string
+  user_name?: string
+  viewer_id: string
+  viewer_phone: string
+  viewer_name?: string
+  viewer_role: string
+  action: 'VIEW' | 'VIEW_PHOTO' | 'WRITE' | 'DELETE'
+  created_at: string
+  self: boolean
+}
+
+export interface AccessLogPage {
+  items: PassportAccess[]
+  total: number
+}
+
+export interface AccessLogParams {
+  user_id?: string
+  viewer_id?: string
+  action?: string
+  search?: string
+  hide_self?: '1'
+  page?: number
+  limit?: number
+}
+
+// Журнал по одному человеку — тем, кто видит паспорта; весь журнал — праву
+// document_audit.view, которое самих данных не открывает.
+export async function userPassportAccess(userId: string, params: AccessLogParams = {}): Promise<AccessLogPage> {
+  return (await api.get(`/admin/users/${userId}/passport/access`, { params })).data
+}
+
+export async function passportAccessLog(params: AccessLogParams = {}): Promise<AccessLogPage> {
+  return (await api.get('/admin/passport-access', { params })).data
+}
+
 // Состояние без паспортных данных — в журнал просмотров не пишется.
 export async function adminPassportStatus(userId: string): Promise<PassportStatus> {
   return (await api.get(`/admin/users/${userId}/passport/status`)).data

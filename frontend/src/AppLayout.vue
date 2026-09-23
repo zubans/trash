@@ -128,6 +128,11 @@
             <span v-if="!sidebarMinimized || isMobile">Заявки на проверку</span>
           </router-link>
 
+          <router-link v-if="can('document_audit.view')" to="/admin/document-audit" class="nav-item" :class="{ active: currentRouteName === 'admin-document-audit' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-eyes"></i>
+            <span v-if="!sidebarMinimized || isMobile">Аудит документов</span>
+          </router-link>
+
           <router-link v-if="can('escalations.view')" to="/admin/escalations" class="nav-item" :class="{ active: currentRouteName === 'admin-escalations' }" @click="closeSidebarOnMobile">
             <i class="ph ph-shield-warning"></i>
             <span v-if="!sidebarMinimized || isMobile">Модерация проверок</span>
@@ -291,8 +296,8 @@ export default defineComponent({
     const showShopSection = computed(() => ['shop.view', 'perk_rules.view', 'shop_orders.view', 'shop_revenue.view'].some(can))
     const showSystemSection = computed(() =>
       ['shifts.view', 'orders.view', 'service_catalog.view', 'achievements.view',
-       'gifts.view', 'checks.view', 'escalations.view', 'disputes.view', 'watermarks.view',
-       'settings.view'].some(can),
+       'gifts.view', 'checks.view', 'document_audit.view', 'escalations.view', 'disputes.view',
+       'watermarks.view', 'settings.view'].some(can),
     )
 
     // Ответы пользователей во внутренней почте. Считается тем же редким
