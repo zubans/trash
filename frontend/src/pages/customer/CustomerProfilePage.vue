@@ -25,6 +25,7 @@
         </div>
 
         <!-- Дата рождения -->
+        <section class="profile-section">
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-cake" style="color: #ec4899;"></i>
@@ -33,7 +34,7 @@
           <div class="section-subtitle">Определяет доступ к услугам с возрастным цензом</div>
         </div>
 
-        <div class="email-box mb-4">
+        <div class="email-box">
           <div class="input-wrapper">
             <input
               v-model="birthDateInput"
@@ -65,11 +66,15 @@
             {{ birthDateMsg }}
           </div>
         </div>
+        </section>
 
         <!-- Паспорт и статус «проверенный» -->
-        <PassportCard />
+        <section class="profile-section">
+          <PassportCard />
+        </section>
 
         <!-- Управление почтой -->
+        <section class="profile-section">
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-envelope" style="color: #6366f1;"></i>
@@ -78,7 +83,7 @@
           <div class="section-subtitle">При изменении потребуется повторная верификация</div>
         </div>
 
-        <div class="email-box mb-4">
+        <div class="email-box">
           <div class="input-wrapper">
             <input
               v-model="emailInput"
@@ -95,8 +100,10 @@
             {{ emailMsg }}
           </div>
         </div>
+        </section>
 
         <!-- Управление адресами -->
+        <section class="profile-section">
         <div class="section-header">
           <div class="section-title">
             <i class="ph-fill ph-map-pin" style="color: #ef4444;"></i>
@@ -173,6 +180,7 @@
         <div v-else class="limit-warning-banner">
           <span>ℹ️ Можно сохранить не более 2 адресов. Удалите один, чтобы добавить новый.</span>
         </div>
+        </section>
 
         <!-- Подвал с действиями -->
         <div class="profile-actions">
@@ -503,12 +511,32 @@ export default defineComponent({
   color: #6366f1;
 }
 
+/* Профиль — стопка панелей, а не один длинный лист: иначе не видно, где
+   кончается одно и начинается другое. */
 .profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.profile-section {
   background: #ffffff;
-  border-radius: 24px;
+  border-radius: 20px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
-  padding: 32px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.04);
+  padding: 20px 24px;
+}
+
+/* Внутри панели серая подложка у полей уже не нужна: рамка панели и есть
+   граница блока. */
+.profile-section .email-box {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.profile-section :deep(.passport-card) {
+  margin-bottom: 0;
 }
 
 /* Баннер с телефоном пользователя */
@@ -519,7 +547,6 @@ export default defineComponent({
   background: #f1f5f9;
   border-radius: 16px;
   padding: 20px;
-  margin-bottom: 28px;
 }
 
 .banner-avatar {
@@ -854,9 +881,6 @@ export default defineComponent({
 }
 
 .profile-actions {
-  margin-top: 32px;
-  padding-top: 24px;
-  border-top: 1px solid #e2e8f0;
   display: flex;
   justify-content: flex-end;
 }
@@ -882,7 +906,7 @@ export default defineComponent({
 }
 
 @media (max-width: 640px) {
-  .profile-card { padding: 20px; border-radius: 20px; }
+  .profile-section { padding: 16px; border-radius: 16px; }
   .top-nav { flex-direction: column; align-items: flex-start; gap: 12px; }
   .input-wrapper { flex-direction: column; align-items: stretch; gap: 10px; }
   .add-address-field { flex: 1 1 100%; }
