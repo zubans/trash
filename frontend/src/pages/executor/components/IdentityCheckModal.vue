@@ -32,7 +32,19 @@
              сети он встаёт в очередь зашифрованным и уходит, когда сеть
              появится; сверка — после этого. -->
         <section v-if="requirePassport" class="identity-passport">
-          <div class="identity-label">{{ $t('passport.verification.title') }}</div>
+          <div class="identity-passport-head">
+            <span class="identity-label">{{ $t('passport.verification.title') }}</span>
+            <!-- Подсказка тому, кто верифицирует: зачем паспорт и что получит
+                 заказчик. Заявку создаёт сервер сам, просить её не надо. -->
+            <button type="button" class="identity-info" :aria-expanded="showHint" @click="showHint = !showHint">
+              <i class="ph-bold ph-info"></i>
+            </button>
+            <div v-if="showHint" class="identity-hint">
+              <strong>{{ $t('passport.verification.whyTitle') }}</strong>
+              <p>{{ $t('passport.verification.why') }}</p>
+              <button type="button" class="identity-hint-close" @click="showHint = false">{{ $t('common.close') }}</button>
+            </div>
+          </div>
           <p v-if="passportState === 'sent'" class="identity-ok">{{ $t('passport.verification.sent') }}</p>
           <p v-else-if="passportState === 'queued'" class="identity-warning">{{ $t('passport.verification.queued') }}</p>
           <template v-if="passportState !== 'sent'">
@@ -42,6 +54,7 @@
               {{ photo ? $t('passport.verification.photoTaken') : $t('passport.verification.takePhoto') }}
               <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" @change="pickPhoto" />
             </label>
+            <p class="identity-auto">{{ $t('passport.verification.autoRequest') }}</p>
           </template>
         </section>
 
@@ -97,6 +110,7 @@ export default defineComponent({
     const passport = ref<PassportData>(emptyPassport())
     const passportErrors = ref<Record<string, string>>({})
     const photo = ref<File | null>(null)
+    const showHint = ref(false)
     // none — ещё не отправлен; queued — ждёт сети в очереди; sent — на сервере.
     const passportState = ref<'none' | 'queued' | 'sent'>('none')
 
@@ -205,7 +219,7 @@ export default defineComponent({
 
     return {
       values, busy, warning, errorText, labelFor, placeholderFor, submit,
-      passport, passportErrors, photo, passportState, pickPhoto,
+      passport, passportErrors, photo, passportState, pickPhoto, showHint,
     }
   },
 })
@@ -367,6 +381,57 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.identity-passport-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.identity-passport-head .identity-label {
+  margin-bottom: 0;
+}
+.identity-info {
+  border: none;
+  background: none;
+  color: #6366f1;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+.identity-hint {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 12px 24px -12px rgba(15, 23, 42, 0.35);
+  padding: 12px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+}
+.identity-hint p {
+  margin: 6px 0 8px;
+}
+.identity-hint-close {
+  border: none;
+  background: #f1f5f9;
+  color: #475569;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.identity-auto {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
 }
 .identity-photo {
   display: inline-flex;

@@ -813,17 +813,21 @@
       "saveFailed": "Could not save the passport",
       "saved": "Passport saved",
       "savedAddPhoto": "Passport saved. Now attach a photo of the document.",
-      "photoSaved": "Photo saved"
+      "photoSaved": "Photo saved",
+      "checkPending": "The check request has been sent. A moderator will compare the passport and grant the checked status."
     },
     "verification": {
       "title": "Customer passport",
       "takePhoto": "Photograph the passport",
       "photoTaken": "Photo taken — retake",
-      "sent": "Passport sent",
+      "sent": "Passport sent — a check request has been created",
       "queued": "The passport is waiting to be sent: you can run the check once online",
       "fillFirst": "Fill in series, number, date of issue and photograph the passport",
       "failed": "Could not send the passport",
-      "noOffline": "This device cannot keep a passport offline — wait for the network"
+      "noOffline": "This device cannot keep a passport offline — wait for the network",
+      "autoRequest": "A passport with a photo goes for the checked status on its own — no separate request is needed.",
+      "whyTitle": "What the checked status gives",
+      "why": "A moderator compares the passport with the account data and marks the customer checked. A checked customer can order shop delivery, and executors trust their orders more. If no passport is given, nothing changes: no request is created."
     },
     "admin": {
       "tab": "Passport",
@@ -851,7 +855,8 @@
       "deleteConfirm": "Delete the passport? The checked mark will be removed too.",
       "deleted": "Passport deleted",
       "saved": "Passport saved",
-      "failed": "The action failed"
+      "failed": "The action failed",
+      "checkRequested": "Awaiting check"
     }
   }
 }

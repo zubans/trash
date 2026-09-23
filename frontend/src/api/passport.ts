@@ -22,6 +22,8 @@ export interface PassportMask {
   updated_at?: string
   // Пользователь «проверенный»: правка — через поддержку.
   locked: boolean
+  // Заявка на подтверждение уже подана — просить ещё раз не нужно.
+  check_requested_at?: string
 }
 
 export interface PassportFull extends PassportData {
@@ -123,6 +125,8 @@ export interface PassportStatus {
   updated_at?: string
   is_checked: boolean
   consent_given: boolean
+  // Человек ждёт подтверждения статуса: паспорт отдан на верификации.
+  check_requested_at?: string
 }
 
 // Состояние без паспортных данных — в журнал просмотров не пишется.

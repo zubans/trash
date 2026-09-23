@@ -54,6 +54,12 @@ type PassportRepository interface {
 	Delete(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error)
 	LogAccess(ctx context.Context, q Querier, userID, viewerID uuid.UUID, action string) error
 	SetChecked(ctx context.Context, q Querier, userID uuid.UUID, checked bool, by uuid.UUID) error
+	// RequestCheck ставит заявку на подтверждение «проверенного», если её ещё
+	// нет и человек не проверен. Повторная заявка не сдвигает дату: в очереди
+	// модерации порядок определяет первая просьба.
+	RequestCheck(ctx context.Context, q Querier, userID uuid.UUID) error
+	// CheckRequestedAt — когда просили подтвердить; nil, если не просили.
+	CheckRequestedAt(ctx context.Context, q Querier, userID uuid.UUID) (*time.Time, error)
 	AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error
 }
 
@@ -140,13 +146,31 @@ func (r *passportRepo) LogAccess(ctx context.Context, q Querier, userID, viewerI
 }
 
 func (r *passportRepo) SetChecked(ctx context.Context, q Querier, userID uuid.UUID, checked bool, by uuid.UUID) error {
-	query := `UPDATE users SET is_checked = TRUE, checked_at = now(), checked_by = $2 WHERE id = $1`
+	// Решение закрывает заявку в обе стороны: и отметка, и отказ снимают её с
+	// очереди модерации.
+	query := `UPDATE users SET is_checked = TRUE, checked_at = now(), checked_by = $2, check_requested_at = NULL WHERE id = $1`
 	args := []interface{}{userID, by}
 	if !checked {
-		query = `UPDATE users SET is_checked = FALSE, checked_at = NULL, checked_by = NULL WHERE id = $1`
+		query = `UPDATE users SET is_checked = FALSE, checked_at = NULL, checked_by = NULL, check_requested_at = NULL WHERE id = $1`
 		args = args[:1]
 	}
 	return execExpectingOne(ctx, r.exec(q), query, args...)
+}
+
+func (r *passportRepo) RequestCheck(ctx context.Context, q Querier, userID uuid.UUID) error {
+	_, err := r.exec(q).ExecContext(ctx,
+		`UPDATE users SET check_requested_at = now()
+		 WHERE id = $1 AND is_checked = FALSE AND check_requested_at IS NULL`, userID)
+	return err
+}
+
+func (r *passportRepo) CheckRequestedAt(ctx context.Context, q Querier, userID uuid.UUID) (*time.Time, error) {
+	var at *time.Time
+	err := r.exec(q).QueryRowContext(ctx, `SELECT check_requested_at FROM users WHERE id = $1`, userID).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return at, err
 }
 
 func (r *passportRepo) AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error {

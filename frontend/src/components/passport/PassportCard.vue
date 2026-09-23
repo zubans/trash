@@ -49,7 +49,7 @@
           </label>
         </template>
         <button
-          v-if="!checked && mask?.exists && mask.has_photo"
+          v-if="!checked && mask?.exists && mask.has_photo && !mask.check_requested_at"
           type="button"
           class="pc-btn accent"
           @click="openSupport('check')"
@@ -57,7 +57,9 @@
           {{ $t('passport.card.becomeChecked') }}
         </button>
       </div>
-      <div v-if="!checked && !(mask?.exists && mask.has_photo)" class="pc-muted">{{ $t('passport.card.checkedHint') }}</div>
+      <!-- Заявка уже есть (паспорт отдан на верификации) — просить нечего. -->
+      <div v-if="!checked && mask?.check_requested_at" class="pc-note">{{ $t('passport.card.checkPending') }}</div>
+      <div v-else-if="!checked && !(mask?.exists && mask.has_photo)" class="pc-muted">{{ $t('passport.card.checkedHint') }}</div>
     </template>
 
     <SupportChatModal v-model:show="showSupport" :prefill="supportPrefill" />
