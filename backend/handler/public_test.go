@@ -377,3 +377,28 @@ func (m *mockUserRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]strin
 func (m *mockUserRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
 	return nil
 }
+
+// Согласие на обработку персональных данных обязательно: без галочки
+// регистрация отклоняется, неверный паспорт — тоже, до создания учётной записи.
+func TestRegisterHandlerRequiresPersonalDataConsent(t *testing.T) {
+	h := newTestPublicHandler().WithPassports(service.NewPassportService(nil, nil, nil, t.TempDir(), nil))
+	base := RegisterRequest{Phone: "+79001234568", Email: "consent@example.com", Password: "secret123", LastName: "Иванов",
+		FirstName: "Иван", Patronymic: "Иванович", BirthDate: "1990-05-17", Address: "Россия, Москва, Тверская улица, д. 1234 кв. 567", Role: "CUSTOMER"}
+
+	register := func(req RegisterRequest) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(req)
+		rr := httptest.NewRecorder()
+		h.RegisterHandler(rr, httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body)))
+		return rr
+	}
+
+	if rr := register(base); rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "pd_consent_required") {
+		t.Fatalf("registration without consent: %d %s", rr.Code, rr.Body.String())
+	}
+	withBadPassport := base
+	withBadPassport.PDConsent = true
+	withBadPassport.Passport = &service.PassportData{Series: "12", Number: "1", IssuedAt: "x"}
+	if rr := register(withBadPassport); rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("registration with a bad passport: %d %s", rr.Code, rr.Body.String())
+	}
+}

@@ -30,6 +30,7 @@ MANIFEST = {
     # Какие поля модератор вводит с документа, и что он не видит о заказчике.
     "check_fields": CHECK_FIELDS,
     "hide_customer_contacts": HIDE_CUSTOMER_CONTACTS,
+    "require_passport": REQUIRE_PASSPORT,
     # Кнопки «Исполнил» нет: заказ закрывается только совпадением данных с
     # паспортом (или решением администратора), а не словом исполнителя.
     "manual_execute": False,

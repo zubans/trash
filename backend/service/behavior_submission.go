@@ -97,6 +97,11 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 	if err != nil {
 		return nil, errors.New("customer not found")
 	}
+	if manifest.RequirePassport {
+		if err := d.requirePassport(ctx, customer.ID); err != nil {
+			return nil, err
+		}
+	}
 
 	matches, mismatched, err := compareCustomerFields(customer, manifest.CheckFields, fields)
 	if err != nil {
@@ -169,6 +174,42 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		Mismatched: mismatched,
 		Messages:   messages,
 	}, nil
+}
+
+// requirePassport — паспорт заказчика с фото уже на сервере.
+func (d *BehaviorDispatcher) requirePassport(ctx context.Context, customerID uuid.UUID) error {
+	if d.passports == nil {
+		return ErrPassportRequired
+	}
+	rec, err := d.passports.Get(ctx, nil, customerID)
+	if errors.Is(err, repository.ErrPassportNotFound) || (err == nil && rec.PhotoPath == nil) {
+		return ErrPassportRequired
+	}
+	return err
+}
+
+// PassportCustomer — заказчик заказа, по которому исполнитель вносит паспорт.
+// Вносить можно только по услуге с require_passport, только своему заказу и
+// только пока заказ в работе.
+func (d *BehaviorDispatcher) PassportCustomer(ctx context.Context, orderID, executorID uuid.UUID) (uuid.UUID, error) {
+	order, err := d.orders.GetOrderByID(ctx, orderID)
+	if err != nil {
+		return uuid.Nil, errors.New("заказ не найден")
+	}
+	if order.ExecutorID == nil || *order.ExecutorID != executorID {
+		return uuid.Nil, errors.New("заказ назначен не вам")
+	}
+	if order.Status != repository.OrderStatusAssigned && order.Status != repository.OrderStatusExecuted {
+		return uuid.Nil, errors.New("заказ не в работе")
+	}
+	variant, err := d.catalog.GetNodeByID(ctx, order.ServiceVariantID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if manifest, ok := d.behaviors.Manifest(variant); !ok || !manifest.RequirePassport {
+		return uuid.Nil, errors.New("эта услуга не принимает паспорт")
+	}
+	return order.CustomerID, nil
 }
 
 // compareCustomerFields сверяет отправленные значения с записью заказчика.

@@ -93,6 +93,11 @@ services:
       LEGACY_ROOT_ROUTES: ${LEGACY_ROOT_ROUTES:-1}
       RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
       UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
+      # Паспорта: ключ шифрования (32 байта в base64) и каталог зашифрованных
+      # фото вне uploads. Без ключа сервер стартует, а приём паспортов выключен.
+      PASSPORT_ENC_KEY: ${PASSPORT_ENC_KEY:-}
+      PASSPORT_KEY_VERSION: ${PASSPORT_KEY_VERSION:-1}
+      PASSPORTS_DIR: /app/passports
       ACCEPT_RADIUS_KM: ${ACCEPT_RADIUS_KM:-0.5}
       # Address suggestions. Without it /geo/suggest answers 503 and nobody can
       # finish registration, so it is required rather than defaulted.
@@ -119,6 +124,7 @@ services:
     volumes:
       - ./releases:/app/releases
       - uploads_data:/app/uploads
+      - passports_data:/app/passports
       - ./certs:/app/certs:ro
     # 8080 is the TLS listener used by the host; 8081 stays inside the compose
     # network for nginx (it is plain HTTP and must not be published).
@@ -144,6 +150,8 @@ volumes:
   postgres_data:
     driver: local
   uploads_data:
+    driver: local
+  passports_data:
     driver: local
   maddy_data:
     driver: local

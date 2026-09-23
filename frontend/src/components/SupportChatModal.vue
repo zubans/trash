@@ -880,4 +880,8 @@ export default defineComponent({
 .icon-ban {
   font-size: 18px;
 }
+/* Скрытое поле выбора файла: общего класса d-none в приложении нет. */
+.d-none {
+  display: none;
+}
 </style>

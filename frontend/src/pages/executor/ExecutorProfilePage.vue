@@ -61,6 +61,9 @@
           </div>
         </div>
 
+        <!-- Паспорт и статус «проверенный» -->
+        <PassportCard />
+
         <!-- Управление почтой -->
         <div class="section-header">
           <div class="section-title">
@@ -136,9 +139,11 @@ import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api, { storeSession } from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
+import PassportCard from '../../components/passport/PassportCard.vue'
 
 export default defineComponent({
   name: 'ExecutorProfilePage',
+  components: { PassportCard },
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()

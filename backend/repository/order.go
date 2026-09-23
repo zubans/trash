@@ -76,6 +76,9 @@ type Order struct {
 	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит
 	// колонки, и оно никогда не несёт сами значения.
 	SubmitFields []string `json:"submit_fields,omitempty"`
+	// RequirePassport — исполнитель вносит паспорт заказчика с фото до сверки
+	// (require_passport в манифесте). Заполняется при отрисовке.
+	RequirePassport bool `json:"require_passport,omitempty"`
 	// ScriptExecuted — заказ закрывает скрипт услуги, а не отметка исполнителя
 	// (manual_execute = false в манифесте). Заполняется при отрисовке, наружу
 	// выходит как actions.execute.

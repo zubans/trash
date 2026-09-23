@@ -5,6 +5,7 @@
   <AppVersionFooter />
   <DebugConsole />
   <SoftBanScreen />
+  <PDConsentModal />
 </template>
 
 <script lang="ts">
@@ -14,12 +15,13 @@ import UpdateBanner from './components/UpdateBanner.vue'
 import AppVersionFooter from './components/AppVersionFooter.vue'
 import DebugConsole from './components/DebugConsole.vue'
 import SoftBanScreen from './components/SoftBanScreen.vue'
+import PDConsentModal from './components/passport/PDConsentModal.vue'
 import { useAuthStore } from './stores/auth-store'
 import api from './services/api'
 
 export default defineComponent({
   name: 'App',
-  components: { ServerStatusIndicator, UpdateBanner, AppVersionFooter, DebugConsole, SoftBanScreen },
+  components: { ServerStatusIndicator, UpdateBanner, AppVersionFooter, DebugConsole, SoftBanScreen, PDConsentModal },
   setup() {
     const authStore = useAuthStore()
 

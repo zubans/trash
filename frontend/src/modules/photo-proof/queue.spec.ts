@@ -31,6 +31,23 @@ class FakeTransport implements QueueTransport {
     if (this.executeFailure) throw this.executeFailure
     this.calls.push(`execute:${orderId}`)
   }
+  passports: { orderId: string; data: any; photo: Uint8Array }[] = []
+  async sendPassport(orderId: string, data: unknown, photo: Uint8Array) {
+    if (this.offline) throw new Error('Network Error')
+    this.passports.push({ orderId, data, photo })
+    this.calls.push(`passport:${orderId}`)
+  }
+}
+
+// Шифр для тестов: переворачивает байты и сдвигает их — достаточно, чтобы
+// открытый текст не лежал в хранилище как есть.
+const testSealer = {
+  async seal(plain: Uint8Array) {
+    return Uint8Array.from([...plain].reverse().map((b) => (b + 7) % 256))
+  },
+  async open(sealed: Uint8Array) {
+    return Uint8Array.from([...sealed].map((b) => (b + 249) % 256).reverse())
+  },
 }
 
 const photoMeta = (orderId: string, photoKind: 'AREA' | 'SELFIE' = 'AREA') => ({
@@ -51,7 +68,48 @@ beforeEach(() => {
   localStorage.clear()
   transport = new FakeTransport()
   blobs = new MemoryBlobStore()
-  queue = new ProofQueue(memoryStorage(), () => 'queue-key', blobs, transport)
+  queue = new ProofQueue(memoryStorage(), () => 'queue-key', blobs, transport, testSealer)
+})
+
+describe('passport in the queue', () => {
+  const data = { series: '4510', number: '123456', issued_at: '2015-06-01' }
+  const photo = new TextEncoder().encode('JPEG passport 123456')
+
+  it('keeps the passport sealed on the device and removes it once sent', async () => {
+    transport.offline = true
+    await queue.enqueuePassport('order-7', data, photo)
+    await queue.flush()
+    expect(queue.pendingPassportFor('order-7')).toBeTruthy()
+    const stored = await Promise.all((await blobs.keys()).map((k) => blobs.get(k)))
+    const plain = stored.map((b) => new TextDecoder().decode(b!)).join('|')
+    expect(plain).not.toContain('123456')
+
+    transport.offline = false
+    await queue.flush()
+    expect(transport.passports).toHaveLength(1)
+    expect(transport.passports[0].orderId).toBe('order-7')
+    expect(transport.passports[0].data).toEqual(data)
+    expect([...transport.passports[0].photo]).toEqual([...photo])
+    expect(queue.pendingPassportFor('order-7')).toBeUndefined()
+    expect(await blobs.keys()).toEqual([])
+  })
+
+  it('replaces an unsent passport of the same order', async () => {
+    transport.offline = true
+    await queue.enqueuePassport('order-7', data, photo)
+    await queue.enqueuePassport('order-7', { ...data, number: '654321' }, photo)
+    expect(queue.actions().filter((a) => a.kind === 'passport')).toHaveLength(1)
+    expect(await blobs.keys()).toHaveLength(2)
+    transport.offline = false
+    await queue.flush()
+    expect(transport.passports[0].data.number).toBe('654321')
+  })
+
+  it('refuses to keep a passport without a device cipher', async () => {
+    const plainQueue = new ProofQueue(memoryStorage(), () => 'k', new MemoryBlobStore(), transport, null)
+    expect(plainQueue.canQueuePassport()).toBe(false)
+    await expect(plainQueue.enqueuePassport('order-1', data, photo)).rejects.toThrow()
+  })
 })
 
 describe('очередь снимков, трека и отметок', () => {

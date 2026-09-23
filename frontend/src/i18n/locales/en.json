@@ -416,7 +416,8 @@
     "customer": "Customer",
     "executor": "Executor",
     "details": "Details",
-    "hours": "hours"
+    "hours": "hours",
+    "back": "Back"
   },
   "camera": {
     "header": "Add photo",
@@ -766,6 +767,91 @@
       "REDEEMED": "Redeemed",
       "EXPIRED": "Expired",
       "CANCELED": "Canceled"
+    }
+  },
+  "passport": {
+    "fields": {
+      "series": "Series",
+      "number": "Number",
+      "issuedAt": "Date of issue",
+      "issuedBy": "Issued by",
+      "divisionCode": "Division code",
+      "seriesNumber": "Series and number",
+      "issuedYear": "Year of issue",
+      "photo": "Photo of the document"
+    },
+    "consent": {
+      "title": "Consent to personal data processing",
+      "lead": "We need your consent to store your data and passport. Please read the text and accept it.",
+      "accept": "I accept",
+      "later": "Later",
+      "failed": "Could not save your consent. Please try again."
+    },
+    "register": {
+      "toggle": "Add a passport (optional)",
+      "hint": "A passport is needed for the checked status and delivery. You can attach its photo in your profile after signing in.",
+      "consentPrefix": "I give my",
+      "consentLink": "consent to personal data processing",
+      "consentRequired": "Please give your consent to personal data processing"
+    },
+    "card": {
+      "title": "Passport",
+      "sub": "Needed for the checked status and delivery. Stored encrypted.",
+      "checked": "Checked",
+      "consentFirst": "Accept the consent to personal data processing to add a passport.",
+      "photoYes": "yes",
+      "photoNo": "no",
+      "edit": "Edit",
+      "addPhoto": "Add photo",
+      "replacePhoto": "Replace photo",
+      "editViaSupport": "Change via support",
+      "becomeChecked": "Become checked",
+      "checkedHint": "To become checked, fill in the passport, attach its photo and message support.",
+      "checkRequest": "Please mark me as checked. My passport and its photo are in my profile.",
+      "editRequest": "Please change my passport details: ",
+      "loadFailed": "Could not load the passport",
+      "saveFailed": "Could not save the passport",
+      "saved": "Passport saved",
+      "savedAddPhoto": "Passport saved. Now attach a photo of the document.",
+      "photoSaved": "Photo saved"
+    },
+    "verification": {
+      "title": "Customer passport",
+      "takePhoto": "Photograph the passport",
+      "photoTaken": "Photo taken — retake",
+      "sent": "Passport sent",
+      "queued": "The passport is waiting to be sent: you can run the check once online",
+      "fillFirst": "Fill in series, number, date of issue and photograph the passport",
+      "failed": "Could not send the passport",
+      "noOffline": "This device cannot keep a passport offline — wait for the network"
+    },
+    "admin": {
+      "tab": "Passport",
+      "checked": "Checked",
+      "notChecked": "Not checked",
+      "exists": "Passport on file",
+      "none": "No passport",
+      "noConsent": "No consent to personal data processing",
+      "source": {
+        "OWNER": "entered by the user",
+        "VERIFICATION": "entered by a moderator",
+        "ADMIN": "entered by an admin"
+      },
+      "reason": "Reason (required)",
+      "markChecked": "Mark as checked",
+      "unmarkChecked": "Remove the mark",
+      "markedChecked": "Marked as checked",
+      "unmarked": "Mark removed",
+      "reveal": "Show passport",
+      "revealHint": "Every view of the passport and photo is logged.",
+      "showPhoto": "Show photo",
+      "add": "Add passport",
+      "edit": "Correct passport",
+      "delete": "Delete passport",
+      "deleteConfirm": "Delete the passport? The checked mark will be removed too.",
+      "deleted": "Passport deleted",
+      "saved": "Passport saved",
+      "failed": "The action failed"
     }
   }
 }

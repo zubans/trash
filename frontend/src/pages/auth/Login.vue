@@ -262,9 +262,32 @@
               </div>
             </div>
 
+            <!-- Паспорт — по желанию: пригодится для статуса «проверенный».
+                 Фото прикладывается в профиле после входа. -->
+            <div class="input-group col-span-2">
+              <button type="button" class="passport-toggle" @click="showPassport = !showPassport">
+                <i :class="showPassport ? 'ph-bold ph-caret-up' : 'ph-bold ph-caret-down'"></i>
+                {{ $t('passport.register.toggle') }}
+              </button>
+              <div v-if="showPassport" class="passport-block">
+                <PassportFields v-model="passport" :errors="passportErrors" />
+                <span class="field-hint">{{ $t('passport.register.hint') }}</span>
+              </div>
+            </div>
+
+            <div class="input-group col-span-2">
+              <label class="consent-check">
+                <input v-model="pdConsent" type="checkbox" />
+                <span>
+                  {{ $t('passport.register.consentPrefix') }}
+                  <router-link to="/legal/personal-data" target="_blank">{{ $t('passport.register.consentLink') }}</router-link>
+                </span>
+              </label>
+            </div>
+
             <!-- Встроенная кнопка отправки для десктопа -->
             <div class="desktop-submit-wrap col-span-2">
-              <button ref="submitBtnRef" type="submit" class="btn-submit" :disabled="loading">
+              <button ref="submitBtnRef" type="submit" class="btn-submit" :disabled="loading || !pdConsent">
                 <span v-if="loading" class="spinner"></span>
                 <template v-else>
                   {{ $t('login.signUpBtn') }} <i class="ph-bold ph-arrow-right"></i>
@@ -275,7 +298,7 @@
 
           <!-- Плавающая нижняя панель действий для мобильных -->
           <div class="bottom-action-bar">
-            <button type="submit" class="btn-submit" :disabled="loading">
+            <button type="submit" class="btn-submit" :disabled="loading || (mode === 'register' && !pdConsent)">
               <span v-if="loading" class="spinner"></span>
               <template v-else>
                 {{ mode === 'login' ? $t('login.signInBtn') : $t('login.signUpBtn') }}
@@ -367,6 +390,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import api, { formatApiError } from '../../services/api'
+import PassportFields from '../../components/passport/PassportFields.vue'
+import { emptyPassport, passportError, passportPayload, type PassportData } from '../../api/passport'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import LanguageSwitcher from '../../components/LanguageSwitcher.vue'
 import AppLogo from '../../components/AppLogo.vue'
@@ -391,7 +416,7 @@ function parseJwt(token: string) {
 
 export default defineComponent({
   name: 'Login',
-  components: { LanguageSwitcher, AddressAutocomplete, AppLogo, RoleSelectOverlay },
+  components: { LanguageSwitcher, AddressAutocomplete, AppLogo, RoleSelectOverlay, PassportFields },
   setup() {
     const router = useRouter()
     const route = useRoute()
@@ -498,6 +523,13 @@ export default defineComponent({
     const firstName = ref('')
     const patronymic = ref('')
     const birthDate = ref('')
+    // Согласие на обработку персональных данных — обязательно; паспорт — по
+    // желанию, и уходит на сервер, только если заполнено хоть одно поле.
+    const pdConsent = ref(false)
+    const showPassport = ref(false)
+    const passport = ref<PassportData>(emptyPassport())
+    const passportErrors = ref<Record<string, string>>({})
+    const passportFilled = () => Object.values(passport.value).some((v) => (v || '').trim() !== '')
     const role = ref<'CUSTOMER' | 'EXECUTOR'>('CUSTOMER')
 
     // Выбор даты отклоняет завтрашний день ещё до запроса; бэкенд отклоняет его
@@ -661,7 +693,14 @@ export default defineComponent({
             patronymic: patronymic.value,
             birth_date: birthDate.value,
             role: role.value,
+            pd_consent: pdConsent.value,
           }
+          if (!pdConsent.value) {
+            error.value = t('passport.register.consentRequired')
+            return
+          }
+          passportErrors.value = {}
+          if (passportFilled()) payload.passport = passportPayload(passport.value)
 
           const chosen = pickedAddress.value
           if (!chosen) {
@@ -690,11 +729,19 @@ export default defineComponent({
           firstName.value = ''
           patronymic.value = ''
           birthDate.value = ''
+          pdConsent.value = false
+          passport.value = emptyPassport()
+          showPassport.value = false
           role.value = 'CUSTOMER'
           pickedAddress.value = null
         }
       } catch (err: any) {
-        error.value = formatApiError(err, t('login.networkError'))
+        const pe = passportError(err)
+        if (pe?.fields) {
+          passportErrors.value = pe.fields
+          showPassport.value = true
+        }
+        error.value = pe?.message || formatApiError(err, t('login.networkError'))
       } finally {
         loading.value = false
       }
@@ -713,6 +760,10 @@ export default defineComponent({
       firstName,
       patronymic,
       birthDate,
+      pdConsent,
+      showPassport,
+      passport,
+      passportErrors,
       maxBirthDate,
       role,
       pickedAddress,
@@ -1391,5 +1442,33 @@ export default defineComponent({
     max-width: 480px;
     padding: 18px;
   }
+}
+.passport-toggle {
+  border: none;
+  background: none;
+  color: #0f766e;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.passport-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.consent-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.4;
+}
+.consent-check input {
+  margin-top: 2px;
 }
 </style>

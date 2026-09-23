@@ -41,18 +41,25 @@ func (u *User) IsBlocked() bool {
 
 // User представляет запись пользователя в базе.
 type User struct {
-	ID                     uuid.UUID    `json:"id"`
-	Role                   string       `json:"role"`
-	Roles                  []string     `json:"roles,omitempty"`
-	Phone                  string       `json:"phone"`
-	Email                  string       `json:"email"`
-	LastName               string       `json:"last_name"`
-	FirstName              string       `json:"first_name"`
-	Patronymic             string       `json:"patronymic"`
-	BirthDate              *time.Time   `json:"birth_date,omitempty"`
-	PendingEmail           string       `json:"pending_email,omitempty"`
-	EmailVerified          bool         `json:"email_verified"`
-	Verified               bool         `json:"is_verified"`
+	ID            uuid.UUID  `json:"id"`
+	Role          string     `json:"role"`
+	Roles         []string   `json:"roles,omitempty"`
+	Phone         string     `json:"phone"`
+	Email         string     `json:"email"`
+	LastName      string     `json:"last_name"`
+	FirstName     string     `json:"first_name"`
+	Patronymic    string     `json:"patronymic"`
+	BirthDate     *time.Time `json:"birth_date,omitempty"`
+	PendingEmail  string     `json:"pending_email,omitempty"`
+	EmailVerified bool       `json:"email_verified"`
+	Verified      bool       `json:"is_verified"`
+	// Checked — «проверенный»: в системе есть паспорт с фото, и модератор его
+	// просмотрел. Ставится только руками в админке.
+	Checked bool `json:"is_checked"`
+	// PDConsentVersion — принятая редакция согласия на обработку персональных
+	// данных; nil — не принимал (зарегистрировался до галочки).
+	PDConsentVersion       *int         `json:"pd_consent_version,omitempty"`
+	PDConsentAt            *time.Time   `json:"pd_consent_at,omitempty"`
 	EmailVerificationToken string       `json:"-"`
 	EmailTokenExpiresAt    *time.Time   `json:"-"`
 	PasswordResetCode      string       `json:"-"`
@@ -244,9 +251,9 @@ func (r *repo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	var email, pendingEmail, token, resetCode sql.NullString
 	var resetExp, birthDate sql.NullTime
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE id = $1`,
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at, is_checked, pd_consent_version, pd_consent_at FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
+	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt, &u.Checked, &u.PDConsentVersion, &u.PDConsentAt)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +285,7 @@ func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*U
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
+		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at, is_checked, pd_consent_version, pd_consent_at
 		 FROM users WHERE id IN (`+placeholders+`)`,
 		args...,
 	)
@@ -291,7 +298,7 @@ func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*U
 		var u User
 		var email, pendingEmail, token, resetCode sql.NullString
 		var resetExp, birthDate sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt, &u.Checked, &u.PDConsentVersion, &u.PDConsentAt); err != nil {
 			return nil, err
 		}
 		u.Email = email.String
@@ -442,9 +449,9 @@ func (r *repo) Create(ctx context.Context, user *User) error {
 		user.ID = id
 	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, birth_date, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.BirthDate, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(),
+		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, birth_date, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at, pd_consent_version, pd_consent_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.BirthDate, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(), user.PDConsentVersion, user.PDConsentAt,
 	)
 	if err != nil {
 		return err

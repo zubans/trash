@@ -3,6 +3,7 @@ import api from '../../services/api'
 import { blobStore, type BlobStore } from './blobStore'
 import { online, onOnline } from './network'
 import { OFFLINE_PREFIX, patchOfflineOrder } from './offlineOrders'
+import { WebCryptoSealer, type Sealer } from './sealer'
 
 /**
  * Очередь того, что исполнитель сделал без сети: снимки, точки трека и отметки
@@ -56,7 +57,21 @@ export interface ExecuteAction {
   createdAt: number
 }
 
-export type QueueAction = PhotoAction | PositionsAction | ExecuteAction
+/**
+ * Паспорт заказчика, внесённый модератором по заказу верификации. Данные и фото
+ * лежат в хранилище байтов зашифрованными (sealer.ts); в описании действия —
+ * только ключи к ним.
+ */
+export interface PassportAction {
+  kind: 'passport'
+  id: string
+  orderId: string
+  dataKey: string
+  photoKey: string
+  createdAt: number
+}
+
+export type QueueAction = PhotoAction | PositionsAction | ExecuteAction | PassportAction
 
 export interface QueueFailure {
   action: QueueAction
@@ -68,6 +83,8 @@ export interface QueueTransport {
   uploadPhoto(action: PhotoAction, bytes: Uint8Array): Promise<void>
   sendPositions(points: PositionPoint[]): Promise<void>
   execute(orderId: string, executedAtDevice: string): Promise<void>
+  /** Данные паспорта, затем фото: фото без данных сервер не примет. */
+  sendPassport(orderId: string, data: unknown, photo: Uint8Array): Promise<void>
 }
 
 export interface KeyValue {
@@ -118,6 +135,7 @@ export class ProofQueue {
     private readonly storageKey: () => string,
     private readonly blobs: BlobStore,
     private readonly transport: QueueTransport,
+    private readonly sealer: Sealer | null = WebCryptoSealer.available() ? new WebCryptoSealer() : null,
   ) {
     this.refreshCounters()
   }
@@ -193,6 +211,42 @@ export class ProofQueue {
     this.save(actions)
   }
 
+  /** Паспорт заказа, ждущий отправки. */
+  pendingPassportFor(orderId: string): PassportAction | undefined {
+    return this.actions().find((a): a is PassportAction => a.kind === 'passport' && a.orderId === orderId)
+  }
+
+  /** Можно ли хранить паспорт на устройстве: без шифра — только сразу на сервер. */
+  canQueuePassport(): boolean {
+    return this.sealer !== null
+  }
+
+  /**
+   * Ставит паспорт в очередь зашифрованным. Повторный ввод по тому же заказу
+   * заменяет прежний неотправленный: на сервер уходит последний.
+   */
+  async enqueuePassport(orderId: string, data: unknown, photo: Uint8Array): Promise<PassportAction> {
+    if (!this.sealer) throw new Error('шифрование на устройстве недоступно')
+    const id = newId()
+    const action: PassportAction = {
+      kind: 'passport', id, orderId, dataKey: `passport-data-${id}`, photoKey: `passport-photo-${id}`, createdAt: Date.now(),
+    }
+    const json = new TextEncoder().encode(JSON.stringify(data))
+    await this.blobs.put(action.dataKey, await this.sealer.seal(json))
+    await this.blobs.put(action.photoKey, await this.sealer.seal(photo))
+
+    const replaced: PassportAction[] = []
+    const actions = this.actions().filter((a) => {
+      const same = a.kind === 'passport' && a.orderId === orderId
+      if (same) replaced.push(a as PassportAction)
+      return !same
+    })
+    actions.push(action)
+    this.save(actions)
+    await Promise.all(replaced.flatMap((a) => [this.blobs.remove(a.dataKey), this.blobs.remove(a.photoKey)]))
+    return action
+  }
+
   /** Ставит в очередь отметку «Исполнил»; вторая отметка того же заказа не нужна. */
   enqueueExecute(orderId: string, executedAtDevice: string): void {
     const actions = this.actions()
@@ -215,6 +269,8 @@ export class ProofQueue {
   private async drop(action: QueueAction, err?: any) {
     this.save(this.actions().filter((a) => a.id !== action.id))
     if (action.kind === 'photo') await this.blobs.remove(action.blobKey)
+    // Паспорт после отправки удаляется сразу, а не по таймеру.
+    if (action.kind === 'passport') await Promise.all([this.blobs.remove(action.dataKey), this.blobs.remove(action.photoKey)])
     if (err) {
       this.failures.value = [...this.failures.value.slice(-9), { action, message: failureText(err), at: Date.now() }]
     }
@@ -232,6 +288,15 @@ export class ProofQueue {
           await this.transport.uploadPhoto(action, bytes)
         } else if (action.kind === 'positions') {
           await this.transport.sendPositions(action.points)
+        } else if (action.kind === 'passport') {
+          const sealedData = await this.blobs.get(action.dataKey)
+          const sealedPhoto = await this.blobs.get(action.photoKey)
+          if (!sealedData || !sealedPhoto || !this.sealer) {
+            await this.drop(action, new Error('паспорт потерян на устройстве — внесите его заново'))
+            continue
+          }
+          const data = JSON.parse(new TextDecoder().decode(await this.sealer.open(sealedData)))
+          await this.transport.sendPassport(action.orderId, data, await this.sealer.open(sealedPhoto))
         } else {
           // Отметка ждёт снимков своего заказа: без них сервер откажет.
           if (this.pendingPhotosFor(action.orderId).length > 0) continue
@@ -270,6 +335,12 @@ const apiTransport: QueueTransport = {
   },
   async execute(orderId, executedAtDevice) {
     await api.post(`/executor/orders/${orderId}/execute`, { executed_at_device: executedAtDevice })
+  },
+  async sendPassport(orderId, data, photo) {
+    await api.put(`/executor/orders/${orderId}/passport`, data)
+    const form = new FormData()
+    form.append('file', new Blob([photo as BlobPart], { type: 'image/jpeg' }), 'passport.jpg')
+    await api.post(`/executor/orders/${orderId}/passport/photo`, form)
   },
 }
 

@@ -28,6 +28,23 @@
           />
         </div>
 
+        <!-- Паспорт заказчика с фото: без него сервер сверку не примет. Без
+             сети он встаёт в очередь зашифрованным и уходит, когда сеть
+             появится; сверка — после этого. -->
+        <section v-if="requirePassport" class="identity-passport">
+          <div class="identity-label">{{ $t('passport.verification.title') }}</div>
+          <p v-if="passportState === 'sent'" class="identity-ok">{{ $t('passport.verification.sent') }}</p>
+          <p v-else-if="passportState === 'queued'" class="identity-warning">{{ $t('passport.verification.queued') }}</p>
+          <template v-if="passportState !== 'sent'">
+            <PassportFields v-model="passport" :errors="passportErrors" />
+            <label class="identity-photo">
+              <i class="ph-bold ph-camera"></i>
+              {{ photo ? $t('passport.verification.photoTaken') : $t('passport.verification.takePhoto') }}
+              <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" @change="pickPhoto" />
+            </label>
+          </template>
+        </section>
+
         <p v-if="warning" class="identity-warning">{{ warning }}</p>
         <p v-if="errorText" class="identity-error">{{ errorText }}</p>
       </div>
@@ -46,8 +63,13 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, reactive, ref, type PropType } from 'vue'
+import { defineComponent, onMounted, reactive, ref, type PropType } from 'vue'
+import { useI18n } from 'vue-i18n'
 import api from '../../../services/api'
+import PassportFields from '../../../components/passport/PassportFields.vue'
+import { emptyPassport, passportError, passportPayload, saveOrderPassport, uploadOrderPassportPhoto, type PassportData } from '../../../api/passport'
+import { proofQueue } from '../../../modules/photo-proof/queue'
+import { online } from '../../../modules/photo-proof/network'
 
 // Подписи полей. Имена приходят из скрипта услуги, поэтому неизвестное
 // показывается как есть, а не отбрасывается: на поведение, спрашивающее что-то
@@ -61,12 +83,82 @@ const LABELS: Record<string, string> = {
 
 export default defineComponent({
   name: 'IdentityCheckModal',
+  components: { PassportFields },
   props: {
     orderId: { type: String, required: true },
     fields: { type: Array as PropType<string[]>, required: true },
+    // Услуга требует паспорт заказчика с фото (require_passport).
+    requirePassport: { type: Boolean, default: false },
   },
   emits: ['close', 'verified'],
   setup(props, { emit }) {
+    const { t } = useI18n()
+    const queue = proofQueue()
+    const passport = ref<PassportData>(emptyPassport())
+    const passportErrors = ref<Record<string, string>>({})
+    const photo = ref<File | null>(null)
+    // none — ещё не отправлен; queued — ждёт сети в очереди; sent — на сервере.
+    const passportState = ref<'none' | 'queued' | 'sent'>('none')
+
+    onMounted(() => {
+      if (props.requirePassport && queue.pendingPassportFor(props.orderId)) passportState.value = 'queued'
+    })
+
+    const pickPhoto = (event: Event) => {
+      const input = event.target as HTMLInputElement
+      photo.value = input.files?.[0] || null
+      input.value = ''
+    }
+
+    // Паспорт уходит до сверки. С сетью — сразу; без сети или при сбое — в
+    // очередь, и сверка ждёт его отправки. Возвращает, можно ли сверять.
+    const sendPassport = async (): Promise<boolean> => {
+      if (passportState.value === 'sent') return true
+      if (passportState.value === 'queued') {
+        await queue.flush()
+        if (!queue.pendingPassportFor(props.orderId)) {
+          passportState.value = 'sent'
+          return true
+        }
+        warning.value = t('passport.verification.queued')
+        return false
+      }
+      const p = passport.value
+      // Ничего не внесено — паспорт мог уже дойти раньше (из очереди или с
+      // другого устройства): решает сервер, и при отказе форма попросит паспорт.
+      if (!p.series.trim() && !p.number.trim() && !p.issued_at && !photo.value) return true
+      if (!p.series.trim() || !p.number.trim() || !p.issued_at || !photo.value) {
+        errorText.value = t('passport.verification.fillFirst')
+        return false
+      }
+      const data = passportPayload(p)
+      if (online.value) {
+        try {
+          await saveOrderPassport(props.orderId, data)
+          await uploadOrderPassportPhoto(props.orderId, photo.value)
+          passportState.value = 'sent'
+          return true
+        } catch (err: any) {
+          const e = passportError(err)
+          if (err?.response) {
+            // Сервер ответил отказом — очередь его не исправит.
+            passportErrors.value = e?.fields || {}
+            errorText.value = e?.message || t('passport.verification.failed')
+            return false
+          }
+          // Нет ответа — дальше как без сети.
+        }
+      }
+      if (!queue.canQueuePassport()) {
+        errorText.value = t('passport.verification.noOffline')
+        return false
+      }
+      await queue.enqueuePassport(props.orderId, data, new Uint8Array(await photo.value.arrayBuffer()))
+      passportState.value = 'queued'
+      warning.value = t('passport.verification.queued')
+      return false
+    }
+
     const values = reactive<Record<string, string>>({})
     props.fields.forEach((field) => {
       values[field] = ''
@@ -85,6 +177,7 @@ export default defineComponent({
       warning.value = ''
       errorText.value = ''
       try {
+        if (props.requirePassport && !(await sendPassport())) return
         const { data } = await api.post(`/executor/orders/${props.orderId}/submission`, values)
         if (data.matched) {
           emit('verified', data)
@@ -97,13 +190,23 @@ export default defineComponent({
           emit('verified', data)
         }
       } catch (err: any) {
-        errorText.value = err.response?.data || 'Не удалось отправить данные'
+        const data = err.response?.data
+        if (data?.error === 'passport_required') {
+          // Паспорт на сервер не дошёл — вносим снова.
+          passportState.value = 'none'
+          errorText.value = data.message
+          return
+        }
+        errorText.value = typeof data === 'string' && data ? data : 'Не удалось отправить данные'
       } finally {
         busy.value = false
       }
     }
 
-    return { values, busy, warning, errorText, labelFor, placeholderFor, submit }
+    return {
+      values, busy, warning, errorText, labelFor, placeholderFor, submit,
+      passport, passportErrors, photo, passportState, pickPhoto,
+    }
   },
 })
 </script>
@@ -125,7 +228,8 @@ export default defineComponent({
   border-radius: 20px;
   width: 100%;
   max-width: 420px;
-  overflow: hidden;
+  max-height: 92vh;
+  overflow: auto;
   box-shadow: 0 24px 48px -16px rgba(15, 23, 42, 0.35);
 }
 
@@ -255,5 +359,34 @@ export default defineComponent({
 .identity-btn-primary:disabled {
   opacity: 0.6;
   cursor: default;
+}
+.identity-passport {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.identity-photo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+.identity-photo input {
+  display: none;
+}
+.identity-ok {
+  color: #15803d;
+  font-size: 13px;
+  margin: 0;
 }
 </style>

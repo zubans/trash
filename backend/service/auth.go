@@ -30,6 +30,8 @@ type AuthService struct {
 	resolver    AddressResolver
 	mailer      MailSender
 	secret      []byte
+	// consentVersion — текущая редакция согласия на обработку персональных данных.
+	consentVersion func(ctx context.Context) int
 }
 
 // JWTClaims содержит данные, извлечённые из проверенного access-токена.
@@ -60,6 +62,14 @@ func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, res
 }
 
 // WithAddresses присоединяет репозиторий адресов, используемый при регистрации.
+// WithConsent подключает редакцию согласия на обработку персональных данных:
+// новая учётная запись создаётся с отметкой о нём. Без согласия регистрацию
+// отклоняет обработчик — это единственный её вход.
+func (s *AuthService) WithConsent(version func(ctx context.Context) int) *AuthService {
+	s.consentVersion = version
+	return s
+}
+
 func (s *AuthService) WithAddresses(addressRepo repository.AddressRepository) *AuthService {
 	s.addressRepo = addressRepo
 	return s
@@ -242,6 +252,10 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		Password:               string(hash),
 		Balance:                0,
 		Status:                 "ACTIVE",
+	}
+	if s.consentVersion != nil {
+		version, now := s.consentVersion(ctx), time.Now()
+		user.PDConsentVersion, user.PDConsentAt = &version, &now
 	}
 	if err := s.repo.Create(ctx, user); err != nil {
 		return nil, err

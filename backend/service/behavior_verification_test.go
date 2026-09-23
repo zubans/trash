@@ -358,12 +358,29 @@ type verificationWorld struct {
 	dispatcher  *BehaviorDispatcher
 	behaviors   *Behaviors
 	settings    *orderMockSettingsRepo
+	passports   *verificationPassports
 	customer    *repository.User
 	moderator   *repository.User
 	executor    *repository.User
 	// rewardBase — баланс проверяющего до вознаграждения, потому что подделка
 	// баланса засевает новым пользователям собственные деньги.
 	rewardBase money.Amount
+}
+
+// verificationPassports — паспорта заказчиков: у каждого есть паспорт с фото,
+// кроме перечисленных в missing. Верификация требует паспорт
+// (require_passport), и тесты, которым он не важен, получают его даром.
+type verificationPassports struct {
+	repository.PassportRepository
+	missing map[uuid.UUID]bool
+}
+
+func (p *verificationPassports) Get(ctx context.Context, q repository.Querier, userID uuid.UUID) (*repository.PassportRecord, error) {
+	if p.missing[userID] {
+		return nil, repository.ErrPassportNotFound
+	}
+	photo := "photo.bin"
+	return &repository.PassportRecord{UserID: userID, PhotoPath: &photo}, nil
 }
 
 func newVerificationWorld(t *testing.T) *verificationWorld {
@@ -397,6 +414,7 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 		tx:          &mockTransactionRepo{},
 		accounts:    newMockAccounts(),
 		submissions: &verificationSubmissions{},
+		passports:   &verificationPassports{missing: map[uuid.UUID]bool{}},
 	}
 	w.behaviors = NewBehaviors(engine, w.claims)
 	ledger := NewLedger(w.tx, w.accounts)
@@ -407,7 +425,8 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 		WithBehaviors(w.behaviors, w.claims, w.events)
 	w.dispatcher = NewBehaviorDispatcher(w.events, w.orders, w.users, w.catalog, w.claims, nil,
 		settings, ledger, w.behaviors, w.orderSvc).
-		WithSubmissions(w.submissions)
+		WithSubmissions(w.submissions).
+		WithPassports(w.passports)
 
 	w.customer = w.users.add(repository.RoleCustomer, nil, false)
 	w.moderator = w.users.add(repository.RoleExecutor, []string{repository.RoleExecutor, repository.RoleModerator}, true)
@@ -1077,5 +1096,44 @@ func TestForkedVerificationScriptWithoutFlagStillBlocksManualExecute(t *testing.
 	}
 	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); !errors.Is(err, ErrManualExecuteDisabled) {
 		t.Fatalf("manual execute: err = %v, want ErrManualExecuteDisabled", err)
+	}
+}
+
+// Верификация требует паспорт заказчика с фото: сверку без него ядро не
+// принимает, и заказ не закроется без документа. Когда паспорт дошёл, та же
+// сверка проходит.
+func TestVerificationRequiresThePassportBeforeTheCheck(t *testing.T) {
+	w := newVerificationWorld(t)
+	ctx := context.Background()
+	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := w.orderSvc.Accept(ctx, order.ID, w.moderator.ID); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	w.passports.missing[w.customer.ID] = true
+	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrPassportRequired) {
+		t.Fatalf("a check without the passport: %v, want ErrPassportRequired", err)
+	}
+	if len(w.submissions.submissions) != 0 {
+		t.Errorf("a refused check was recorded as an attempt: %d", len(w.submissions.submissions))
+	}
+
+	// Модератор вносит паспорт по своему заказу — и только по своему.
+	if customer, err := w.dispatcher.PassportCustomer(ctx, order.ID, w.moderator.ID); err != nil || customer != w.customer.ID {
+		t.Fatalf("passport customer: %s, %v", customer, err)
+	}
+	if _, err := w.dispatcher.PassportCustomer(ctx, order.ID, w.executor.ID); err == nil {
+		t.Error("an executor who does not hold the order may enter its passport")
+	}
+
+	delete(w.passports.missing, w.customer.ID)
+	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
+		t.Fatalf("the check with the passport: %v", err)
+	}
+	if !w.customer.Verified {
+		t.Error("the customer was not verified once the passport arrived")
 	}
 }

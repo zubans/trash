@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -18,11 +19,20 @@ type PublicHandler struct {
 	// permissions даёт /auth/me список действующих прав пользователя. Интерфейс
 	// строит по нему меню и прячет кнопки, а не гадает по названию роли.
 	permissions *service.Permissions
+	// passports — согласие на обработку персональных данных, паспорт при
+	// регистрации и статус «проверенный» в /auth/me.
+	passports *service.PassportService
 }
 
 // NewPublicHandler создаёт PublicHandler с переданным AuthService.
 func NewPublicHandler(authService *service.AuthService) *PublicHandler {
 	return &PublicHandler{authService: authService}
+}
+
+// WithPassports подключает паспорт и согласие к регистрации и /auth/me.
+func (h *PublicHandler) WithPassports(passports *service.PassportService) *PublicHandler {
+	h.passports = passports
+	return h
 }
 
 // WithPermissions подключает службу прав к ответу /auth/me.
@@ -52,6 +62,11 @@ type RegisterRequest struct {
 	Role       string   `json:"role"`
 	Lat        *float64 `json:"lat,omitempty"`
 	Lon        *float64 `json:"lon,omitempty"`
+	// PDConsent — галочка согласия на обработку персональных данных,
+	// обязательна.
+	PDConsent bool `json:"pd_consent"`
+	// Passport — необязательный паспорт; фото прикладывается после входа.
+	Passport *service.PassportData `json:"passport,omitempty"`
 }
 
 // AuthResponse возвращает пару токенов после успешного входа или обновления.
@@ -68,6 +83,8 @@ type RegisterResponse struct {
 	Phone string `json:"phone"`
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	// PassportSaved — паспорт из формы регистрации записан.
+	PassportSaved bool `json:"passport_saved,omitempty"`
 }
 
 // HealthHandler возвращает состояние здоровья сервиса.
@@ -94,6 +111,22 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if h.passports != nil {
+		if !req.PDConsent {
+			metrics.AuthEvent("register", "denied")
+			http.Error(w, "pd_consent_required", http.StatusBadRequest)
+			return
+		}
+		// Паспорт проверяется до создания учётной записи: иначе она создалась
+		// бы, а паспорт — нет, и человек не понял бы почему.
+		if req.Passport != nil {
+			if err := h.passports.ValidateData(*req.Passport); err != nil {
+				writePassportError(w, err)
+				return
+			}
+		}
+	}
+
 	user, err := h.authService.RegisterWithCoordinates(r.Context(), req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.BirthDate, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
 		metrics.AuthEvent("register", "denied")
@@ -111,6 +144,15 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 		Phone: user.Phone,
 		Email: user.Email,
 		Role:  user.Role,
+	}
+	if h.passports != nil && req.Passport != nil {
+		// Сбой записи паспорта регистрацию не отменяет: учётная запись уже есть,
+		// а паспорт можно заполнить в профиле. Клиент узнаёт об этом по флагу.
+		if err := h.passports.SaveAtRegistration(r.Context(), user.ID, *req.Passport); err != nil {
+			log.Printf("[passport] registration of %s: %v", user.ID, err)
+		} else {
+			resp.PassportSaved = true
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -255,7 +297,11 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 		"birth_date":    user.BirthDateString(),
 		"age":           user.GetAge(),
 		"is_verified":   user.IsVerified(),
+		"is_checked":    user.Checked,
 		"pending_email": user.PendingEmail,
+		// Окно согласия показывается, пока пользователь не принял текущую
+		// редакцию: зарегистрировавшимся до галочки и после её правки.
+		"pd_consent_required": h.passports != nil && h.passports.ConsentRequired(r.Context(), user),
 	})
 }
 

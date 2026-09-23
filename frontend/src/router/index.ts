@@ -299,6 +299,13 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true, role: 'EXECUTOR' },
   },
   {
+    // Согласие на обработку персональных данных открыто без входа: на него
+    // ведёт ссылка из формы регистрации.
+    path: '/legal/personal-data',
+    name: 'personal-data-consent',
+    component: () => import('../pages/shared/PersonalDataConsentPage.vue'),
+  },
+  {
     // Оферта без требования роли: её читают из окна оформления любой роли.
     path: '/shop/offer',
     name: 'shop-offer',

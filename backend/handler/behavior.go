@@ -54,6 +54,11 @@ func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, service.ErrSubmissionEscalated):
 			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, service.ErrPassportRequired):
+			// Код, а не текст: приложение по нему досылает паспорт из очереди.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "passport_required", "message": err.Error()})
 		default:
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
