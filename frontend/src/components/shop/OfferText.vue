@@ -8,16 +8,22 @@
 </template>
 
 <script lang="ts">
-import { defineComponent } from 'vue'
+import { computed, defineComponent } from 'vue'
 import offer from '../../content/shop-offer.md?raw'
 import { parseOffer, sectionAnchor } from '../../utils/offerMarkdown'
 
-// Текст оферты. Разбирается свой маркдаун с экранированием, поэтому v-html
-// здесь безопасен: в разметку попадает только <strong>.
+// Юридический текст: оферта магазина по умолчанию или другой документ того же
+// вида (согласие на обработку персональных данных). Разбирается свой маркдаун
+// с экранированием, поэтому v-html здесь безопасен: в разметку попадает
+// только <strong>.
 export default defineComponent({
   name: 'OfferText',
-  setup() {
-    return { blocks: parseOffer(offer), anchor: sectionAnchor }
+  props: {
+    text: { type: String, default: '' },
+  },
+  setup(props) {
+    const blocks = computed(() => parseOffer(props.text || offer))
+    return { blocks, anchor: sectionAnchor }
   },
 })
 </script>

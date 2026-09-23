@@ -263,6 +263,7 @@ func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*rep
 			// их показывать нельзя.
 			if manifest, ok := s.behaviors.Manifest(variant); ok {
 				o.SubmitFields = manifest.CheckFields
+				o.RequirePassport = manifest.RequirePassport
 				o.ScriptExecuted = !manifest.ExecutableByHand()
 			}
 		}

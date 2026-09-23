@@ -789,6 +789,7 @@
       v-if="identityOrder"
       :order-id="identityOrder.id"
       :fields="identityOrder.submit_fields || []"
+      :require-passport="!!identityOrder.require_passport"
       @close="identityOrder = null"
       @verified="onIdentityChecked"
     />

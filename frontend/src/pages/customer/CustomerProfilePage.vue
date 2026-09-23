@@ -67,6 +67,9 @@
           </div>
         </div>
 
+        <!-- Паспорт и статус «проверенный» -->
+        <PassportCard />
+
         <!-- Управление почтой -->
         <div class="section-header">
           <div class="section-title">
@@ -189,11 +192,12 @@ import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
+import PassportCard from '../../components/passport/PassportCard.vue'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 
 export default defineComponent({
   name: 'CustomerProfilePage',
-  components: { AddressAutocomplete },
+  components: { AddressAutocomplete, PassportCard },
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()

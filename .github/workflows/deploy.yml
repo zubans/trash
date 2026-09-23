@@ -240,7 +240,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL,DADATA_API_KEY,OPS_KEY
+          envs: DOCKER_USERNAME,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,SMTP_PASSWORD,SMTP_USER,SMTP_HOST,CORS_ORIGIN,APP_BASE_URL,DADATA_API_KEY,OPS_KEY,PASSPORT_ENC_KEY,PASSPORT_KEY_VERSION
           script: |
             set -e
             cd /home/user/.openclaw/workspace/worktrees/trash || exit 1
@@ -275,7 +275,9 @@ jobs:
             # переписывается целиком, и ключ, добавленный в него как-то иначе,
             # исчезает на следующем деплое. Без него бэкенд не поднимает
             # /internal/*, и принудительная сверка из бота отвечает 404.
-            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\nDADATA_API_KEY=%s\nOPS_KEY=%s\n" \
+            # PASSPORT_ENC_KEY — ключ шифрования паспортов. Потерять его — потерять
+            # все паспорта: храните копию секрета вне GitHub.
+            printf "DOCKER_USERNAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nDB_NAME=%s\nJWT_SECRET=%s\nSMTP_PASSWORD=%s\nSMTP_USER=%s\nSMTP_HOST=%s\nCORS_ORIGIN=%s\nAPP_BASE_URL=%s\nDADATA_API_KEY=%s\nOPS_KEY=%s\nPASSPORT_ENC_KEY=%s\nPASSPORT_KEY_VERSION=%s\n" \
               "${DOCKER_USERNAME}" \
               "${DB_USER:-healthlogin}" \
               "${DB_PASSWORD}" \
@@ -287,7 +289,9 @@ jobs:
               "${CORS_ORIGIN:-https://moya-usluga.ru}" \
               "${APP_BASE_URL:-https://moya-usluga.ru}" \
               "${DADATA_API_KEY}" \
-              "${OPS_KEY}" > .env
+              "${OPS_KEY}" \
+              "${PASSPORT_ENC_KEY}" \
+              "${PASSPORT_KEY_VERSION:-1}" > .env
             chmod 600 .env
 
             echo "Restarting services via make restart..."
@@ -311,6 +315,8 @@ jobs:
           DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
           # Тот же секрет, что у мониторинга: бот и бэкенд сверяют его друг с другом.
           OPS_KEY: ${{ secrets.OPS_KEY }}
+          PASSPORT_ENC_KEY: ${{ secrets.PASSPORT_ENC_KEY }}
+          PASSPORT_KEY_VERSION: ${{ vars.PASSPORT_KEY_VERSION || '1' }}
 
       # Релиз APK — отдельный шаг, а не хвост деплоя.
       #

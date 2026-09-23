@@ -25,6 +25,7 @@ import (
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
+	"healthlogin/backend/passport"
 	"healthlogin/backend/perks"
 	"healthlogin/backend/photoproof"
 	"healthlogin/backend/repository"
@@ -214,12 +215,25 @@ func main() {
 		log.Printf("[address] WARNING: DADATA_API_KEY is not set — address suggestions will return 503 and registration cannot complete")
 	}
 	mailer := service.NewSmtpMailSender()
+	// Паспорта шифруются ключом из окружения. Без ключа сервер стартует, а приём
+	// паспортов отвечает 503: хранить паспорт открытым нельзя даже временно.
+	passportCipher, err := passport.NewCipher(getEnv("PASSPORT_ENC_KEY", ""), getEnvInt("PASSPORT_KEY_VERSION", 1))
+	if err != nil {
+		log.Fatalf("[passport] %v", err)
+	}
+	if passportCipher == nil {
+		log.Println("[passport] WARNING: PASSPORT_ENC_KEY is not set, passports are not accepted")
+	}
+	passportRepo := repository.NewPassportRepository(db)
+	passportService := service.NewPassportService(passportRepo, userRepo, passportCipher,
+		getEnv("PASSPORTS_DIR", "passports"), settingsRepo)
 	// AuthService владеет всем, что связано с сессиями: выдачей access-токенов,
 	// ротацией refresh-токенов и занесением отозванных access-токенов в чёрный список.
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, addressSuggester, mailer).
 		WithAddresses(addressRepo).
 		WithExecutorGeo(executorGeoRepo).
-		WithSessionStorage(refreshRepo, tokenRepo)
+		WithSessionStorage(refreshRepo, tokenRepo).
+		WithConsent(passportService.ConsentVersion)
 	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
 		WithSessions(authService).
 		WithLedger(ledger).
@@ -310,7 +324,9 @@ func main() {
 	behaviorDispatcher := service.NewBehaviorDispatcher(
 		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
 		settingsRepo, ledger, serviceBehaviors, orderService,
-	).WithSubmissions(submissionRepo)
+	).WithSubmissions(submissionRepo).
+		WithPassports(passportRepo)
+	passportService.WithVerification(behaviorDispatcher)
 	behaviorWorker := worker.NewBehaviorWorker(behaviorDispatcher).
 		WithLeader(leader, "behavior_dispatch").
 		WithScriptSync(serviceBehaviors)
@@ -367,7 +383,8 @@ func main() {
 		WithPermissions(permissions)
 
 	// Обработчики
-	ph := handler.NewPublicHandler(authService).WithPermissions(permissions)
+	ph := handler.NewPublicHandler(authService).WithPermissions(permissions).WithPassports(passportService)
+	pah := handler.NewPassportHandler(passportService)
 	ah := handler.NewAdminHandler(adminService)
 	rolh := handler.NewRoleHandler(roleService)
 	oh := handler.NewOrderHandler(orderService)
@@ -513,6 +530,7 @@ func main() {
 			// Магазин: витрина и покупка открыты любой роли — какие товары
 			// кому видны, решают роли на самом товаре.
 			shh.RegisterUserRoutes(r, shopPurchaseLimiter.Middleware)
+			pah.RegisterUserRoutes(r)
 			// Купоны: и подарки ачивок, и купленное в магазине. У заказчика
 			// ачивок нет, но купоны на купленные вещи есть.
 			r.Get("/user/gifts", ach.GetGifts)
@@ -657,6 +675,7 @@ func main() {
 			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
 			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
 			shh.RegisterAdminRoutes(r, can)
+			pah.RegisterAdminRoutes(r, can)
 		})
 	}
 

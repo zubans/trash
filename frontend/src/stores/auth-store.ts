@@ -22,6 +22,11 @@ export interface CurrentUser {
   birth_date: string
   age: number
   is_verified: boolean
+  // «Проверенный»: паспорт с фото просмотрен модератором. Ставится в админке.
+  is_checked?: boolean
+  // Текущая редакция согласия на обработку персональных данных не принята —
+  // приложение показывает окно согласия.
+  pd_consent_required?: boolean
 }
 
 function parseJwtSub(token: string): string {

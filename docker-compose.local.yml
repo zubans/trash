@@ -92,6 +92,9 @@ services:
       LEGACY_ROOT_ROUTES: ${LEGACY_ROOT_ROUTES:-1}
       RELEASES_BASE_URL: ${RELEASES_BASE_URL:-}
       UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
+      # Локально ключ необязателен: без него приём паспортов выключен.
+      PASSPORT_ENC_KEY: ${PASSPORT_ENC_KEY:-}
+      PASSPORTS_DIR: /app/passports
       ACCEPT_RADIUS_KM: ${ACCEPT_RADIUS_KM:-0.5}
       # Необязательно локально: без ключа /geo/suggest отвечает 503, остальное
       # работает. В проде переменная обязательна именно потому, что без неё
@@ -112,6 +115,7 @@ services:
     volumes:
       - ./releases:/app/releases
       - uploads_local_data:/app/uploads
+      - passports_local_data:/app/passports
       - ./certs:/app/certs:ro
     expose:
       - "8081"
@@ -203,6 +207,8 @@ volumes:
   postgres_local_data:
     driver: local
   uploads_local_data:
+    driver: local
+  passports_local_data:
     driver: local
   prometheus_local_data:
     driver: local

@@ -58,6 +58,15 @@
         >
           {{ $t('shop.admin.userTab') }}
         </button>
+        <button
+          v-if="canSeePassport"
+          type="button"
+          class="tab"
+          :class="{ active: tab === 'passport' }"
+          @click="switchTo('passport')"
+        >
+          {{ $t('passport.admin.tab') }}
+        </button>
       </div>
 
       <p v-if="errorMsg" class="alert error">{{ errorMsg }}</p>
@@ -321,6 +330,8 @@
 
       <!-- Покупки в магазине и привилегии. Выдать и отозвать привилегию —
            право shop_orders.edit: это те же люди, что отменяют покупки. -->
+      <PassportAdminPanel v-if="tab === 'passport' && user" :user-id="user.id" />
+
       <div v-if="tab === 'shop'" class="penalties">
         <p v-if="actionMsg" class="alert success">{{ actionMsg }}</p>
         <table class="history-table">
@@ -465,6 +476,7 @@ import {
   type AdminPenaltyView,
   type PenaltyPoint,
 } from '../../api/penalties'
+import PassportAdminPanel from './PassportAdminPanel.vue'
 
 const PAGE_SIZE = 20
 
@@ -487,11 +499,12 @@ const TYPE_LABELS: Record<string, string> = {
   SHOP_REFUND: 'Возврат покупки',
 }
 
-type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties' | 'shop'
+type Tab = 'transactions' | 'orders' | 'achievements' | 'penalties' | 'shop' | 'passport'
 
 
 export default defineComponent({
   name: 'UserHistoryModal',
+  components: { PassportAdminPanel },
   props: {
     modelValue: { type: Boolean, default: false },
     user: { type: Object as PropType<any | null>, default: null },
@@ -535,6 +548,8 @@ export default defineComponent({
     // Магазин: покупки видит тот, кто видит заказы магазина; выдать и отозвать
     // привилегию — право на их правку.
     const canSeeShop = computed(() => authStore.can('shop_orders.view'))
+    // Паспорт: статус видит тот, кто ставит «проверенный».
+    const canSeePassport = computed(() => authStore.can('checks.view'))
     const canEditShop = computed(() => authStore.can('shop_orders.edit'))
     const shopOrders = ref<ShopOrder[]>([])
     const shopPerks = ref<UserPerk[]>([])
@@ -622,6 +637,8 @@ export default defineComponent({
             resetGrantConfig()
           }
           total.value = res.orders.length
+        } else if (tab.value === 'passport') {
+          // Панель паспорта грузит своё сама: её данные охраняются своими правами.
         } else if (tab.value === 'penalties') {
           penalties.value = await getUserPenalties(props.user.id)
           total.value = penalties.value.points.length
@@ -838,6 +855,7 @@ export default defineComponent({
 
     return {
       canSeeShop,
+      canSeePassport,
       canEditShop,
       shopOrders,
       shopPerks,

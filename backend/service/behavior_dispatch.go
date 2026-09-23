@@ -47,6 +47,7 @@ type BehaviorDispatcher struct {
 	chat        repository.ChatRepository
 	settings    repository.SettingsRepository
 	submissions repository.SubmissionRepository
+	passports   repository.PassportRepository
 	ledger      *Ledger
 	behaviors   *Behaviors
 	orderSvc    *OrderService
@@ -88,6 +89,15 @@ func NewBehaviorDispatcher(
 		batchSize: 50, maxAttempts: 10,
 		retention: 30 * 24 * time.Hour, purgeEvery: time.Hour,
 	}
+}
+
+// WithPassports подключает паспорта: услуга с require_passport не примет
+// сверку, пока паспорт заказчика с фото не на сервере. Без хранилища такая
+// услуга сверку не принимает вовсе — закрыть заказ без документа хуже, чем не
+// закрыть.
+func (d *BehaviorDispatcher) WithPassports(passports repository.PassportRepository) *BehaviorDispatcher {
+	d.passports = passports
+	return d
 }
 
 // WithSubmissions подключает хранилище за проверками данных и эскалациями. Без
