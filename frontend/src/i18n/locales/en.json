@@ -774,8 +774,6 @@
       "series": "Series",
       "number": "Number",
       "issuedAt": "Date of issue",
-      "issuedBy": "Issued by",
-      "divisionCode": "Division code",
       "seriesNumber": "Series and number",
       "issuedYear": "Year of issue",
       "photo": "Photo of the document"
@@ -802,8 +800,8 @@
       "photoYes": "yes",
       "photoNo": "no",
       "edit": "Edit",
-      "addPhoto": "Add photo",
-      "replacePhoto": "Replace photo",
+      "addPhoto": "Photograph the passport",
+      "replacePhoto": "Retake the photo",
       "editViaSupport": "Change via support",
       "becomeChecked": "Become checked",
       "checkedHint": "To become checked, fill in the passport, attach its photo and message support.",
@@ -814,7 +812,8 @@
       "saved": "Passport saved",
       "savedAddPhoto": "Passport saved. Now attach a photo of the document.",
       "photoSaved": "Photo saved",
-      "checkPending": "The check request has been sent. A moderator will compare the passport and grant the checked status."
+      "checkPending": "The check request has been sent. A moderator will compare the passport and grant the checked status.",
+      "photoLive": "The photo is taken live — the app opens the camera."
     },
     "verification": {
       "title": "Customer passport",
@@ -856,7 +855,13 @@
       "deleted": "Passport deleted",
       "saved": "Passport saved",
       "failed": "The action failed",
-      "checkRequested": "Awaiting check"
+      "checkRequested": "Awaiting check",
+      "photoOrigin": {
+        "app": "Taken in the app",
+        "resaved": "Taken in the app, file re-saved",
+        "foreign": "No app signature"
+      },
+      "photoOriginHint": "The app signs a photo as it is taken. No signature means the photo was brought ready-made: a reason to look closer, not a refusal."
     }
   }
 }

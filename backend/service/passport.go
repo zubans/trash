@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"healthlogin/backend/passport"
+	"healthlogin/backend/photoproof"
 	"healthlogin/backend/repository"
 )
 
@@ -24,6 +25,23 @@ const SettingPDConsentVersion = "pd_consent_version"
 
 // maxPassportPhotoBytes — потолок фото документа.
 const maxPassportPhotoBytes = 10 << 20
+
+// passportPhotoKind — вид снимка в подписи. Входит и в подпись файла, и в
+// метку изображения: приложение подписывает ровно эту строку.
+const passportPhotoKind = "passport"
+
+// photoScope — для чего сделан снимок. Ключ подписи выводится из области,
+// поэтому снимок, подписанный для своего профиля, не сойдёт за снимок с
+// верификации.
+type photoScope struct {
+	kind string
+	id   uuid.UUID
+}
+
+func ownerScope(userID uuid.UUID) photoScope  { return photoScope{kind: "user", id: userID} }
+func orderScope(orderID uuid.UUID) photoScope { return photoScope{kind: "order", id: orderID} }
+
+func (p photoScope) String() string { return p.kind + ":" + p.id.String() }
 
 // PassportError — отказ с кодом, который клиент переводит, и полями формы.
 type PassportError struct {
@@ -54,21 +72,18 @@ const (
 // пока паспорт заказчика с фото не на сервере.
 var ErrPassportRequired = errors.New("сначала отправьте паспорт заказчика с фото")
 
-// PassportData — то, что записано в паспорте. Обязательны серия, номер и дата
-// выдачи; «кем выдан» и код подразделения — по желанию
-// (implementation_plan_delivery_passport.md §3.1).
+// PassportData — то, что записано в паспорте: серия, номер и дата выдачи, и
+// ничего больше (implementation_plan_delivery_passport.md §3.1). Лишнего о
+// человеке не хранится: чего нет, то не утечёт.
 type PassportData struct {
-	Series       string `json:"series"`
-	Number       string `json:"number"`
-	IssuedAt     string `json:"issued_at"`
-	IssuedBy     string `json:"issued_by,omitempty"`
-	DivisionCode string `json:"division_code,omitempty"`
+	Series   string `json:"series"`
+	Number   string `json:"number"`
+	IssuedAt string `json:"issued_at"`
 }
 
 var (
-	passportSeries   = regexp.MustCompile(`^\d{4}$`)
-	passportNumber   = regexp.MustCompile(`^\d{6}$`)
-	passportDivision = regexp.MustCompile(`^\d{3}-\d{3}$`)
+	passportSeries = regexp.MustCompile(`^\d{4}$`)
+	passportNumber = regexp.MustCompile(`^\d{6}$`)
 )
 
 func digitsOnly(s string) string {
@@ -86,8 +101,6 @@ func (d *PassportData) normalize(now time.Time) map[string]string {
 	d.Series = digitsOnly(d.Series)
 	d.Number = digitsOnly(d.Number)
 	d.IssuedAt = strings.TrimSpace(d.IssuedAt)
-	d.IssuedBy = strings.TrimSpace(d.IssuedBy)
-	d.DivisionCode = strings.TrimSpace(d.DivisionCode)
 	fields := map[string]string{}
 	if !passportSeries.MatchString(d.Series) {
 		fields["series"] = "Серия — 4 цифры"
@@ -99,9 +112,6 @@ func (d *PassportData) normalize(now time.Time) map[string]string {
 		fields["issued_at"] = "Дата выдачи обязательна"
 	} else if issued.After(now) {
 		fields["issued_at"] = "Дата выдачи не может быть в будущем"
-	}
-	if d.DivisionCode != "" && !passportDivision.MatchString(d.DivisionCode) {
-		fields["division_code"] = "Код подразделения — в виде 123-456"
 	}
 	return fields
 }
@@ -144,7 +154,9 @@ type PassportService struct {
 	orders verificationOrders
 	// mail сообщает человеку, что заявка на подтверждение отправлена.
 	mail repository.MailRepository
-	now  func() time.Time
+	// checker отвечает, сделан ли снимок в приложении.
+	checker photoproof.Checker
+	now     func() time.Time
 }
 
 // verificationOrders — то, что нужно паспорту от диспетчера поведений:
@@ -159,6 +171,13 @@ func NewPassportService(repo repository.PassportRepository, users repository.Use
 	cipher *passport.Cipher, photosDir string, settings repository.SettingsRepository) *PassportService {
 	return &PassportService{repo: repo, users: users, cipher: cipher,
 		photos: passport.Photos{Dir: photosDir, Cipher: cipher}, settings: settings, now: time.Now}
+}
+
+// WithPhotoCheck подключает скрытую проверку снимков: подпись файла и метку в
+// изображении считает тот же код, что у фото-подтверждения заказов.
+func (s *PassportService) WithPhotoCheck(checker photoproof.Checker) *PassportService {
+	s.checker = checker
+	return s
 }
 
 // WithMail подключает внутреннюю почту: письмо о поданной заявке.
@@ -252,9 +271,29 @@ func (s *PassportService) save(ctx context.Context, owner *repository.User, acto
 	})
 }
 
+// verdict — скрытая проверка снимка: подписан ли он приложением и есть ли в
+// изображении метка. Проверка ничего не запрещает: её итог читает модератор,
+// когда решает, ставить ли «проверенного». Без времени съёмки проверять нечего
+// — подпись считается вместе с ним.
+func (s *PassportService) verdict(photo []byte, scope photoScope, takenAt time.Time) repository.PassportPhoto {
+	if s.checker == nil || takenAt.IsZero() {
+		return repository.PassportPhoto{Seal: photoproof.SealMissing, Mark: photoproof.MarkNotFound}
+	}
+	// OrderID в CheckInput — просто идентификатор в подписываемом сообщении:
+	// здесь это идентификатор области, а не заказа.
+	seal, mark := s.checker.Check(photo, photoproof.CheckInput{
+		OrderID:       scope.id,
+		SymbolCode:    passportPhotoKind,
+		Key:           s.captureKey(scope),
+		DeviceTakenAt: takenAt,
+	})
+	return repository.PassportPhoto{Seal: seal, Mark: mark, TakenAt: &takenAt}
+}
+
 // savePhoto — общая запись фото: тип по содержимому, шифрованный файл, старый
 // файл удаляется после коммита.
-func (s *PassportService) savePhoto(ctx context.Context, owner *repository.User, actor uuid.UUID, photo []byte) error {
+func (s *PassportService) savePhoto(ctx context.Context, owner *repository.User, actor uuid.UUID, photo []byte,
+	scope photoScope, takenAt time.Time) error {
 	if err := s.requireKey(); err != nil {
 		return err
 	}
@@ -271,14 +310,22 @@ func (s *PassportService) savePhoto(ctx context.Context, owner *repository.User,
 	} else if err != nil {
 		return err
 	}
+	origin := s.verdict(photo, scope, takenAt)
+	if origin.Seal != photoproof.SealValid {
+		// Не отказ: человеку об этом не говорят, но в журнале это остаётся —
+		// модератор должен знать, что снимок в приложении не делали.
+		log.Printf("[AUDIT] the passport photo of %s from %s is not signed by the app: seal=%s, mark=%s",
+			owner.ID, actor, origin.Seal, origin.Mark)
+	}
 	name := owner.ID.String() + "-" + uuid.New().String() + ".bin"
 	if err := s.photos.Save(name, photo); err != nil {
 		return err
 	}
+	origin.Path = name
 	var previous *string
 	err := s.repo.RunInTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		if previous, err = s.repo.SetPhoto(ctx, tx, owner.ID, name); err != nil {
+		if previous, err = s.repo.SetPhoto(ctx, tx, owner.ID, origin); err != nil {
 			return err
 		}
 		return s.repo.LogAccess(ctx, tx, owner.ID, actor, repository.PassportActionWrite)
@@ -334,6 +381,31 @@ func (s *PassportService) open(rec *repository.PassportRecord) (*PassportData, e
 	return &data, nil
 }
 
+// MineForEdit — свои данные паспорта целиком: форма правки открывается
+// заполненной, иначе человек перенабирал бы то, что уже вводил. Маска — для
+// показа, а не для правки. Обращение пишется в журнал: паспорт читают, пусть
+// и свой.
+func (s *PassportService) MineForEdit(ctx context.Context, user *repository.User) (*PassportData, error) {
+	if err := s.ownerMayEdit(ctx, user); err != nil {
+		return nil, err
+	}
+	rec, err := s.repo.Get(ctx, nil, user.ID)
+	if errors.Is(err, repository.ErrPassportNotFound) {
+		return nil, passportErr(http.StatusNotFound, PassportErrNotFound, "Паспорта нет")
+	}
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.open(rec)
+	if err != nil {
+		return nil, fmt.Errorf("open passport of %s: %w", user.ID, err)
+	}
+	if err := s.repo.LogAccess(ctx, nil, user.ID, user.ID, repository.PassportActionView); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // ownerMayEdit — владелец правит паспорт, пока не «проверенный».
 func (s *PassportService) ownerMayEdit(ctx context.Context, user *repository.User) error {
 	if err := s.requireConsent(ctx, user, true); err != nil {
@@ -379,12 +451,44 @@ func (s *PassportService) SaveAtRegistration(ctx context.Context, userID uuid.UU
 	return s.SaveMine(ctx, owner, data)
 }
 
-// SaveMinePhoto — владелец прикладывает фото документа.
-func (s *PassportService) SaveMinePhoto(ctx context.Context, user *repository.User, photo []byte) error {
+// SaveMinePhoto — владелец прикладывает фото документа. takenAt — время съёмки
+// по часам телефона; без него подпись снимка не проверяется.
+func (s *PassportService) SaveMinePhoto(ctx context.Context, user *repository.User, photo []byte, takenAt time.Time) error {
 	if err := s.ownerMayEdit(ctx, user); err != nil {
 		return err
 	}
-	return s.savePhoto(ctx, user, user.ID, photo)
+	return s.savePhoto(ctx, user, user.ID, photo, ownerScope(user.ID), takenAt)
+}
+
+// captureKey — ключ подписи для области.
+func (s *PassportService) captureKey(scope photoScope) []byte {
+	return s.cipher.CaptureKey(scope.String())
+}
+
+// MinePhotoKey — ключ, которым приложение подпишет снимок своего паспорта.
+// Выдаётся перед съёмкой тому, кто вправе менять паспорт.
+func (s *PassportService) MinePhotoKey(ctx context.Context, user *repository.User) (uuid.UUID, []byte, error) {
+	if err := s.requireKey(); err != nil {
+		return uuid.Nil, nil, err
+	}
+	if err := s.ownerMayEdit(ctx, user); err != nil {
+		return uuid.Nil, nil, err
+	}
+	scope := ownerScope(user.ID)
+	return scope.id, s.captureKey(scope), nil
+}
+
+// VerificationPhotoKey — ключ подписи снимка паспорта заказчика. Исполнитель
+// берёт его, пока сеть есть, и подписывает снимок даже там, где сети нет.
+func (s *PassportService) VerificationPhotoKey(ctx context.Context, orderID, executorID uuid.UUID) (uuid.UUID, []byte, error) {
+	if err := s.requireKey(); err != nil {
+		return uuid.Nil, nil, err
+	}
+	if _, err := s.verificationOwner(ctx, orderID, executorID); err != nil {
+		return uuid.Nil, nil, err
+	}
+	scope := orderScope(orderID)
+	return scope.id, s.captureKey(scope), nil
 }
 
 // PassportStatus — есть ли паспорт и фото и стоит ли «проверенный». Без
@@ -395,6 +499,10 @@ type PassportStatus struct {
 	Source    string     `json:"source,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	Checked   bool       `json:"is_checked"`
+	// PhotoSeal и PhotoMark — итог скрытой проверки снимка: сделан ли он в
+	// приложении. Владельцу не показываются.
+	PhotoSeal string `json:"photo_seal,omitempty"`
+	PhotoMark string `json:"photo_mark,omitempty"`
 	// CheckRequestedAt — когда просили подтвердить статус; nil — не просили.
 	CheckRequestedAt *time.Time `json:"check_requested_at,omitempty"`
 	// ConsentGiven — пользователь принял согласие на обработку персональных
@@ -417,6 +525,7 @@ func (s *PassportService) Status(ctx context.Context, userID uuid.UUID) (*Passpo
 		return nil, err
 	}
 	status.Exists, status.HasPhoto, status.Source, status.UpdatedAt = true, rec.PhotoPath != nil, rec.Source, &rec.UpdatedAt
+	status.PhotoSeal, status.PhotoMark = rec.Photo.Seal, rec.Photo.Mark
 	if status.CheckRequestedAt, err = s.repo.CheckRequestedAt(ctx, nil, userID); err != nil {
 		return nil, err
 	}
@@ -495,7 +604,9 @@ func (s *PassportService) AdminSavePhoto(ctx context.Context, adminID, userID uu
 	if err := s.requireConsent(ctx, owner, false); err != nil {
 		return err
 	}
-	if err := s.savePhoto(ctx, owner, adminID, photo); err != nil {
+	// Админ загружает файл, а не снимает: подписи у такого снимка нет, и
+	// вердикт это покажет.
+	if err := s.savePhoto(ctx, owner, adminID, photo, ownerScope(userID), time.Time{}); err != nil {
 		return err
 	}
 	log.Printf("[AUDIT] admin %s saved the passport photo of %s", adminID, userID)
@@ -590,12 +701,13 @@ func (s *PassportService) SaveFromVerification(ctx context.Context, orderID, exe
 // Паспорт, отданный на хранение прямо на верификации, — это и есть просьба
 // подтвердить данные: заявка ставится сама, без отдельного обращения в
 // поддержку (implementation_plan_delivery_passport.md §2).
-func (s *PassportService) SavePhotoFromVerification(ctx context.Context, orderID, executorID uuid.UUID, photo []byte) error {
+func (s *PassportService) SavePhotoFromVerification(ctx context.Context, orderID, executorID uuid.UUID, photo []byte,
+	takenAt time.Time) error {
 	owner, err := s.verificationOwner(ctx, orderID, executorID)
 	if err != nil {
 		return err
 	}
-	if err := s.savePhoto(ctx, owner, executorID, photo); err != nil {
+	if err := s.savePhoto(ctx, owner, executorID, photo, orderScope(orderID), takenAt); err != nil {
 		return err
 	}
 	// Заявка — после фото: паспорт без снимка подтверждать нечем, и очередь

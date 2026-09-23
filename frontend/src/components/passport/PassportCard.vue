@@ -42,11 +42,10 @@
             <button v-if="mask?.exists" type="button" class="pc-btn secondary" :disabled="busy" @click="editing = false">{{ $t('common.cancel') }}</button>
           </template>
           <button v-else type="button" class="pc-btn secondary" @click="startEdit">{{ $t('passport.card.edit') }}</button>
-          <label v-if="mask?.exists && !editing" class="pc-btn secondary pc-file">
+          <button v-if="mask?.exists && !editing" type="button" class="pc-btn secondary" :disabled="busy" @click="takePhoto">
             <i class="ph-bold ph-camera"></i>
             {{ mask.has_photo ? $t('passport.card.replacePhoto') : $t('passport.card.addPhoto') }}
-            <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" :disabled="busy" @change="uploadPhoto" />
-          </label>
+          </button>
         </template>
         <button
           v-if="!checked && mask?.exists && mask.has_photo && !mask.check_requested_at"
@@ -58,9 +57,20 @@
         </button>
       </div>
       <!-- Заявка уже есть (паспорт отдан на верификации) — просить нечего. -->
+      <div v-if="mask?.exists && !mask.locked" class="pc-muted">{{ $t('passport.card.photoLive') }}</div>
       <div v-if="!checked && mask?.check_requested_at" class="pc-note">{{ $t('passport.card.checkPending') }}</div>
       <div v-else-if="!checked && !(mask?.exists && mask.has_photo)" class="pc-muted">{{ $t('passport.card.checkedHint') }}</div>
     </template>
+
+    <!-- Запасной путь для браузера: своей камеры у него нет. -->
+    <input
+      ref="fileInput"
+      type="file"
+      accept="image/jpeg"
+      capture="environment"
+      style="display: none"
+      @change="onFileChosen"
+    />
 
     <SupportChatModal v-model:show="showSupport" :prefill="supportPrefill" />
   </div>
@@ -74,6 +84,8 @@ import {
   acceptPDConsent,
   emptyPassport,
   getMyPassport,
+  getMyPassportData,
+  myPassportPhotoKey,
   passportError,
   passportErrorText,
   saveMyPassport,
@@ -81,6 +93,7 @@ import {
   type PassportData,
   type PassportMask,
 } from '../../api/passport'
+import { cameraAvailable, shootPassport, shotAt, signPassportPhoto, toRfc3339 } from './photo'
 import PassportFields from './PassportFields.vue'
 import SupportChatModal from '../SupportChatModal.vue'
 
@@ -101,6 +114,7 @@ export default defineComponent({
     const message = ref('')
     const messageIsError = ref(false)
     const showSupport = ref(false)
+    const fileInput = ref<HTMLInputElement | null>(null)
     const supportPrefill = ref('')
 
     const checked = computed(() => !!authStore.user?.is_checked)
@@ -123,13 +137,22 @@ export default defineComponent({
       }
     }
 
-    // Полные данные наружу не отдаются никому, кроме права passports.view, —
-    // и владельцу тоже: правка начинается с пустой формы.
-    const startEdit = () => {
-      draft.value = emptyPassport()
+    // Правка начинается с того, что уже сохранено: набранное однажды не
+    // набирают снова. Маска — для показа, за данными идём отдельным запросом.
+    const startEdit = async () => {
       errors.value = {}
-      editing.value = true
       say('')
+      draft.value = emptyPassport()
+      editing.value = true
+      if (!mask.value?.exists) return
+      busy.value = true
+      try {
+        draft.value = await getMyPassportData()
+      } catch (err) {
+        say(passportErrorText(err, t('passport.card.loadFailed')), true)
+      } finally {
+        busy.value = false
+      }
     }
 
     const save = async () => {
@@ -147,20 +170,52 @@ export default defineComponent({
       }
     }
 
-    const uploadPhoto = async (event: Event) => {
-      const input = event.target as HTMLInputElement
-      const file = input.files?.[0]
-      input.value = ''
-      if (!file) return
+    // Снимок подписывается ключом, который сервер выдаёт перед съёмкой: так
+    // видно, что фото сделано в приложении, а не принесено готовым. Подпись не
+    // удалась — фото всё равно уходит: снимок нужнее, чем отметка о нём.
+    const sendPhoto = async (original: Uint8Array, takenAt: Date) => {
       busy.value = true
       try {
-        mask.value = await uploadMyPassportPhoto(file)
+        let photo = original
+        let at: string | undefined
+        try {
+          photo = await signPassportPhoto(original, await myPassportPhotoKey(), takenAt)
+          at = toRfc3339(takenAt)
+        } catch (err) {
+          console.warn('[passport] cannot sign the photo', err)
+        }
+        mask.value = await uploadMyPassportPhoto(new Blob([photo as BlobPart], { type: 'image/jpeg' }), at)
         say(t('passport.card.photoSaved'))
       } catch (err) {
         say(passportErrorText(err, t('passport.card.saveFailed')), true)
       } finally {
         busy.value = false
       }
+    }
+
+    // Фото — только живой съёмкой. В приложении открывается камера; браузеру
+    // своей камеры не дать, там остаётся системный выбор.
+    const takePhoto = async () => {
+      say('')
+      if (!cameraAvailable()) {
+        fileInput.value?.click()
+        return
+      }
+      try {
+        const original = await shootPassport()
+        if (original) await sendPhoto(original, shotAt())
+      } catch (err) {
+        // Съёмку закрыли — это не ошибка.
+        console.warn('[passport] camera closed', err)
+      }
+    }
+
+    const onFileChosen = async (event: Event) => {
+      const input = event.target as HTMLInputElement
+      const file = input.files?.[0]
+      input.value = ''
+      if (!file) return
+      await sendPhoto(new Uint8Array(await file.arrayBuffer()), shotAt())
     }
 
     const accept = async () => {
@@ -186,8 +241,8 @@ export default defineComponent({
     onMounted(load)
 
     return {
-      mask, draft, errors, editing, loading, busy, message, messageIsError, showSupport, supportPrefill,
-      checked, consentRequired, startEdit, save, uploadPhoto, accept, openSupport,
+      mask, draft, errors, editing, loading, busy, message, messageIsError, showSupport, supportPrefill, fileInput,
+      checked, consentRequired, startEdit, save, takePhoto, onFileChosen, accept, openSupport,
     }
   },
 })
@@ -297,8 +352,5 @@ export default defineComponent({
 .pc-btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-.pc-file input {
-  display: none;
 }
 </style>

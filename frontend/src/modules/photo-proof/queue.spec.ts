@@ -31,10 +31,10 @@ class FakeTransport implements QueueTransport {
     if (this.executeFailure) throw this.executeFailure
     this.calls.push(`execute:${orderId}`)
   }
-  passports: { orderId: string; data: any; photo: Uint8Array }[] = []
-  async sendPassport(orderId: string, data: unknown, photo: Uint8Array) {
+  passports: { orderId: string; data: any; photo: Uint8Array; takenAt: string }[] = []
+  async sendPassport(orderId: string, data: unknown, photo: Uint8Array, takenAt: string) {
     if (this.offline) throw new Error('Network Error')
-    this.passports.push({ orderId, data, photo })
+    this.passports.push({ orderId, data, photo, takenAt })
     this.calls.push(`passport:${orderId}`)
   }
 }
@@ -74,10 +74,11 @@ beforeEach(() => {
 describe('passport in the queue', () => {
   const data = { series: '4510', number: '123456', issued_at: '2015-06-01' }
   const photo = new TextEncoder().encode('JPEG passport 123456')
+  const takenAt = '2026-09-23T10:00:00Z'
 
   it('keeps the passport sealed on the device and removes it once sent', async () => {
     transport.offline = true
-    await queue.enqueuePassport('order-7', data, photo)
+    await queue.enqueuePassport('order-7', data, photo, takenAt)
     await queue.flush()
     expect(queue.pendingPassportFor('order-7')).toBeTruthy()
     const stored = await Promise.all((await blobs.keys()).map((k) => blobs.get(k)))
@@ -90,14 +91,16 @@ describe('passport in the queue', () => {
     expect(transport.passports[0].orderId).toBe('order-7')
     expect(transport.passports[0].data).toEqual(data)
     expect([...transport.passports[0].photo]).toEqual([...photo])
+    // Время съёмки доезжает вместе со снимком: без него сервер не проверит подпись.
+    expect(transport.passports[0].takenAt).toBe(takenAt)
     expect(queue.pendingPassportFor('order-7')).toBeUndefined()
     expect(await blobs.keys()).toEqual([])
   })
 
   it('replaces an unsent passport of the same order', async () => {
     transport.offline = true
-    await queue.enqueuePassport('order-7', data, photo)
-    await queue.enqueuePassport('order-7', { ...data, number: '654321' }, photo)
+    await queue.enqueuePassport('order-7', data, photo, takenAt)
+    await queue.enqueuePassport('order-7', { ...data, number: '654321' }, photo, takenAt)
     expect(queue.actions().filter((a) => a.kind === 'passport')).toHaveLength(1)
     expect(await blobs.keys()).toHaveLength(2)
     transport.offline = false
@@ -108,7 +111,7 @@ describe('passport in the queue', () => {
   it('refuses to keep a passport without a device cipher', async () => {
     const plainQueue = new ProofQueue(memoryStorage(), () => 'k', new MemoryBlobStore(), transport, null)
     expect(plainQueue.canQueuePassport()).toBe(false)
-    await expect(plainQueue.enqueuePassport('order-1', data, photo)).rejects.toThrow()
+    await expect(plainQueue.enqueuePassport('order-1', data, photo, takenAt)).rejects.toThrow()
   })
 })
 

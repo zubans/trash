@@ -38,6 +38,22 @@ type PassportRecord struct {
 	KeyVersion int
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	// Photo — откуда взялось фото: вердикт скрытой проверки снимка.
+	Photo PassportPhoto
+}
+
+// Результаты скрытой проверки снимка. Значения — те же, что у снимков
+// фото-подтверждения (backend/photoproof): считает их один и тот же код.
+type PassportPhoto struct {
+	// Path — имя файла снимка; пусто, когда фото не меняется.
+	Path string
+	// Seal — подпись файла: VALID, MISSING, INVALID.
+	Seal string
+	// Mark — незаметная метка в изображении: FOUND, NOT_FOUND, MISMATCH.
+	Mark string
+	// TakenAt — время съёмки по часам телефона; nil, если приложение его не
+	// прислало (старая версия или загрузка из админки).
+	TakenAt *time.Time
 }
 
 // PassportRepository хранит паспорта, журнал доступа к ним и два флага
@@ -48,8 +64,9 @@ type PassportRepository interface {
 	Get(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error)
 	// Save записывает данные паспорта; фото, если оно было, остаётся.
 	Save(ctx context.Context, q Querier, rec *PassportRecord) error
-	// SetPhoto ставит фото и возвращает прежнее — его файл надо удалить.
-	SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, path string) (previous *string, err error)
+	// SetPhoto ставит фото вместе с вердиктом о его происхождении и возвращает
+	// прежнее — его файл надо удалить.
+	SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, photo PassportPhoto) (previous *string, err error)
 	// Delete удаляет паспорт и возвращает удалённую строку — ради файла фото.
 	Delete(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error)
 	LogAccess(ctx context.Context, q Querier, userID, viewerID uuid.UUID, action string) error
@@ -93,12 +110,19 @@ func (r *passportRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) erro
 
 func (r *passportRepo) Get(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error) {
 	var rec PassportRecord
+	var seal, mark sql.NullString
 	err := r.exec(q).QueryRowContext(ctx, `
-		SELECT user_id, data_enc, photo_path, source, entered_by, key_version, created_at, updated_at
+		SELECT user_id, data_enc, photo_path, source, entered_by, key_version, created_at, updated_at,
+		       photo_seal, photo_mark, photo_taken_at
 		FROM user_passports WHERE user_id = $1`, userID).
-		Scan(&rec.UserID, &rec.DataEnc, &rec.PhotoPath, &rec.Source, &rec.EnteredBy, &rec.KeyVersion, &rec.CreatedAt, &rec.UpdatedAt)
+		Scan(&rec.UserID, &rec.DataEnc, &rec.PhotoPath, &rec.Source, &rec.EnteredBy, &rec.KeyVersion,
+			&rec.CreatedAt, &rec.UpdatedAt, &seal, &mark, &rec.Photo.TakenAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPassportNotFound
+	}
+	rec.Photo.Seal, rec.Photo.Mark = seal.String, mark.String
+	if rec.PhotoPath != nil {
+		rec.Photo.Path = *rec.PhotoPath
 	}
 	return &rec, err
 }
@@ -114,13 +138,14 @@ func (r *passportRepo) Save(ctx context.Context, q Querier, rec *PassportRecord)
 	return err
 }
 
-func (r *passportRepo) SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, path string) (*string, error) {
+func (r *passportRepo) SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, photo PassportPhoto) (*string, error) {
 	var previous *string
 	err := r.exec(q).QueryRowContext(ctx, `
-		UPDATE user_passports p SET photo_path = $2, updated_at = now()
+		UPDATE user_passports p
+		SET photo_path = $2, photo_seal = $3, photo_mark = $4, photo_taken_at = $5, updated_at = now()
 		FROM (SELECT photo_path FROM user_passports WHERE user_id = $1 FOR UPDATE) old
 		WHERE p.user_id = $1
-		RETURNING old.photo_path`, userID, path).Scan(&previous)
+		RETURNING old.photo_path`, userID, photo.Path, photo.Seal, photo.Mark, photo.TakenAt).Scan(&previous)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPassportNotFound
 	}

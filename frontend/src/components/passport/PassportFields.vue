@@ -40,28 +40,6 @@
       />
       <span v-if="errors.issued_at" class="pf-error">{{ errors.issued_at }}</span>
     </label>
-    <label class="pf-field">
-      <span>{{ $t('passport.fields.divisionCode') }}</span>
-      <input
-        :value="modelValue.division_code"
-        class="pf-input"
-        :class="{ invalid: errors.division_code }"
-        placeholder="770-001"
-        maxlength="7"
-        :disabled="disabled"
-        @input="set('division_code', ($event.target as HTMLInputElement).value)"
-      />
-      <span v-if="errors.division_code" class="pf-error">{{ errors.division_code }}</span>
-    </label>
-    <label class="pf-field wide">
-      <span>{{ $t('passport.fields.issuedBy') }}</span>
-      <input
-        :value="modelValue.issued_by"
-        class="pf-input"
-        :disabled="disabled"
-        @input="set('issued_by', ($event.target as HTMLInputElement).value)"
-      />
-    </label>
   </div>
 </template>
 
@@ -69,9 +47,9 @@
 import { defineComponent, type PropType } from 'vue'
 import type { PassportData } from '../../api/passport'
 
-// Поля паспорта — одни на регистрацию, профиль, верификацию и админку.
-// Обязательны серия, номер и дата выдачи; остальное — по желанию. Проверяет
-// сервер, ошибки приходят по полям.
+// Поля паспорта — одни на регистрацию, профиль, верификацию и админку. Их
+// ровно три: серия, номер и дата выдачи. Проверяет сервер, ошибки приходят по
+// полям.
 export default defineComponent({
   name: 'PassportFields',
   props: {
@@ -99,9 +77,6 @@ export default defineComponent({
   gap: 4px;
   font-size: 12px;
   color: #475569;
-}
-.pf-field.wide {
-  grid-column: 1 / -1;
 }
 .pf-input {
   border: 1px solid #e2e8f0;

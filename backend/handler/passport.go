@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
@@ -27,10 +30,13 @@ func NewPassportHandler(passports *service.PassportService) *PassportHandler {
 // RegisterUserRoutes — маршруты владельца и исполнителя заказа верификации.
 func (h *PassportHandler) RegisterUserRoutes(r chi.Router) {
 	r.Get("/me/passport", h.Mine)
+	r.Get("/me/passport/data", h.MineForEdit)
 	r.Put("/me/passport", h.SaveMine)
+	r.Get("/me/passport/photo/key", h.MinePhotoKey)
 	r.Post("/me/passport/photo", h.SaveMinePhoto)
 	r.Post("/me/pd-consent", h.AcceptConsent)
 	r.Put("/executor/orders/{id}/passport", h.SaveFromVerification)
+	r.Get("/executor/orders/{id}/passport/photo/key", h.VerificationPhotoKey)
 	r.Post("/executor/orders/{id}/passport/photo", h.SavePhotoFromVerification)
 }
 
@@ -94,6 +100,26 @@ func readPhoto(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	return photo, true
 }
 
+// deviceTakenAt — время съёмки по часам телефона. Его присылает приложение
+// вместе со снимком; нет его — подпись снимка не проверяется.
+func deviceTakenAt(r *http.Request) time.Time {
+	value := r.FormValue("taken_at")
+	if value == "" {
+		return time.Time{}
+	}
+	takenAt, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return takenAt
+}
+
+// writeCaptureKey отдаёт ключ подписи снимка. Ключ не кешируется: он секрет.
+func writeCaptureKey(w http.ResponseWriter, id uuid.UUID, key []byte) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]string{"id": id.String(), "key": base64.StdEncoding.EncodeToString(key)})
+}
+
 func respondOK(w http.ResponseWriter) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
@@ -110,6 +136,22 @@ func (h *PassportHandler) Mine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, mask)
+}
+
+// MineForEdit обслуживает GET /me/passport/data — свои данные целиком, чтобы
+// форма правки открылась заполненной.
+func (h *PassportHandler) MineForEdit(w http.ResponseWriter, r *http.Request) {
+	user := h.caller(w, r)
+	if user == nil {
+		return
+	}
+	data, err := h.passports.MineForEdit(r.Context(), user)
+	if err != nil {
+		writePassportError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, data)
 }
 
 // SaveMine обслуживает PUT /me/passport.
@@ -139,11 +181,44 @@ func (h *PassportHandler) SaveMinePhoto(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if err := h.passports.SaveMinePhoto(r.Context(), user, photo); err != nil {
+	if err := h.passports.SaveMinePhoto(r.Context(), user, photo, deviceTakenAt(r)); err != nil {
 		writePassportError(w, err)
 		return
 	}
 	h.Mine(w, r)
+}
+
+// MinePhotoKey обслуживает GET /me/passport/photo/key.
+func (h *PassportHandler) MinePhotoKey(w http.ResponseWriter, r *http.Request) {
+	user := h.caller(w, r)
+	if user == nil {
+		return
+	}
+	id, key, err := h.passports.MinePhotoKey(r.Context(), user)
+	if err != nil {
+		writePassportError(w, err)
+		return
+	}
+	writeCaptureKey(w, id, key)
+}
+
+// VerificationPhotoKey обслуживает GET /executor/orders/{id}/passport/photo/key.
+func (h *PassportHandler) VerificationPhotoKey(w http.ResponseWriter, r *http.Request) {
+	executor := h.caller(w, r)
+	if executor == nil {
+		return
+	}
+	orderID, err := parseUUIDParam(r, "id")
+	if err != nil {
+		http.Error(w, "invalid order id", http.StatusBadRequest)
+		return
+	}
+	id, key, err := h.passports.VerificationPhotoKey(r.Context(), orderID, executor.ID)
+	if err != nil {
+		writePassportError(w, err)
+		return
+	}
+	writeCaptureKey(w, id, key)
 }
 
 // AcceptConsent обслуживает POST /me/pd-consent.
@@ -196,7 +271,7 @@ func (h *PassportHandler) SavePhotoFromVerification(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	if err := h.passports.SavePhotoFromVerification(r.Context(), orderID, executor.ID, photo); err != nil {
+	if err := h.passports.SavePhotoFromVerification(r.Context(), orderID, executor.ID, photo, deviceTakenAt(r)); err != nil {
 		writePassportError(w, err)
 		return
 	}
