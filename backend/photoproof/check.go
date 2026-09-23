@@ -328,6 +328,11 @@ type ProofChecker struct{}
 // NewChecker создаёт проверку снимка.
 func NewChecker() ProofChecker { return ProofChecker{} }
 
+// Sign вставляет в снимок подпись — то же, что делает приложение перед
+// отправкой. Нужна тестам и проверочным инструментам: своя реализация подписи
+// рядом с этой разошлась бы с ней при первой же правке.
+func Sign(data []byte, in CheckInput) []byte { return addSeal(data, in) }
+
 // Check проверяет снимок. Без ключа заказа проверять нечем.
 func (ProofChecker) Check(data []byte, in CheckInput) (string, string) {
 	if len(in.Key) == 0 {

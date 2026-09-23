@@ -8,8 +8,6 @@ export interface PassportData {
   series: string
   number: string
   issued_at: string
-  issued_by?: string
-  division_code?: string
 }
 
 export interface PassportMask {
@@ -52,32 +50,51 @@ export function passportErrorText(err: any, fallback: string): string {
   return typeof data === 'string' && data.trim() ? data.trim() : fallback
 }
 
-function photoForm(photo: Blob, name = 'passport.jpg'): FormData {
+// takenAt — время съёмки по часам телефона. Сервер проверяет им подпись снимка;
+// снимок, принесённый готовым, его не имеет.
+function photoForm(photo: Blob, takenAt?: string, name = 'passport.jpg'): FormData {
   const form = new FormData()
   form.append('file', photo, name)
+  if (takenAt) form.append('taken_at', takenAt)
   return form
 }
 
-export const emptyPassport = (): PassportData => ({ series: '', number: '', issued_at: '', issued_by: '', division_code: '' })
+// CaptureKey — то, чем приложение подписывает снимок паспорта: ключ и
+// идентификатор области, для которой он выдан.
+export interface CaptureKey {
+  id: string
+  key: string
+}
 
-// Необязательные поля, оставленные пустыми, не уходят на сервер.
+export const emptyPassport = (): PassportData => ({ series: '', number: '', issued_at: '' })
+
 export function passportPayload(data: PassportData): PassportData {
-  const out: PassportData = { series: data.series.trim(), number: data.number.trim(), issued_at: data.issued_at }
-  if (data.issued_by?.trim()) out.issued_by = data.issued_by.trim()
-  if (data.division_code?.trim()) out.division_code = data.division_code.trim()
-  return out
+  return { series: data.series.trim(), number: data.number.trim(), issued_at: data.issued_at }
 }
 
 export async function getMyPassport(): Promise<PassportMask> {
   return (await api.get('/me/passport')).data
 }
 
+// Свои данные целиком — для формы правки: набранное однажды не набирают снова.
+export async function getMyPassportData(): Promise<PassportData> {
+  return (await api.get('/me/passport/data')).data
+}
+
 export async function saveMyPassport(data: PassportData): Promise<PassportMask> {
   return (await api.put('/me/passport', passportPayload(data))).data
 }
 
-export async function uploadMyPassportPhoto(photo: Blob): Promise<PassportMask> {
-  return (await api.post('/me/passport/photo', photoForm(photo))).data
+export async function uploadMyPassportPhoto(photo: Blob, takenAt?: string): Promise<PassportMask> {
+  return (await api.post('/me/passport/photo', photoForm(photo, takenAt))).data
+}
+
+export async function myPassportPhotoKey(): Promise<CaptureKey> {
+  return (await api.get('/me/passport/photo/key')).data
+}
+
+export async function orderPassportPhotoKey(orderId: string): Promise<CaptureKey> {
+  return (await api.get(`/executor/orders/${orderId}/passport/photo/key`)).data
 }
 
 export async function acceptPDConsent(): Promise<void> {
@@ -88,8 +105,8 @@ export async function saveOrderPassport(orderId: string, data: PassportData): Pr
   await api.put(`/executor/orders/${orderId}/passport`, passportPayload(data))
 }
 
-export async function uploadOrderPassportPhoto(orderId: string, photo: Blob): Promise<void> {
-  await api.post(`/executor/orders/${orderId}/passport/photo`, photoForm(photo))
+export async function uploadOrderPassportPhoto(orderId: string, photo: Blob, takenAt?: string): Promise<void> {
+  await api.post(`/executor/orders/${orderId}/passport/photo`, photoForm(photo, takenAt))
 }
 
 export async function adminGetPassport(userId: string): Promise<PassportFull> {
@@ -127,6 +144,10 @@ export interface PassportStatus {
   consent_given: boolean
   // Человек ждёт подтверждения статуса: паспорт отдан на верификации.
   check_requested_at?: string
+  // Итог скрытой проверки снимка: подписан ли он приложением и есть ли метка в
+  // изображении. Владельцу паспорта не показывается.
+  photo_seal?: 'VALID' | 'MISSING' | 'INVALID'
+  photo_mark?: 'FOUND' | 'NOT_FOUND' | 'MISMATCH'
 }
 
 // Состояние без паспортных данных — в журнал просмотров не пишется.

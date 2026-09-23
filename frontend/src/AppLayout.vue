@@ -123,6 +123,11 @@
             <span v-if="!sidebarMinimized || isMobile">Подарки</span>
           </router-link>
 
+          <router-link v-if="can('checks.view')" to="/admin/check-requests" class="nav-item" :class="{ active: currentRouteName === 'admin-check-requests' }" @click="closeSidebarOnMobile">
+            <i class="ph ph-seal-check"></i>
+            <span v-if="!sidebarMinimized || isMobile">Заявки на проверку</span>
+          </router-link>
+
           <router-link v-if="can('escalations.view')" to="/admin/escalations" class="nav-item" :class="{ active: currentRouteName === 'admin-escalations' }" @click="closeSidebarOnMobile">
             <i class="ph ph-shield-warning"></i>
             <span v-if="!sidebarMinimized || isMobile">Модерация проверок</span>
@@ -286,7 +291,8 @@ export default defineComponent({
     const showShopSection = computed(() => ['shop.view', 'perk_rules.view', 'shop_orders.view', 'shop_revenue.view'].some(can))
     const showSystemSection = computed(() =>
       ['shifts.view', 'orders.view', 'service_catalog.view', 'achievements.view',
-       'gifts.view', 'escalations.view', 'disputes.view', 'watermarks.view', 'settings.view'].some(can),
+       'gifts.view', 'checks.view', 'escalations.view', 'disputes.view', 'watermarks.view',
+       'settings.view'].some(can),
     )
 
     // Ответы пользователей во внутренней почте. Считается тем же редким

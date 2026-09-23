@@ -49,12 +49,20 @@
           <p v-else-if="passportState === 'queued'" class="identity-warning">{{ $t('passport.verification.queued') }}</p>
           <template v-if="passportState !== 'sent'">
             <PassportFields v-model="passport" :errors="passportErrors" />
-            <label class="identity-photo">
+            <button type="button" class="identity-photo" @click="takePhoto">
               <i class="ph-bold ph-camera"></i>
-              {{ photo ? $t('passport.verification.photoTaken') : $t('passport.verification.takePhoto') }}
-              <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" @change="pickPhoto" />
-            </label>
+              {{ shot ? $t('passport.verification.photoTaken') : $t('passport.verification.takePhoto') }}
+            </button>
             <p class="identity-auto">{{ $t('passport.verification.autoRequest') }}</p>
+            <!-- Запасной путь для браузера: своей камеры у него нет. -->
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/jpeg"
+              capture="environment"
+              style="display: none"
+              @change="onFileChosen"
+            />
           </template>
         </section>
 
@@ -80,7 +88,17 @@ import { defineComponent, onMounted, reactive, ref, type PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../../services/api'
 import PassportFields from '../../../components/passport/PassportFields.vue'
-import { emptyPassport, passportError, passportPayload, saveOrderPassport, uploadOrderPassportPhoto, type PassportData } from '../../../api/passport'
+import {
+  emptyPassport,
+  orderPassportPhotoKey,
+  passportError,
+  passportPayload,
+  saveOrderPassport,
+  uploadOrderPassportPhoto,
+  type CaptureKey,
+  type PassportData,
+} from '../../../api/passport'
+import { cameraAvailable, shootPassport, shotAt, signPassportPhoto, toRfc3339 } from '../../../components/passport/photo'
 import { proofQueue } from '../../../modules/photo-proof/queue'
 import { online } from '../../../modules/photo-proof/network'
 
@@ -109,19 +127,67 @@ export default defineComponent({
     const queue = proofQueue()
     const passport = ref<PassportData>(emptyPassport())
     const passportErrors = ref<Record<string, string>>({})
-    const photo = ref<File | null>(null)
+    // Снимок и момент съёмки: время входит в подпись снимка.
+    const shot = ref<{ bytes: Uint8Array; takenAt: Date } | null>(null)
+    const fileInput = ref<HTMLInputElement | null>(null)
     const showHint = ref(false)
+    // Ключ подписи снимка. Берётся, пока сеть есть: у двери её может не быть, а
+    // подписать снимок надо там же, где его делают.
+    const capture = ref<CaptureKey | null>(null)
     // none — ещё не отправлен; queued — ждёт сети в очереди; sent — на сервере.
     const passportState = ref<'none' | 'queued' | 'sent'>('none')
 
-    onMounted(() => {
-      if (props.requirePassport && queue.pendingPassportFor(props.orderId)) passportState.value = 'queued'
+    onMounted(async () => {
+      if (!props.requirePassport) return
+      if (queue.pendingPassportFor(props.orderId)) passportState.value = 'queued'
+      try {
+        capture.value = await orderPassportPhotoKey(props.orderId)
+      } catch (err) {
+        // Без ключа снимок уйдёт без подписи: съёмку это не останавливает.
+        console.warn('[passport] no capture key', err)
+      }
     })
 
-    const pickPhoto = (event: Event) => {
+    // Паспорт фотографируют, а не выбирают файлом: в приложении открывается
+    // камера, в браузере остаётся системный выбор.
+    const takePhoto = async () => {
+      errorText.value = ''
+      if (!cameraAvailable()) {
+        fileInput.value?.click()
+        return
+      }
+      try {
+        const bytes = await shootPassport()
+        if (bytes) shot.value = { bytes, takenAt: shotAt() }
+      } catch (err) {
+        // Съёмку закрыли — это не ошибка.
+        console.warn('[passport] camera closed', err)
+      }
+    }
+
+    const onFileChosen = async (event: Event) => {
       const input = event.target as HTMLInputElement
-      photo.value = input.files?.[0] || null
+      const file = input.files?.[0]
       input.value = ''
+      if (!file) return
+      shot.value = { bytes: new Uint8Array(await file.arrayBuffer()), takenAt: shotAt() }
+    }
+
+    // Подписывает снимок ключом заказа. Подпись не удалась или ключа нет —
+    // снимок уходит как есть: он нужнее, чем отметка о его происхождении.
+    const prepareShot = async (): Promise<{ bytes: Uint8Array; takenAt: string }> => {
+      const current = shot.value!
+      if (capture.value) {
+        try {
+          return {
+            bytes: await signPassportPhoto(current.bytes, capture.value, current.takenAt),
+            takenAt: toRfc3339(current.takenAt),
+          }
+        } catch (err) {
+          console.warn('[passport] cannot sign the photo', err)
+        }
+      }
+      return { bytes: current.bytes, takenAt: '' }
     }
 
     // Паспорт уходит до сверки. С сетью — сразу; без сети или при сбое — в
@@ -140,16 +206,21 @@ export default defineComponent({
       const p = passport.value
       // Ничего не внесено — паспорт мог уже дойти раньше (из очереди или с
       // другого устройства): решает сервер, и при отказе форма попросит паспорт.
-      if (!p.series.trim() && !p.number.trim() && !p.issued_at && !photo.value) return true
-      if (!p.series.trim() || !p.number.trim() || !p.issued_at || !photo.value) {
+      if (!p.series.trim() && !p.number.trim() && !p.issued_at && !shot.value) return true
+      if (!p.series.trim() || !p.number.trim() || !p.issued_at || !shot.value) {
         errorText.value = t('passport.verification.fillFirst')
         return false
       }
       const data = passportPayload(p)
+      const prepared = await prepareShot()
       if (online.value) {
         try {
           await saveOrderPassport(props.orderId, data)
-          await uploadOrderPassportPhoto(props.orderId, photo.value)
+          await uploadOrderPassportPhoto(
+            props.orderId,
+            new Blob([prepared.bytes as BlobPart], { type: 'image/jpeg' }),
+            prepared.takenAt || undefined,
+          )
           passportState.value = 'sent'
           return true
         } catch (err: any) {
@@ -167,7 +238,7 @@ export default defineComponent({
         errorText.value = t('passport.verification.noOffline')
         return false
       }
-      await queue.enqueuePassport(props.orderId, data, new Uint8Array(await photo.value.arrayBuffer()))
+      await queue.enqueuePassport(props.orderId, data, prepared.bytes, prepared.takenAt)
       passportState.value = 'queued'
       warning.value = t('passport.verification.queued')
       return false
@@ -219,7 +290,7 @@ export default defineComponent({
 
     return {
       values, busy, warning, errorText, labelFor, placeholderFor, submit,
-      passport, passportErrors, photo, passportState, pickPhoto, showHint,
+      passport, passportErrors, shot, passportState, takePhoto, onFileChosen, fileInput, showHint,
     }
   },
 })
@@ -434,6 +505,8 @@ export default defineComponent({
   line-height: 1.4;
 }
 .identity-photo {
+  border: none;
+  font-family: inherit;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -445,9 +518,6 @@ export default defineComponent({
   font-weight: 600;
   color: #334155;
   cursor: pointer;
-}
-.identity-photo input {
-  display: none;
 }
 .identity-ok {
   color: #15803d;

@@ -125,6 +125,14 @@ const routes: Array<RouteRecordRaw> = [
         meta: { permission: 'mail.view', flush: true },
       },
       {
+        // Очередь заявок на статус «проверенный»: её ведёт поддержка, а не
+        // карточка отдельного пользователя.
+        path: 'check-requests',
+        name: 'admin-check-requests',
+        component: () => import('../pages/admin/CheckRequests.vue'),
+        meta: { permission: 'checks.view', bare: true },
+      },
+      {
         path: 'escalations',
         name: 'admin-escalations',
         component: () => import('../pages/admin/Escalations.vue'),
@@ -321,6 +329,13 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true },
   },
   {
+    // Пароль — не часть профиля: это про вход, и страница одна для всех ролей.
+    path: '/password',
+    name: 'change-password',
+    component: () => import('../pages/shared/ChangePasswordPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: () => {
       const authStore = useAuthStore()
@@ -386,6 +401,7 @@ const adminSections: { path: string; permission: string }[] = [
   { path: '/admin/service-catalog', permission: 'service_catalog.view' },
   { path: '/admin/achievements', permission: 'achievements.view' },
   { path: '/admin/gifts', permission: 'gifts.view' },
+  { path: '/admin/check-requests', permission: 'checks.view' },
   { path: '/admin/escalations', permission: 'escalations.view' },
   { path: '/admin/disputes', permission: 'disputes.view' },
   { path: '/admin/watermark-symbols', permission: 'watermarks.view' },

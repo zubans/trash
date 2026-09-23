@@ -227,7 +227,8 @@ func main() {
 	passportRepo := repository.NewPassportRepository(db)
 	passportService := service.NewPassportService(passportRepo, userRepo, passportCipher,
 		getEnv("PASSPORTS_DIR", "passports"), settingsRepo).
-		WithMail(mailRepo)
+		WithMail(mailRepo).
+		WithPhotoCheck(photoproof.NewChecker())
 	// AuthService владеет всем, что связано с сессиями: выдачей access-токенов,
 	// ротацией refresh-токенов и занесением отозванных access-токенов в чёрный список.
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, addressSuggester, mailer).

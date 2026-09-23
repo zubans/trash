@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"healthlogin/backend/passport"
+	"healthlogin/backend/photoproof"
 	"healthlogin/backend/repository"
 )
 
@@ -85,7 +87,7 @@ func newPassportService(t *testing.T, withKey bool) (*PassportService, repositor
 func TestPassportOwnerFlowIntegration(t *testing.T) {
 	ctx := context.Background()
 	srv, repo, dir, newUser := newPassportService(t, true)
-	data := PassportData{Series: "45 10", Number: "123 456", IssuedAt: "2015-06-01", DivisionCode: "770-001"}
+	data := PassportData{Series: "45 10", Number: "123 456", IssuedAt: "2015-06-01"}
 
 	noConsent := newUser(false)
 	if err := srv.SaveMine(ctx, noConsent, data); passportCode(err) != PassportErrConsentRequired {
@@ -96,7 +98,7 @@ func TestPassportOwnerFlowIntegration(t *testing.T) {
 	if err := srv.SaveMine(ctx, owner, PassportData{Series: "45", Number: "1", IssuedAt: "2999-01-01"}); passportCode(err) != PassportErrValidation {
 		t.Fatalf("bad passport: %v", err)
 	}
-	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes); passportCode(err) != PassportErrRequired {
+	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes, time.Time{}); passportCode(err) != PassportErrRequired {
 		t.Fatalf("photo before the data: %v", err)
 	}
 	if err := srv.SaveMine(ctx, owner, data); err != nil {
@@ -114,13 +116,17 @@ func TestPassportOwnerFlowIntegration(t *testing.T) {
 		t.Fatalf("mask: %+v, %v", mask, err)
 	}
 
-	if err := srv.SaveMinePhoto(ctx, owner, []byte("<html>not a photo</html>")); passportCode(err) != PassportErrBadPhoto {
+	if err := srv.SaveMinePhoto(ctx, owner, []byte("<html>not a photo</html>"), time.Time{}); passportCode(err) != PassportErrBadPhoto {
 		t.Fatalf("a non-image photo: %v", err)
 	}
-	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes); err != nil {
+	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes, time.Time{}); err != nil {
 		t.Fatalf("photo: %v", err)
 	}
-	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes); err != nil {
+	// Полный паспорт сам просит подтверждения: обращаться в поддержку не нужно.
+	if requested, err := repo.CheckRequestedAt(ctx, nil, owner.ID); err != nil || requested == nil {
+		t.Fatalf("a complete passport did not ask for the check: %v, %v", requested, err)
+	}
+	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes, time.Time{}); err != nil {
 		t.Fatalf("second photo: %v", err)
 	}
 	files, _ := os.ReadDir(dir)
@@ -165,14 +171,14 @@ func TestPassportAdminFlowIntegration(t *testing.T) {
 	db := openTestDB(t)
 	owner, admin := newUser(true), newUser(true)
 
-	if err := srv.AdminSave(ctx, admin.ID, owner.ID, PassportData{Series: "4510", Number: "654321", IssuedAt: "2020-02-02", IssuedBy: "ОВД"}); err != nil {
+	if err := srv.AdminSave(ctx, admin.ID, owner.ID, PassportData{Series: "4510", Number: "654321", IssuedAt: "2020-02-02"}); err != nil {
 		t.Fatalf("admin save: %v", err)
 	}
 	if err := srv.AdminSavePhoto(ctx, admin.ID, owner.ID, jpegBytes); err != nil {
 		t.Fatalf("admin photo: %v", err)
 	}
 	full, err := srv.AdminView(ctx, admin.ID, owner.ID)
-	if err != nil || full.Number != "654321" || full.IssuedBy != "ОВД" || full.Source != repository.PassportSourceAdmin || !full.HasPhoto {
+	if err != nil || full.Number != "654321" || full.Source != repository.PassportSourceAdmin || !full.HasPhoto {
 		t.Fatalf("admin view: %+v, %v", full, err)
 	}
 	photo, err := srv.AdminPhoto(ctx, admin.ID, owner.ID)
@@ -224,7 +230,7 @@ func TestPassportFromVerificationIntegration(t *testing.T) {
 	if err := srv.SaveFromVerification(ctx, order, moderator.ID, data); err != nil {
 		t.Fatalf("verification save: %v", err)
 	}
-	if err := srv.SavePhotoFromVerification(ctx, order, moderator.ID, jpegBytes); err != nil {
+	if err := srv.SavePhotoFromVerification(ctx, order, moderator.ID, jpegBytes, time.Time{}); err != nil {
 		t.Fatalf("verification photo: %v", err)
 	}
 	rec, err := repo.Get(ctx, nil, customer.ID)
@@ -238,7 +244,7 @@ func TestPassportFromVerificationIntegration(t *testing.T) {
 	if err != nil || requested == nil {
 		t.Fatalf("check was not requested: %v, %v", requested, err)
 	}
-	if err := srv.SavePhotoFromVerification(ctx, order, moderator.ID, jpegBytes); err != nil {
+	if err := srv.SavePhotoFromVerification(ctx, order, moderator.ID, jpegBytes, time.Time{}); err != nil {
 		t.Fatalf("second photo: %v", err)
 	}
 	again, err := repo.CheckRequestedAt(ctx, nil, customer.ID)
@@ -260,5 +266,56 @@ func TestPassportWithoutKeyIntegration(t *testing.T) {
 	owner := newUser(true)
 	if err := srv.SaveMine(context.Background(), owner, PassportData{Series: "4510", Number: "123456", IssuedAt: "2015-06-01"}); passportCode(err) != PassportErrNoKey {
 		t.Fatalf("save without a key: %v", err)
+	}
+}
+
+// Скрытая проверка снимка: подписанный приложением снимок отличим от
+// принесённого готовым, и подпись для своей области не годится для другой.
+func TestPassportPhotoOriginIntegration(t *testing.T) {
+	ctx := context.Background()
+	srv, repo, _, newUser := newPassportService(t, true)
+	srv.WithPhotoCheck(photoproof.NewChecker())
+	owner := newUser(true)
+	if err := srv.SaveMine(ctx, owner, PassportData{Series: "4510", Number: "123456", IssuedAt: "2015-06-01"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Снимок без подписи принимается — проверка скрытая и не отказывает, — но
+	// вердикт это показывает.
+	if err := srv.SaveMinePhoto(ctx, owner, jpegBytes, time.Time{}); err != nil {
+		t.Fatalf("plain photo: %v", err)
+	}
+	rec, err := repo.Get(ctx, nil, owner.ID)
+	if err != nil || rec.Photo.Seal != photoproof.SealMissing || rec.Photo.TakenAt != nil {
+		t.Fatalf("a plain photo passed as signed: %+v, %v", rec.Photo, err)
+	}
+
+	id, key, err := srv.MinePhotoKey(ctx, owner)
+	if err != nil || id != owner.ID || len(key) == 0 {
+		t.Fatalf("capture key: %v, %v, %v", id, len(key), err)
+	}
+	takenAt := time.Now().Truncate(time.Second)
+	signed := photoproof.Sign(jpegBytes, photoproof.CheckInput{
+		OrderID: id, SymbolCode: passportPhotoKind, Key: key, DeviceTakenAt: takenAt,
+	})
+	if err := srv.SaveMinePhoto(ctx, owner, signed, takenAt); err != nil {
+		t.Fatalf("signed photo: %v", err)
+	}
+	rec, err = repo.Get(ctx, nil, owner.ID)
+	if err != nil || rec.Photo.Seal != photoproof.SealValid || rec.Photo.TakenAt == nil || !rec.Photo.TakenAt.Equal(takenAt) {
+		t.Fatalf("a signed photo was not recognised: %+v, %v", rec.Photo, err)
+	}
+
+	// Ключ другой области тот же снимок не подтверждает: подпись для заказа
+	// верификации не годится для своего профиля.
+	foreign := photoproof.Sign(jpegBytes, photoproof.CheckInput{
+		OrderID: id, SymbolCode: passportPhotoKind, Key: srv.captureKey(orderScope(uuid.New())), DeviceTakenAt: takenAt,
+	})
+	if err := srv.SaveMinePhoto(ctx, owner, foreign, takenAt); err != nil {
+		t.Fatalf("foreign photo: %v", err)
+	}
+	rec, err = repo.Get(ctx, nil, owner.ID)
+	if err != nil || rec.Photo.Seal != photoproof.SealInvalid {
+		t.Fatalf("a photo signed for another scope passed: %+v, %v", rec.Photo, err)
 	}
 }

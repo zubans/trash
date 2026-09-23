@@ -69,6 +69,8 @@ export interface PassportAction {
   dataKey: string
   photoKey: string
   createdAt: number
+  /** Время съёмки по часам телефона: без него сервер не проверит подпись снимка. */
+  takenAt: string
 }
 
 export type QueueAction = PhotoAction | PositionsAction | ExecuteAction | PassportAction
@@ -84,7 +86,7 @@ export interface QueueTransport {
   sendPositions(points: PositionPoint[]): Promise<void>
   execute(orderId: string, executedAtDevice: string): Promise<void>
   /** Данные паспорта, затем фото: фото без данных сервер не примет. */
-  sendPassport(orderId: string, data: unknown, photo: Uint8Array): Promise<void>
+  sendPassport(orderId: string, data: unknown, photo: Uint8Array, takenAt: string): Promise<void>
 }
 
 export interface KeyValue {
@@ -225,11 +227,12 @@ export class ProofQueue {
    * Ставит паспорт в очередь зашифрованным. Повторный ввод по тому же заказу
    * заменяет прежний неотправленный: на сервер уходит последний.
    */
-  async enqueuePassport(orderId: string, data: unknown, photo: Uint8Array): Promise<PassportAction> {
+  async enqueuePassport(orderId: string, data: unknown, photo: Uint8Array, takenAt: string): Promise<PassportAction> {
     if (!this.sealer) throw new Error('шифрование на устройстве недоступно')
     const id = newId()
     const action: PassportAction = {
-      kind: 'passport', id, orderId, dataKey: `passport-data-${id}`, photoKey: `passport-photo-${id}`, createdAt: Date.now(),
+      kind: 'passport', id, orderId, dataKey: `passport-data-${id}`, photoKey: `passport-photo-${id}`,
+      createdAt: Date.now(), takenAt,
     }
     const json = new TextEncoder().encode(JSON.stringify(data))
     await this.blobs.put(action.dataKey, await this.sealer.seal(json))
@@ -296,7 +299,7 @@ export class ProofQueue {
             continue
           }
           const data = JSON.parse(new TextDecoder().decode(await this.sealer.open(sealedData)))
-          await this.transport.sendPassport(action.orderId, data, await this.sealer.open(sealedPhoto))
+          await this.transport.sendPassport(action.orderId, data, await this.sealer.open(sealedPhoto), action.takenAt)
         } else {
           // Отметка ждёт снимков своего заказа: без них сервер откажет.
           if (this.pendingPhotosFor(action.orderId).length > 0) continue
@@ -336,10 +339,11 @@ const apiTransport: QueueTransport = {
   async execute(orderId, executedAtDevice) {
     await api.post(`/executor/orders/${orderId}/execute`, { executed_at_device: executedAtDevice })
   },
-  async sendPassport(orderId, data, photo) {
+  async sendPassport(orderId, data, photo, takenAt) {
     await api.put(`/executor/orders/${orderId}/passport`, data)
     const form = new FormData()
     form.append('file', new Blob([photo as BlobPart], { type: 'image/jpeg' }), 'passport.jpg')
+    if (takenAt) form.append('taken_at', takenAt)
     await api.post(`/executor/orders/${orderId}/passport/photo`, form)
   },
 }

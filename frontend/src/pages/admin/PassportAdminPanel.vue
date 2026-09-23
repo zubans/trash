@@ -14,6 +14,11 @@
         </template>
         <template v-else>{{ $t('passport.admin.none') }}</template>
       </span>
+      <!-- Откуда снимок: подпись приложения. Это подсказка модератору, а не
+           запрет — снимок без подписи повод посмотреть внимательнее. -->
+      <span v-if="status.has_photo" class="pp-origin" :class="photoOrigin" :title="$t('passport.admin.photoOriginHint')">
+        {{ $t('passport.admin.photoOrigin.' + photoOrigin) }}
+      </span>
       <span v-if="!status.is_checked && status.check_requested_at" class="pp-badge wait">
         {{ $t('passport.admin.checkRequested') }}
       </span>
@@ -47,8 +52,6 @@
       <div v-if="full && !editing" class="pp-full">
         <div><span>{{ $t('passport.fields.seriesNumber') }}</span><strong>{{ full.series }} {{ full.number }}</strong></div>
         <div><span>{{ $t('passport.fields.issuedAt') }}</span><strong>{{ full.issued_at }}</strong></div>
-        <div v-if="full.division_code"><span>{{ $t('passport.fields.divisionCode') }}</span><strong>{{ full.division_code }}</strong></div>
-        <div v-if="full.issued_by"><span>{{ $t('passport.fields.issuedBy') }}</span><strong>{{ full.issued_by }}</strong></div>
         <button v-if="full.has_photo && !photoUrl" type="button" class="btn-link" :disabled="busy" @click="showPhoto">
           {{ $t('passport.admin.showPhoto') }}
         </button>
@@ -82,7 +85,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
 import PassportFields from '../../components/passport/PassportFields.vue'
@@ -173,8 +176,7 @@ export default defineComponent({
 
     const startEdit = () => {
       draft.value = full.value
-        ? { series: full.value.series, number: full.value.number, issued_at: full.value.issued_at,
-            issued_by: full.value.issued_by || '', division_code: full.value.division_code || '' }
+        ? { series: full.value.series, number: full.value.number, issued_at: full.value.issued_at }
         : emptyPassport()
       fieldErrors.value = {}
       editing.value = true
@@ -212,6 +214,15 @@ export default defineComponent({
       })
     }
 
+    // Подпись цела — снимок такой, каким его сделало приложение; метка без
+    // подписи — снимок из приложения, но файл пересохранён; ни того ни другого
+    // — фото принесли готовым.
+    const photoOrigin = computed(() => {
+      if (status.value?.photo_seal === 'VALID') return 'app'
+      if (status.value?.photo_mark === 'FOUND') return 'resaved'
+      return 'foreign'
+    })
+
     const setChecked = (checked: boolean) =>
       run(async () => {
         await adminSetChecked(props.userId, checked, reason.value.trim())
@@ -225,7 +236,7 @@ export default defineComponent({
     onBeforeUnmount(dropPhoto)
 
     return {
-      can, status, full, photoUrl, draft, fieldErrors, editing, reason, busy, error, notice,
+      can, status, full, photoUrl, draft, fieldErrors, editing, reason, busy, error, notice, photoOrigin,
       reveal, showPhoto, startEdit, save, uploadPhoto, remove, setChecked,
     }
   },
@@ -280,6 +291,25 @@ export default defineComponent({
 }
 .pp-warn {
   color: #b45309;
+}
+.pp-origin {
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: help;
+}
+.pp-origin.app {
+  background: #dcfce7;
+  color: #15803d;
+}
+.pp-origin.resaved {
+  background: #fef3c7;
+  color: #b45309;
+}
+.pp-origin.foreign {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 .pp-check,
 .pp-actions {

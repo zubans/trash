@@ -10,7 +10,9 @@ package passport
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -26,8 +28,11 @@ var ErrNoKey = errors.New("passport encryption key is not configured")
 
 // Cipher шифрует и расшифровывает данные одним ключом.
 type Cipher struct {
-	aead    cipher.AEAD
-	version int
+	aead cipher.AEAD
+	// captureRoot — корень ключей подписи снимков. Выведен из того же ключа, но
+	// сам ключ шифрования в структуре не лежит: подписи он не нужен.
+	captureRoot []byte
+	version     int
 }
 
 // NewCipher разбирает ключ в base64. Пустой ключ — nil без ошибки: сервер
@@ -55,7 +60,9 @@ func NewCipher(keyBase64 string, version int) (*Cipher, error) {
 	if version <= 0 {
 		version = 1
 	}
-	return &Cipher{aead: aead, version: version}, nil
+	root := hmac.New(sha256.New, key)
+	root.Write([]byte("passport-capture"))
+	return &Cipher{aead: aead, captureRoot: root.Sum(nil), version: version}, nil
 }
 
 // Version — версия ключа, которая пишется рядом с шифротекстом.
@@ -64,6 +71,20 @@ func (c *Cipher) Version() int {
 		return 0
 	}
 	return c.version
+}
+
+// CaptureKey — ключ, которым приложение подписывает снимок паспорта. Область
+// (scope) — то, для чего снимок делается: «user:<id>» для своего паспорта,
+// «order:<id>» для паспорта заказчика на верификации. Ключ выводится, а не
+// хранится: сервер восстанавливает его по той же области при проверке снимка,
+// поэтому ни таблицы разовых ключей, ни своей переменной окружения не нужно.
+func (c *Cipher) CaptureKey(scope string) []byte {
+	if c == nil {
+		return nil
+	}
+	mac := hmac.New(sha256.New, c.captureRoot)
+	mac.Write([]byte(scope))
+	return mac.Sum(nil)
 }
 
 // Seal шифрует: nonce, затем шифротекст с меткой подлинности.

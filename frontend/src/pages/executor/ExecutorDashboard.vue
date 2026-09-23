@@ -67,6 +67,9 @@
               <i class="ph-fill ph-envelope-simple"></i> Почта
               <span v-if="mailUnread > 0" class="support-unread-dot nav-dot mail-nav-dot"></span>
             </button>
+            <button type="button" class="nav-item" @click="menuOpen = false; $router.push('/password')">
+              <i class="ph-fill ph-lock-key"></i> Смена пароля
+            </button>
           </div>
 
           <div class="nav-section">Помощь</div>

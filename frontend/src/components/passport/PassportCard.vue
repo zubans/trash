@@ -4,9 +4,25 @@
       <div class="pc-title">
         <i class="ph-fill ph-identification-card"></i>
         {{ $t('passport.card.title') }}
-        <span v-if="checked" class="pc-badge ok"><i class="ph-bold ph-seal-check"></i> {{ $t('passport.card.checked') }}</span>
+        <!-- Слово-статус нажимается: что такое «проверенный» и зачем он, надо
+             объяснить там же, где человек его видит. -->
+        <button
+          type="button"
+          class="pc-badge"
+          :class="checked ? 'ok' : 'plain'"
+          :aria-expanded="showAbout"
+          @click="showAbout = !showAbout"
+        >
+          <i class="ph-bold" :class="checked ? 'ph-seal-check' : 'ph-question'"></i>
+          {{ checked ? $t('passport.card.checked') : $t('passport.card.checkedWord') }}
+        </button>
       </div>
       <div class="pc-sub">{{ $t('passport.card.sub') }}</div>
+      <div v-if="showAbout" class="pc-about">
+        <strong>{{ $t('passport.card.aboutTitle') }}</strong>
+        <p>{{ $t('passport.card.about') }}</p>
+        <button type="button" class="pc-btn secondary" @click="showAbout = false">{{ $t('common.close') }}</button>
+      </div>
     </div>
 
     <div v-if="loading" class="pc-muted">{{ $t('common.loading') }}</div>
@@ -34,7 +50,7 @@
       <div class="pc-actions">
         <!-- Проверенный паспорт правится через поддержку: иначе его можно было бы подменить. -->
         <template v-if="mask?.locked">
-          <button type="button" class="pc-btn secondary" @click="openSupport('edit')">{{ $t('passport.card.editViaSupport') }}</button>
+          <button type="button" class="pc-btn secondary" @click="openSupport">{{ $t('passport.card.editViaSupport') }}</button>
         </template>
         <template v-else>
           <template v-if="editing">
@@ -42,25 +58,28 @@
             <button v-if="mask?.exists" type="button" class="pc-btn secondary" :disabled="busy" @click="editing = false">{{ $t('common.cancel') }}</button>
           </template>
           <button v-else type="button" class="pc-btn secondary" @click="startEdit">{{ $t('passport.card.edit') }}</button>
-          <label v-if="mask?.exists && !editing" class="pc-btn secondary pc-file">
+          <button v-if="mask?.exists && !editing" type="button" class="pc-btn secondary" :disabled="busy" @click="takePhoto">
             <i class="ph-bold ph-camera"></i>
             {{ mask.has_photo ? $t('passport.card.replacePhoto') : $t('passport.card.addPhoto') }}
-            <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" :disabled="busy" @change="uploadPhoto" />
-          </label>
+          </button>
         </template>
-        <button
-          v-if="!checked && mask?.exists && mask.has_photo && !mask.check_requested_at"
-          type="button"
-          class="pc-btn accent"
-          @click="openSupport('check')"
-        >
-          {{ $t('passport.card.becomeChecked') }}
-        </button>
       </div>
-      <!-- Заявка уже есть (паспорт отдан на верификации) — просить нечего. -->
+      <!-- Заявка на статус уходит сама, как только паспорт полон: кнопки «стать
+           проверенным» нет и писать в поддержку не нужно. -->
+      <div v-if="mask?.exists && !mask.locked" class="pc-muted">{{ $t('passport.card.photoLive') }}</div>
       <div v-if="!checked && mask?.check_requested_at" class="pc-note">{{ $t('passport.card.checkPending') }}</div>
       <div v-else-if="!checked && !(mask?.exists && mask.has_photo)" class="pc-muted">{{ $t('passport.card.checkedHint') }}</div>
     </template>
+
+    <!-- Запасной путь для браузера: своей камеры у него нет. -->
+    <input
+      ref="fileInput"
+      type="file"
+      accept="image/jpeg"
+      capture="environment"
+      style="display: none"
+      @change="onFileChosen"
+    />
 
     <SupportChatModal v-model:show="showSupport" :prefill="supportPrefill" />
   </div>
@@ -74,6 +93,8 @@ import {
   acceptPDConsent,
   emptyPassport,
   getMyPassport,
+  getMyPassportData,
+  myPassportPhotoKey,
   passportError,
   passportErrorText,
   saveMyPassport,
@@ -81,6 +102,7 @@ import {
   type PassportData,
   type PassportMask,
 } from '../../api/passport'
+import { cameraAvailable, shootPassport, shotAt, signPassportPhoto, toRfc3339 } from './photo'
 import PassportFields from './PassportFields.vue'
 import SupportChatModal from '../SupportChatModal.vue'
 
@@ -101,6 +123,8 @@ export default defineComponent({
     const message = ref('')
     const messageIsError = ref(false)
     const showSupport = ref(false)
+    const showAbout = ref(false)
+    const fileInput = ref<HTMLInputElement | null>(null)
     const supportPrefill = ref('')
 
     const checked = computed(() => !!authStore.user?.is_checked)
@@ -123,13 +147,22 @@ export default defineComponent({
       }
     }
 
-    // Полные данные наружу не отдаются никому, кроме права passports.view, —
-    // и владельцу тоже: правка начинается с пустой формы.
-    const startEdit = () => {
-      draft.value = emptyPassport()
+    // Правка начинается с того, что уже сохранено: набранное однажды не
+    // набирают снова. Маска — для показа, за данными идём отдельным запросом.
+    const startEdit = async () => {
       errors.value = {}
-      editing.value = true
       say('')
+      draft.value = emptyPassport()
+      editing.value = true
+      if (!mask.value?.exists) return
+      busy.value = true
+      try {
+        draft.value = await getMyPassportData()
+      } catch (err) {
+        say(passportErrorText(err, t('passport.card.loadFailed')), true)
+      } finally {
+        busy.value = false
+      }
     }
 
     const save = async () => {
@@ -147,20 +180,52 @@ export default defineComponent({
       }
     }
 
-    const uploadPhoto = async (event: Event) => {
-      const input = event.target as HTMLInputElement
-      const file = input.files?.[0]
-      input.value = ''
-      if (!file) return
+    // Снимок подписывается ключом, который сервер выдаёт перед съёмкой: так
+    // видно, что фото сделано в приложении, а не принесено готовым. Подпись не
+    // удалась — фото всё равно уходит: снимок нужнее, чем отметка о нём.
+    const sendPhoto = async (original: Uint8Array, takenAt: Date) => {
       busy.value = true
       try {
-        mask.value = await uploadMyPassportPhoto(file)
+        let photo = original
+        let at: string | undefined
+        try {
+          photo = await signPassportPhoto(original, await myPassportPhotoKey(), takenAt)
+          at = toRfc3339(takenAt)
+        } catch (err) {
+          console.warn('[passport] cannot sign the photo', err)
+        }
+        mask.value = await uploadMyPassportPhoto(new Blob([photo as BlobPart], { type: 'image/jpeg' }), at)
         say(t('passport.card.photoSaved'))
       } catch (err) {
         say(passportErrorText(err, t('passport.card.saveFailed')), true)
       } finally {
         busy.value = false
       }
+    }
+
+    // Фото — только живой съёмкой. В приложении открывается камера; браузеру
+    // своей камеры не дать, там остаётся системный выбор.
+    const takePhoto = async () => {
+      say('')
+      if (!cameraAvailable()) {
+        fileInput.value?.click()
+        return
+      }
+      try {
+        const original = await shootPassport()
+        if (original) await sendPhoto(original, shotAt())
+      } catch (err) {
+        // Съёмку закрыли — это не ошибка.
+        console.warn('[passport] camera closed', err)
+      }
+    }
+
+    const onFileChosen = async (event: Event) => {
+      const input = event.target as HTMLInputElement
+      const file = input.files?.[0]
+      input.value = ''
+      if (!file) return
+      await sendPhoto(new Uint8Array(await file.arrayBuffer()), shotAt())
     }
 
     const accept = async () => {
@@ -176,18 +241,18 @@ export default defineComponent({
       }
     }
 
-    // Статус ставит модератор по обращению — тем же приёмом, что возврат
-    // покупки: чат поддержки с подставленным текстом, отправляет сам человек.
-    const openSupport = (reason: 'check' | 'edit') => {
-      supportPrefill.value = reason === 'check' ? t('passport.card.checkRequest') : t('passport.card.editRequest')
+    // В поддержку идут только за правкой проверенного паспорта: заявку на сам
+    // статус ставит сервер, когда паспорт становится полным.
+    const openSupport = () => {
+      supportPrefill.value = t('passport.card.editRequest')
       showSupport.value = true
     }
 
     onMounted(load)
 
     return {
-      mask, draft, errors, editing, loading, busy, message, messageIsError, showSupport, supportPrefill,
-      checked, consentRequired, startEdit, save, uploadPhoto, accept, openSupport,
+      mask, draft, errors, editing, loading, busy, message, messageIsError, showSupport, supportPrefill, fileInput, showAbout,
+      checked, consentRequired, startEdit, save, takePhoto, onFileChosen, accept, openSupport,
     }
   },
 })
@@ -225,9 +290,31 @@ export default defineComponent({
   align-items: center;
   gap: 4px;
 }
+.pc-badge {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
 .pc-badge.ok {
   background: #dcfce7;
   color: #15803d;
+}
+.pc-badge.plain {
+  background: #f1f5f9;
+  color: #475569;
+}
+.pc-about {
+  margin-top: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+}
+.pc-about p {
+  margin: 6px 0 8px;
 }
 .pc-mask {
   border: 1px solid #e2e8f0;
@@ -297,8 +384,5 @@ export default defineComponent({
 .pc-btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-.pc-file input {
-  display: none;
 }
 </style>

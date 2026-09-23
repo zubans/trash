@@ -38,6 +38,36 @@ type PassportRecord struct {
 	KeyVersion int
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	// Photo — откуда взялось фото: вердикт скрытой проверки снимка.
+	Photo PassportPhoto
+}
+
+// Результаты скрытой проверки снимка. Значения — те же, что у снимков
+// фото-подтверждения (backend/photoproof): считает их один и тот же код.
+type PassportPhoto struct {
+	// Path — имя файла снимка; пусто, когда фото не меняется.
+	Path string
+	// Seal — подпись файла: VALID, MISSING, INVALID.
+	Seal string
+	// Mark — незаметная метка в изображении: FOUND, NOT_FOUND, MISMATCH.
+	Mark string
+	// TakenAt — время съёмки по часам телефона; nil, если приложение его не
+	// прислало (старая версия или загрузка из админки).
+	TakenAt *time.Time
+}
+
+// CheckRequest — заявка на статус «проверенный» в очереди модерации.
+type CheckRequest struct {
+	UserID      uuid.UUID `json:"user_id"`
+	Phone       string    `json:"phone"`
+	Name        string    `json:"name,omitempty"`
+	Role        string    `json:"role"`
+	Verified    bool      `json:"is_verified"`
+	RequestedAt time.Time `json:"requested_at"`
+	HasPhoto    bool      `json:"has_photo"`
+	// PhotoSeal — вердикт скрытой проверки снимка, чтобы очередь сразу
+	// показывала, на что смотреть внимательнее.
+	PhotoSeal string `json:"photo_seal,omitempty"`
 }
 
 // PassportRepository хранит паспорта, журнал доступа к ним и два флага
@@ -48,8 +78,9 @@ type PassportRepository interface {
 	Get(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error)
 	// Save записывает данные паспорта; фото, если оно было, остаётся.
 	Save(ctx context.Context, q Querier, rec *PassportRecord) error
-	// SetPhoto ставит фото и возвращает прежнее — его файл надо удалить.
-	SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, path string) (previous *string, err error)
+	// SetPhoto ставит фото вместе с вердиктом о его происхождении и возвращает
+	// прежнее — его файл надо удалить.
+	SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, photo PassportPhoto) (previous *string, err error)
 	// Delete удаляет паспорт и возвращает удалённую строку — ради файла фото.
 	Delete(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error)
 	LogAccess(ctx context.Context, q Querier, userID, viewerID uuid.UUID, action string) error
@@ -60,6 +91,8 @@ type PassportRepository interface {
 	RequestCheck(ctx context.Context, q Querier, userID uuid.UUID) error
 	// CheckRequestedAt — когда просили подтвердить; nil, если не просили.
 	CheckRequestedAt(ctx context.Context, q Querier, userID uuid.UUID) (*time.Time, error)
+	// CheckRequests — очередь заявок, самая давняя первой.
+	CheckRequests(ctx context.Context, q Querier, limit int) ([]CheckRequest, error)
 	AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error
 }
 
@@ -93,12 +126,19 @@ func (r *passportRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) erro
 
 func (r *passportRepo) Get(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error) {
 	var rec PassportRecord
+	var seal, mark sql.NullString
 	err := r.exec(q).QueryRowContext(ctx, `
-		SELECT user_id, data_enc, photo_path, source, entered_by, key_version, created_at, updated_at
+		SELECT user_id, data_enc, photo_path, source, entered_by, key_version, created_at, updated_at,
+		       photo_seal, photo_mark, photo_taken_at
 		FROM user_passports WHERE user_id = $1`, userID).
-		Scan(&rec.UserID, &rec.DataEnc, &rec.PhotoPath, &rec.Source, &rec.EnteredBy, &rec.KeyVersion, &rec.CreatedAt, &rec.UpdatedAt)
+		Scan(&rec.UserID, &rec.DataEnc, &rec.PhotoPath, &rec.Source, &rec.EnteredBy, &rec.KeyVersion,
+			&rec.CreatedAt, &rec.UpdatedAt, &seal, &mark, &rec.Photo.TakenAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPassportNotFound
+	}
+	rec.Photo.Seal, rec.Photo.Mark = seal.String, mark.String
+	if rec.PhotoPath != nil {
+		rec.Photo.Path = *rec.PhotoPath
 	}
 	return &rec, err
 }
@@ -114,13 +154,14 @@ func (r *passportRepo) Save(ctx context.Context, q Querier, rec *PassportRecord)
 	return err
 }
 
-func (r *passportRepo) SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, path string) (*string, error) {
+func (r *passportRepo) SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, photo PassportPhoto) (*string, error) {
 	var previous *string
 	err := r.exec(q).QueryRowContext(ctx, `
-		UPDATE user_passports p SET photo_path = $2, updated_at = now()
+		UPDATE user_passports p
+		SET photo_path = $2, photo_seal = $3, photo_mark = $4, photo_taken_at = $5, updated_at = now()
 		FROM (SELECT photo_path FROM user_passports WHERE user_id = $1 FOR UPDATE) old
 		WHERE p.user_id = $1
-		RETURNING old.photo_path`, userID, path).Scan(&previous)
+		RETURNING old.photo_path`, userID, photo.Path, photo.Seal, photo.Mark, photo.TakenAt).Scan(&previous)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPassportNotFound
 	}
@@ -171,6 +212,35 @@ func (r *passportRepo) CheckRequestedAt(ctx context.Context, q Querier, userID u
 		return nil, nil
 	}
 	return at, err
+}
+
+func (r *passportRepo) CheckRequests(ctx context.Context, q Querier, limit int) ([]CheckRequest, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := r.exec(q).QueryContext(ctx, `
+		SELECT u.id, u.phone, TRIM(CONCAT_WS(' ', u.last_name, u.first_name, u.patronymic)),
+		       u.role::text, u.is_verified, u.check_requested_at,
+		       p.photo_path IS NOT NULL, COALESCE(p.photo_seal, '')
+		FROM users u
+		LEFT JOIN user_passports p ON p.user_id = u.id
+		WHERE u.check_requested_at IS NOT NULL AND u.is_checked = FALSE
+		ORDER BY u.check_requested_at
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CheckRequest{}
+	for rows.Next() {
+		var item CheckRequest
+		if err := rows.Scan(&item.UserID, &item.Phone, &item.Name, &item.Role, &item.Verified,
+			&item.RequestedAt, &item.HasPhoto, &item.PhotoSeal); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 func (r *passportRepo) AcceptPDConsent(ctx context.Context, userID uuid.UUID, version int) error {
