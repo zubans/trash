@@ -44,7 +44,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 }
 
 // findOrder достаёт заказ из ленты, как его увидело бы приложение.
-func findOrder(t *testing.T, orders []*repository.Order, err error, id uuid.UUID) *repository.Order {
+func findOrder(t *testing.T, orders []*service.OrderView, err error, id uuid.UUID) *service.OrderView {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("list orders: %v", err)
@@ -84,13 +84,13 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, nil, catalogRepo, nil).
 		WithExecutorGeo(executorGeoRepo)
 
-	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo, catalogRepo)
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, settingsRepo).
+		WithNearbyOrders(orderService)
 
 	// Подключено ровно так же, как в main.go: отчёты о местоположении в смене
 	// пишутся через гео-сервис — именно это делает позицию, которую читают карта и
 	// подбор, той же, что сообщило приложение исполнителя.
-	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo).
 		WithExecutorLocation(executorGeoService).
 		WithOrderHistory(orderService)
 
@@ -137,13 +137,12 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 
 	// Пополняем баланс заказчика, чтобы удержание прошло
 	_ = transactionRepo.UpdateBalance(ctx, nil, customer.ID, money.FromRubles(5000))
-	_ = userRepo.UpdateVerified(ctx, customer.ID, true)
+	_ = userRepo.UpdateVerified(ctx, nil, customer.ID, true)
 
 	// 2. Заказчик создаёт заказ со своим адресом
-	order, err := orderService.CreateOrder(
-		ctx, customer.ID, variantID, false, false,
-		custAddress, &custLat, &custLon,
-	)
+	order, err := orderService.Create(ctx, customer.ID, service.CreateOrderRequest{
+		ServiceVariantID: variantID, Address: custAddress, Lat: &custLat, Lon: &custLon,
+	})
 	if err != nil {
 		t.Fatalf("Customer order creation failed: %v", err)
 	}
@@ -171,9 +170,9 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	if err != nil || len(execAddrs) == 0 {
 		t.Fatalf("Executor address was not saved in addresses table: %v", err)
 	}
-	_ = userRepo.UpdateVerified(ctx, executor.ID, true)
+	_ = userRepo.UpdateVerified(ctx, nil, executor.ID, true)
 	birthDate := time.Now().AddDate(-25, 0, 0)
-	_ = userRepo.UpdateUserBirthDate(ctx, executor.ID, birthDate)
+	_ = userRepo.UpdateUserBirthDate(ctx, nil, executor.ID, birthDate)
 
 	// 4. Исполнитель открывает активную смену
 	shift, err := shiftService.StartShift(ctx, executor.ID, 3)
@@ -310,7 +309,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	}
 
 	// 7. Исполнитель выполняет и подтверждает заказ
-	err = orderService.ExecuteOrder(ctx, order.ID, executor.ID)
+	err = orderService.ExecuteOrderAt(ctx, order.ID, executor.ID, nil)
 	if err != nil {
 		t.Fatalf("Executor failed to execute order: %v", err)
 	}
@@ -383,7 +382,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 		WithExecutorGeo(executorGeoRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, nil, catalogRepo, nil).
 		WithExecutorGeo(executorGeoRepo)
-	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db)
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo)
 	matchingService := service.NewMatchingService(orderRepo, shiftRepo, userRepo, catalogRepo).
 		WithGeo(executorGeoRepo, settingsRepo)
 
@@ -411,12 +410,13 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	if err := transactionRepo.UpdateBalance(ctx, nil, customer.ID, money.FromRubles(5000)); err != nil {
 		t.Fatalf("failed to fund customer: %v", err)
 	}
-	if err := userRepo.UpdateVerified(ctx, customer.ID, true); err != nil {
+	if err := userRepo.UpdateVerified(ctx, nil, customer.ID, true); err != nil {
 		t.Fatalf("failed to verify customer: %v", err)
 	}
 
-	order, err := orderService.CreateOrder(ctx, customer.ID, variantID, false, false,
-		"Россия, г. Москва, ул. Арбат, д. 10", &custLat, &custLon)
+	order, err := orderService.Create(ctx, customer.ID, service.CreateOrderRequest{
+		ServiceVariantID: variantID, Address: "Россия, г. Москва, ул. Арбат, д. 10", Lat: &custLat, Lon: &custLon,
+	})
 	if err != nil {
 		t.Fatalf("order creation failed: %v", err)
 	}
@@ -439,10 +439,10 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("distant executor registration failed: %v", err)
 	}
-	if err := userRepo.UpdateVerified(ctx, distant.ID, true); err != nil {
+	if err := userRepo.UpdateVerified(ctx, nil, distant.ID, true); err != nil {
 		t.Fatalf("failed to verify executor: %v", err)
 	}
-	if err := userRepo.UpdateUserBirthDate(ctx, distant.ID, time.Now().AddDate(-25, 0, 0)); err != nil {
+	if err := userRepo.UpdateUserBirthDate(ctx, nil, distant.ID, time.Now().AddDate(-25, 0, 0)); err != nil {
 		t.Fatalf("failed to set executor birth date: %v", err)
 	}
 	if _, err := shiftService.StartShift(ctx, distant.ID, 3); err != nil {
@@ -463,10 +463,10 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unlocated executor registration failed: %v", err)
 	}
-	if err := userRepo.UpdateVerified(ctx, unlocated.ID, true); err != nil {
+	if err := userRepo.UpdateVerified(ctx, nil, unlocated.ID, true); err != nil {
 		t.Fatalf("failed to verify executor: %v", err)
 	}
-	if err := userRepo.UpdateUserBirthDate(ctx, unlocated.ID, time.Now().AddDate(-25, 0, 0)); err != nil {
+	if err := userRepo.UpdateUserBirthDate(ctx, nil, unlocated.ID, time.Now().AddDate(-25, 0, 0)); err != nil {
 		t.Fatalf("failed to set executor birth date: %v", err)
 	}
 	if _, err := shiftService.StartShift(ctx, unlocated.ID, 3); err != nil {

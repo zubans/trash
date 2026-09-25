@@ -63,7 +63,7 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		return nil, ErrSubmissionNotSupported
 	}
 
-	order, err := d.orders.GetOrderByID(ctx, orderID)
+	order, err := d.orders.FindByID(ctx, orderID)
 	if err != nil {
 		return nil, errors.New("order not found")
 	}
@@ -192,7 +192,7 @@ func (d *BehaviorDispatcher) requirePassport(ctx context.Context, customerID uui
 // Вносить можно только по услуге с require_passport, только своему заказу и
 // только пока заказ в работе.
 func (d *BehaviorDispatcher) PassportCustomer(ctx context.Context, orderID, executorID uuid.UUID) (uuid.UUID, error) {
-	order, err := d.orders.GetOrderByID(ctx, orderID)
+	order, err := d.orders.FindByID(ctx, orderID)
 	if err != nil {
 		return uuid.Nil, errors.New("заказ не найден")
 	}

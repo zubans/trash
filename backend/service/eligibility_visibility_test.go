@@ -69,7 +69,8 @@ func TestCanViewOrTakeOrder(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := canViewOrTakeOrder(context.Background(), nil, c.blocks, c.viewer, c.customer, c.variant)
+			blocked := silentlyBlocked(context.Background(), c.blocks, c.viewer, repository.RoleExecutor)
+			err := canViewOrTakeOrder(context.Background(), nil, blocked, c.viewer, c.customer, c.variant)
 			if c.wantOK && err != nil {
 				t.Errorf("expected visible, got error: %v", err)
 			}

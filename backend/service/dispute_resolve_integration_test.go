@@ -16,8 +16,8 @@ func newResolveFixture(t *testing.T) (*disputeFixture, *repository.Dispute, uuid
 	t.Helper()
 	f := newDisputeFixture(t)
 	f.cleanupPenalties(t)
-	f.srv.WithPenalties(newIntegrationPenaltyService(f.db, f.srv))
-	dispute, err := f.srv.OpenDispute(context.Background(), f.customerID, f.order.ID, "не вывезли")
+	f.withPenalties(newIntegrationPenaltyService(f.db, f.srv))
+	dispute, err := f.disputeSvc.OpenDispute(context.Background(), f.customerID, f.order.ID, "не вывезли")
 	if err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestResolveDisputeIntegration(t *testing.T) {
 			ctx := context.Background()
 			customerBefore := f.balance(t, f.customerID)
 
-			resolved, err := f.srv.ResolveDispute(ctx, dispute.ID, arbiterID, c.decision, " фото нет ")
+			resolved, err := f.disputeSvc.ResolveDispute(ctx, dispute.ID, arbiterID, c.decision, " фото нет ")
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
@@ -79,7 +79,7 @@ func TestResolveDisputeIntegration(t *testing.T) {
 				t.Errorf("executor points %d, want %d", n, c.executorPoints)
 			}
 
-			if _, err := f.srv.ResolveDispute(ctx, dispute.ID, arbiterID, c.decision, ""); !errors.Is(err, ErrDisputeClosed) {
+			if _, err := f.disputeSvc.ResolveDispute(ctx, dispute.ID, arbiterID, c.decision, ""); !errors.Is(err, ErrDisputeClosed) {
 				t.Fatalf("second resolution: %v", err)
 			}
 		})
@@ -90,17 +90,17 @@ func TestResolveDisputeRejectsBadInputIntegration(t *testing.T) {
 	f, dispute, arbiterID := newResolveFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.srv.ResolveDispute(ctx, uuid.New(), arbiterID, repository.DisputeDecisionCustomer, ""); !errors.Is(err, ErrDisputeNotFound) {
+	if _, err := f.disputeSvc.ResolveDispute(ctx, uuid.New(), arbiterID, repository.DisputeDecisionCustomer, ""); !errors.Is(err, ErrDisputeNotFound) {
 		t.Fatalf("missing dispute: %v", err)
 	}
-	if _, err := f.srv.ResolveDispute(ctx, dispute.ID, arbiterID, "BOTH", ""); !errors.Is(err, ErrDisputeDecision) {
+	if _, err := f.disputeSvc.ResolveDispute(ctx, dispute.ID, arbiterID, "BOTH", ""); !errors.Is(err, ErrDisputeDecision) {
 		t.Fatalf("bad decision: %v", err)
 	}
 	if got := f.status(t); got != repository.OrderStatusDisputed {
 		t.Fatalf("order status %s after rejected input", got)
 	}
 
-	list, err := f.srv.ListDisputes(ctx, repository.DisputeStatusOpen, 200, 0)
+	list, err := f.disputeSvc.ListDisputes(ctx, repository.DisputeStatusOpen, 200, 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestResolveDisputeRejectsBadInputIntegration(t *testing.T) {
 	if row.OrderStatus != string(repository.OrderStatusDisputed) || row.ExecutorDisputesTotal != 1 || row.Claim != "не вывезли" || row.ServiceName == "" {
 		t.Fatalf("queue row: %+v", row)
 	}
-	if _, err := f.srv.ListDisputes(ctx, "WHATEVER", 20, 0); err == nil {
+	if _, err := f.disputeSvc.ListDisputes(ctx, "WHATEVER", 20, 0); err == nil {
 		t.Fatal("unknown status filter accepted")
 	}
 }
@@ -140,7 +140,7 @@ func TestResolveDisputeRacesCustomerConfirmIntegration(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		_, resolveErr = f.srv.ResolveDispute(ctx, dispute.ID, arbiterID, repository.DisputeDecisionCustomer, "")
+		_, resolveErr = f.disputeSvc.ResolveDispute(ctx, dispute.ID, arbiterID, repository.DisputeDecisionCustomer, "")
 	}()
 	close(start)
 	wg.Wait()

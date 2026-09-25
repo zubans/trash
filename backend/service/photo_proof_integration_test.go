@@ -34,7 +34,7 @@ func assignedOrder(t *testing.T, srv *OrderService, db *sql.DB, customerID, vari
 	t.Helper()
 	ctx := context.Background()
 	lat, lon := 55.7558, 37.6173
-	order, err := srv.CreateOrder(ctx, customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.Create(ctx, customerID, CreateOrderRequest{ServiceVariantID: variantID, IsUrgent: false, IsAsap: false, Address: "Россия, Москва, Тверская улица, д. 1", Lat: &lat, Lon: &lon})
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -42,11 +42,11 @@ func assignedOrder(t *testing.T, srv *OrderService, db *sql.DB, customerID, vari
 		if err := srv.orderRepo.Assign(ctx, tx, order.ID, executorID); err != nil {
 			return err
 		}
-		return srv.requirePhotoProofTx(ctx, tx, order, executorID)
+		return srv.requirePhotoProofTx(ctx, tx, &order.Order, executorID)
 	}); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
-	loaded, err := srv.orderRepo.GetOrderByID(ctx, order.ID)
+	loaded, err := srv.orderRepo.FindByID(ctx, order.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -82,16 +82,14 @@ func TestPhotoProofRequirementIntegration(t *testing.T) {
 		}
 
 		// Исполнитель получает жест и служебные данные, заказчик — ничего.
-		asExecutor := *order
-		srv.presentOrders(ctx, executorViewer(executorID), []*repository.Order{&asExecutor})
+		asExecutor := srv.presentOrders(ctx, executorViewer(executorID), []*repository.Order{order})[0]
 		if asExecutor.PhotoProof == nil || asExecutor.PhotoProof.Gesture == nil || asExecutor.PhotoProof.Gesture.Title == "" {
 			t.Fatalf("executor view: %+v", asExecutor.PhotoProof)
 		}
 		if key, err := base64.StdEncoding.DecodeString(asExecutor.PhotoProof.Nonce); err != nil || len(key) != 32 {
 			t.Fatalf("nonce: %q %v", asExecutor.PhotoProof.Nonce, err)
 		}
-		asCustomer := *order
-		srv.presentOrders(ctx, customerViewer(customerID), []*repository.Order{&asCustomer})
+		asCustomer := srv.presentOrders(ctx, customerViewer(customerID), []*repository.Order{order})[0]
 		if asCustomer.PhotoProof != nil {
 			t.Fatalf("the customer sees the photo proof data: %+v", asCustomer.PhotoProof)
 		}
@@ -110,7 +108,7 @@ func TestPhotoProofRequirementIntegration(t *testing.T) {
 		if err := srv.ExecuteOrderAt(ctx, order.ID, executorID, &deviceAt); err != nil {
 			t.Fatalf("execute with the area photo: %v", err)
 		}
-		executed, err := srv.orderRepo.GetOrderByID(ctx, order.ID)
+		executed, err := srv.orderRepo.FindByID(ctx, order.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

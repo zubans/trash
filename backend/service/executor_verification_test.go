@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -16,7 +17,7 @@ import (
 // размещает заказчик, только собранный за него: вариант находится по поведению,
 // адрес берётся из профиля, недостающие данные дозаполняются.
 
-func (u *verificationUsers) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (u *verificationUsers) UpdateUserName(ctx context.Context, q repository.Querier, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	user, ok := u.users[userID]
 	if !ok {
 		return errors.New("not found")
@@ -25,7 +26,7 @@ func (u *verificationUsers) UpdateUserName(ctx context.Context, userID uuid.UUID
 	return nil
 }
 
-func (u *verificationUsers) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
+func (u *verificationUsers) UpdateUserBirthDate(ctx context.Context, q repository.Querier, userID uuid.UUID, birthDate time.Time) error {
 	user, ok := u.users[userID]
 	if !ok {
 		return errors.New("not found")
@@ -41,6 +42,26 @@ func (c *verificationCatalog) GetActiveVariants(ctx context.Context) ([]*reposit
 	return []*repository.ServiceNode{c.node}, nil
 }
 
+// GetNodeByCode повторяет настоящий репозиторий: живой узел по коду, иначе
+// sql.ErrNoRows. Тесты ниже проверяют и путь по системному коду, и запасной
+// путь по библиотечному поведению.
+func (c *verificationCatalog) GetNodeByCode(ctx context.Context, code string) (*repository.ServiceNode, error) {
+	if c.parent != nil && c.parent.Code == code {
+		return c.parent, nil
+	}
+	if c.node.Code == code {
+		return c.node, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (c *verificationCatalog) GetChildren(ctx context.Context, parentID uuid.UUID, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
+	if c.parent != nil && c.parent.ID == parentID && c.node.ParentID != nil && *c.node.ParentID == parentID {
+		return []*repository.ServiceNode{c.node}, nil
+	}
+	return nil, nil
+}
+
 type verificationAddresses struct {
 	repository.AddressRepository
 	byUser map[uuid.UUID][]repository.Address
@@ -50,7 +71,7 @@ func (a *verificationAddresses) List(ctx context.Context, userID uuid.UUID) ([]r
 	return a.byUser[userID], nil
 }
 
-func (a *verificationAddresses) Add(ctx context.Context, userID uuid.UUID, address repository.Address) ([]repository.Address, error) {
+func (a *verificationAddresses) Add(ctx context.Context, q repository.Querier, userID uuid.UUID, address repository.Address) ([]repository.Address, error) {
 	address.UserID = userID
 	a.byUser[userID] = append(a.byUser[userID], address)
 	return a.byUser[userID], nil
@@ -70,7 +91,7 @@ func newExecutorVerificationWorld(t *testing.T) *executorVerificationWorld {
 	return &executorVerificationWorld{
 		verificationWorld: w,
 		addresses:         addresses,
-		svc:               NewExecutorVerificationService(w.users, addresses, w.catalog, w.orders, w.behaviors, w.orderSvc),
+		svc:               NewExecutorVerificationService(w.users, addresses, w.catalog, w.orders, w.behaviors, w.orderSvc, w.orderSvc.ledger),
 		applicant:         w.users.add(repository.RoleExecutor, []string{repository.RoleExecutor}, false),
 	}
 }

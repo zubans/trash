@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"errors"
 	"log"
 
 	"github.com/google/uuid"
@@ -15,7 +14,7 @@ import (
 
 // ErrPhotoProofRequired — заказ требует фото-подтверждения, а снимка места
 // заказа ещё нет.
-var ErrPhotoProofRequired = errors.New("заказ требует фото-подтверждения: сначала загрузите снимок места заказа с жестом")
+var ErrPhotoProofRequired = stateError("заказ требует фото-подтверждения: сначала загрузите снимок места заказа с жестом")
 
 // PhotoProofGate — то, что заказам нужно от модуля фото-подтверждения. Ему
 // удовлетворяет *photoproof.Service.
@@ -32,6 +31,15 @@ type PhotoProofGate interface {
 func (s *OrderService) WithPhotoProof(gate PhotoProofGate) *OrderService {
 	s.photoProof = gate
 	return s
+}
+
+// orderGestureOf — жест в том виде, в каком его показывает приложение: и в
+// карточке заказа исполнителя, и в карточке доказательств арбитра.
+func orderGestureOf(g photoproof.Symbol) *OrderGesture {
+	return &OrderGesture{
+		Code: g.Code, Number: g.Number, Title: g.Title, Description: g.Description,
+		HintImageURL: g.HintImageURL, FitsInSelfie: g.FitsInSelfie,
+	}
 }
 
 // requirePhotoProofTx решает при взятии заказа, требует ли он фото: да, если
@@ -53,14 +61,17 @@ func (s *OrderService) requirePhotoProofTx(ctx context.Context, tx *sql.Tx, orde
 // фото-подтверждение без сети: жест и служебные данные проверки. Заказчику не
 // отдаётся ничего сверх флага photo_required: жест — задание исполнителю, а
 // служебные данные — не его дело вовсе.
-func (s *OrderService) attachPhotoProof(ctx context.Context, viewer orderViewer, orders []*repository.Order) {
+func (s *OrderService) attachPhotoProof(ctx context.Context, viewer orderViewer, views []*OrderView) {
 	if s.photoProof == nil || viewer.role != repository.RoleExecutor {
 		return
 	}
+	needsProof := func(v *OrderView) bool {
+		return v != nil && v.PhotoRequired && executorOf(&v.Order, viewer.userID) && v.WatermarkSymbolID != nil
+	}
 	var ids []uuid.UUID
-	for _, o := range orders {
-		if o != nil && o.PhotoRequired && executorOf(o, viewer.userID) && o.WatermarkSymbolID != nil {
-			ids = append(ids, *o.WatermarkSymbolID)
+	for _, v := range views {
+		if needsProof(v) {
+			ids = append(ids, *v.WatermarkSymbolID)
 		}
 	}
 	if len(ids) == 0 {
@@ -71,17 +82,14 @@ func (s *OrderService) attachPhotoProof(ctx context.Context, viewer orderViewer,
 		log.Printf("[OrderService] cannot load photo proof gestures: %v", err)
 		return
 	}
-	for _, o := range orders {
-		if o == nil || !o.PhotoRequired || !executorOf(o, viewer.userID) || o.WatermarkSymbolID == nil {
+	for _, v := range views {
+		if !needsProof(v) {
 			continue
 		}
-		proof := &repository.OrderPhotoProof{Required: true, Nonce: base64.StdEncoding.EncodeToString(o.ProofKey)}
-		if g, ok := gestures[*o.WatermarkSymbolID]; ok {
-			proof.Gesture = &repository.OrderGesture{
-				Code: g.Code, Number: g.Number, Title: g.Title, Description: g.Description,
-				HintImageURL: g.HintImageURL, FitsInSelfie: g.FitsInSelfie,
-			}
+		proof := &OrderPhotoProof{Required: true, Nonce: base64.StdEncoding.EncodeToString(v.ProofKey)}
+		if g, ok := gestures[*v.WatermarkSymbolID]; ok {
+			proof.Gesture = orderGestureOf(g)
 		}
-		o.PhotoProof = proof
+		v.PhotoProof = proof
 	}
 }

@@ -30,11 +30,15 @@ type UserRatingSummary struct {
 	ReviewsCount int       `json:"reviews_count"`
 }
 
+// ReviewRepository хранит отзывы. Методы с Querier участвуют в транзакции
+// отзыва: проверка «уже оставлял», запись и пересчёт рейтинга идут вместе;
+// nil — пул соединений.
 type ReviewRepository interface {
-	CreateReview(ctx context.Context, review *OrderReview) error
-	GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*OrderReview, error)
+	CreateReview(ctx context.Context, q Querier, review *OrderReview) error
+	// GetReviewByOrderAndAuthor отдаёт nil, nil, когда отзыва нет.
+	GetReviewByOrderAndAuthor(ctx context.Context, q Querier, orderID, authorID uuid.UUID) (*OrderReview, error)
 	GetReviewsForUser(ctx context.Context, targetID uuid.UUID, limit, offset int) ([]OrderReview, error)
-	UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error
+	UpdateUserRating(ctx context.Context, q Querier, userID uuid.UUID, role string) error
 	GetUserRating(ctx context.Context, userID uuid.UUID, role string) (*UserRatingSummary, error)
 }
 
@@ -46,7 +50,7 @@ func NewReviewRepository(db *sql.DB) ReviewRepository {
 	return &reviewRepository{db: db}
 }
 
-func (r *reviewRepository) CreateReview(ctx context.Context, review *OrderReview) error {
+func (r *reviewRepository) CreateReview(ctx context.Context, q Querier, review *OrderReview) error {
 	if review.ID == uuid.Nil {
 		review.ID = uuid.New()
 	}
@@ -67,11 +71,11 @@ func (r *reviewRepository) CreateReview(ctx context.Context, review *OrderReview
 		INSERT INTO order_reviews (id, order_id, author_id, target_id, author_role, rating, tags, comment, photos, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err := r.db.ExecContext(ctx, query, review.ID, review.OrderID, review.AuthorID, review.TargetID, review.AuthorRole, review.Rating, tagsJSON, review.Comment, photosJSON, review.CreatedAt, review.UpdatedAt)
+	_, err := exec(r.db, q).ExecContext(ctx, query, review.ID, review.OrderID, review.AuthorID, review.TargetID, review.AuthorRole, review.Rating, tagsJSON, review.Comment, photosJSON, review.CreatedAt, review.UpdatedAt)
 	return err
 }
 
-func (r *reviewRepository) GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*OrderReview, error) {
+func (r *reviewRepository) GetReviewByOrderAndAuthor(ctx context.Context, q Querier, orderID, authorID uuid.UUID) (*OrderReview, error) {
 	var rev OrderReview
 	var tagsJSON, photosJSON []byte
 	query := `
@@ -79,7 +83,7 @@ func (r *reviewRepository) GetReviewByOrderAndAuthor(ctx context.Context, orderI
 		FROM order_reviews
 		WHERE order_id = $1 AND author_id = $2
 	`
-	err := r.db.QueryRowContext(ctx, query, orderID, authorID).Scan(
+	err := exec(r.db, q).QueryRowContext(ctx, query, orderID, authorID).Scan(
 		&rev.ID, &rev.OrderID, &rev.AuthorID, &rev.TargetID, &rev.AuthorRole, &rev.Rating, &tagsJSON, &rev.Comment, &photosJSON, &rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if err != nil {
@@ -121,13 +125,13 @@ func (r *reviewRepository) GetReviewsForUser(ctx context.Context, targetID uuid.
 	return reviews, rows.Err()
 }
 
-func (r *reviewRepository) UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error {
+func (r *reviewRepository) UpdateUserRating(ctx context.Context, q Querier, userID uuid.UUID, role string) error {
 	// Считаем байесовский средний рейтинг
 	// m = 4.8, C = 5
 	// R = (C*m + SUM(r_i)) / (C + n)
 	var sumRating float64
 	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(rating), 0), COUNT(id) FROM order_reviews WHERE target_id = $1`, userID).Scan(&sumRating, &count)
+	err := exec(r.db, q).QueryRowContext(ctx, `SELECT COALESCE(SUM(rating), 0), COUNT(id) FROM order_reviews WHERE target_id = $1`, userID).Scan(&sumRating, &count)
 	if err != nil {
 		return err
 	}
@@ -138,10 +142,10 @@ func (r *reviewRepository) UpdateUserRating(ctx context.Context, userID uuid.UUI
 
 	if role == "CUSTOMER" {
 		query := `UPDATE customer_profiles SET rating = $1, reviews_count = $2 WHERE user_id = $3`
-		_, err = r.db.ExecContext(ctx, query, bayesianRating, count, userID)
+		_, err = exec(r.db, q).ExecContext(ctx, query, bayesianRating, count, userID)
 	} else {
 		query := `UPDATE executor_profiles SET rating = $1, reviews_count = $2 WHERE user_id = $3`
-		_, err = r.db.ExecContext(ctx, query, bayesianRating, count, userID)
+		_, err = exec(r.db, q).ExecContext(ctx, query, bayesianRating, count, userID)
 	}
 	return err
 }

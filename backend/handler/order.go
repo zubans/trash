@@ -27,20 +27,6 @@ func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
 	return &OrderHandler{orderService: orderService}
 }
 
-// writeOrderError сопоставляет доменные ошибки с кодами статуса. Конфликт
-// означает, что заказ был не в том состоянии, какого ждал вызывающий, — обычно
-// дубль или параллельный запрос, — и не должен выдаваться за успех.
-func writeOrderError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, repository.ErrConflict):
-		http.Error(w, "заказ уже изменился, обновите страницу", http.StatusConflict)
-	case errors.Is(err, repository.ErrInsufficientFunds):
-		http.Error(w, "недостаточно средств", http.StatusUnprocessableEntity)
-	default:
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
-	}
-}
-
 func userFromContext(r *http.Request) *repository.User {
 	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
 	if !ok {
@@ -69,7 +55,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.orderService.Create(r.Context(), user.ID, req)
 	if err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -93,45 +79,11 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Cancel(r.Context(), user.ID, orderID); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-}
-
-// OpenDispute обслуживает POST /customer/orders/{id}/dispute: заказчик
-// заявляет, что исполненный заказ не выполнен. Тело — {"claim": "..."}.
-func (h *OrderHandler) OpenDispute(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		http.Error(w, "Invalid order id", http.StatusBadRequest)
-		return
-	}
-
-	var req struct {
-		Claim string `json:"claim"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-
-	dispute, err := h.orderService.OpenDispute(r.Context(), user.ID, orderID, req.Claim)
-	if err != nil {
-		writeOrderError(w, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(dispute)
 }
 
 // ConfirmOrder обслуживает POST /customer/orders/{id}/confirm.
@@ -149,7 +101,7 @@ func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Confirm(r.Context(), user.ID, orderID); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -181,7 +133,7 @@ func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.TipOrder(r.Context(), user.ID, orderID, req.Amount); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -203,7 +155,7 @@ func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.Accept(r.Context(), orderID, user.ID); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -225,30 +177,7 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.RejectAssignedOrder(r.Context(), orderID, user.ID); err != nil {
-		writeOrderError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-// ConcedeDispute обслуживает POST /executor/orders/{id}/dispute/concede:
-// исполнитель признаёт, что оспоренный заказ не выполнен.
-func (h *OrderHandler) ConcedeDispute(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		http.Error(w, "Invalid order id", http.StatusBadRequest)
-		return
-	}
-
-	if err := h.orderService.ConcedeDispute(r.Context(), user.ID, orderID); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -282,7 +211,7 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.orderService.ExecuteOrderAt(r.Context(), orderID, user.ID, req.ExecutedAtDevice); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -299,16 +228,14 @@ func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request
 
 	orders, err := h.orderService.ListAssigned(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	writeJSON(w, orders)
 }
 
-// GetCustomerOrdersHandler обслуживает GET /customer/orders.
-func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.Request) {
+// ListCustomerOrders обслуживает GET /customer/orders.
+func (h *OrderHandler) ListCustomerOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -317,22 +244,20 @@ func (h *OrderHandler) GetCustomerOrdersHandler(w http.ResponseWriter, r *http.R
 
 	orders, err := h.orderService.ListByCustomer(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	writeJSON(w, orders)
 }
 
-// GetNearbyOrdersHandler обслуживает GET /executor/orders/nearby?lat=...&lon=...
+// NearbyOrders обслуживает GET /executor/orders/nearby?lat=...&lon=...
 //
 // Параметр radius больше не читается: радиус обзора задаёт настройка
 // map_overview_radius_km, та же, по которой строится карта. Установленные APK
 // продолжают его присылать — он просто игнорируется, и это не ломает их, а
 // приводит к тому же ответу, что у свежего клиента. Координаты из запроса тоже
 // лишь запасной вариант: сервис берёт сохранённую рабочую позицию.
-func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Request) {
+func (h *OrderHandler) NearbyOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	if user == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -347,12 +272,10 @@ func (h *OrderHandler) GetNearbyOrdersHandler(w http.ResponseWriter, r *http.Req
 
 	orders, err := h.orderService.FindNearbyOrdersForExecutor(r.Context(), user.ID, lat, lon)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	writeJSON(w, orders)
 }
 
 func parseCoords(r *http.Request) (float64, float64, error) {
@@ -364,26 +287,6 @@ func parseCoords(r *http.Request) (float64, float64, error) {
 		return 0, 0, fmt.Errorf("invalid lon")
 	}
 	return lat, lon, nil
-}
-
-// Псевдонимы имён методов, которых ожидает main.go.
-func (h *OrderHandler) CreateOrderHandler(w http.ResponseWriter, r *http.Request) {
-	h.CreateOrder(w, r)
-}
-func (h *OrderHandler) ConfirmOrderHandler(w http.ResponseWriter, r *http.Request) {
-	h.ConfirmOrder(w, r)
-}
-func (h *OrderHandler) TipOrderHandler(w http.ResponseWriter, r *http.Request) {
-	h.TipOrder(w, r)
-}
-func (h *OrderHandler) CancelOrderHandler(w http.ResponseWriter, r *http.Request) {
-	h.CancelOrder(w, r)
-}
-func (h *OrderHandler) RejectOrderHandler(w http.ResponseWriter, r *http.Request) {
-	h.RejectOrder(w, r)
-}
-func (h *OrderHandler) GetExecutorAssignedOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	h.ListAssignedOrders(w, r)
 }
 
 // ReturnToWork обслуживает POST /admin/orders/{id}/return-to-work: заказ на
@@ -400,11 +303,7 @@ func (h *OrderHandler) ReturnToWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.orderService.ReturnToWork(r.Context(), orderID, user.ID); err != nil {
-		if errors.Is(err, service.ErrOrderNotOnReview) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

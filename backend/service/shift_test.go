@@ -15,7 +15,6 @@ import (
 
 type mockShiftRepo struct {
 	shifts []*repository.Shift
-	logs   []bool
 }
 
 func (m *mockShiftRepo) StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
@@ -31,7 +30,7 @@ func (m *mockShiftRepo) StartShift(ctx context.Context, executorID uuid.UUID, du
 	return s, nil
 }
 
-func (m *mockShiftRepo) GetActiveShift(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
+func (m *mockShiftRepo) FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
 	for _, s := range m.shifts {
 		if s.ExecutorID == executorID && s.Status == "ACTIVE" {
 			return s, nil
@@ -60,17 +59,23 @@ func (m *mockShiftRepo) Create(ctx context.Context, shift *repository.Shift) err
 	return nil
 }
 
-func (m *mockShiftRepo) FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
-	return m.GetActiveShift(context.Background(), executorID)
-}
-
-func (m *mockShiftRepo) End(ctx context.Context, shiftID uuid.UUID) error {
-	return m.UpdateShiftStatus(context.Background(), shiftID, string(repository.ShiftStatusCompleted))
-}
-
-func (m *mockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
+// End и EarlyEnd охраняются статусом, как в настоящем репозитории: закрыть
+// можно только активную смену.
+func (m *mockShiftRepo) End(ctx context.Context, q repository.Querier, shiftID uuid.UUID) error {
 	for _, s := range m.shifts {
-		if s.ID == shiftID {
+		if s.ID == shiftID && s.Status == repository.ShiftStatusActive {
+			now := time.Now()
+			s.Status = repository.ShiftStatusCompleted
+			s.ActualEndAt = &now
+			return nil
+		}
+	}
+	return repository.ErrConflict
+}
+
+func (m *mockShiftRepo) EarlyEnd(ctx context.Context, q repository.Querier, shiftID uuid.UUID, fine money.Amount) error {
+	for _, s := range m.shifts {
+		if s.ID == shiftID && s.Status == repository.ShiftStatusActive {
 			now := time.Now()
 			s.Status = repository.ShiftStatusPenalized
 			s.ActualEndAt = &now
@@ -78,7 +83,19 @@ func (m *mockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine mo
 			return nil
 		}
 	}
-	return errors.New("not found")
+	return repository.ErrConflict
+}
+
+func (m *mockShiftRepo) EndExpired(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	for _, s := range m.shifts {
+		if s.Status == repository.ShiftStatusActive && s.PlannedEndAt.Before(now) {
+			s.Status = repository.ShiftStatusCompleted
+			s.ActualEndAt = &now
+			ids = append(ids, s.ID)
+		}
+	}
+	return ids, nil
 }
 
 func (m *mockShiftRepo) GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*repository.Shift, error) {
@@ -107,7 +124,7 @@ func (m *mockShiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID u
 
 func TestShiftService_StartShift(t *testing.T) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, nil, nil, nil, nil)
+	srv := NewShiftService(repo, nil, nil, nil)
 
 	executorID := uuid.New()
 
@@ -124,19 +141,6 @@ func TestShiftService_StartShift(t *testing.T) {
 	_, err = srv.StartShift(context.Background(), executorID, 2)
 	if err == nil {
 		t.Error("expected error starting shift with duration 2")
-	}
-}
-
-func TestShiftService_IsWithinRadius(t *testing.T) {
-	// Центр: Москва (55.7558, 37.6173)
-	// Точка 1: Красная площадь (примерно 55.7539, 37.6208) — должна быть в пределах 1000 м
-	if !IsWithinRadius(55.7558, 37.6173, 55.7539, 37.6208, 1000.0) {
-		t.Error("expected Red Square to be within 1km of Moscow Center")
-	}
-
-	// Точка 2: аэропорт Домодедово (примерно 55.4087, 37.9063) — должна быть за пределами 5000 м
-	if IsWithinRadius(55.7558, 37.6173, 55.4087, 37.9063, 5000.0) {
-		t.Error("expected Domodedovo Airport to be outside 5km of Moscow Center")
 	}
 }
 
@@ -194,7 +198,7 @@ func (f *fakeLocationRecorder) RecordLiveLocation(ctx context.Context, executorI
 
 func newShiftServiceForLocation(recorder ExecutorLocationRecorder) (*ShiftService, *mockShiftRepo) {
 	repo := &mockShiftRepo{}
-	srv := NewShiftService(repo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil, nil)
+	srv := NewShiftService(repo, NewLedger(&mockShiftTransactionRepo{}, newMockAccounts()), nil, nil)
 	if recorder != nil {
 		srv = srv.WithExecutorLocation(recorder)
 	}
@@ -280,7 +284,7 @@ func TestShiftService_RecordLocationWithoutStoreFails(t *testing.T) {
 func TestShiftService_EarlyEnd(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
-	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, nil, nil)
+	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, nil)
 
 	executorID := uuid.New()
 	shift, err := srv.StartShift(context.Background(), executorID, 3)
@@ -288,7 +292,7 @@ func TestShiftService_EarlyEnd(t *testing.T) {
 		t.Fatalf("unexpected error starting shift: %v", err)
 	}
 
-	ended, err := srv.EarlyEnd(context.Background(), executorID)
+	ended, err := srv.End(context.Background(), executorID)
 	if err != nil {
 		t.Fatalf("unexpected error ending shift early: %v", err)
 	}
@@ -310,7 +314,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	repo := &mockShiftRepo{}
 	txRepo := &mockShiftTransactionRepo{}
 	orderRepo := &mockOrderRepo{}
-	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, orderRepo, nil)
+	srv := NewShiftService(repo, NewLedger(txRepo, newMockAccounts()), nil, orderRepo)
 
 	executorID := uuid.New()
 	customerID := uuid.New()
@@ -329,7 +333,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 		HoldAmount: money.FromRubles(300),
 	})
 
-	ended, err := srv.EarlyEnd(context.Background(), executorID)
+	ended, err := srv.End(context.Background(), executorID)
 	if err != nil {
 		t.Fatalf("unexpected error ending shift early with order: %v", err)
 	}
@@ -344,7 +348,7 @@ func TestShiftService_EarlyEnd_WithAssignedOrder(t *testing.T) {
 	}
 
 	// Назначенный заказ должен стать неназначенным (SEARCHING).
-	updatedOrder, err := orderRepo.GetOrderByID(context.Background(), orderID)
+	updatedOrder, err := orderRepo.FindByID(context.Background(), orderID)
 	if err != nil {
 		t.Fatalf("unexpected error fetching order: %v", err)
 	}

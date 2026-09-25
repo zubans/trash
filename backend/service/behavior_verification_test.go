@@ -83,11 +83,7 @@ func (u *verificationUsers) FindByIDs(ctx context.Context, ids []uuid.UUID) (map
 	return found, nil
 }
 
-func (u *verificationUsers) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
-	return u.UpdateVerifiedTx(ctx, nil, id, verified)
-}
-
-func (u *verificationUsers) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
+func (u *verificationUsers) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	user, ok := u.users[id]
 	if !ok {
 		return sql.ErrNoRows
@@ -426,7 +422,7 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 
 // orderView отрисовывает заказ так же, как это делает списковый эндпоинт, — то
 // есть так, как его видит приложение исполнителя.
-func (w *verificationWorld) orderView(t *testing.T, orderID uuid.UUID) *repository.Order {
+func (w *verificationWorld) orderView(t *testing.T, orderID uuid.UUID) *OrderView {
 	t.Helper()
 	orders, err := w.orderSvc.ListAssigned(context.Background(), w.moderator.ID)
 	if err != nil {
@@ -461,7 +457,7 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 	}
 	opening := w.books()
 
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва, Арбат, 10", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create verification order: %v", err)
 	}
@@ -471,7 +467,7 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 
 	// Один раз на пользователя: вторая попытка отклоняется скриптом, до записи
 	// какой-либо строки.
-	if _, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil); err == nil {
+	if _, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва, Арбат, 10", Lat: nil, Lon: nil}); err == nil {
 		t.Error("the verification service must be orderable only once")
 	}
 
@@ -501,7 +497,7 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 	if !w.customer.Verified {
 		t.Error("the customer was not verified by the successful check")
 	}
-	closed, err := w.orders.GetOrderByID(ctx, order.ID)
+	closed, err := w.orders.FindByID(ctx, order.ID)
 	if err != nil {
 		t.Fatalf("reload order: %v", err)
 	}
@@ -532,7 +528,7 @@ func TestRewardCommissionIsOptIn(t *testing.T) {
 			w.catalog.node.BehaviorConfig["apply_commission"] = true
 		}
 
-		order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва", nil, nil)
+		order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil})
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
@@ -578,7 +574,7 @@ func TestVerificationRewardIsPaidOnce(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
 
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -613,14 +609,14 @@ func TestCancelledVerificationOrderReleasesTheClaim(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
 
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if err := w.orderSvc.CancelOrder(ctx, order.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	if _, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва", nil, nil); err != nil {
+	if _, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil}); err != nil {
 		t.Errorf("a customer who cancelled must be able to order verification again: %v", err)
 	}
 }
@@ -631,7 +627,7 @@ func TestAdminVerificationClosesTheOpenOrder(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
 
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -641,7 +637,7 @@ func TestAdminVerificationClosesTheOpenOrder(t *testing.T) {
 	beforeReward := w.tx.balances[w.moderator.ID]
 
 	// Ровно то, что пишет AdminService.SetUserVerified.
-	if err := w.users.UpdateVerified(ctx, w.customer.ID, true); err != nil {
+	if err := w.users.UpdateVerified(ctx, nil, w.customer.ID, true); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	if err := w.events.Publish(ctx, nil, &repository.DomainEvent{
@@ -655,7 +651,7 @@ func TestAdminVerificationClosesTheOpenOrder(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 
-	closed, err := w.orders.GetOrderByID(ctx, order.ID)
+	closed, err := w.orders.FindByID(ctx, order.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -673,14 +669,14 @@ func TestEffectGuardsRefuseWhatAScriptMayNotDo(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
 
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if err := w.orderSvc.Accept(ctx, order.ID, w.moderator.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	stored, _ := w.orders.GetOrderByID(ctx, order.ID)
+	stored, _ := w.orders.FindByID(ctx, order.ID)
 	variant, _ := w.catalog.GetNodeByID(ctx, verificationVariantID)
 
 	event := &repository.DomainEvent{ID: uuid.New(), Type: repository.EventOrderExecuted}
@@ -737,7 +733,7 @@ func TestVerifierCannotBeTheCustomer(t *testing.T) {
 	ctx := context.Background()
 
 	selfServing := w.users.add(repository.RoleExecutor, []string{repository.RoleExecutor, repository.RoleModerator}, false)
-	order, err := w.orderSvc.CreateOrder(ctx, selfServing.ID, verificationVariantID, false, false, "Москва", nil, nil)
+	order, err := w.orderSvc.Create(ctx, selfServing.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -930,7 +926,7 @@ func TestFreshRoundStillCompletesTheOrderOnMatch(t *testing.T) {
 		t.Fatal("верные данные не совпали")
 	}
 
-	closed, _ := w.orders.GetOrderByID(ctx, order.ID)
+	closed, _ := w.orders.FindByID(ctx, order.ID)
 	if closed.Status != repository.OrderStatusCompleted {
 		t.Errorf("order status = %s, want COMPLETED: заказчик ничего не подтверждает", closed.Status)
 	}
@@ -955,7 +951,7 @@ func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
 	}
 
 	// Ровно то, что пишет AdminService.SetUserVerified.
-	if err := w.users.UpdateVerified(ctx, w.customer.ID, true); err != nil {
+	if err := w.users.UpdateVerified(ctx, nil, w.customer.ID, true); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	if err := w.events.Publish(ctx, nil, &repository.DomainEvent{
@@ -969,7 +965,7 @@ func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 
-	closed, _ := w.orders.GetOrderByID(ctx, order.ID)
+	closed, _ := w.orders.FindByID(ctx, order.ID)
 	if closed.Status != repository.OrderStatusCompleted {
 		t.Errorf("order status = %s, want COMPLETED", closed.Status)
 	}
@@ -1015,10 +1011,10 @@ func TestExecutorSeesTheAddressAndNoCustomerIdentity(t *testing.T) {
 
 // acceptedVerificationOrder создаёт заказ верификации и ставит на него
 // модератора — состояние, с которого начинается любая проверка.
-func (w *verificationWorld) acceptedVerificationOrder(t *testing.T) *repository.Order {
+func (w *verificationWorld) acceptedVerificationOrder(t *testing.T) *OrderView {
 	t.Helper()
 	ctx := context.Background()
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва, Арбат, 10", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1039,10 +1035,10 @@ func TestVerificationOrderCannotBeExecutedManually(t *testing.T) {
 	if view := w.orderView(t, order.ID); view.Actions == nil || view.Actions.Execute {
 		t.Errorf("the executor must not be offered «Исполнил»: %+v", view.Actions)
 	}
-	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); !errors.Is(err, ErrManualExecuteDisabled) {
+	if err := w.orderSvc.ExecuteOrderAt(ctx, order.ID, w.moderator.ID, nil); !errors.Is(err, ErrManualExecuteDisabled) {
 		t.Fatalf("manual execute: err = %v, want ErrManualExecuteDisabled", err)
 	}
-	reloaded, err := w.orders.GetOrderByID(ctx, order.ID)
+	reloaded, err := w.orders.FindByID(ctx, order.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -1084,7 +1080,7 @@ func TestForkedVerificationScriptWithoutFlagStillBlocksManualExecute(t *testing.
 	if view := w.orderView(t, order.ID); view.Actions == nil || view.Actions.Execute {
 		t.Errorf("the executor must not be offered «Исполнил»: %+v", view.Actions)
 	}
-	if err := w.orderSvc.ExecuteOrder(ctx, order.ID, w.moderator.ID); !errors.Is(err, ErrManualExecuteDisabled) {
+	if err := w.orderSvc.ExecuteOrderAt(ctx, order.ID, w.moderator.ID, nil); !errors.Is(err, ErrManualExecuteDisabled) {
 		t.Fatalf("manual execute: err = %v, want ErrManualExecuteDisabled", err)
 	}
 }
@@ -1095,7 +1091,7 @@ func TestForkedVerificationScriptWithoutFlagStillBlocksManualExecute(t *testing.
 func TestVerificationRequiresThePassportBeforeTheCheck(t *testing.T) {
 	w := newVerificationWorld(t)
 	ctx := context.Background()
-	order, err := w.orderSvc.CreateOrder(ctx, w.customer.ID, verificationVariantID, false, false, "Москва, Арбат, 10", nil, nil)
+	order, err := w.orderSvc.Create(ctx, w.customer.ID, CreateOrderRequest{ServiceVariantID: verificationVariantID, IsUrgent: false, IsAsap: false, Address: "Москва, Арбат, 10", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

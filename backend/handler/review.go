@@ -44,7 +44,7 @@ func (h *ReviewHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 
 	review, err := h.reviewService.CreateReview(r.Context(), orderID, user.ID, dto)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (h *ReviewHandler) GetOrderReview(w http.ResponseWriter, r *http.Request) {
 
 	review, err := h.reviewService.GetReviewByOrderAndAuthor(r.Context(), orderID, user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *ReviewHandler) GetUserReviews(w http.ResponseWriter, r *http.Request) {
 
 	reviews, err := h.reviewService.GetReviewsForUser(r.Context(), userID, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *ReviewHandler) GetUserRating(w http.ResponseWriter, r *http.Request) {
 
 	rating, err := h.reviewService.GetUserRating(r.Context(), userID, role)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 

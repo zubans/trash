@@ -35,12 +35,12 @@ func TestSilentBlockHidesWorkIntegration(t *testing.T) {
 	f.cleanupPenalties(t)
 	ctx := context.Background()
 	penalties := newIntegrationPenaltyService(f.db, f.srv)
-	f.srv.WithPenalties(penalties)
+	f.withPenalties(penalties)
 
 	// Свежий заказ в поиске, рядом с исполнителем.
 	customerID, variantID := seedCustomer(t, f.db, money.FromRubles(5000))
 	lat, lon := 55.7558, 37.6173
-	order, err := f.srv.CreateOrder(ctx, customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := f.srv.Create(ctx, customerID, CreateOrderRequest{ServiceVariantID: variantID, IsUrgent: false, IsAsap: false, Address: "Россия, Москва, Тверская улица, д. 1", Lat: &lat, Lon: &lon})
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestSilentBlockHidesWorkIntegration(t *testing.T) {
 
 	// Заказчик в тихой блокировке не может создать заказ.
 	blockSilently(t, f, customerID, repository.RoleCustomer)
-	if _, err := f.srv.CreateOrder(ctx, customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 2", &lat, &lon); err == nil {
+	if _, err := f.srv.Create(ctx, customerID, CreateOrderRequest{ServiceVariantID: variantID, IsUrgent: false, IsAsap: false, Address: "Россия, Москва, Тверская улица, д. 2", Lat: &lat, Lon: &lon}); err == nil {
 		t.Fatal("a silently blocked customer created an order")
 	}
 }

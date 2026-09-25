@@ -187,7 +187,7 @@ func (d *AchievementDispatcher) dispatch(ctx context.Context, event *repository.
 func (d *AchievementDispatcher) subjects(ctx context.Context, event *repository.DomainEvent) ([]subject, error) {
 	switch event.SubjectType {
 	case repository.EventSubjectOrder:
-		order, err := d.orders.GetOrderByID(ctx, event.SubjectID)
+		order, err := d.orders.FindByID(ctx, event.SubjectID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, nil

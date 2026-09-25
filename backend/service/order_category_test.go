@@ -28,8 +28,7 @@ func TestHydrateFillsCategoryAtAnyDepth(t *testing.T) {
 	}}
 
 	svc := &OrderService{catalogRepo: catalog}
-	orders := []*repository.Order{{ID: uuid.New(), ServiceVariantID: variantID}}
-	svc.hydrateServiceVariants(context.Background(), orders)
+	orders, _ := svc.viewsOf(context.Background(), []*repository.Order{{ID: uuid.New(), ServiceVariantID: variantID}})
 
 	if orders[0].ServiceVariant == nil {
 		t.Fatal("вариант не заполнен")
@@ -51,8 +50,7 @@ func TestHydrateLeavesCategoryEmptyForRootVariant(t *testing.T) {
 	}}
 
 	svc := &OrderService{catalogRepo: catalog}
-	orders := []*repository.Order{{ID: uuid.New(), ServiceVariantID: variantID}}
-	svc.hydrateServiceVariants(context.Background(), orders)
+	orders, _ := svc.viewsOf(context.Background(), []*repository.Order{{ID: uuid.New(), ServiceVariantID: variantID}})
 
 	if orders[0].ServiceCategory != nil {
 		t.Errorf("категории быть не должно, получено %v", orders[0].ServiceCategory)

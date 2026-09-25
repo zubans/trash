@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,23 +9,28 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"healthlogin/backend/repository"
 )
 
+// ErrLocationNotSet — у исполнителя нет сохранённой рабочей позиции.
+var ErrLocationNotSet = ruleError("местоположение исполнителя не задано")
+
+// NearbyOrdersSource — заказы вокруг точки, собранные под исполнителя. Ему
+// удовлетворяет *OrderService: у карты и списка «Заказы поблизости» одна
+// реализация, и живёт она у заказов.
+type NearbyOrdersSource interface {
+	OrdersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]*MapOrderView, error)
+}
+
+// ExecutorGeoService ведёт рабочую позицию исполнителя: где он сейчас, куда
+// поставил метку вручную и не «телепортировался» ли.
 type ExecutorGeoService struct {
-	// penalties — тихая блокировка ролей; nil означает «механизм штрафов не подключён».
-	penalties *PenaltyService
-	geoRepo   repository.ExecutorGeoRepository
-	orderRepo repository.OrderRepository
-	// Необязательно. Когда подключено, карта применяет тот же предикат видимости,
-	// что и список заказов исполнителя (роли, верификация заказчика, только для
-	// модераторов), поэтому карта и список никогда не расходятся в том, что показано.
-	userRepo     repository.UserRepository
+	geoRepo      repository.ExecutorGeoRepository
 	settingsRepo repository.SettingsRepository
-	catalogRepo  repository.ServiceCatalogRepository
-	// behaviors применяет скриптовые правила услуги к карте, чтобы карта показывала
-	// ровно те заказы, что и список. Необязательно.
-	behaviors *Behaviors
+	// orders собирает заказы вокруг позиции для карты. Необязательно: без
+	// него карта пуста.
+	orders NearbyOrdersSource
 	// track копит отчёты о местоположении в треке исполнителя: сохранённая
 	// позиция отвечает на вопрос «где он сейчас», а трек — «где он был тогда».
 	// Необязательно.
@@ -35,25 +39,14 @@ type ExecutorGeoService struct {
 	cooldownMap sync.Map
 }
 
-func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, orderRepo repository.OrderRepository) *ExecutorGeoService {
-	return &ExecutorGeoService{
-		geoRepo:   geoRepo,
-		orderRepo: orderRepo,
-	}
+// NewExecutorGeoService создаёт ExecutorGeoService.
+func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, settingsRepo repository.SettingsRepository) *ExecutorGeoService {
+	return &ExecutorGeoService{geoRepo: geoRepo, settingsRepo: settingsRepo}
 }
 
-// WithEligibility подключает зависимости, нужные карте, чтобы применять тот же
-// предикат видимости, что и список заказов исполнителя.
-func (s *ExecutorGeoService) WithEligibility(userRepo repository.UserRepository, settingsRepo repository.SettingsRepository, catalogRepo repository.ServiceCatalogRepository) *ExecutorGeoService {
-	s.userRepo = userRepo
-	s.settingsRepo = settingsRepo
-	s.catalogRepo = catalogRepo
-	return s
-}
-
-// WithBehaviors подключает скрипты поведений к проверке видимости на карте.
-func (s *ExecutorGeoService) WithBehaviors(behaviors *Behaviors) *ExecutorGeoService {
-	s.behaviors = behaviors
+// WithNearbyOrders подключает источник заказов для карты.
+func (s *ExecutorGeoService) WithNearbyOrders(orders NearbyOrdersSource) *ExecutorGeoService {
+	s.orders = orders
 	return s
 }
 
@@ -93,7 +86,15 @@ const (
 	maxMapOverviewRadiusKM = 50.0
 )
 
-// resolveAcceptRadiusKM возвращает действующий радиус взятия заказа.
+// speedAlertThresholdKMH — скорость, выше которой перемещение считается
+// подделкой GPS и оставляет GeoAlert; speedAlertMinShiftKM — перемещение
+// короче этого не проверяется вовсе.
+const (
+	speedAlertThresholdKMH = 150.0
+	speedAlertMinShiftKM   = 2.0
+)
+
+// acceptRadiusKM возвращает действующий радиус взятия заказа.
 //
 // Источник один на всех: и флаг can_accept на карте, и такой же флаг в списке
 // на дашборде, и проверка на сервере при взятии заказа читают эту функцию.
@@ -103,13 +104,8 @@ const (
 // Порядок источников: настройка из админки, затем ACCEPT_RADIUS_KM из
 // окружения, затем умолчание. Окружение остаётся ради установок, поднятых до
 // появления настройки, и однажды его можно будет убрать.
-func resolveAcceptRadiusKM(ctx context.Context, settings repository.SettingsRepository) float64 {
-	if settings != nil {
-		if v := settingFloat(ctx, settings, SettingAcceptRadiusKM, 0); v > 0 {
-			return v
-		}
-	}
-	return acceptRadiusFromEnv()
+func acceptRadiusKM(settings settingsMap) float64 {
+	return settings.positiveFloat(SettingAcceptRadiusKM, acceptRadiusFromEnv())
 }
 
 func acceptRadiusFromEnv() float64 {
@@ -124,20 +120,15 @@ func acceptRadiusFromEnv() float64 {
 	return val
 }
 
-// resolveMapOverviewRadiusKM возвращает радиус обзора — тот, в котором заказы
+// mapOverviewRadiusKM возвращает радиус обзора — тот, в котором заказы
 // показываются. Он всегда не меньше радиуса взятия: обзор уже зоны взятия
 // означал бы, что исполнителю не показывают то, что ему разрешено брать.
-func resolveMapOverviewRadiusKM(ctx context.Context, settings repository.SettingsRepository) float64 {
-	radius := defaultMapOverviewRadiusKM
-	if settings != nil {
-		if v := settingFloat(ctx, settings, SettingMapOverviewRadiusKM, 0); v > 0 {
-			radius = v
-		}
-	}
+func mapOverviewRadiusKM(settings settingsMap) float64 {
+	radius := settings.positiveFloat(SettingMapOverviewRadiusKM, defaultMapOverviewRadiusKM)
 	if radius > maxMapOverviewRadiusKM {
 		radius = maxMapOverviewRadiusKM
 	}
-	if accept := resolveAcceptRadiusKM(ctx, settings); radius < accept {
+	if accept := acceptRadiusKM(settings); radius < accept {
 		radius = accept
 	}
 	return radius
@@ -154,7 +145,7 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}
 
 	now := time.Now()
-	acceptRadiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
+	radiusKM := acceptRadiusKM(loadSettingsMap(ctx, s.settingsRepo))
 
 	// Проверяем дистанцию ручного сдвига смены
 	var shiftDist float64
@@ -165,14 +156,14 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	// Считается ли перемещение «ручным», решается здесь, по пройденному
 	// расстоянию, а не по флагу, который присылает клиент: иначе исполнитель мог
 	// бы обойти паузу, выставив is_manual в false.
-	isManual := req.IsManual || shiftDist > acceptRadiusKM
+	isManual := req.IsManual || shiftDist > radiusKM
 
 	if isManual && oldLat != nil && oldLon != nil {
 		// Отвергаем ручные перемещения внутри внутреннего круга
-		if shiftDist <= acceptRadiusKM {
+		if shiftDist <= radiusKM {
 			return &SetLocationResponse{
 				Success: false,
-				Message: fmt.Sprintf("Ручное перемещение разрешено только за пределы разрешенного круга (более %.1f км)", acceptRadiusKM),
+				Message: fmt.Sprintf("Ручное перемещение разрешено только за пределы разрешенного круга (более %.1f км)", radiusKM),
 				Lat:     *oldLat,
 				Lon:     *oldLon,
 			}, nil
@@ -201,39 +192,25 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 		}
 	}
 
-	// Асинхронная горутина: глубокая гео-проверка на подделку скорости
-	if oldLat != nil && oldLon != nil && shiftDist > 2.0 {
-		go func(exID uuid.UUID, oLat, oLon, nLat, nLon float64, tNow time.Time) {
-			var lastTime time.Time
-			if lastManual != nil {
-				lastTime = *lastManual
-			} else {
-				lastTime = tNow.Add(-1 * time.Minute)
+	// Проверка скорости — синхронно, до записи позиции. Это один INSERT, и
+	// выигрыш от горутины был нулевым, а цена — ненулевой: горутина держала
+	// контекст запроса, который net/http отменяет сразу после ответа, и INSERT
+	// падал с «context canceled». GeoAlert — след подделки GPS для карточки
+	// доказательств арбитража, и терять его молча нельзя. Сбой записи
+	// логируется, но позицию не блокирует: алерт — наблюдение, а не запрет.
+	if oldLat != nil && oldLon != nil && shiftDist > speedAlertMinShiftKM {
+		if alert := speedAlert(executorID, *oldLat, *oldLon, req.Lat, req.Lon, shiftDist, lastManual, now); alert != nil {
+			if err := s.geoRepo.CreateGeoAlert(ctx, alert); err != nil {
+				log.Printf("[ExecutorGeoService] cannot record geo alert for %s: %v", executorID, err)
 			}
-			hours := tNow.Sub(lastTime).Hours()
-			if hours > 0 {
-				speed := shiftDist / hours
-				if speed > 150.0 {
-					// Обнаружена подделка GPS! Пишем GeoAlert для админа
-					_ = s.geoRepo.CreateGeoAlert(ctx, &repository.GeoAlert{
-						ExecutorID:         exID,
-						OldLat:             &oLat,
-						OldLon:             &oLon,
-						NewLat:             nLat,
-						NewLon:             nLon,
-						CalculatedSpeedKMH: speed,
-						Status:             "PENDING",
-					})
-				}
-			}
-		}(executorID, *oldLat, *oldLon, req.Lat, req.Lon, now)
+		}
 	}
 
 	if err := s.geoRepo.UpdateExecutorLocation(ctx, executorID, req.Lat, req.Lon, isManual); err != nil {
 		return nil, err
 	}
 
-	if isManual && shiftDist > acceptRadiusKM {
+	if isManual && shiftDist > radiusKM {
 		s.cooldownMap.Store(executorID, now)
 	}
 
@@ -243,6 +220,34 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 		Lat:     req.Lat,
 		Lon:     req.Lon,
 	}, nil
+}
+
+// speedAlert решает, похоже ли перемещение на подделку GPS: расстояние
+// shiftDist, пройденное с момента lastManual (или за последнюю минуту, если
+// ручных перемещений не было), даёт скорость выше speedAlertThresholdKMH.
+// Возвращает алерт для записи или nil.
+func speedAlert(executorID uuid.UUID, oldLat, oldLon, newLat, newLon, shiftDist float64, lastManual *time.Time, now time.Time) *repository.GeoAlert {
+	lastTime := now.Add(-1 * time.Minute)
+	if lastManual != nil {
+		lastTime = *lastManual
+	}
+	hours := now.Sub(lastTime).Hours()
+	if hours <= 0 {
+		return nil
+	}
+	speed := shiftDist / hours
+	if speed <= speedAlertThresholdKMH {
+		return nil
+	}
+	return &repository.GeoAlert{
+		ExecutorID:         executorID,
+		OldLat:             &oldLat,
+		OldLon:             &oldLon,
+		NewLat:             newLat,
+		NewLon:             newLon,
+		CalculatedSpeedKMH: speed,
+		Status:             "PENDING",
+	}
 }
 
 // PositionRecorder дописывает точку в трек исполнителя. Ему удовлетворяет
@@ -313,7 +318,7 @@ func (s *ExecutorGeoService) FollowDevice(ctx context.Context, executorID uuid.U
 // validateCoordinates отвергает точки, которых нет на глобусе.
 func validateCoordinates(lat, lon float64) error {
 	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
-		return fmt.Errorf("invalid coordinates")
+		return validationError("invalid coordinates")
 	}
 	return nil
 }
@@ -344,139 +349,22 @@ func (s *ExecutorGeoService) GetLocation(ctx context.Context, executorID uuid.UU
 // GetMapOrders возвращает заказы в поиске вокруг собственной сохранённой
 // позиции исполнителя. Позиция намеренно берётся из базы, а не из параметров
 // запроса: с координатами от клиента любая учётка могла бы прочесать карту и
-// собрать адреса заказчиков по всей стране.
-func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.UUID) ([]repository.MapOrder, error) {
+// собрать адреса заказчиков по всей стране. Сами заказы собирает OrderService —
+// тем же путём, что и список «Заказы поблизости».
+func (s *ExecutorGeoService) GetMapOrders(ctx context.Context, executorID uuid.UUID) ([]*MapOrderView, error) {
+	if s.orders == nil {
+		return nil, ErrNotConfigured
+	}
 	lat, lon, _, err := s.geoRepo.GetExecutorLocation(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
 	if lat == nil || lon == nil {
-		return nil, errors.New("местоположение исполнителя не задано")
+		return nil, ErrLocationNotSet
 	}
-	return s.mapOrdersAround(ctx, executorID, *lat, *lon)
-}
-
-func (s *ExecutorGeoService) mapOrdersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]repository.MapOrder, error) {
-	// Ищем ожидающие заказы в радиусе обзора (настройка map_overview_radius_km).
-	overviewRadiusKM := resolveMapOverviewRadiusKM(ctx, s.settingsRepo)
-	acceptRadiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
-
-	// Ограничиваем поиск в базе, а не в этом цикле. Чтение каждого заказа в
-	// поиске по всей стране с отбрасыванием всех, кроме ближних, делало стоимость
-	// этого эндпоинта растущей вместе со всем маркетплейсом — на экране, который
-	// каждый исполнитель держит открытым и опрашивает.
-	pendingOrders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, int(overviewRadiusKM*1000))
-	if err != nil {
-		return nil, err
-	}
-	if len(pendingOrders) == 0 {
-		return nil, nil
-	}
-
-	// Видимость определяют роли и верификация смотрящего, ровно как в списке
-	// заказов исполнителя, поэтому карта и список никогда не расходятся.
-	var viewer *repository.User
-	if s.userRepo != nil {
-		viewer, _ = s.userRepo.FindByID(ctx, executorID)
-	}
-
-	// Всё, что нужно предикату, за два запроса вместо двух на заказ. Сам предикат
-	// не изменился и по-прежнему единственный решает видимость: отличается лишь
-	// то, как загружаются его входные данные.
-	customers, variants := s.eligibilityInputs(ctx, pendingOrders)
-
-	// Категории (родители вариантов), чтобы карта могла подписать каждый заказ
-	// как «категория · услуга». Пакетно, поэтому это один лишний запрос, а не N.
-	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
-
-	var mapOrders []repository.MapOrder
-
-	for _, o := range pendingOrders {
-		// FindNearbyOrders возвращает только заказы с координатами, поэтому
-		// разыменование ниже безопасно; проверка остаётся на всякий случай, если
-		// контракт запроса когда-нибудь изменится.
-		if o.PickupLat == nil || o.PickupLon == nil {
-			continue
-		}
-
-		// Тот же предикат, что в FindNearbyOrdersForExecutor и на пути принятия:
-		// заказы только для модераторов → модераторам; обычные заказы → сегментация
-		// по верификации заказчика плюс стандартные проверки исполнителя.
-		if s.userRepo != nil {
-			if canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customers[o.CustomerID], variants[o.ServiceVariantID]) != nil {
-				continue
-			}
-		}
-
-		oLat, oLon := *o.PickupLat, *o.PickupLon
-
-		dist := HaversineDistanceKM(lat, lon, oLat, oLon)
-		if dist <= overviewRadiusKM {
-			// Прикрепляем вариант (название услуги) и разрешаем название категории,
-			// чтобы клиент рисовал «категория · услуга» без лишних запросов.
-			oc := *o
-			categoryName := ""
-			if v := variants[o.ServiceVariantID]; v != nil {
-				oc.ServiceVariant = v
-				oc.ServiceCategory = categoryOf(v, categories)
-				if v.ParentID != nil {
-					if cat := categories[*v.ParentID]; cat != nil {
-						categoryName = cat.Name["ru"]
-						if categoryName == "" {
-							categoryName = cat.Name["en"]
-						}
-					}
-				}
-			}
-			mapOrders = append(mapOrders, repository.MapOrder{
-				Order:        oc,
-				CanAccept:    dist <= acceptRadiusKM,
-				DistanceKM:   dist,
-				CategoryName: categoryName,
-			})
-		}
-	}
-
-	return mapOrders, nil
-}
-
-// eligibilityInputs пакетно загружает заказчиков и варианты услуг, которые
-// нужны canViewOrTakeOrder для страницы заказов.
-//
-// Неудача чтения даёт отсутствующую запись в карте, а не ошибку, — так же, как
-// вели себя вызовы по одному заказу: предикат уже трактует nil-заказчика или
-// nil-вариант как «нет дополнительных ограничений», и одна нечитаемая строка не
-// должна обнулять всю карту.
-func (s *ExecutorGeoService) eligibilityInputs(ctx context.Context, orders []*repository.Order) (map[uuid.UUID]*repository.User, map[uuid.UUID]*repository.ServiceNode) {
-	customerIDs := make([]uuid.UUID, 0, len(orders))
-	variantIDs := make([]uuid.UUID, 0, len(orders))
-	for _, o := range orders {
-		customerIDs = append(customerIDs, o.CustomerID)
-		variantIDs = append(variantIDs, o.ServiceVariantID)
-	}
-
-	customers := map[uuid.UUID]*repository.User{}
-	if s.userRepo != nil {
-		if loaded, err := s.userRepo.FindByIDs(ctx, customerIDs); err == nil {
-			customers = loaded
-		}
-	}
-	variants := map[uuid.UUID]*repository.ServiceNode{}
-	if s.catalogRepo != nil {
-		if loaded, err := s.catalogRepo.GetNodesByIDs(ctx, variantIDs); err == nil {
-			variants = loaded
-		}
-	}
-	return customers, variants
+	return s.orders.OrdersAround(ctx, executorID, *lat, *lon)
 }
 
 func (s *ExecutorGeoService) GetGeoAlerts(ctx context.Context, status string, limit, offset int) ([]repository.GeoAlert, error) {
 	return s.geoRepo.GetGeoAlerts(ctx, status, limit, offset)
-}
-
-// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
-// видит заказов и не может их брать.
-func (s *ExecutorGeoService) WithPenalties(penalties *PenaltyService) *ExecutorGeoService {
-	s.penalties = penalties
-	return s
 }

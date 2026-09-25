@@ -14,12 +14,21 @@ import (
 
 // disputeFixture — заказ, исполненный исполнителем и ждущий подтверждения.
 type disputeFixture struct {
-	db         *sql.DB
-	srv        *OrderService
+	db  *sql.DB
+	srv *OrderService
+	// disputeSvc — споры поверх того же заказа и того же реестра.
+	disputeSvc *DisputeService
 	disputes   repository.DisputeRepository
 	customerID uuid.UUID
 	executorID uuid.UUID
-	order      *repository.Order
+	order      *OrderView
+}
+
+// withPenalties подключает штрафы обеим сторонам: заказам (тихая блокировка) и
+// спорам (баллы по решению арбитра).
+func (f *disputeFixture) withPenalties(p *PenaltyService) {
+	f.srv.WithPenalties(p)
+	f.disputeSvc.WithPenalties(p)
 }
 
 func seedExecutor(t *testing.T, db *sql.DB) uuid.UUID {
@@ -43,12 +52,13 @@ func newDisputeFixture(t *testing.T) *disputeFixture {
 	db := openTestDB(t)
 	disputes := repository.NewDisputeRepository(db)
 	srv := newIntegrationOrderService(db).WithDisputes(disputes)
+	disputeSvc := NewDisputeService(srv, srv.orderRepo, srv.ledger, disputes, srv.catalogRepo, nil)
 
 	customerID, variantID := seedCustomer(t, db, money.FromRubles(5000))
 	executorID := seedExecutor(t, db)
 
 	lat, lon := 55.7558, 37.6173
-	order, err := srv.CreateOrder(context.Background(), customerID, variantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.Create(context.Background(), customerID, CreateOrderRequest{ServiceVariantID: variantID, IsUrgent: false, IsAsap: false, Address: "Россия, Москва, Тверская улица, д. 1", Lat: &lat, Lon: &lon})
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -61,7 +71,7 @@ func newDisputeFixture(t *testing.T) *disputeFixture {
 	}
 	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM order_disputes WHERE order_id = $1`, order.ID) })
 	order.ExecutorID = &executorID
-	return &disputeFixture{db: db, srv: srv, disputes: disputes, customerID: customerID, executorID: executorID, order: order}
+	return &disputeFixture{db: db, srv: srv, disputeSvc: disputeSvc, disputes: disputes, customerID: customerID, executorID: executorID, order: order}
 }
 
 func (f *disputeFixture) status(t *testing.T) repository.OrderStatus {
@@ -77,10 +87,10 @@ func TestOpenDisputeIntegration(t *testing.T) {
 	f := newDisputeFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.srv.OpenDispute(ctx, uuid.New(), f.order.ID, "не вывезли"); err == nil {
+	if _, err := f.disputeSvc.OpenDispute(ctx, uuid.New(), f.order.ID, "не вывезли"); err == nil {
 		t.Fatal("a stranger opened a dispute")
 	}
-	if _, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "   "); !errors.Is(err, ErrDisputeClaimRequired) {
+	if _, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "   "); !errors.Is(err, ErrDisputeClaimRequired) {
 		t.Fatalf("empty claim: %v", err)
 	}
 
@@ -88,14 +98,14 @@ func TestOpenDisputeIntegration(t *testing.T) {
 	if _, err := f.db.Exec(`UPDATE orders SET status = 'ASSIGNED' WHERE id = $1`, f.order.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли"); !errors.Is(err, ErrDisputeNotAllowed) {
+	if _, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли"); !errors.Is(err, ErrDisputeNotAllowed) {
 		t.Fatalf("assigned order: %v", err)
 	}
 	if _, err := f.db.Exec(`UPDATE orders SET status = 'EXECUTED' WHERE id = $1`, f.order.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "  мешки стоят у подъезда  ")
+	dispute, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "  мешки стоят у подъезда  ")
 	if err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}
@@ -105,12 +115,12 @@ func TestOpenDisputeIntegration(t *testing.T) {
 	if got := f.status(t); got != repository.OrderStatusDisputed {
 		t.Fatalf("order status %s, want DISPUTED", got)
 	}
-	if _, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "ещё раз"); !errors.Is(err, ErrDisputeAlreadyOpen) {
+	if _, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "ещё раз"); !errors.Is(err, ErrDisputeAlreadyOpen) {
 		t.Fatalf("second dispute: %v", err)
 	}
 
 	// Оспоренный заказ остаётся в списке исполнителя: разбирательство — его дело.
-	assigned, err := f.srv.orderRepo.GetExecutorAssignedOrders(ctx, f.executorID)
+	assigned, err := f.srv.orderRepo.FindAssignedByExecutor(ctx, f.executorID)
 	if err != nil {
 		t.Fatalf("executor orders: %v", err)
 	}
@@ -143,7 +153,7 @@ func TestConfirmDisputedOrderIntegration(t *testing.T) {
 	f := newDisputeFixture(t)
 	ctx := context.Background()
 
-	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
+	dispute, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
 	if err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}
@@ -193,18 +203,18 @@ func TestConcedeDisputeIntegration(t *testing.T) {
 	events := repository.NewEventRepository(f.db)
 	f.srv.WithBehaviors(nil, nil, events)
 
-	if err := f.srv.ConcedeDispute(ctx, f.executorID, f.order.ID); !errors.Is(err, ErrDisputeNotOpen) {
+	if err := f.disputeSvc.ConcedeDispute(ctx, f.executorID, f.order.ID); !errors.Is(err, ErrDisputeNotOpen) {
 		t.Fatalf("concede without a dispute: %v", err)
 	}
-	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
+	dispute, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
 	if err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}
-	if err := f.srv.ConcedeDispute(ctx, uuid.New(), f.order.ID); err == nil {
+	if err := f.disputeSvc.ConcedeDispute(ctx, uuid.New(), f.order.ID); err == nil {
 		t.Fatal("another executor conceded")
 	}
 
-	if err := f.srv.ConcedeDispute(ctx, f.executorID, f.order.ID); err != nil {
+	if err := f.disputeSvc.ConcedeDispute(ctx, f.executorID, f.order.ID); err != nil {
 		t.Fatalf("concede: %v", err)
 	}
 	if got := f.status(t); got != repository.OrderStatusCanceled {
@@ -250,7 +260,7 @@ func TestConcedeDisputeIntegration(t *testing.T) {
 	}
 
 	// Второй раз признавать нечего.
-	if err := f.srv.ConcedeDispute(ctx, f.executorID, f.order.ID); !errors.Is(err, ErrDisputeNotOpen) {
+	if err := f.disputeSvc.ConcedeDispute(ctx, f.executorID, f.order.ID); !errors.Is(err, ErrDisputeNotOpen) {
 		t.Fatalf("second concession: %v", err)
 	}
 }
@@ -280,7 +290,7 @@ func TestSettleUnknownDisputeIntegration(t *testing.T) {
 	ctx := context.Background()
 	f.srv.settingsRepo = settingsOverride{f.srv.settingsRepo, map[string]string{SettingOrderCommissionPercent: "10"}}
 
-	if _, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли"); err != nil {
+	if _, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли"); err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}
 	var hold money.Amount
@@ -294,19 +304,19 @@ func TestSettleUnknownDisputeIntegration(t *testing.T) {
 
 	// Спор ещё открыт — платить нельзя.
 	err := f.srv.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		return f.srv.settleUnknownDisputeTx(ctx, tx, f.order.ID)
+		return f.disputeSvc.settleUnknownDisputeTx(ctx, tx, f.order.ID)
 	})
 	if !errors.Is(err, ErrOrderHasOpenDispute) {
 		t.Fatalf("settle with an open dispute: %v", err)
 	}
 
 	err = f.srv.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		if _, err := f.srv.closeOpenDisputeTx(ctx, tx, f.order.ID, repository.DisputeClosing{
+		if _, err := closeOpenDisputeTx(ctx, tx, f.disputes, f.order.ID, repository.DisputeClosing{
 			Closure: repository.DisputeClosureArbitration, Decision: repository.DisputeDecisionUnknown,
 		}); err != nil {
 			return err
 		}
-		return f.srv.settleUnknownDisputeTx(ctx, tx, f.order.ID)
+		return f.disputeSvc.settleUnknownDisputeTx(ctx, tx, f.order.ID)
 	})
 	if err != nil {
 		t.Fatalf("settle unknown: %v", err)

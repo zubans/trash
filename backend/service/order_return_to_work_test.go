@@ -19,7 +19,7 @@ func TestReturnToWorkOnlyFromReview(t *testing.T) {
 	srv := NewOrderService(orderRepo, NewLedger(&mockTransactionRepo{}, newMockAccounts()), nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
 	custID, execID, adminID := uuid.New(), uuid.New(), uuid.New()
 
-	order, err := srv.CreateOrder(ctx, custID, standardVariantID, false, false, "", nil, nil)
+	order, err := srv.Create(ctx, custID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: false, Address: "", Lat: nil, Lon: nil})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -34,20 +34,22 @@ func TestReturnToWorkOnlyFromReview(t *testing.T) {
 		t.Errorf("assigned order: err = %v, want ErrOrderNotOnReview", err)
 	}
 
-	if err := srv.ExecuteOrder(ctx, order.ID, execID); err != nil {
+	if err := srv.ExecuteOrderAt(ctx, order.ID, execID, nil); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if err := srv.ReturnToWork(ctx, order.ID, adminID); err != nil {
 		t.Fatalf("return to work: %v", err)
 	}
-	if order.Status != repository.OrderStatusAssigned || order.ExecutedAt != nil {
-		t.Errorf("after return: status = %s, executed_at = %v; want ASSIGNED and no mark", order.Status, order.ExecutedAt)
+	// Create отдаёт снимок карточки, а не строку хранилища: состояние перечитывается.
+	stored, _ := orderRepo.FindByID(ctx, order.ID)
+	if stored.Status != repository.OrderStatusAssigned || stored.ExecutedAt != nil {
+		t.Errorf("after return: status = %s, executed_at = %v; want ASSIGNED and no mark", stored.Status, stored.ExecutedAt)
 	}
-	if order.ExecutorID == nil || *order.ExecutorID != execID {
+	if stored.ExecutorID == nil || *stored.ExecutorID != execID {
 		t.Error("the order must stay with the same executor")
 	}
 
-	if err := srv.ExecuteOrder(ctx, order.ID, execID); err != nil {
+	if err := srv.ExecuteOrderAt(ctx, order.ID, execID, nil); err != nil {
 		t.Errorf("the executor must be able to mark it executed again: %v", err)
 	}
 

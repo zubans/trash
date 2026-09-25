@@ -380,7 +380,7 @@ func (s *ChatService) receiveMessage(ctx context.Context, client *ChatClient, ro
 	}
 
 	// Читаем текущий статус заказа, чтобы проверить состояние чата.
-	order, err := s.orderRepo.GetOrderByID(ctx, room.OrderID)
+	order, err := s.orderRepo.FindByID(ctx, room.OrderID)
 	if err != nil {
 		log.Printf("[ChatService] Failed to check order status: %v", err)
 		return true
@@ -507,7 +507,7 @@ func orderChatClosed(status repository.OrderStatus) bool {
 // participantOrder возвращает заказ, если пользователь — его заказчик или
 // исполнитель, и ErrForbidden — если нет.
 func (s *ChatService) participantOrder(ctx context.Context, orderID, userID uuid.UUID) (*repository.Order, error) {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -686,8 +686,6 @@ func (s *ChatService) GetOrCreateSupportChat(ctx context.Context, userID uuid.UU
 // статуса по тождеству: сопоставление по тексту ошибки — способ молча
 // превратить 403 в 500 при переименовании.
 var (
-	// ErrForbidden сообщает, что вызывающий не участник переписки.
-	ErrForbidden = errors.New("forbidden: this chat does not belong to you")
 	// ErrChatLocked сообщает, что переписка больше не принимает сообщений.
 	ErrChatLocked = errors.New("chat is locked (read-only)")
 )

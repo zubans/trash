@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +37,9 @@ func IsValidShiftDuration(hours int) bool {
 	return false
 }
 
+// ErrInvalidShiftDuration — длительность не из ShiftDurationsHours.
+var ErrInvalidShiftDuration = validationError("invalid shift duration")
+
 // ShiftService управляет сменами исполнителей.
 type ShiftService struct {
 	shiftRepo    repository.ShiftRepository
@@ -46,18 +48,17 @@ type ShiftService struct {
 	orderRepo    repository.OrderRepository
 	locations    ExecutorLocationRecorder
 	history      ExecutorOrderHistory
-	db           *sql.DB
 }
 
 // ExecutorOrderHistory отдаёт заказы для экрана истории исполнителя. Как
 // выглядит заказ, решает OrderService; у смен своего представления заказа нет.
 type ExecutorOrderHistory interface {
-	ExecutorHistory(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error)
+	ExecutorHistory(ctx context.Context, executorID uuid.UUID) ([]*OrderView, error)
 }
 
 // NewShiftService создаёт ShiftService.
-func NewShiftService(shiftRepo repository.ShiftRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository, db *sql.DB) *ShiftService {
-	return &ShiftService{shiftRepo: shiftRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo, db: db}
+func NewShiftService(shiftRepo repository.ShiftRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, orderRepo repository.OrderRepository) *ShiftService {
+	return &ShiftService{shiftRepo: shiftRepo, ledger: ledger, settingsRepo: settingsRepo, orderRepo: orderRepo}
 }
 
 // WithExecutorLocation присоединяет хранилище, через которое пишутся отчёты о
@@ -75,18 +76,18 @@ func (s *ShiftService) WithOrderHistory(history ExecutorOrderHistory) *ShiftServ
 	return s
 }
 
-// StartShift начинает новую смену исполнителя и планирует таймер автозавершения.
+// StartShift начинает новую смену исполнителя.
 func (s *ShiftService) StartShift(ctx context.Context, executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
 	if !IsValidShiftDuration(durationHours) {
-		return nil, errors.New("invalid shift duration")
+		return nil, ErrInvalidShiftDuration
 	}
 
-	existing, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	existing, err := s.shiftRepo.FindActiveByExecutor(ctx, executorID)
+	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return nil, errors.New("active shift already exists")
+		return nil, ErrShiftAlreadyActive
 	}
 
 	shift, err := s.shiftRepo.StartShift(ctx, executorID, durationHours)
@@ -101,107 +102,75 @@ func (s *ShiftService) StartShift(ctx context.Context, executorID uuid.UUID, dur
 // (см. AutoEndExpiredShifts). Раньше их было три — горутина с таймером на
 // каждую смену, этот скан и восстановительный проход при старте, пересоздававший
 // таймеры, — из-за чего смену закрывал тот, кто выиграл гонку, а горутины на
-// смену всё равно терялись при каждом перезапуске.
+// смену всё равно терялись при каждом перезапуске. Чтение (GetCurrent) смену
+// не закрывает: истёкшая, но ещё активная смена — дело воркера, а не того, кто
+// первым открыл экран.
 
-// EndShiftByID завершает активную смену, если она ещё не была закрыта.
-func (s *ShiftService) EndShiftByID(ctx context.Context, shiftID uuid.UUID) error {
-	shift, err := s.shiftRepo.GetShiftByID(ctx, shiftID)
-	if err != nil || shift.Status != repository.ShiftStatusActive {
-		return nil
-	}
-	log.Printf("[ShiftService] Auto-closing expired shift %s for executor %s (planned_end_at: %v)", shift.ID, shift.ExecutorID, shift.PlannedEndAt)
-	if err := s.shiftRepo.End(ctx, shift.ID); err != nil {
-		return err
-	}
-	metrics.ShiftEvent("auto_closed")
-	return nil
-}
-
-// AutoEndExpiredShifts просматривает все активные смены и завершает те, что прошли planned_end_at.
+// AutoEndExpiredShifts одним оператором закрывает все активные смены, прошедшие
+// planned_end_at.
 func (s *ShiftService) AutoEndExpiredShifts(ctx context.Context) error {
-	shifts, err := s.shiftRepo.GetActiveShifts(ctx)
+	ids, err := s.shiftRepo.EndExpired(ctx, time.Now())
 	if err != nil {
 		return err
 	}
-	now := time.Now()
-	for _, shift := range shifts {
-		if now.After(shift.PlannedEndAt) {
-			_ = s.EndShiftByID(ctx, shift.ID)
-		}
+	for _, id := range ids {
+		log.Printf("[ShiftService] auto-closed expired shift %s", id)
+		metrics.ShiftEvent("auto_closed")
 	}
 	return nil
 }
 
-// Start начинает новую смену (псевдоним, совместимый с обработчиком).
-func (s *ShiftService) Start(ctx context.Context, executorID uuid.UUID, durationHours int) (*repository.Shift, error) {
-	return s.StartShift(ctx, executorID, durationHours)
-}
-
-// GetActive возвращает активную смену исполнителя, автоматически завершая её при истечении.
-func (s *ShiftService) GetActive(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
-	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	if err == nil && shift != nil {
-		if time.Now().After(shift.PlannedEndAt) {
-			_ = s.EndShiftByID(ctx, shift.ID)
-			return nil, errors.New("no active shift")
-		}
-		return shift, nil
-	}
-	return nil, err
-}
-
 // GetCurrent возвращает активную смену или самую свежую, если активной нет.
-// Активные смены проверяются на истечение.
 func (s *ShiftService) GetCurrent(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
-	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	if err == nil && shift != nil {
-		if time.Now().After(shift.PlannedEndAt) {
-			_ = s.EndShiftByID(ctx, shift.ID)
-			return s.shiftRepo.GetLastShiftByExecutor(ctx, executorID)
-		}
+	shift, err := s.shiftRepo.FindActiveByExecutor(ctx, executorID)
+	if err != nil {
+		return nil, err
+	}
+	if shift != nil {
 		return shift, nil
 	}
-	return s.shiftRepo.GetLastShiftByExecutor(ctx, executorID)
+	last, err := s.shiftRepo.GetLastShiftByExecutor(ctx, executorID)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrShiftNotFound
+	}
+	return last, err
 }
 
 // End завершает активную смену исполнителя. Завершение смены раньше
 // запланированного конца — штрафуемое событие независимо от того, какой
-// эндпоинт вызвал клиент, поэтому здесь делегируется той же процедуре, что и
-// EarlyEnd: раньше штраф можно было пропустить, просто вызвав /shifts/end.
-func (s *ShiftService) End(ctx context.Context, executorID uuid.UUID) error {
-	_, err := s.finishShift(ctx, executorID)
-	return err
-}
-
-// EarlyEnd завершает активную смену и списывает штраф, настроенный в
-// system_settings (по умолчанию 50). Если на момент завершения у исполнителя
-// есть назначенные заказы, эти заказы возвращаются в пул поиска, а с
-// исполнителя берут двойной штраф плюс общую стоимость этих заказов.
-func (s *ShiftService) EarlyEnd(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
-	return s.finishShift(ctx, executorID)
-}
-
-// finishShift — единственный путь выхода из активной смены. Штраф, снятие
-// назначения с открытых заказов и смена статуса смены применяются вместе,
-// поэтому исполнителя никогда не штрафуют за заказы, оставшиеся за ним.
-func (s *ShiftService) finishShift(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
-	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
+// эндпоинт вызвал клиент: раньше штраф можно было пропустить, просто вызвав
+// /shifts/end. Штраф, снятие назначения с открытых заказов и смена статуса
+// смены применяются в одной транзакции, поэтому исполнителя никогда не штрафуют
+// за заказы, оставшиеся за ним, и не закрывают смену, не списав штраф.
+//
+// Штраф — настраиваемая shift_early_exit_penalty (по умолчанию 50). Если на
+// момент завершения у исполнителя есть назначенные заказы, эти заказы
+// возвращаются в пул поиска, а с исполнителя берут двойной штраф плюс общую
+// стоимость этих заказов.
+func (s *ShiftService) End(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
+	if s.ledger == nil {
+		return nil, ErrNotConfigured
+	}
+	shift, err := s.shiftRepo.FindActiveByExecutor(ctx, executorID)
 	if err != nil {
-		return nil, errors.New("no active shift")
+		return nil, err
+	}
+	if shift == nil {
+		return nil, ErrNoActiveShift
 	}
 
 	// Смена, уже дошедшая до запланированного конца, штрафа не несёт.
 	if !time.Now().Before(shift.PlannedEndAt) {
-		if err := s.shiftRepo.End(ctx, shift.ID); err != nil {
+		if err := s.shiftRepo.End(ctx, nil, shift.ID); err != nil {
 			return nil, err
 		}
 		metrics.ShiftEvent("ended")
 		return s.shiftRepo.GetShiftByID(ctx, shift.ID)
 	}
 
-	basePenalty := s.earlyExitPenaltyAmount(ctx)
+	basePenalty := money.FromRubles(settingFloat(ctx, s.settingsRepo, "shift_early_exit_penalty", 50.0))
 
-	var assignedOrders []repository.Order
+	var assignedOrders []*repository.Order
 	if s.orderRepo != nil {
 		assignedOrders, err = s.orderRepo.FindAssignedByExecutor(ctx, executorID)
 		if err != nil {
@@ -210,7 +179,7 @@ func (s *ShiftService) finishShift(ctx context.Context, executorID uuid.UUID) (*
 	}
 
 	orderCost := money.Zero
-	openOrders := make([]repository.Order, 0, len(assignedOrders))
+	openOrders := make([]*repository.Order, 0, len(assignedOrders))
 	for _, o := range assignedOrders {
 		// Заказы, уже помеченные EXECUTED, ждут подтверждения заказчика, и
 		// отбирать их у исполнителя нельзя.
@@ -227,58 +196,31 @@ func (s *ShiftService) finishShift(ctx context.Context, executorID uuid.UUID) (*
 		totalFine = basePenalty.Scale(2).Add(orderCost)
 	}
 
-	if s.ledger != nil {
-		if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-			for _, o := range openOrders {
-				if err := s.orderRepo.Unassign(ctx, tx, o.ID); err != nil {
-					return err
-				}
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		for _, o := range openOrders {
+			if err := s.orderRepo.Unassign(ctx, tx, o.ID); err != nil {
+				return err
 			}
-			// Штраф собирается на счёт штрафов, а не просто исчезает с баланса
-			// исполнителя.
-			return s.ledger.Charge(ctx, tx, executorID, repository.AccountFines, totalFine, repository.TransactionTypeFine, nil)
-		}); err != nil {
-			return nil, err
 		}
-	}
-
-	if err := s.shiftRepo.EarlyEnd(ctx, shift.ID, totalFine); err != nil {
+		// Штраф собирается на счёт штрафов, а не просто исчезает с баланса
+		// исполнителя.
+		if err := s.ledger.Charge(ctx, tx, executorID, repository.AccountFines, totalFine, repository.TransactionTypeFine, nil); err != nil {
+			return err
+		}
+		// Закрытие охраняется статусом: смена, которую тем временем закрыл
+		// воркер, откатывает штраф вместе с собой.
+		return s.shiftRepo.EarlyEnd(ctx, tx, shift.ID, totalFine)
+	}); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return nil, ErrNoActiveShift
+		}
 		return nil, err
 	}
 	metrics.ShiftEvent("ended_early")
 
-	updated, err := s.shiftRepo.GetShiftByID(ctx, shift.ID)
-	if err != nil {
-		// Откатываемся к исходной смене с изменениями, применёнными в памяти.
-		now := time.Now()
-		shift.Status = repository.ShiftStatusPenalized
-		shift.ActualEndAt = &now
-		shift.FineAmount = shift.FineAmount.Add(totalFine)
-		return shift, nil
-	}
-	return updated, nil
-}
-
-// earlyExitPenaltyAmount возвращает штраф, который берут, когда исполнитель
-// завершает смену раньше запланированного времени.
-func (s *ShiftService) earlyExitPenaltyAmount(ctx context.Context) money.Amount {
-	return money.FromRubles(s.settingsFloat(ctx, "shift_early_exit_penalty", 50.0))
-}
-
-func (s *ShiftService) settingsFloat(ctx context.Context, key string, defaultValue float64) float64 {
-	if s.settingsRepo == nil {
-		return defaultValue
-	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return defaultValue
-	}
-	if v, ok := settings[key]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return defaultValue
+	// Возвращается то, что записано, а не то, что мы думаем о записанном:
+	// сфабрикованное состояние скрыло бы расхождение, которое стоит увидеть.
+	return s.shiftRepo.GetShiftByID(ctx, shift.ID)
 }
 
 // RecordLocation сохраняет позицию, о которой приложение исполнителя сообщает во время смены.
@@ -289,29 +231,29 @@ func (s *ShiftService) settingsFloat(ctx context.Context, key string, defaultVal
 // местоположения могут отклонить перемещение (смену района, ещё не вышедшую из
 // паузы), и это законный исход, а не сбой.
 func (s *ShiftService) RecordLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64) (bool, error) {
-	// Nil-смена без ошибки тоже означает «не на смене»: репозиторий так сообщает
-	// об отсутствующей строке, поэтому проверка только ошибки принимала бы
-	// позиции от исполнителя, который не работает.
-	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	if err != nil || shift == nil {
-		return false, errors.New("no active shift")
+	shift, err := s.shiftRepo.FindActiveByExecutor(ctx, executorID)
+	if err != nil {
+		return false, err
+	}
+	if shift == nil {
+		return false, ErrNoActiveShift
 	}
 	if s.locations == nil {
-		return false, errors.New("executor location storage is not configured")
+		return false, ErrNotConfigured
 	}
 	return s.locations.RecordLiveLocation(ctx, executorID, lat, lon)
 }
 
 // ExecutorHistoryResult содержит заказы и историю транзакций исполнителя.
 type ExecutorHistoryResult struct {
-	Orders       []*repository.Order       `json:"orders"`
+	Orders       []*OrderView              `json:"orders"`
 	Transactions []*repository.Transaction `json:"transactions"`
 }
 
 // GetExecutorFinancialHistory отдаёт журналы заказов и транзакций исполнителя.
 func (s *ShiftService) GetExecutorFinancialHistory(ctx context.Context, executorID uuid.UUID) (*ExecutorHistoryResult, error) {
 	res := &ExecutorHistoryResult{
-		Orders:       []*repository.Order{},
+		Orders:       []*OrderView{},
 		Transactions: []*repository.Transaction{},
 	}
 

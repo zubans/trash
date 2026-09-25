@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"math"
 	"time"
 
@@ -25,36 +26,30 @@ const (
 	OrderStatusCanceled  OrderStatus = "CANCELED"
 )
 
-// Order представляет заказ клиента.
+// Order — строка таблицы orders, и только она. Всё, что приложение видит
+// сверх колонок (участники, вариант услуги, кнопки, данные фото-подтверждения),
+// собирает service.OrderView: репозиторий не диктует контракт API.
 type Order struct {
 	ID               uuid.UUID    `json:"id"`
 	CustomerID       uuid.UUID    `json:"customer_id"`
 	ExecutorID       *uuid.UUID   `json:"executor_id,omitempty"`
-	ExecutorPhone    string       `json:"executor_phone,omitempty"`
-	ExecutorName     string       `json:"executor_name,omitempty"`
 	ServiceVariantID uuid.UUID    `json:"service_variant_id"`
-	ServiceVariant   *ServiceNode `json:"service_variant,omitempty"`
-	// ServiceCategory — родительская категория варианта. Едет вместе с заказом,
-	// потому что клиент подписывает заказ как «категория / услуга», а достать её
-	// сам он не может: /service-categories отдаёт только корни, и у вложенного
-	// каталога родитель варианта в этот список не попадает.
-	ServiceCategory *ServiceNode `json:"service_category,omitempty"`
-	IsUrgent        bool         `json:"is_urgent"`
-	IsAsap          bool         `json:"is_asap"`
-	Status          OrderStatus  `json:"status"`
-	HoldAmount      money.Amount `json:"hold_amount"`
-	FinalAmount     money.Amount `json:"final_amount"`
-	IsDowngraded    bool         `json:"is_downgraded"`
-	PhotoURL        *string      `json:"photo_url,omitempty"`
-	Address         *string      `json:"address,omitempty"`
-	Comment         *string      `json:"comment,omitempty"`
-	PickupLat       *float64     `json:"pickup_lat,omitempty"`
-	PickupLon       *float64     `json:"pickup_lon,omitempty"`
-	CreatedAt       time.Time    `json:"created_at"`
-	AssignedAt      *time.Time   `json:"assigned_at,omitempty"`
-	DeadlineAt      *time.Time   `json:"deadline_at,omitempty"`
-	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
-	CanceledAt      *time.Time   `json:"canceled_at,omitempty"`
+	IsUrgent         bool         `json:"is_urgent"`
+	IsAsap           bool         `json:"is_asap"`
+	Status           OrderStatus  `json:"status"`
+	HoldAmount       money.Amount `json:"hold_amount"`
+	FinalAmount      money.Amount `json:"final_amount"`
+	IsDowngraded     bool         `json:"is_downgraded"`
+	PhotoURL         *string      `json:"photo_url,omitempty"`
+	Address          *string      `json:"address,omitempty"`
+	Comment          *string      `json:"comment,omitempty"`
+	PickupLat        *float64     `json:"pickup_lat,omitempty"`
+	PickupLon        *float64     `json:"pickup_lon,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	AssignedAt       *time.Time   `json:"assigned_at,omitempty"`
+	DeadlineAt       *time.Time   `json:"deadline_at,omitempty"`
+	CompletedAt      *time.Time   `json:"completed_at,omitempty"`
+	CanceledAt       *time.Time   `json:"canceled_at,omitempty"`
 	// ExecutedAt — когда исполнитель отметил «Исполнил», по часам сервера;
 	// ExecutedAtDevice — по часам телефона. Они расходятся, когда отметка
 	// пролежала в офлайн-очереди.
@@ -65,85 +60,30 @@ type Order struct {
 	PhotoRequired bool `json:"photo_required"`
 	// WatermarkSymbolID и ProofKey — жест и служебные данные проверки снимка,
 	// выданные заказу при взятии. Наружу не отдаются как есть: исполнитель
-	// получает их в PhotoProof, заказчик не получает вовсе.
+	// получает их в service.OrderView.PhotoProof, заказчик не получает вовсе.
 	WatermarkSymbolID *uuid.UUID `json:"-"`
 	ProofKey          []byte     `json:"-"`
-	// PhotoProof собирается для исполнителя заказа (service/order_view.go);
-	// колонки за ним нет.
-	PhotoProof *OrderPhotoProof `json:"photo_proof,omitempty"`
-	// SubmitFields называет данные, которые исполнитель обязан отправить на
-	// проверку до завершения этого заказа, — поля личности в заказе верификации.
-	// Оно заполняется при отрисовке заказа, из поведения услуги; за ним не стоит
-	// колонки, и оно никогда не несёт сами значения.
-	SubmitFields []string `json:"submit_fields,omitempty"`
-	// RequirePassport — исполнитель вносит паспорт заказчика с фото до сверки
-	// (require_passport в манифесте). Заполняется при отрисовке.
-	RequirePassport bool `json:"require_passport,omitempty"`
-	// ScriptExecuted — заказ закрывает скрипт услуги, а не отметка исполнителя
-	// (manual_execute = false в манифесте). Заполняется при отрисовке, наружу
-	// выходит как actions.execute.
-	ScriptExecuted bool `json:"-"`
-	// Counterparty и Actions собираются под того, кто смотрит на заказ
-	// (service/order_view.go); колонок за ними нет.
-	Counterparty *OrderParty   `json:"counterparty,omitempty"`
-	Actions      *OrderActions `json:"actions,omitempty"`
-}
-
-// OrderPhotoProof — что исполнитель должен знать о фото-подтверждении заказа,
-// чтобы снять его без сети: какой жест показать и служебные данные проверки.
-type OrderPhotoProof struct {
-	Required bool          `json:"required"`
-	Gesture  *OrderGesture `json:"gesture,omitempty"`
-	Nonce    string        `json:"nonce,omitempty"`
-}
-
-// OrderGesture — жест заказа в том виде, в каком его показывает попап.
-type OrderGesture struct {
-	Code         string `json:"code"`
-	Number       int    `json:"number"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	HintImageURL string `json:"hint_image_url,omitempty"`
-	FitsInSelfie bool   `json:"fits_in_selfie"`
-}
-
-// OrderParty — вторая сторона заказа глазами смотрящего: заказчику —
-// исполнитель, исполнителю — заказчик.
-type OrderParty struct {
-	Role  string `json:"role"`
-	Name  string `json:"name,omitempty"`
-	Phone string `json:"phone,omitempty"`
-	// Hidden — сторона известна, но этому смотрящему её не показывают.
-	Hidden bool `json:"hidden,omitempty"`
-}
-
-// OrderActions — что смотрящий может сделать с заказом сейчас. Решает сервер
-// по роли и статусу; приложение только рисует кнопки.
-type OrderActions struct {
-	Cancel bool `json:"cancel"`
-	Reject bool `json:"reject"`
-	Review bool `json:"review"`
-	// Dispute — заказчик может заявить, что заказ не выполнен.
-	Dispute bool `json:"dispute"`
-	// Concede — исполнитель может признать, что оспоренный заказ не выполнен.
-	Concede bool `json:"concede"`
-	// Execute — исполнитель может отметить заказ исполненным («Исполнил»).
-	Execute bool `json:"execute"`
 }
 
 // OrderRepository описывает операции хранения заказов.
 type OrderRepository interface {
 	Create(ctx context.Context, q Querier, order *Order) error
+	// FindByID отдаёт sql.ErrNoRows, когда заказа нет; слой сервисов переводит
+	// это в свою ErrOrderNotFound.
 	FindByID(ctx context.Context, id uuid.UUID) (*Order, error)
-	GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, error)
-	FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error)
+	// FindAssignedByExecutor возвращает незакрытые заказы исполнителя:
+	// назначенные, исполненные и оспоренные.
+	FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]*Order, error)
 	// FindAllByExecutor возвращает заказы исполнителя, сначала недавно
 	// завершённые, не более limit (см. DefaultHistoryPageSize).
 	FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]Order, error)
 	// FindByCustomer возвращает заказы заказчика, сначала недавно завершённые,
 	// не более limit (см. DefaultHistoryPageSize) — как и FindAllByExecutor.
-	FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]Order, error)
-	GetPendingOrders(ctx context.Context) ([]*Order, error)
+	FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]*Order, error)
+	// GetPendingOrders возвращает заказы в поиске, старые первыми, не более
+	// limit (ноль — DefaultHistoryPageSize): воркер подбора обрабатывает их
+	// страницей за тик, а не всю очередь разом.
+	GetPendingOrders(ctx context.Context, limit int) ([]*Order, error)
 	// GetOrdersMissingCoordinates возвращает заказы в поиске, у которых есть адрес,
 	// но нет координат подачи, чтобы фоновая задача могла их геокодировать.
 	GetOrdersMissingCoordinates(ctx context.Context, limit int) ([]*Order, error)
@@ -175,16 +115,23 @@ type OrderRepository interface {
 	LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error)
 	SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error
 	AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error
-	CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
+	// LockExecutor сериализует взятие заказов одним исполнителем до конца
+	// транзакции: лимиты активных и неподтверждённых заказов считаются под
+	// этой блокировкой, поэтому два параллельных взятия не пройдут оба под
+	// одним и тем же счётчиком. Это advisory-блокировка, а не строка users:
+	// строку исполнителя пишет реестр, и брать её здесь значило бы выстраивать
+	// в очередь ещё и выплаты.
+	LockExecutor(ctx context.Context, q Querier, executorID uuid.UUID) error
+	// CountActiveOrdersByExecutor и CountExecutedUnconfirmedOrdersByExecutor
+	// принимают Querier, чтобы считаться внутри транзакции взятия.
+	CountActiveOrdersByExecutor(ctx context.Context, q Querier, executorID uuid.UUID) (int, error)
 	// CountActiveOrdersByExecutors отвечает на тот же вопрос для набора
 	// исполнителей одним запросом. Воркер подбора задаёт его раз на кандидата за
 	// цикл; исполнители без назначенного заказа в результате отсутствуют, что
 	// читается как нулевое количество.
 	CountActiveOrdersByExecutors(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]int, error)
-	CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error)
+	CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, q Querier, executorID uuid.UUID) (int, error)
 
-	GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error)
-	GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
 	// FindOpenByCustomer возвращает незавершённые заказы заказчика: те, которые
 	// доменное событие о нём ещё может изменить. Ограничено статусом, а не
 	// размером страницы, потому что «ещё выполняется» — небольшое множество, какой
@@ -271,29 +218,31 @@ func (r *orderRepo) FindByID(ctx context.Context, id uuid.UUID) (*Order, error) 
 	return &o, nil
 }
 
-func (r *orderRepo) GetOrderByID(ctx context.Context, id uuid.UUID) (*Order, error) {
-	return r.FindByID(ctx, id)
-}
-
-func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]Order, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3, $4) ORDER BY o.created_at DESC`,
-		executorID, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
-	)
+// queryOrders выполняет выборку по orderColumns и читает её целиком. Один цикл
+// на все списковые методы: раньше каждый носил свою копию.
+func (r *orderRepo) queryOrders(ctx context.Context, query string, args ...interface{}) ([]*Order, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	orders := []Order{}
+	orders := []*Order{}
 	for rows.Next() {
 		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
-		orders = append(orders, o)
+		orders = append(orders, &o)
 	}
 	return orders, rows.Err()
+}
+
+func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]*Order, error) {
+	return r.queryOrders(ctx,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.executor_id = $1 AND o.status IN ($2, $3, $4) ORDER BY o.created_at DESC`,
+		executorID, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
+	)
 }
 
 func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]Order, error) {
@@ -317,46 +266,18 @@ func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID,
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]Order, error) {
-	rows, err := r.db.QueryContext(ctx,
+func (r *orderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]*Order, error) {
+	return r.queryOrders(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC LIMIT $2`,
 		customerID, historyLimit(limit),
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orders := []Order{}
-	for rows.Next() {
-		o, err := scanOrder(rows)
-		if err != nil {
-			return nil, err
-		}
-		orders = append(orders, o)
-	}
-	return orders, rows.Err()
 }
 
-func (r *orderRepo) GetPendingOrders(ctx context.Context) ([]*Order, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+orderColumns+` FROM orders o WHERE o.status = $1`,
-		OrderStatusSearching,
+func (r *orderRepo) GetPendingOrders(ctx context.Context, limit int) ([]*Order, error) {
+	return r.queryOrders(ctx,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.status = $1 ORDER BY o.created_at LIMIT $2`,
+		OrderStatusSearching, historyLimit(limit),
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orders := []*Order{}
-	for rows.Next() {
-		o, err := scanOrder(rows)
-		if err != nil {
-			return nil, err
-		}
-		orders = append(orders, &o)
-	}
-	return orders, rows.Err()
 }
 
 // GetOrdersMissingCoordinates возвращает не более limit заказов в поиске, у
@@ -364,7 +285,7 @@ func (r *orderRepo) GetPendingOrders(ctx context.Context) ([]*Order, error) {
 // исполнителя рисует только заказы с координатами, поэтому иначе эти остались
 // бы невидимыми до повторного геокодирования.
 func (r *orderRepo) GetOrdersMissingCoordinates(ctx context.Context, limit int) ([]*Order, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return r.queryOrders(ctx,
 		`SELECT `+orderColumns+` FROM orders o
 		 WHERE o.status = $1
 		   AND (o.pickup_lat IS NULL OR o.pickup_lon IS NULL)
@@ -373,20 +294,6 @@ func (r *orderRepo) GetOrdersMissingCoordinates(ctx context.Context, limit int) 
 		 LIMIT $2`,
 		OrderStatusSearching, limit,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orders := []*Order{}
-	for rows.Next() {
-		o, err := scanOrder(rows)
-		if err != nil {
-			return nil, err
-		}
-		orders = append(orders, &o)
-	}
-	return orders, rows.Err()
 }
 
 // SetPickupCoordinates записывает заказу только координаты подачи.
@@ -542,84 +449,37 @@ func (r *orderRepo) SetHoldAmount(ctx context.Context, q Querier, orderID uuid.U
 	)
 }
 
-// GetExecutorAssignedOrders возвращает заказы, назначенные конкретному исполнителю.
-func (r *orderRepo) GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*Order, error) {
-	orders, err := r.FindAssignedByExecutor(ctx, executorID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*Order, len(orders))
-	for i := range orders {
-		result[i] = &orders[i]
-	}
-	return result, nil
-}
-
-// GetCustomerOrders возвращает заказы, созданные заказчиком, — страницу
-// размера по умолчанию, см. DefaultHistoryPageSize.
-func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
-	orders, err := r.FindByCustomer(ctx, customerID, 0)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*Order, len(orders))
-	for i := range orders {
-		result[i] = &orders[i]
-	}
-	return result, nil
-}
-
 func (r *orderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return r.queryOrders(ctx,
 		`SELECT `+orderColumns+` FROM orders o
 		 WHERE o.customer_id = $1 AND o.status IN ($2, $3, $4, $5)
 		 ORDER BY o.created_at`,
 		customerID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orders := []*Order{}
-	for rows.Next() {
-		o, err := scanOrder(rows)
-		if err != nil {
-			return nil, err
-		}
-		order := o
-		orders = append(orders, &order)
-	}
-	return orders, rows.Err()
 }
 
 // GetAvailableAuctionOrders возвращает открытые аукционные заказы.
 func (r *orderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return r.queryOrders(ctx,
 		`SELECT `+orderColumns+` FROM orders o
 		 JOIN service_nodes sn ON sn.id = o.service_variant_id
 		 WHERE sn.is_auction = TRUE AND o.status = $1`,
 		OrderStatusSearching,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orders := []*Order{}
-	for rows.Next() {
-		o, err := scanOrder(rows)
-		if err != nil {
-			return nil, err
-		}
-		orders = append(orders, &o)
-	}
-	return orders, rows.Err()
 }
 
-func (r *orderRepo) CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
+// LockExecutor берёт транзакционную advisory-блокировку по id исполнителя.
+// Ключ — первые восемь байт uuid: столкновения двух исполнителей на одном
+// ключе лишь выстроят их взятия в очередь, а не сломают что-либо.
+func (r *orderRepo) LockExecutor(ctx context.Context, q Querier, executorID uuid.UUID) error {
+	key := int64(binary.BigEndian.Uint64(executorID[:8]))
+	_, err := exec(r.db, q).ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, key)
+	return err
+}
+
+func (r *orderRepo) CountActiveOrdersByExecutor(ctx context.Context, q Querier, executorID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
+	err := exec(r.db, q).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status = 'ASSIGNED'`,
 		executorID,
 	).Scan(&count)
@@ -654,9 +514,9 @@ func (r *orderRepo) CountActiveOrdersByExecutors(ctx context.Context, executorID
 	return counts, rows.Err()
 }
 
-func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
+func (r *orderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, q Querier, executorID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
+	err := exec(r.db, q).QueryRowContext(ctx,
 		// Оспоренный заказ тоже ждёт закрытия, и исполнитель, копящий споры, не
 		// должен набирать новую работу сверх лимита.
 		`SELECT COUNT(*) FROM orders WHERE executor_id = $1 AND status IN ('EXECUTED', 'DISPUTED')`,

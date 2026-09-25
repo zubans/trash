@@ -78,7 +78,7 @@ func (m *mockOrderRepo) Unassign(ctx context.Context, q repository.Querier, orde
 	return errors.New("not found")
 }
 
-func (m *mockOrderRepo) GetPendingOrders(ctx context.Context) ([]*repository.Order, error) {
+func (m *mockOrderRepo) GetPendingOrders(ctx context.Context, limit int) ([]*repository.Order, error) {
 	var pending []*repository.Order
 	for _, o := range m.orders {
 		if o.Status == "SEARCHING" {
@@ -124,7 +124,12 @@ func (m *mockOrderRepo) AssignOrder(ctx context.Context, orderID uuid.UUID, exec
 	return errors.New("not found")
 }
 
-func (m *mockOrderRepo) CountActiveOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
+// LockExecutor: у подделки нет параллельных транзакций, блокировать нечего.
+func (m *mockOrderRepo) LockExecutor(ctx context.Context, q repository.Querier, executorID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockOrderRepo) CountActiveOrdersByExecutor(ctx context.Context, q repository.Querier, executorID uuid.UUID) (int, error) {
 	var count int
 	for _, o := range m.orders {
 		if o.ExecutorID != nil && *o.ExecutorID == executorID && (o.Status == repository.OrderStatusAssigned || o.Status == "ASSIGNED") {
@@ -137,7 +142,7 @@ func (m *mockOrderRepo) CountActiveOrdersByExecutor(ctx context.Context, executo
 func (m *mockOrderRepo) CountActiveOrdersByExecutors(ctx context.Context, executorIDs []uuid.UUID) (map[uuid.UUID]int, error) {
 	counts := make(map[uuid.UUID]int, len(executorIDs))
 	for _, id := range executorIDs {
-		n, err := m.CountActiveOrdersByExecutor(ctx, id)
+		n, err := m.CountActiveOrdersByExecutor(ctx, nil, id)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +153,7 @@ func (m *mockOrderRepo) CountActiveOrdersByExecutors(ctx context.Context, execut
 	return counts, nil
 }
 
-func (m *mockOrderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, executorID uuid.UUID) (int, error) {
+func (m *mockOrderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Context, q repository.Querier, executorID uuid.UUID) (int, error) {
 	var count int
 	for _, o := range m.orders {
 		if o.ExecutorID != nil && *o.ExecutorID == executorID && (o.Status == repository.OrderStatusExecuted || o.Status == "EXECUTED") {
@@ -158,7 +163,7 @@ func (m *mockOrderRepo) CountExecutedUnconfirmedOrdersByExecutor(ctx context.Con
 	return count, nil
 }
 
-func (m *mockOrderRepo) GetExecutorAssignedOrders(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
+func (m *mockOrderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
 	var assigned []*repository.Order
 	for _, o := range m.orders {
 		if o.ExecutorID != nil && *o.ExecutorID == executorID && o.Status == repository.OrderStatusAssigned {
@@ -168,7 +173,7 @@ func (m *mockOrderRepo) GetExecutorAssignedOrders(ctx context.Context, executorI
 	return assigned, nil
 }
 
-func (m *mockOrderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*repository.Order, error) {
+func (m *mockOrderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]*repository.Order, error) {
 	var cust []*repository.Order
 	for _, o := range m.orders {
 		if o.CustomerID == customerID {
@@ -194,13 +199,14 @@ func (m *mockOrderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.
 	return open, nil
 }
 
-func (m *mockOrderRepo) GetOrderByID(ctx context.Context, orderID uuid.UUID) (*repository.Order, error) {
+// FindByID отвечает sql.ErrNoRows на отсутствующий заказ, как настоящий репозиторий.
+func (m *mockOrderRepo) FindByID(ctx context.Context, orderID uuid.UUID) (*repository.Order, error) {
 	for _, o := range m.orders {
 		if o.ID == orderID {
 			return o, nil
 		}
 	}
-	return nil, errors.New("not found")
+	return nil, sql.ErrNoRows
 }
 
 func (m *mockOrderRepo) CreateConstructionOrder(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, photoURL, lastGeo string) (*repository.Order, error) {
@@ -235,34 +241,6 @@ func (m *mockOrderRepo) Create(ctx context.Context, q repository.Querier, order 
 	return nil
 }
 
-func (m *mockOrderRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.Order, error) {
-	return m.GetOrderByID(context.Background(), id)
-}
-
-func (m *mockOrderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.UUID) ([]repository.Order, error) {
-	orders, err := m.GetExecutorAssignedOrders(context.Background(), executorID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]repository.Order, len(orders))
-	for i, o := range orders {
-		result[i] = *o
-	}
-	return result, nil
-}
-
-func (m *mockOrderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]repository.Order, error) {
-	orders, err := m.GetCustomerOrders(context.Background(), customerID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]repository.Order, len(orders))
-	for i, o := range orders {
-		result[i] = *o
-	}
-	return result, nil
-}
-
 func (m *mockOrderRepo) Assign(ctx context.Context, q repository.Querier, orderID, executorID uuid.UUID) error {
 	// Назначение — единственное место, где настоящий репозиторий проигрывает
 	// гонку за заказ; assignErr позволяет тесту воспроизвести этот проигрыш.
@@ -292,7 +270,7 @@ func (m *mockOrderRepo) AssignWithHold(ctx context.Context, q repository.Querier
 
 // LockForUpdate повторяет чтение с блокировкой строки из настоящего репозитория.
 func (m *mockOrderRepo) LockForUpdate(ctx context.Context, q repository.Querier, orderID uuid.UUID) (*repository.Order, error) {
-	return m.GetOrderByID(context.Background(), orderID)
+	return m.FindByID(context.Background(), orderID)
 }
 
 func (m *mockOrderRepo) SetHoldAmount(ctx context.Context, q repository.Querier, orderID uuid.UUID, holdAmount money.Amount) error {
@@ -538,7 +516,7 @@ func (m *orderMockSettingsRepo) UpdateSettings(ctx context.Context, settings map
 
 type orderMockShiftRepo struct{}
 
-func (m *orderMockShiftRepo) GetActiveShift(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
+func (m *orderMockShiftRepo) FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
 	return &repository.Shift{Status: repository.ShiftStatusActive}, nil
 }
 
@@ -574,16 +552,18 @@ func (m *orderMockShiftRepo) ApplyEarlyEndPenalty(ctx context.Context, shiftID u
 	return nil, nil
 }
 
-func (m *orderMockShiftRepo) FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
-	return m.GetActiveShift(context.Background(), executorID)
-}
-
 func (m *orderMockShiftRepo) Create(ctx context.Context, shift *repository.Shift) error { return nil }
 
-func (m *orderMockShiftRepo) End(ctx context.Context, shiftID uuid.UUID) error { return nil }
-
-func (m *orderMockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
+func (m *orderMockShiftRepo) End(ctx context.Context, q repository.Querier, shiftID uuid.UUID) error {
 	return nil
+}
+
+func (m *orderMockShiftRepo) EarlyEnd(ctx context.Context, q repository.Querier, shiftID uuid.UUID, fine money.Amount) error {
+	return nil
+}
+
+func (m *orderMockShiftRepo) EndExpired(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
+	return nil, nil
 }
 
 func (m *orderMockShiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.UUID) (*repository.Shift, error) {
@@ -632,15 +612,7 @@ func (m *mockUserRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid
 func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	return nil
 }
-func (m *mockUserRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error { return nil }
-
-// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
-// querier игнорируется.
-func (m *mockUserRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
-	return m.UpdateVerified(ctx, id, verified)
-}
-
-func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+func (m *mockUserRepo) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	return nil
 }
 func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
@@ -661,10 +633,10 @@ func (m *mockUserRepo) ResetPasswordWithCode(ctx context.Context, email, code, n
 func (m *mockUserRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*repository.User, error) {
 	return nil, nil
 }
-func (m *mockUserRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (m *mockUserRepo) UpdateUserName(ctx context.Context, q repository.Querier, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	return nil
 }
-func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
+func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, q repository.Querier, userID uuid.UUID, birthDate time.Time) error {
 	return nil
 }
 
@@ -780,7 +752,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 
 	customerID := uuid.New()
 	lat, lon := 55.7558, 37.6173
-	order, err := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "Россия, Москва, Тверская улица, д. 1", &lat, &lon)
+	order, err := srv.Create(context.Background(), customerID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: false, Address: "Россия, Москва, Тверская улица, д. 1", Lat: &lat, Lon: &lon})
 	if err != nil {
 		t.Fatalf("unexpected error creating order: %v", err)
 	}
@@ -801,7 +773,7 @@ func TestOrderService_CreateOrder(t *testing.T) {
 func TestOrderService_CreateOrder_BothUrgencyFlagsRejected(t *testing.T) {
 	catalog := newMockCatalogRepo()
 	srv := NewOrderService(&mockOrderRepo{}, testLedger(), &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
-	_, err := srv.CreateOrder(context.Background(), uuid.New(), standardVariantID, true, true, "addr", nil, nil)
+	_, err := srv.Create(context.Background(), uuid.New(), CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: true, IsAsap: true, Address: "addr", Lat: nil, Lon: nil})
 	if err == nil {
 		t.Error("expected error when both urgency flags are set")
 	}
@@ -814,7 +786,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 	srv := NewOrderService(orderRepo, testLedger(), setRepo, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	order, _ := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, false, "", nil, nil)
+	order, _ := srv.Create(context.Background(), customerID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: false, Address: "", Lat: nil, Lon: nil})
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(context.Background(), order.ID, executorID)
 	_ = orderRepo.Execute(context.Background(), nil, order.ID)
@@ -829,7 +801,7 @@ func TestOrderService_ConfirmAndCancel(t *testing.T) {
 		t.Errorf("expected error double confirming")
 	}
 
-	order2, _ := srv.CreateOrder(context.Background(), customerID, largeVariantID, false, false, "", nil, nil)
+	order2, _ := srv.Create(context.Background(), customerID, CreateOrderRequest{ServiceVariantID: largeVariantID, IsUrgent: false, IsAsap: false, Address: "", Lat: nil, Lon: nil})
 	err = srv.CancelOrder(context.Background(), order2.ID)
 	if err != nil {
 		t.Errorf("expected success canceling order, got err: %v", err)
@@ -874,7 +846,7 @@ func TestOrderService_AsapDowngradeOnConfirm(t *testing.T) {
 	srv := NewOrderService(orderRepo, testLedger(), &orderMockSettingsRepo{}, newMockUserRepo(), &orderMockShiftRepo{}, nil, catalog, nil)
 
 	customerID := uuid.New()
-	order, _ := srv.CreateOrder(context.Background(), customerID, standardVariantID, false, true, "", nil, nil)
+	order, _ := srv.Create(context.Background(), customerID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: true, Address: "", Lat: nil, Lon: nil})
 	executorID := uuid.New()
 	_ = orderRepo.AssignOrder(context.Background(), order.ID, executorID)
 
@@ -1162,7 +1134,7 @@ func TestOrderService_AcceptAutoOpensShift(t *testing.T) {
 		t.Fatalf("accept without a shift should open one, got: %v", err)
 	}
 
-	shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+	shift, _ := shiftRepo.FindActiveByExecutor(context.Background(), executorID)
 	if shift == nil {
 		t.Fatal("expected an active shift after accepting an order without one")
 	}
@@ -1203,7 +1175,7 @@ func TestOrderService_AcceptAutoShiftHonoursSettings(t *testing.T) {
 		if err := srv.Accept(context.Background(), newOrder(orderRepo), executorID); err != nil {
 			t.Fatalf("unexpected accept error: %v", err)
 		}
-		shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+		shift, _ := shiftRepo.FindActiveByExecutor(context.Background(), executorID)
 		if shift == nil || shift.DurationHours != 3 {
 			t.Errorf("expected a 3 h auto shift, got %+v", shift)
 		}
@@ -1221,7 +1193,7 @@ func TestOrderService_AcceptAutoShiftHonoursSettings(t *testing.T) {
 		if err := srv.Accept(context.Background(), newOrder(orderRepo), executorID); err != nil {
 			t.Fatalf("unexpected accept error: %v", err)
 		}
-		shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+		shift, _ := shiftRepo.FindActiveByExecutor(context.Background(), executorID)
 		if shift == nil || shift.DurationHours != defaultAutoShiftDurationHours {
 			t.Errorf("expected the default auto shift duration, got %+v", shift)
 		}
@@ -1250,7 +1222,7 @@ func TestOrderService_AcceptRollsBackAutoShiftWhenOrderIsGone(t *testing.T) {
 		t.Fatal("expected accepting an already assigned order to fail")
 	}
 
-	shift, _ := shiftRepo.GetActiveShift(context.Background(), executorID)
+	shift, _ := shiftRepo.FindActiveByExecutor(context.Background(), executorID)
 	if shift != nil {
 		t.Errorf("expected the auto-opened shift to be closed again, got %+v", shift)
 	}

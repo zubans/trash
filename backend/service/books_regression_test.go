@@ -81,8 +81,8 @@ func TestCancellingSearchingOrderDrainsEscrowAndHold(t *testing.T) {
 	opening := booksTotal(txRepo, accounts)
 
 	lat, lon := 55.75, 37.61
-	order, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false,
-		"Россия, Москва, Тверская улица, д. 3", &lat, &lon)
+	order, err := orders.Create(context.Background(), customerID, CreateOrderRequest{
+		ServiceVariantID: standardVariantID, Address: "Россия, Москва, Тверская улица, д. 3", Lat: &lat, Lon: &lon})
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestCancellingSearchingOrderDrainsEscrowAndHold(t *testing.T) {
 	if got := accounts.balances[repository.AccountEscrow]; !got.IsZero() {
 		t.Errorf("escrow still holds %s after cancelling", got)
 	}
-	cancelled, err := orderRepo.GetOrderByID(context.Background(), order.ID)
+	cancelled, err := orderRepo.FindByID(context.Background(), order.ID)
 	if err != nil {
 		t.Fatalf("reload order: %v", err)
 	}
@@ -161,8 +161,8 @@ func TestExpiredAuctionSweepWillNotCancelAClaimedOrder(t *testing.T) {
 
 	customerID := uuid.New()
 	lat, lon := 55.75, 37.61
-	order, err := orders.CreateOrder(context.Background(), customerID, standardVariantID, false, false,
-		"Россия, Москва, Тверская улица, д. 4", &lat, &lon)
+	order, err := orders.Create(context.Background(), customerID, CreateOrderRequest{
+		ServiceVariantID: standardVariantID, Address: "Россия, Москва, Тверская улица, д. 4", Lat: &lat, Lon: &lon})
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestExpiredAuctionSweepWillNotCancelAClaimedOrder(t *testing.T) {
 		t.Fatal("the sweep cancelled an order that had already been claimed")
 	}
 
-	claimed, err := orderRepo.GetOrderByID(context.Background(), order.ID)
+	claimed, err := orderRepo.FindByID(context.Background(), order.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}

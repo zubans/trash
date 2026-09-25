@@ -25,11 +25,11 @@ import (
 
 var (
 	// ErrPenaltyRole — балл можно дать только исполнителю или заказчику.
-	ErrPenaltyRole = errors.New("штрафной балл даётся только роли исполнителя или заказчика")
+	ErrPenaltyRole = validationError("штрафной балл даётся только роли исполнителя или заказчика")
 	// ErrPenaltyPointNotLive — балл уже отменён или сгорел.
-	ErrPenaltyPointNotLive = errors.New("балл уже отменён или сгорел")
+	ErrPenaltyPointNotLive = stateError("балл уже отменён или сгорел")
 	// ErrPenaltyPointNotFound — балла нет.
-	ErrPenaltyPointNotFound = errors.New("балл не найден")
+	ErrPenaltyPointNotFound = notFoundError("балл не найден")
 )
 
 // softBanRelapseReason — причина мягкого бана, поставленного системой.
@@ -170,6 +170,29 @@ func (s *PenaltyService) SilentlyBlocked(ctx context.Context, userID uuid.UUID, 
 		return false
 	}
 	return st.SilentBlockEndsAt != nil && st.SilentBlockEndsAt.After(s.now())
+}
+
+// SilentlyBlockedAmong отвечает на тот же вопрос, что SilentlyBlocked, для
+// набора пользователей одним запросом — для раунда подбора, который иначе
+// спрашивал бы базу на каждую пару заказ×исполнитель. Возвращаются только
+// заблокированные; сбой чтения — ошибка, а не «никто не заблокирован»: раунд
+// без этого знания назначал бы заказы тем, кому их не положено.
+func (s *PenaltyService) SilentlyBlockedAmong(ctx context.Context, userIDs []uuid.UUID, role string) (map[uuid.UUID]bool, error) {
+	blocked := map[uuid.UUID]bool{}
+	if s == nil || s.repo == nil || len(userIDs) == 0 || !validPenaltyRole(role) {
+		return blocked, nil
+	}
+	statuses, err := s.repo.StatusesOf(ctx, nil, userIDs, role)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	for _, st := range statuses {
+		if st.SilentBlockEndsAt != nil && st.SilentBlockEndsAt.After(now) {
+			blocked[st.UserID] = true
+		}
+	}
+	return blocked, nil
 }
 
 // PenaltyView — то, что о своих штрафах знает сам пользователь.
@@ -420,31 +443,22 @@ type penaltyLimits struct {
 }
 
 func (s *PenaltyService) limits(ctx context.Context) penaltyLimits {
-	l := penaltyLimits{
-		threshold:         defaultPenaltyPointsThreshold,
-		photoMonths:       defaultPhotoRequirementMonths,
-		pointsTTLMonths:   defaultPenaltyPointsTTLMonths,
-		silentBlockMonths: defaultSilentBlockMonths,
-	}
-	if s.settings == nil {
-		return l
-	}
-	settings, err := s.settings.GetSettings(ctx)
-	if err != nil {
-		return l
-	}
-	read := func(key string, into *int) {
-		// Нечитаемое или вне границ значение не должно выключать механику:
-		// берётся умолчание, как если бы строки не было.
-		if v, err := strconv.Atoi(settings[key]); err == nil && validatePenaltySetting(key, settings[key]) == nil {
-			*into = v
+	settings := loadSettingsMap(ctx, s.settings)
+	// Значение вне границ не должно выключать механику: берётся умолчание, как
+	// если бы строки не было.
+	read := func(key string, def int) int {
+		v := settings.int(key, def)
+		if validatePenaltySetting(key, strconv.Itoa(v)) != nil {
+			return def
 		}
+		return v
 	}
-	read(SettingPenaltyPointsThreshold, &l.threshold)
-	read(SettingPhotoRequirementMonths, &l.photoMonths)
-	read(SettingPenaltyPointsTTLMonths, &l.pointsTTLMonths)
-	read(SettingSilentBlockMonths, &l.silentBlockMonths)
-	return l
+	return penaltyLimits{
+		threshold:         read(SettingPenaltyPointsThreshold, defaultPenaltyPointsThreshold),
+		photoMonths:       read(SettingPhotoRequirementMonths, defaultPhotoRequirementMonths),
+		pointsTTLMonths:   read(SettingPenaltyPointsTTLMonths, defaultPenaltyPointsTTLMonths),
+		silentBlockMonths: read(SettingSilentBlockMonths, defaultSilentBlockMonths),
+	}
 }
 
 // recomputeReason — что изменило журнал. От этого зависит, что пересчёт вправе

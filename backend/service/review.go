@@ -2,26 +2,40 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
-	"errors"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
 	"healthlogin/backend/repository"
 )
 
+// ReviewService принимает отзывы по завершённым заказам и держит рейтинг
+// пользователей в такт с ними.
 type ReviewService struct {
 	reviewRepo repository.ReviewRepository
 	orderRepo  repository.OrderRepository
+	// tx выполняет проверку, запись и пересчёт рейтинга одной транзакцией.
+	// Без него (в тестах) шаги идут на пуле соединений.
+	tx TxRunner
 	// stats копит агрегаты исполнителя, по которым решают ачивки. Необязателен:
 	// без него серия пятёрок просто не ведётся.
 	stats repository.ExecutorStatsRepository
 }
 
+// NewReviewService создаёт ReviewService.
 func NewReviewService(reviewRepo repository.ReviewRepository, orderRepo repository.OrderRepository) *ReviewService {
 	return &ReviewService{reviewRepo: reviewRepo, orderRepo: orderRepo}
+}
+
+// WithTx подключает транзакции: отзыв, пересчёт рейтинга и серия оценок
+// коммитятся вместе.
+func (s *ReviewService) WithTx(tx TxRunner) *ReviewService {
+	s.tx = tx
+	return s
 }
 
 // WithExecutorStats подключает счётчики исполнителя: оценка либо продолжает
@@ -46,39 +60,53 @@ const (
 	maxReviewPhotos = 10
 )
 
+func (s *ReviewService) runInTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	if s.tx == nil {
+		return fn(nil)
+	}
+	return s.tx.RunInTx(ctx, fn)
+}
+
+// CreateReview записывает отзыв участника завершённого заказа о второй стороне
+// и пересчитывает её рейтинг. Проверка «уже оставлял», запись и пересчёт —
+// одна транзакция: два одновременных отзыва от одного автора не проходят оба, а
+// рейтинг не может отстать от отзывов.
 func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid.UUID, dto CreateReviewDTO) (*repository.OrderReview, error) {
 	if dto.Rating < 1 || dto.Rating > 5 {
-		return nil, errors.New("rating must be between 1 and 5")
+		return nil, validationError("rating must be between 1 and 5")
 	}
 	dto.Comment = strings.TrimSpace(dto.Comment)
 	if len([]rune(dto.Comment)) > maxCommentRunes {
-		return nil, errors.New("комментарий слишком длинный")
+		return nil, validationError("комментарий слишком длинный")
 	}
 	if len(dto.Photos) > maxReviewPhotos {
-		return nil, errors.New("слишком много фотографий")
+		return nil, validationError("слишком много фотографий")
 	}
 	for _, photo := range dto.Photos {
 		// То же правило, что и для фото заказа: только наши собственные пути загрузки.
 		if !strings.HasPrefix(photo, "/uploads/") || strings.Contains(photo, "..") {
-			return nil, errors.New("фотографии должны быть загружены через приложение")
+			return nil, validationError("фотографии должны быть загружены через приложение")
 		}
 	}
 	if len(dto.Tags) > 20 {
-		return nil, errors.New("слишком много тегов")
+		return nil, validationError("слишком много тегов")
 	}
 
 	order, err := s.orderRepo.FindByID(ctx, orderID)
-	if err != nil || order == nil {
-		return nil, errors.New("order not found")
+	if err != nil {
+		return nil, orderNotFound(err)
+	}
+	if order == nil {
+		return nil, ErrOrderNotFound
 	}
 
 	if order.Status != repository.OrderStatusCompleted {
-		return nil, errors.New("reviews can only be submitted for completed orders")
+		return nil, stateError("reviews can only be submitted for completed orders")
 	}
 
 	// Проверка 7-дневного SLA
 	if order.CompletedAt != nil && time.Since(*order.CompletedAt) > ReviewWindow {
-		return nil, errors.New("review window has expired (7 days max after order completion)")
+		return nil, stateError("review window has expired (7 days max after order completion)")
 	}
 
 	var authorRole string
@@ -87,22 +115,20 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 	if authorID == order.CustomerID {
 		authorRole = "CUSTOMER"
 		if order.ExecutorID == nil {
-			return nil, errors.New("executor not assigned to this order")
+			return nil, ErrOrderHasNoExecutor
 		}
 		targetID = *order.ExecutorID
 	} else if order.ExecutorID != nil && authorID == *order.ExecutorID {
 		authorRole = "EXECUTOR"
 		targetID = order.CustomerID
 	} else {
-		return nil, errors.New("user is not a participant of this order")
+		return nil, forbiddenError("user is not a participant of this order")
 	}
 
-	existing, err := s.reviewRepo.GetReviewByOrderAndAuthor(ctx, orderID, authorID)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, errors.New("you have already submitted a review for this order")
+	// Роль цели — это роль объекта отзыва
+	targetRole := "EXECUTOR"
+	if authorRole == "EXECUTOR" {
+		targetRole = "CUSTOMER"
 	}
 
 	tagsJSON, _ := json.Marshal(dto.Tags)
@@ -119,33 +145,41 @@ func (s *ReviewService) CreateReview(ctx context.Context, orderID, authorID uuid
 		Photos:     json.RawMessage(photosJSON),
 	}
 
-	if err := s.reviewRepo.CreateReview(ctx, review); err != nil {
-		return nil, err
-	}
-
-	// Роль цели — это роль объекта отзыва
-	targetRole := "EXECUTOR"
-	if authorRole == "EXECUTOR" {
-		targetRole = "CUSTOMER"
-	}
-
-	_ = s.reviewRepo.UpdateUserRating(ctx, targetID, targetRole)
-
-	// Серия считается только для исполнителя: ачивки уровня — его, и оценка,
-	// которую он поставил заказчику, к ней отношения не имеет.
-	if s.stats != nil && targetRole == "EXECUTOR" {
-		if err := s.stats.RecordRating(ctx, nil, targetID, dto.Rating); err != nil {
-			// Сбой счётчика не повод отклонить отзыв: отзыв уже записан, а
-			// агрегат восстанавливается админским пересчётом.
-			log.Printf("[review] cannot record rating for %s: %v", targetID, err)
+	if err := s.runInTx(ctx, func(tx *sql.Tx) error {
+		existing, err := s.reviewRepo.GetReviewByOrderAndAuthor(ctx, tx, orderID, authorID)
+		if err != nil {
+			return err
 		}
+		if existing != nil {
+			return ErrReviewAlreadySubmitted
+		}
+		if err := s.reviewRepo.CreateReview(ctx, tx, review); err != nil {
+			return err
+		}
+		// Рейтинг — производная от отзывов; отзыв без пересчёта оставил бы их
+		// расходиться до следующего отзыва.
+		if err := s.reviewRepo.UpdateUserRating(ctx, tx, targetID, targetRole); err != nil {
+			return err
+		}
+		// Серия считается только для исполнителя: ачивки уровня — его, и оценка,
+		// которую он поставил заказчику, к ней отношения не имеет.
+		if s.stats != nil && targetRole == "EXECUTOR" {
+			if err := s.stats.RecordRating(ctx, tx, targetID, dto.Rating); err != nil {
+				// Сбой счётчика не повод отклонить отзыв: агрегат восстанавливается
+				// админским пересчётом.
+				log.Printf("[review] cannot record rating for %s: %v", targetID, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return review, nil
 }
 
 func (s *ReviewService) GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
-	return s.reviewRepo.GetReviewByOrderAndAuthor(ctx, orderID, authorID)
+	return s.reviewRepo.GetReviewByOrderAndAuthor(ctx, nil, orderID, authorID)
 }
 
 func (s *ReviewService) GetReviewsForUser(ctx context.Context, targetID uuid.UUID, limit, offset int) ([]repository.OrderReview, error) {

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"log"
-	"strconv"
 
 	"github.com/google/uuid"
 
@@ -15,6 +14,14 @@ import (
 // с радиусом, в котором карта исполнителя показывает заказы, поэтому воркер
 // может раздавать только те заказы, которые исполнитель увидел бы и мог доехать.
 const defaultAutoMatchRadiusKM = 10.0
+
+// SettingAutoMatchingEnabled — ключ system_settings, включающий и выключающий
+// автоматическое назначение. По умолчанию ВЫКЛ: пока он выключен, заказы
+// берутся только нажатием исполнителем «взять» и никогда не назначаются воркером.
+const SettingAutoMatchingEnabled = "auto_matching_enabled"
+
+// SettingAutoMatchRadiusKM — радиус автоподбора.
+const SettingAutoMatchRadiusKM = "auto_match_radius_km"
 
 // MatchingService сопоставляет заказы в поиске с активными исполнителями.
 type MatchingService struct {
@@ -57,39 +64,11 @@ func (s *MatchingService) WithGeo(geoRepo repository.ExecutorGeoRepository, sett
 	return s
 }
 
-// autoMatchRadiusKM читает настроенную границу, откатываясь к умолчанию.
-func (s *MatchingService) autoMatchRadiusKM(ctx context.Context) float64 {
-	if s.settingsRepo == nil {
-		return defaultAutoMatchRadiusKM
-	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return defaultAutoMatchRadiusKM
-	}
-	if v, ok := settings["auto_match_radius_km"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
-			return f
-		}
-	}
-	return defaultAutoMatchRadiusKM
-}
-
-// SettingAutoMatchingEnabled — ключ system_settings, включающий и выключающий
-// автоматическое назначение. По умолчанию ВЫКЛ: пока он выключен, заказы
-// берутся только нажатием исполнителем «взять» и никогда не назначаются воркером.
-const SettingAutoMatchingEnabled = "auto_matching_enabled"
-
-// autoMatchingEnabled сообщает, можно ли воркеру назначать заказы. Выключено,
-// пока админ явно не включит, поэтому по умолчанию всё только вручную.
-func (s *MatchingService) autoMatchingEnabled(ctx context.Context) bool {
-	if s.settingsRepo == nil {
-		return false
-	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return false
-	}
-	return settings[SettingAutoMatchingEnabled] == "1"
+// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
+// видит заказов и не может их брать.
+func (s *MatchingService) WithPenalties(penalties *PenaltyService) *MatchingService {
+	s.penalties = penalties
+	return s
 }
 
 // withinAutoMatchRadius сообщает, достаточно ли заказ близок к исполнителю,
@@ -114,10 +93,10 @@ func withinAutoMatchRadius(position repository.ExecutorPosition, known bool, ord
 //
 // Воркер сравнивает каждый ждущий заказ с каждым исполнителем на смене. Когда
 // каждое такое сравнение ходило в базу за исполнителем, вариантом услуги,
-// позицией и числом назначенных заказов, цикл стоил примерно четырёх запросов
-// на пару — а это растёт как произведение заказов и исполнителей, на таймере в
-// пять секунд. Однократная загрузка каждого из этих наборов превращает
-// сравнение в арифметику.
+// позицией, числом назначенных заказов и тихой блокировкой, цикл стоил
+// примерно пяти запросов на пару — а это растёт как произведение заказов и
+// исполнителей, на таймере в пять секунд. Однократная загрузка каждого из этих
+// наборов превращает сравнение в арифметику.
 type matchingRound struct {
 	users    map[uuid.UUID]*repository.User
 	variants map[uuid.UUID]*repository.ServiceNode
@@ -128,6 +107,8 @@ type matchingRound struct {
 	// ходу назначения в цикле, поэтому исполнителю нельзя вручить второй заказ на
 	// более поздней итерации того же цикла.
 	activeOrders map[uuid.UUID]int
+	// blocked — исполнители в тихой блокировке, одним запросом на раунд.
+	blocked map[uuid.UUID]bool
 }
 
 // loadRound достаёт входные данные раунда фиксированным числом запросов.
@@ -137,6 +118,7 @@ func (s *MatchingService) loadRound(ctx context.Context, orders []*repository.Or
 		variants:     map[uuid.UUID]*repository.ServiceNode{},
 		positions:    map[uuid.UUID]repository.ExecutorPosition{},
 		activeOrders: map[uuid.UUID]int{},
+		blocked:      map[uuid.UUID]bool{},
 	}
 
 	// Заказчики и исполнители лежат в одной таблице, поэтому это одно чтение.
@@ -174,6 +156,13 @@ func (s *MatchingService) loadRound(ctx context.Context, orders []*repository.Or
 		return nil, err
 	}
 	round.activeOrders = counts
+	if s.penalties != nil {
+		blocked, err := s.penalties.SilentlyBlockedAmong(ctx, executorIDs, repository.RoleExecutor)
+		if err != nil {
+			return nil, err
+		}
+		round.blocked = blocked
+	}
 
 	return round, nil
 }
@@ -197,20 +186,22 @@ func (s *MatchingService) executorEligible(ctx context.Context, round *matchingR
 	if !ok {
 		return false
 	}
-	return canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, round.users[order.CustomerID], variant) == nil
+	return canViewOrTakeOrder(ctx, s.behaviors, round.blocked[executorID], executor, round.users[order.CustomerID], variant) == nil
 }
 
 // MatchOrders выполняет один цикл подбора. По таймеру его запускает
 // worker.MatchingWorker — под защитой лидера, как и остальные периодические задачи.
 func (s *MatchingService) MatchOrders(ctx context.Context) error {
+	settings := loadSettingsMap(ctx, s.settingsRepo)
 	// Автоматическое назначение включается явно. Пока оно выключено (по
 	// умолчанию), воркер ничего не делает, и заказы берутся только вручную.
-	if !s.autoMatchingEnabled(ctx) {
+	if s.settingsRepo == nil || !settings.bool(SettingAutoMatchingEnabled, false) {
 		return nil
 	}
 
-	// 1. Получаем все заказы в поиске
-	orders, err := s.orderRepo.GetPendingOrders(ctx)
+	// 1. Получаем заказы в поиске — страницей, старые первыми: очередь длиннее
+	// страницы дойдёт до следующих тиков.
+	orders, err := s.orderRepo.GetPendingOrders(ctx, 0)
 	if err != nil {
 		return err
 	}
@@ -242,7 +233,7 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 	}
 
 	// 3. Подбираем каждому заказу
-	radiusKM := s.autoMatchRadiusKM(ctx)
+	radiusKM := settings.positiveFloat(SettingAutoMatchRadiusKM, defaultAutoMatchRadiusKM)
 	for _, order := range orders {
 		var matchedExecutorID uuid.UUID
 		for _, execID := range executorIDs {
@@ -284,11 +275,4 @@ func (s *MatchingService) MatchOrders(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// WithPenalties подключает тихую блокировку: заблокированный исполнитель не
-// видит заказов и не может их брать.
-func (s *MatchingService) WithPenalties(penalties *PenaltyService) *MatchingService {
-	s.penalties = penalties
-	return s
 }

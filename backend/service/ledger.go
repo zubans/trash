@@ -460,7 +460,7 @@ func (l *Ledger) SettleOrder(ctx context.Context, tx *sql.Tx, s OrderSettlement)
 	}
 	// Деньги заказчика ушли с баланса в момент удержания; эта проводка
 	// фиксирует расход удержания, а не второе списание.
-	if err := l.Note(ctx, tx, s.CustomerID, repository.AccountEscrow, paid, repository.TransactionTypePayment, &s.OrderID); err != nil {
+	if err := l.note(ctx, tx, s.CustomerID, repository.AccountEscrow, paid, repository.TransactionTypePayment, &s.OrderID); err != nil {
 		return err
 	}
 	if err := l.Commission(ctx, tx, s.ExecutorID, commission, &s.OrderID); err != nil {
@@ -484,10 +484,10 @@ func (l *Ledger) incident(ctx context.Context, tx *sql.Tx, incident *repository.
 	}
 }
 
-// Note записывает проводку, которая не двигает денег, — для шага, который стоит
+// note записывает проводку, которая не двигает денег, — для шага, который стоит
 // видеть в журнале: PAYMENT отмечает расход удержания, а баланс изменился ещё
 // когда удержание бралось.
-func (l *Ledger) Note(ctx context.Context, tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
+func (l *Ledger) note(ctx context.Context, tx *sql.Tx, userID uuid.UUID, account string, amount money.Amount, kind repository.TransactionType, orderID *uuid.UUID) error {
 	return l.record(ctx, tx, entry{UserID: userID, OrderID: orderID, Type: kind, Account: account, Amount: amount})
 }
 

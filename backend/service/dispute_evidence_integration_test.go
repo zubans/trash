@@ -36,7 +36,7 @@ func TestDisputeEvidenceIntegration(t *testing.T) {
 	proofs := photoproof.NewService(photoproof.NewSymbolRepository(f.db)).
 		WithTrack(photoproof.NewTrackRepository(f.db), f.srv.settingsRepo).
 		WithProofs(f.db, photoproof.DiskStorage{Root: t.TempDir()}, photoproof.NewChecker())
-	f.srv.WithEvidence(proofs).WithExecutorGeo(repository.NewExecutorGeoRepository(f.db))
+	f.disputeSvc.WithEvidence(proofs, repository.NewExecutorGeoRepository(f.db), f.srv.settingsRepo)
 	t.Cleanup(func() {
 		_, _ = f.db.Exec(`DELETE FROM executor_positions WHERE executor_id = $1`, f.executorID)
 		_, _ = f.db.Exec(`DELETE FROM geo_alerts WHERE executor_id = $1`, f.executorID)
@@ -85,15 +85,15 @@ func TestDisputeEvidenceIntegration(t *testing.T) {
 		f.order.ID, executedAt); err != nil {
 		t.Fatal(err)
 	}
-	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
+	dispute, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
 	if err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}
 
-	if _, err := f.srv.DisputeEvidence(ctx, uuid.New()); err != ErrDisputeNotFound {
+	if _, err := f.disputeSvc.DisputeEvidence(ctx, uuid.New()); err != ErrDisputeNotFound {
 		t.Fatalf("missing dispute: %v", err)
 	}
-	ev, err := f.srv.DisputeEvidence(ctx, dispute.ID)
+	ev, err := f.disputeSvc.DisputeEvidence(ctx, dispute.ID)
 	if err != nil {
 		t.Fatalf("evidence: %v", err)
 	}

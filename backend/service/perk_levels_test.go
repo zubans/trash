@@ -142,7 +142,7 @@ func TestConfirmOrderAppliesThePerkAndRecordsIt(t *testing.T) {
 			_, _ = txRepo.GetBalance(ctx, executorID)
 			opening := booksTotal(txRepo, accounts)
 
-			order, err := srv.CreateOrder(ctx, customerID, standardVariantID, false, false, "", nil, nil)
+			order, err := srv.Create(ctx, customerID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: false, Address: "", Lat: nil, Lon: nil})
 			if err != nil {
 				t.Fatalf("create order: %v", err)
 			}

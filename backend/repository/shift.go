@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,14 +35,20 @@ type Shift struct {
 // ShiftRepository описывает операции хранения смен.
 type ShiftRepository interface {
 	Create(ctx context.Context, shift *Shift) error
-	GetActiveShift(ctx context.Context, executorID uuid.UUID) (*Shift, error)
+	// FindActiveByExecutor возвращает активную смену исполнителя или nil, nil,
+	// когда её нет: отсутствие смены — обычное состояние, а не ошибка.
+	FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error)
 	GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*Shift, error)
 	GetActiveShifts(ctx context.Context) ([]*Shift, error)
-	End(ctx context.Context, shiftID uuid.UUID) error
-
-	// EarlyEnd завершает смену раньше запланированного конца, записывает сумму
-	// штрафа и помечает смену как PENALIZED.
-	EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error
+	// End закрывает смену без штрафа. EarlyEnd завершает её раньше
+	// запланированного конца, записывает сумму штрафа и помечает смену как
+	// PENALIZED. Оба принимают Querier, чтобы закрытие легло в одну транзакцию
+	// со штрафом и снятием назначений; nil — пул соединений.
+	End(ctx context.Context, q Querier, shiftID uuid.UUID) error
+	EarlyEnd(ctx context.Context, q Querier, shiftID uuid.UUID, fine money.Amount) error
+	// EndExpired одним оператором закрывает активные смены, чей плановый конец
+	// раньше now, и возвращает их id — для журнала и метрик.
+	EndExpired(ctx context.Context, now time.Time) ([]uuid.UUID, error)
 
 	// GetLastShiftByExecutor возвращает самую свежую смену исполнителя,
 	// независимо от статуса (активная, завершённая или со штрафом).
@@ -77,22 +84,20 @@ func (r *shiftRepo) Create(ctx context.Context, shift *Shift) error {
 	return err
 }
 
-// findActiveByExecutor — реализация, стоящая за GetActiveShift.
-func (r *shiftRepo) findActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
+func (r *shiftRepo) FindActiveByExecutor(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, executor_id, duration_hours, started_at, planned_end_at, actual_end_at, status, fine_amount
 		 FROM shifts WHERE executor_id = $1 AND status = $2`,
 		executorID, ShiftStatusActive,
 	)
 	s, err := scanShift(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &s, nil
-}
-
-func (r *shiftRepo) GetActiveShift(ctx context.Context, executorID uuid.UUID) (*Shift, error) {
-	return r.findActiveByExecutor(ctx, executorID)
 }
 
 func (r *shiftRepo) GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*Shift, error) {
@@ -130,21 +135,43 @@ func (r *shiftRepo) GetActiveShifts(ctx context.Context) ([]*Shift, error) {
 	return shifts, rows.Err()
 }
 
-func (r *shiftRepo) End(ctx context.Context, shiftID uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE shifts SET status = $1, actual_end_at = now() WHERE id = $2`,
-		ShiftStatusCompleted, shiftID,
+// End и EarlyEnd охраняются статусом: закрыть можно только активную смену,
+// и уже закрытая сообщает ErrConflict вместо тихого повторного закрытия.
+func (r *shiftRepo) End(ctx context.Context, q Querier, shiftID uuid.UUID) error {
+	return execExpectingOne(ctx, exec(r.db, q),
+		`UPDATE shifts SET status = $1, actual_end_at = now() WHERE id = $2 AND status = $3`,
+		ShiftStatusCompleted, shiftID, ShiftStatusActive,
 	)
-	return err
 }
 
-// EarlyEnd завершает смену раньше запланированного конца и записывает штраф.
-func (r *shiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE shifts SET status = $1, actual_end_at = now(), fine_amount = fine_amount + $2 WHERE id = $3`,
-		ShiftStatusPenalized, fine, shiftID,
+func (r *shiftRepo) EarlyEnd(ctx context.Context, q Querier, shiftID uuid.UUID, fine money.Amount) error {
+	return execExpectingOne(ctx, exec(r.db, q),
+		`UPDATE shifts SET status = $1, actual_end_at = now(), fine_amount = fine_amount + $2 WHERE id = $3 AND status = $4`,
+		ShiftStatusPenalized, fine, shiftID, ShiftStatusActive,
 	)
-	return err
+}
+
+func (r *shiftRepo) EndExpired(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`UPDATE shifts SET status = $1, actual_end_at = now()
+		 WHERE status = $2 AND planned_end_at < $3
+		 RETURNING id`,
+		ShiftStatusCompleted, ShiftStatusActive, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // GetLastShiftByExecutor возвращает самую свежую смену исполнителя,

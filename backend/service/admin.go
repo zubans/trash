@@ -116,7 +116,7 @@ func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address
 	if err := address.Validate(); err != nil {
 		return nil, err
 	}
-	return s.addressRepo.Add(ctx, userID, address.ToRecord())
+	return s.addressRepo.Add(ctx, nil, userID, address.ToRecord())
 }
 
 // DeleteAddress удаляет один из адресов пользователя.
@@ -290,14 +290,14 @@ func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid
 		return errors.New("user not found")
 	}
 	if s.events == nil {
-		if err := s.userRepo.UpdateVerified(ctx, userID, verified); err != nil {
+		if err := s.userRepo.UpdateVerified(ctx, nil, userID, verified); err != nil {
 			return err
 		}
 	} else if err := s.events.RunInTx(ctx, func(tx *sql.Tx) error {
 		// Флаг и событие коммитятся вместе. Поведение, закрывающее заказ верификации
 		// по этому событию, не должно ни разу увидеть флаг без события или событие
 		// без флага.
-		if err := s.userRepo.UpdateVerifiedTx(ctx, tx, userID, verified); err != nil {
+		if err := s.userRepo.UpdateVerified(ctx, tx, userID, verified); err != nil {
 			return err
 		}
 		if !verified {
@@ -347,7 +347,7 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 		}
 	}
 
-	if err := s.userRepo.UpdateRole(ctx, userID, role); err != nil {
+	if err := s.userRepo.SetUserRoles(ctx, userID, []string{role}); err != nil {
 		return err
 	}
 	// Авторизация читает роль из базы на каждом запросе, поэтому изменение уже
@@ -475,7 +475,7 @@ func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, 
 	}
 	record := parsed.ToRecord()
 	record.IsDefault = true
-	_, err := s.addressRepo.Add(ctx, userID, record)
+	_, err := s.addressRepo.Add(ctx, nil, userID, record)
 	return err
 }
 
@@ -490,7 +490,7 @@ func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, las
 	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	return s.userRepo.UpdateUserName(ctx, userID, lastName, firstName, patronymic)
+	return s.userRepo.UpdateUserName(ctx, nil, userID, lastName, firstName, patronymic)
 }
 
 // UpdateUserBirthDate исправляет дату рождения пользователя (только для
@@ -504,7 +504,7 @@ func (s *AdminService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID
 	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
 		return errors.New("user not found")
 	}
-	return s.userRepo.UpdateUserBirthDate(ctx, userID, parsed)
+	return s.userRepo.UpdateUserBirthDate(ctx, nil, userID, parsed)
 }
 
 // TopUpUserBalance зачисляет средства прямо на баланс пользователя.

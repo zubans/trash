@@ -285,9 +285,9 @@ type countingOrderRepo struct {
 	lookups atomic.Int32
 }
 
-func (r *countingOrderRepo) GetOrderByID(ctx context.Context, orderID uuid.UUID) (*repository.Order, error) {
+func (r *countingOrderRepo) FindByID(ctx context.Context, orderID uuid.UUID) (*repository.Order, error) {
 	r.lookups.Add(1)
-	return r.mockOrderRepo.GetOrderByID(ctx, orderID)
+	return r.mockOrderRepo.FindByID(ctx, orderID)
 }
 
 // chatFixture — заказ с исполнителем и активным чатом, как их видит сервис.

@@ -18,7 +18,10 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// OrderService ведёт жизненный цикл заказа: создание, назначение, подтверждение, отмену.
+// OrderService ведёт заказ от создания до закрытия: создание, взятие,
+// отметку «Исполнил», подтверждение, отмену, чаевые — и собирает списки и
+// карточки заказов под того, кто смотрит. Споры живут в DisputeService, а
+// переходы, которыми пользуются соседи, описаны в OrderLifecycle.
 type OrderService struct {
 	orderRepo    repository.OrderRepository
 	ledger       *Ledger
@@ -45,17 +48,20 @@ type OrderService struct {
 	// одна на всех, ровно как до появления геймификации.
 	levels *Levels
 	stats  repository.ExecutorStatsRepository
-	// disputes — споры по исполненным заказам. Без них заказ нельзя оспорить,
-	// а в остальном сервис работает как до появления споров.
+	// disputes нужны здесь ради двух вещей: закрыть заказ нельзя, пока его спор
+	// открыт, а подтверждение заказчиком закрывает спор. Сами споры ведёт DisputeService.
 	disputes repository.DisputeRepository
-	// penalties начисляет штрафные баллы по решению арбитра.
+	// penalties — тихая блокировка ролей и период фото-подтверждения.
 	penalties *PenaltyService
-	// disputeNotifier сообщает сторонам об открытии и закрытии спора.
+	// disputeNotifier сообщает сторонам о споре, который закрыло подтверждение.
 	disputeNotifier *DisputeNotifier
 	// photoProof — модуль фото-подтверждения. Без него заказы фото не требуют.
 	photoProof PhotoProofGate
-	// evidence — снимки и трек для карточки доказательств арбитража.
-	evidence ProofEvidenceSource
+}
+
+// NewOrderService создаёт OrderService.
+func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, resolver AddressResolver) *OrderService {
+	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, resolver: resolver}
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
@@ -74,6 +80,27 @@ func (s *OrderService) WithBehaviors(behaviors *Behaviors, claimRepo repository.
 	s.behaviors = behaviors
 	s.claimRepo = claimRepo
 	s.events = events
+	return s
+}
+
+// WithExecutorGeo подключает хранилище местоположений исполнителей, чтобы
+// список ближайших разрешался по сохранённой на сервере позиции, а не по
+// координатам из запроса, которым нельзя доверять.
+func (s *OrderService) WithExecutorGeo(geoRepo repository.ExecutorGeoRepository) *OrderService {
+	s.executorGeoRepo = geoRepo
+	return s
+}
+
+// WithPenalties подключает тихую блокировку и период фото-подтверждения.
+func (s *OrderService) WithPenalties(penalties *PenaltyService) *OrderService {
+	s.penalties = penalties
+	return s
+}
+
+// WithDisputes подключает хранилище споров: без него заказ закрывается, не
+// глядя на спор, которого и быть не может.
+func (s *OrderService) WithDisputes(disputes repository.DisputeRepository) *OrderService {
+	s.disputes = disputes
 	return s
 }
 
@@ -117,19 +144,6 @@ var eventsForEveryOrder = map[string]bool{
 	repository.EventOrderConfirmed:  true,
 	repository.EventOrderCanceled:   true,
 	repository.EventDisputeConceded: true,
-}
-
-// NewOrderService создаёт OrderService.
-func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, resolver AddressResolver) *OrderService {
-	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, resolver: resolver}
-}
-
-// WithExecutorGeo подключает хранилище местоположений исполнителей, чтобы
-// список ближайших разрешался по сохранённой на сервере позиции, а не по
-// координатам из запроса, которым нельзя доверять.
-func (s *OrderService) WithExecutorGeo(geoRepo repository.ExecutorGeoRepository) *OrderService {
-	s.executorGeoRepo = geoRepo
-	return s
 }
 
 // Ключи system_settings, управляющие автооткрытием смены при взятии заказа.
@@ -201,121 +215,23 @@ type CreateOrderRequest struct {
 	Lon              *float64  `json:"lon,omitempty"`
 }
 
-// hydrateServiceVariant заполняет у заказа вариант услуги и личность
-// исполнителя. Это однозаказная форма hydrateServiceVariants, которую
-// используют списковые эндпоинты; обе делят одну реализацию, чтобы
-// отрисованный заказ выглядел одинаково, каким бы путём его ни получили.
-func (s *OrderService) hydrateServiceVariant(ctx context.Context, order *repository.Order) {
-	if order == nil {
-		return
-	}
-	s.hydrateServiceVariants(ctx, []*repository.Order{order})
-}
-
-// hydrateServiceVariants заполняет целую страницу заказов двумя запросами.
-//
-// Делать это по одному заказу стоило двух запросов на строку — вариант и, для
-// назначенных заказов, исполнитель — на каждом списковом эндпоинте, который
-// опрашивают приложения. Здесь чтения пакетные; разбор полей заказа не изменился.
-// Возвращает участников заказов — заказчиков и исполнителей одним запросом:
-// по ним собирается вторая сторона в карточке и фильтруются ленты.
-func (s *OrderService) hydrateServiceVariants(ctx context.Context, orders []*repository.Order) map[uuid.UUID]*repository.User {
-	users := map[uuid.UUID]*repository.User{}
-	if len(orders) == 0 {
-		return users
-	}
-
-	variantIDs := make([]uuid.UUID, 0, len(orders))
-	userIDs := make([]uuid.UUID, 0, 2*len(orders))
-	for _, o := range orders {
-		if o == nil {
-			continue
-		}
-		variantIDs = append(variantIDs, o.ServiceVariantID)
-		userIDs = append(userIDs, o.CustomerID)
-		if o.ExecutorID != nil {
-			userIDs = append(userIDs, *o.ExecutorID)
-		}
-	}
-
-	variants := map[uuid.UUID]*repository.ServiceNode{}
-	if s.catalogRepo != nil {
-		if loaded, err := s.catalogRepo.GetNodesByIDs(ctx, variantIDs); err == nil {
-			variants = loaded
-		}
-	}
-	categories := loadOrderCategories(ctx, s.catalogRepo, variants)
-	if s.userRepo != nil && len(userIDs) > 0 {
-		if loaded, err := s.userRepo.FindByIDs(ctx, userIDs); err == nil {
-			users = loaded
-		}
-	}
-
-	for _, o := range orders {
-		if o == nil {
-			continue
-		}
-		if variant := variants[o.ServiceVariantID]; variant != nil {
-			o.ServiceVariant = variant
-			o.ServiceCategory = categoryOf(variant, categories)
-			// Что исполнитель обязан отправить, прежде чем этот заказ можно завершить.
-			// Только имена полей: их значения — то, с чем идёт сверка, и исполнителю
-			// их показывать нельзя.
-			if manifest, ok := s.behaviors.Manifest(variant); ok {
-				o.SubmitFields = manifest.CheckFields
-				o.RequirePassport = manifest.RequirePassport
-				o.ScriptExecuted = !manifest.ExecutableByHand()
-			}
-		}
-		// executor_name и executor_phone читают установленные APK заказчика;
-		// новая карточка берёт вторую сторону из counterparty.
-		if o.ExecutorID == nil {
-			continue
-		}
-		if execUser := users[*o.ExecutorID]; execUser != nil {
-			o.ExecutorPhone = execUser.Phone
-			o.ExecutorName = shortDisplayName(execUser)
-		}
-	}
-	return users
-}
-
-// shortDisplayName отдаёт «Имя Отчество Ф.» — форму, в которой приложения
-// показывают участников заказа: исполнителя заказчику и заказчика исполнителю.
-func shortDisplayName(u *repository.User) string {
-	var nameParts []string
-	if u.FirstName != "" {
-		nameParts = append(nameParts, u.FirstName)
-	}
-	if u.Patronymic != "" {
-		nameParts = append(nameParts, u.Patronymic)
-	}
-	if u.LastName != "" {
-		runes := []rune(strings.TrimSpace(u.LastName))
-		if len(runes) > 0 {
-			nameParts = append(nameParts, string(runes[0])+".")
-		}
-	}
-	return strings.Join(nameParts, " ")
-}
-
+// loadSettings читает числовые настройки с умолчаниями тарифных
+// коэффициентов — карта, из которой считаются цена и базовая комиссия.
 func (s *OrderService) loadSettings(ctx context.Context) map[string]float64 {
 	settings := map[string]float64{
 		"standard_tariff_coeff": 1.0,
 		"urgent_tariff_coeff":   3.0,
 		"asap_tariff_coeff":     8.0,
 	}
-	if s.settingsRepo != nil {
-		repoSettings, err := s.settingsRepo.GetSettings(ctx)
-		if err == nil {
-			for k, v := range repoSettings {
-				if k == "currency" {
-					continue
-				}
-				if f, err := strconv.ParseFloat(v, 64); err == nil {
-					settings[k] = f
-				}
-			}
+	stored := loadSettingsMap(ctx, s.settingsRepo)
+	for k, v := range stored {
+		if k == "currency" {
+			continue
+		}
+		// Нечисловые настройки в карту не попадают: у них нет умолчания, за
+		// которое можно было бы спрятать негодное значение.
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			settings[k] = f
 		}
 	}
 	return settings
@@ -327,8 +243,13 @@ func (s *OrderService) CalculatePrice(ctx context.Context, serviceVariantID uuid
 	if err != nil {
 		return money.Zero, err
 	}
+	return s.priceOf(ctx, variant, isUrgent, isAsap, isDowngraded)
+}
+
+// priceOf — CalculatePrice над уже загруженным вариантом.
+func (s *OrderService) priceOf(ctx context.Context, variant *repository.ServiceNode, isUrgent, isAsap, isDowngraded bool) (money.Amount, error) {
 	if variant == nil || !variant.IsVariant() {
-		return money.Zero, errors.New("invalid service variant")
+		return money.Zero, ErrInvalidServiceVariant
 	}
 	// Поведение, назначающее цену своей услуге, перекрывает каталог целиком,
 	// включая тарифные коэффициенты: «бесплатно» обязано оставаться бесплатным и
@@ -340,7 +261,7 @@ func (s *OrderService) CalculatePrice(ctx context.Context, serviceVariantID uuid
 	}
 
 	if variant.BasePrice == nil {
-		return money.Zero, errors.New("variant has no base price")
+		return money.Zero, validationError("variant has no base price")
 	}
 
 	price := *variant.BasePrice
@@ -366,60 +287,27 @@ func (s *OrderService) CalculatePrice(ctx context.Context, serviceVariantID uuid
 	return price, nil
 }
 
-// CreateOrder создаёт обычный заказ и удерживает баланс заказчика.
-func (s *OrderService) CreateOrder(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, lat, lon *float64) (*repository.Order, error) {
-	return s.CreateOrderWithComment(ctx, customerID, serviceVariantID, isUrgent, isAsap, address, "", lat, lon)
+// --- Создание ---------------------------------------------------------------
+
+// preparedOrder — заказ, прошедший все проверки и готовый к записи. Разделение
+// на «подготовить» и «записать» существует ради вызывающих со своей
+// транзакцией: заявка на верификацию дозаполняет профиль и размещает заказ
+// одним коммитом.
+type preparedOrder struct {
+	order   *repository.Order
+	variant *repository.ServiceNode
+	// auction — аукционная заявка: без удержания и без события создания.
+	auction bool
 }
 
-// CreateOrderWithComment создаёт обычный заказ с необязательным комментарием и
-// удерживает баланс заказчика. Создание заказа, удержание баланса и проводка
-// происходят в одной транзакции: списание охраняется балансом, поэтому
-// параллельные запросы не потратят одни деньги дважды, а сбой на любом шаге не
-// оставит после себя ни заказа, ни удержания.
-func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uuid.UUID, serviceVariantID uuid.UUID, isUrgent, isAsap bool, address string, comment string, lat, lon *float64) (*repository.Order, error) {
-	if isUrgent && isAsap {
-		return nil, errors.New("cannot set both urgent and asap flags")
-	}
-
-	variant, err := s.catalogRepo.GetNodeByID(ctx, serviceVariantID)
-	if err != nil {
-		return nil, err
-	}
-	if variant == nil || !variant.IsVariant() {
-		return nil, errors.New("invalid service variant")
-	}
-	// Списанная услуга продолжает разрешаться для уже размещённых по ней
-	// заказов, но новый заказ по ней создать нельзя.
-	if !variant.IsOrderable() {
-		return nil, errors.New("service variant is not available")
-	}
-	if variant.IsAuction {
-		return nil, errors.New("auction variants are ordered through the construction order endpoint")
-	}
-
-	// Вариант с пометкой requires_verification может заказать только вручную
-	// верифицированный заказчик. Проверяется здесь, а не только прячется в
-	// каталоге, чтобы это нельзя было обойти отправкой известного id варианта.
-	if s.userRepo != nil {
-		customer, err := s.userRepo.FindByID(ctx, customerID)
-		if err != nil {
-			return nil, err
-		}
-		if err := canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant); err != nil {
-			return nil, err
-		}
-	}
-
-	holdAmount, err := s.CalculatePrice(ctx, serviceVariantID, isUrgent, isAsap, false)
-	if err != nil {
-		return nil, err
-	}
-	if holdAmount.IsNegative() {
-		return nil, errors.New("invalid order price")
-	}
-
-	var deadline *time.Time
+// newOrder собирает строку заказа. Комментарий обрезается, пустой не хранится.
+func newOrder(customerID uuid.UUID, variant *repository.ServiceNode, isUrgent, isAsap bool, address, comment string, hold money.Amount) *repository.Order {
 	now := time.Now()
+	var commentPtr *string
+	if c := strings.TrimSpace(comment); c != "" {
+		commentPtr = &c
+	}
+	var deadline *time.Time
 	if isUrgent {
 		d := now.Add(1 * time.Hour)
 		deadline = &d
@@ -427,110 +315,239 @@ func (s *OrderService) CreateOrderWithComment(ctx context.Context, customerID uu
 		d := now.Add(15 * time.Minute)
 		deadline = &d
 	}
-
-	var commentPtr *string
-	if strings.TrimSpace(comment) != "" {
-		c := strings.TrimSpace(comment)
-		commentPtr = &c
-	}
-
-	order := &repository.Order{
+	return &repository.Order{
 		ID:               uuid.New(),
 		CustomerID:       customerID,
-		ServiceVariantID: serviceVariantID,
+		ServiceVariantID: variant.ID,
 		IsUrgent:         isUrgent,
 		IsAsap:           isAsap,
 		Comment:          commentPtr,
 		Status:           repository.OrderStatusSearching,
-		HoldAmount:       holdAmount,
-		FinalAmount:      holdAmount,
+		HoldAmount:       hold,
+		FinalAmount:      hold,
 		Address:          &address,
 		CreatedAt:        now,
 		DeadlineAt:       deadline,
 	}
+}
 
-	// Разрешаем координаты: предпочитаем переданные lat/lon, иначе геокодируем адрес.
+// resolvePickup записывает координаты подачи: предпочитает переданные lat/lon,
+// иначе геокодирует адрес.
+func (s *OrderService) resolvePickup(ctx context.Context, order *repository.Order, address string, lat, lon *float64) {
 	if lat != nil && lon != nil {
 		order.PickupLat = lat
 		order.PickupLon = lon
-	} else if s.resolver != nil && address != "" {
-		// От клиента координат нет (старая сборка или набранная строка):
-		// разрешаем их один раз здесь, чтобы заказ можно было подобрать. Выбранная
-		// подсказка несёт свои и в эту ветку не попадает.
+		return
+	}
+	// От клиента координат нет (старая сборка или набранная строка):
+	// разрешаем их один раз здесь, чтобы заказ можно было подобрать. Выбранная
+	// подсказка несёт свои и в эту ветку не попадает.
+	if s.resolver != nil && address != "" {
 		if geo, err := s.resolver.Resolve(ctx, address); err == nil {
 			order.PickupLat = &geo.Lat
 			order.PickupLon = &geo.Lon
 		}
 	}
+}
 
-	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		// Строка заказа идёт первой: проводка на неё ссылается, а
-		// transactions.order_id — внешний ключ, проверяемый немедленно. Порядок
-		// здесь ничего не стоит — оба оператора делят одну транзакцию, поэтому
-		// неудавшееся удержание откатывает заказ вместе с собой.
-		if err := s.orderRepo.Create(ctx, tx, order); err != nil {
-			return err
-		}
-		// Услуга, которую можно заказать один раз на пользователя, занимает свою
-		// строку здесь, в той же транзакции, что и заказ. Два одновременных запроса
-		// оба проходят хук can_order; строку получает только один.
-		if s.behaviors.OncePerUser(variant) {
-			if s.claimRepo == nil {
-				return errors.New("service variant is not available")
-			}
-			if err := s.claimRepo.Claim(ctx, tx, customerID, variant.ID, order.ID); err != nil {
-				return err
-			}
-		}
-		// Reserve — это одно условное списание в паре с зачислением в эскроу:
-		// деньги не уничтожаются, они переходят на счёт, который держит их на всё
-		// время заказа.
-		if err := s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, holdAmount, repository.TransactionTypeHold, &order.ID); err != nil {
-			return err
-		}
-		return s.publishOrderEvent(ctx, tx, repository.EventOrderCreated, order, &customerID)
-	}); err != nil {
-		if errors.Is(err, repository.ErrInsufficientFunds) {
-			return nil, errors.New("insufficient balance")
-		}
-		if errors.Is(err, repository.ErrServiceAlreadyClaimed) {
-			return nil, errors.New("услуга уже была заказана")
-		}
+// createChatBestEffort заводит чат заказа. Неудача не фатальна: заказ и его
+// удержание уже закоммичены, чат появится при первом сообщении.
+func (s *OrderService) createChatBestEffort(ctx context.Context, orderID uuid.UUID) {
+	if s.chatRepo == nil {
+		return
+	}
+	if _, err := s.chatRepo.CreateChat(ctx, orderID); err != nil {
+		log.Printf("[OrderService] failed to create chat for order %s: %v", orderID, err)
+	}
+}
+
+// prepareOrder проверяет запрос обычного заказа и собирает заказ, ничего не записывая.
+func (s *OrderService) prepareOrder(ctx context.Context, customerID uuid.UUID, req CreateOrderRequest) (*preparedOrder, error) {
+	if req.IsUrgent && req.IsAsap {
+		return nil, validationError("cannot set both urgent and asap flags")
+	}
+
+	variant, err := s.catalogRepo.GetNodeByID(ctx, req.ServiceVariantID)
+	if err != nil {
+		return nil, err
+	}
+	if variant == nil || !variant.IsVariant() {
+		return nil, ErrInvalidServiceVariant
+	}
+	// Списанная услуга продолжает разрешаться для уже размещённых по ней
+	// заказов, но новый заказ по ней создать нельзя.
+	if !variant.IsOrderable() {
+		return nil, ErrServiceVariantUnavailable
+	}
+	if variant.IsAuction {
+		return nil, validationError("auction variants are ordered through the construction order endpoint")
+	}
+	if err := s.checkCustomerEligibility(ctx, customerID, variant); err != nil {
 		return nil, err
 	}
 
-	// Всё ниже — по мере возможности: заказ и его удержание уже закоммичены.
-	if s.chatRepo != nil {
-		if _, err := s.chatRepo.CreateChat(ctx, order.ID); err != nil {
-			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
+	holdAmount, err := s.priceOf(ctx, variant, req.IsUrgent, req.IsAsap, false)
+	if err != nil {
+		return nil, err
+	}
+	if holdAmount.IsNegative() {
+		return nil, validationError("invalid order price")
+	}
+
+	order := newOrder(customerID, variant, req.IsUrgent, req.IsAsap, req.Address, req.Comment, holdAmount)
+	s.resolvePickup(ctx, order, req.Address, req.Lat, req.Lon)
+	return &preparedOrder{order: order, variant: variant}, nil
+}
+
+// checkCustomerEligibility — вариант с пометкой requires_verification может
+// заказать только вручную верифицированный заказчик. Проверяется здесь, а не
+// только прячется в каталоге, чтобы это нельзя было обойти отправкой известного
+// id варианта.
+func (s *OrderService) checkCustomerEligibility(ctx context.Context, customerID uuid.UUID, variant *repository.ServiceNode) error {
+	if s.userRepo == nil {
+		return nil
+	}
+	customer, err := s.userRepo.FindByID(ctx, customerID)
+	if err != nil {
+		return userNotFound(err)
+	}
+	return canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant)
+}
+
+// placeOrderTx записывает подготовленный заказ в транзакции вызывающего.
+// Создание заказа, удержание баланса и проводка происходят в одной
+// транзакции: списание охраняется балансом, поэтому параллельные запросы не
+// потратят одни деньги дважды, а сбой на любом шаге не оставит после себя ни
+// заказа, ни удержания.
+func (s *OrderService) placeOrderTx(ctx context.Context, tx *sql.Tx, p *preparedOrder) error {
+	order := p.order
+	// Строка заказа идёт первой: проводка на неё ссылается, а
+	// transactions.order_id — внешний ключ, проверяемый немедленно. Порядок
+	// здесь ничего не стоит — оба оператора делят одну транзакцию, поэтому
+	// неудавшееся удержание откатывает заказ вместе с собой.
+	if err := s.orderRepo.Create(ctx, tx, order); err != nil {
+		return err
+	}
+	if p.auction {
+		return nil
+	}
+	// Услуга, которую можно заказать один раз на пользователя, занимает свою
+	// строку здесь, в той же транзакции, что и заказ. Два одновременных запроса
+	// оба проходят хук can_order; строку получает только один.
+	if s.behaviors.OncePerUser(p.variant) {
+		if s.claimRepo == nil {
+			return ErrServiceVariantUnavailable
+		}
+		if err := s.claimRepo.Claim(ctx, tx, order.CustomerID, p.variant.ID, order.ID); err != nil {
+			if errors.Is(err, repository.ErrServiceAlreadyClaimed) {
+				return ErrServiceAlreadyOrdered
+			}
+			return err
 		}
 	}
-
-	metrics.OrderEvent("created")
-	if !order.HoldAmount.IsPositive() {
-		// Бесплатная услуга — поддерживаемый случай, поэтому это факт для
-		// публикации, а не сбой для отчёта, — но опубликовать его надо, иначе заказ
-		// не оставит следа вообще ни в одной денежной метрике.
-		metrics.OrderCreatedFree()
+	// Reserve — это одно условное списание в паре с зачислением в эскроу:
+	// деньги не уничтожаются, они переходят на счёт, который держит их на всё
+	// время заказа.
+	if err := s.ledger.Reserve(ctx, tx, order.CustomerID, repository.AccountEscrow, order.HoldAmount, repository.TransactionTypeHold, &order.ID); err != nil {
+		if errors.Is(err, repository.ErrInsufficientFunds) {
+			return ErrInsufficientBalance
+		}
+		return err
 	}
-	s.hydrateServiceVariant(ctx, order)
-	return order, nil
+	return s.publishOrderEvent(ctx, tx, repository.EventOrderCreated, order, &order.CustomerID)
 }
 
-// Create создаёт новый заказ для заказчика (псевдоним, совместимый с обработчиком).
-func (s *OrderService) Create(ctx context.Context, customerID uuid.UUID, req CreateOrderRequest) (*repository.Order, error) {
-	return s.CreateOrderWithComment(ctx, customerID, req.ServiceVariantID, req.IsUrgent, false, req.Address, req.Comment, req.Lat, req.Lon)
+// orderPlaced — всё, что происходит после коммита заказа: чат, метрики и
+// карточка для ответа. По мере возможности: заказ и его удержание уже записаны.
+func (s *OrderService) orderPlaced(ctx context.Context, p *preparedOrder) *OrderView {
+	s.createChatBestEffort(ctx, p.order.ID)
+	if p.auction {
+		metrics.OrderEvent("created_auction")
+	} else {
+		metrics.OrderEvent("created")
+		if !p.order.HoldAmount.IsPositive() {
+			// Бесплатная услуга — поддерживаемый случай, поэтому это факт для
+			// публикации, а не сбой для отчёта, — но опубликовать его надо, иначе заказ
+			// не оставит следа вообще ни в одной денежной метрике.
+			metrics.OrderCreatedFree()
+		}
+	}
+	return s.viewOf(ctx, p.order)
 }
+
+// Create создаёт обычный заказ и удерживает баланс заказчика.
+func (s *OrderService) Create(ctx context.Context, customerID uuid.UUID, req CreateOrderRequest) (*OrderView, error) {
+	p, err := s.prepareOrder(ctx, customerID, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		return s.placeOrderTx(ctx, tx, p)
+	}); err != nil {
+		return nil, err
+	}
+	return s.orderPlaced(ctx, p), nil
+}
+
+// CreateConstructionOrder создаёт аукционный заказ на вывоз строительного мусора.
+func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID uuid.UUID, photoURL, address, comment string, lat, lon *float64) (*OrderView, error) {
+	photoURL = strings.TrimSpace(photoURL)
+	if photoURL == "" {
+		return nil, validationError("photo URL is required")
+	}
+	// Принимается только путь, порождённый нашим собственным эндпоинтом загрузки.
+	// Значение раньше сохранялось дословно и рисовалось в админ-панели, поэтому
+	// произвольный URL там — это чужой контент на нашей странице.
+	if !strings.HasPrefix(photoURL, "/uploads/") || strings.Contains(photoURL, "..") {
+		return nil, validationError("photo must be uploaded through the app")
+	}
+
+	// GetNodeByCode видит только живые узлы, поэтому списанный строительный
+	// вариант читается как отсутствующий, а не как ошибка базы.
+	variant, err := s.catalogRepo.GetNodeByCode(ctx, "trash_construction")
+	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
+	if variant == nil || variant.IsDeleted() {
+		return nil, fmt.Errorf("%w: construction variant is missing from the catalog", ErrNotConfigured)
+	}
+	if !variant.IsActive {
+		return nil, ErrServiceVariantUnavailable
+	}
+	// Та же проверка верификации заказчика, что и на пути обычного заказа, — на
+	// случай, если строительный вариант помечен requires_verification.
+	if err := s.checkCustomerEligibility(ctx, customerID, variant); err != nil {
+		return nil, err
+	}
+
+	order := newOrder(customerID, variant, false, false, address, comment, money.Zero)
+	order.PhotoURL = &photoURL
+	s.resolvePickup(ctx, order, address, lat, lon)
+	p := &preparedOrder{order: order, variant: variant, auction: true}
+
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		return s.placeOrderTx(ctx, tx, p)
+	}); err != nil {
+		return nil, err
+	}
+	return s.orderPlaced(ctx, p), nil
+}
+
+// --- Взятие и исполнение ----------------------------------------------------
 
 // Accept позволяет исполнителю взять заказ из очереди. Каждое ограничение,
 // которое список заказов применяет при показе, перепроверяется здесь, потому
 // что список — лишь удобство, а настоящей точкой авторизации является этот
 // метод.
 func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID) error {
-	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
-	hasShift := err == nil && shift != nil
-	if hasShift && shift.Status == repository.ShiftStatusPenalized {
-		return errors.New("executor is penalized")
+	settings := loadSettingsMap(ctx, s.settingsRepo)
+
+	shift, err := s.shiftRepo.FindActiveByExecutor(ctx, executorID)
+	if err != nil {
+		return err
+	}
+	if shift != nil && shift.Status == repository.ShiftStatusPenalized {
+		return ErrExecutorPenalized
 	}
 	// Смена без смены больше не тупик: исполнитель, нажавший «взять заказ»,
 	// уже сказал, что готов работать, поэтому смену открывают за него. Здесь
@@ -538,22 +555,22 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	// заказ уже прошёл все проверки, — иначе отказ по балансу или лимиту
 	// оставлял бы за исполнителем открытую смену, за досрочный выход из которой
 	// берут штраф.
-	autoOpenShift := !hasShift
-	if autoOpenShift && !s.autoShiftOnAcceptEnabled(ctx) {
-		return errors.New("executor has no active shift")
+	autoOpenShift := shift == nil
+	if autoOpenShift && !settings.bool(SettingAutoShiftOnAcceptEnabled, true) {
+		return ErrNoActiveShift
 	}
 
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
-		return errors.New("order not found")
+		return orderNotFound(err)
 	}
 	if order.CustomerID == executorID {
-		return errors.New("нельзя брать собственный заказ")
+		return ErrOwnOrder
 	}
 	if err := s.checkExecutorEligibility(ctx, executorID, order); err != nil {
 		return err
 	}
-	if err := s.checkAcceptRadius(ctx, executorID, order); err != nil {
+	if err := s.checkAcceptRadius(ctx, settings, executorID, order); err != nil {
 		return err
 	}
 
@@ -563,47 +580,52 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	}
 	// Предел настраивается как модуль и применяется как отрицательный пол,
 	// например min_balance_limit=500 означает «никаких новых заказов ниже -500».
-	minBalanceLimit := money.FromRubles(-math.Abs(s.settingsFloat(ctx, "min_balance_limit", defaultMinBalanceLimit)))
+	minBalanceLimit := money.FromRubles(-math.Abs(settings.float("min_balance_limit", defaultMinBalanceLimit)))
 	if balance < minBalanceLimit {
-		return fmt.Errorf("нельзя брать новые заказы: баланс %s ниже допустимого лимита (%s)", balance, minBalanceLimit)
+		return ruleError(fmt.Sprintf("нельзя брать новые заказы: баланс %s ниже допустимого лимита (%s)", balance, minBalanceLimit))
 	}
-
-	maxActive := settingInt(ctx, s.settingsRepo, "max_active_orders", defaultMaxActiveOrders)
-	activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(ctx, executorID)
-	if err != nil {
-		return err
-	}
-	if activeCount >= maxActive {
-		return fmt.Errorf("превышен лимит активных заказов (не более %d)", maxActive)
-	}
-
-	maxExecuted := settingInt(ctx, s.settingsRepo, "max_executed_unconfirmed_orders", defaultMaxExecutedUnconfirmed)
-	executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(ctx, executorID)
-	if err != nil {
-		return err
-	}
-	if executedCount >= maxExecuted {
-		return fmt.Errorf("превышен лимит непотвержденных заказчиком исполненных заказов (не более %d)", maxExecuted)
-	}
+	maxActive := settings.int("max_active_orders", defaultMaxActiveOrders)
+	maxExecuted := settings.int("max_executed_unconfirmed_orders", defaultMaxExecutedUnconfirmed)
 
 	// Смена открывается до назначения, потому что назначенный заказ обязан
 	// принадлежать исполнителю на смене: по смене его находит автоподбор и по
 	// ней же считается штраф за досрочный уход.
 	var openedShift *repository.Shift
 	if autoOpenShift {
-		openedShift, err = s.shiftRepo.StartShift(ctx, executorID, s.autoShiftDurationHours(ctx))
+		openedShift, err = s.shiftRepo.StartShift(ctx, executorID, autoShiftDurationHours(settings))
 		if err != nil {
 			log.Printf("[OrderService] failed to auto-open shift for executor %s: %v", executorID, err)
-			return errors.New("executor has no active shift")
+			return ErrNoActiveShift
 		}
 		metrics.ShiftEvent("auto_started")
 	}
 
-	// Назначение и порождаемое им событие делят одну транзакцию: поведение,
-	// реагирующее на принятый заказ, не должно ни увидеть заказ, который так и не
-	// назначили, ни пропустить тот, который назначили.
+	// Лимиты, назначение и порождаемое им событие делят одну транзакцию под
+	// блокировкой исполнителя: два параллельных взятия не пройдут оба под
+	// одним счётчиком, а поведение, реагирующее на принятый заказ, не увидит
+	// заказ, который так и не назначили.
 	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if err := s.orderRepo.LockExecutor(ctx, tx, executorID); err != nil {
+			return err
+		}
+		activeCount, err := s.orderRepo.CountActiveOrdersByExecutor(ctx, tx, executorID)
+		if err != nil {
+			return err
+		}
+		if activeCount >= maxActive {
+			return ruleError(fmt.Sprintf("превышен лимит активных заказов (не более %d)", maxActive))
+		}
+		executedCount, err := s.orderRepo.CountExecutedUnconfirmedOrdersByExecutor(ctx, tx, executorID)
+		if err != nil {
+			return err
+		}
+		if executedCount >= maxExecuted {
+			return ruleError(fmt.Sprintf("превышен лимит непотвержденных заказчиком исполненных заказов (не более %d)", maxExecuted))
+		}
 		if err := s.orderRepo.Assign(ctx, tx, orderID, executorID); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				return ErrOrderTaken
+			}
 			return err
 		}
 		if err := s.requirePhotoProofTx(ctx, tx, order, executorID); err != nil {
@@ -616,14 +638,11 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 		// отработавшую до конца смену (без штрафа): иначе исполнитель остался бы
 		// со сменой, которую не открывал и за досрочный выход из которой платит.
 		if openedShift != nil {
-			if endErr := s.shiftRepo.End(ctx, openedShift.ID); endErr != nil {
+			if endErr := s.shiftRepo.End(ctx, nil, openedShift.ID); endErr != nil {
 				log.Printf("[OrderService] failed to roll back auto-opened shift %s: %v", openedShift.ID, endErr)
 			} else {
 				metrics.ShiftEvent("auto_rolled_back")
 			}
-		}
-		if errors.Is(err, repository.ErrConflict) {
-			return errors.New("заказ уже взят другим исполнителем")
 		}
 		return err
 	}
@@ -631,52 +650,26 @@ func (s *OrderService) Accept(ctx context.Context, orderID, executorID uuid.UUID
 	return nil
 }
 
-// autoShiftOnAcceptEnabled сообщает, открывать ли смену за исполнителя, который
-// берёт заказ без неё. Включено по умолчанию; выключение возвращает прежнее
-// поведение — отказ с «executor has no active shift».
-func (s *OrderService) autoShiftOnAcceptEnabled(ctx context.Context) bool {
-	if s.settingsRepo == nil {
-		return true
-	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return true
-	}
-	v, ok := settings[SettingAutoShiftOnAcceptEnabled]
-	if !ok {
-		return true
-	}
-	return v != "0"
-}
-
 // autoShiftDurationHours возвращает длительность автоматически открываемой
 // смены. Значение вне списка разрешённых игнорируется, а не создаёт смену,
 // которую исполнитель не смог бы открыть сам.
-func (s *OrderService) autoShiftDurationHours(ctx context.Context) int {
-	hours := settingInt(ctx, s.settingsRepo, SettingAutoShiftDurationHours, defaultAutoShiftDurationHours)
+func autoShiftDurationHours(settings settingsMap) int {
+	hours := settings.int(SettingAutoShiftDurationHours, defaultAutoShiftDurationHours)
 	if !IsValidShiftDuration(hours) {
 		return defaultAutoShiftDurationHours
 	}
 	return hours
 }
 
-// checkExecutorEligibility загружает исполнителя, вариант услуги и заказчика и
-// применяет общий предикат видимости/принятия — тот же, что используют списки
-// заказов, поэтому исполнитель может принять только то, что видит.
+// checkExecutorEligibility применяет общий предикат видимости/принятия — тот
+// же, что используют списки заказов, поэтому исполнитель может принять только
+// то, что видит.
 func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID uuid.UUID, order *repository.Order) error {
 	if s.userRepo == nil {
 		return nil
 	}
-	viewer, err := s.userRepo.FindByID(ctx, executorID)
-	if err != nil {
-		return errors.New("executor not found")
-	}
-	variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
-	if err != nil {
-		return err
-	}
-	customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-	return canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customer, variant)
+	_, err := eligibilityFor(ctx, s.userRepo, s.catalogRepo, s.behaviors, s.penalties, executorID, order)
+	return err
 }
 
 // checkAcceptRadius не даёт взять заказ дальше радиуса взятия.
@@ -687,13 +680,13 @@ func (s *OrderService) checkExecutorEligibility(ctx context.Context, executorID 
 // 5 км, и заказ за пределами круга брался обычным нажатием, не говоря уже о
 // прямом вызове эндпоинта.
 //
-// Радиус тот же, что рисует карта (resolveAcceptRadiusKM), и позиция та же,
+// Радиус тот же, что рисует карта (acceptRadiusKM), и позиция та же,
 // авторитетная серверная, — иначе проверка расходилась бы с тем, что видит
 // исполнитель.
 //
 // Автоподбор эта проверка не трогает: воркер назначает заказы через
 // orderRepo.Assign, минуя Accept, и живёт по своему auto_match_radius_km.
-func (s *OrderService) checkAcceptRadius(ctx context.Context, executorID uuid.UUID, order *repository.Order) error {
+func (s *OrderService) checkAcceptRadius(ctx context.Context, settings settingsMap, executorID uuid.UUID, order *repository.Order) error {
 	// Без хранилища позиций проверять нечего: так собран сервис в тестах, где
 	// география не участвует. В main.go оно подключено всегда (WithExecutorGeo),
 	// и именно поэтому проверка там работает.
@@ -712,20 +705,15 @@ func (s *OrderService) checkAcceptRadius(ctx context.Context, executorID uuid.UU
 		return err
 	}
 	if lat == nil || lon == nil {
-		return errors.New("рабочая позиция не задана: откройте карту и выберите район, чтобы брать заказы")
+		return ErrWorkPositionUnknown
 	}
 
-	radiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
+	radiusKM := acceptRadiusKM(settings)
 	distanceKM := HaversineDistanceKM(*lat, *lon, *order.PickupLat, *order.PickupLon)
 	if distanceKM > radiusKM {
-		return fmt.Errorf("заказ вне зоны взятия: до него %.1f км, разрешено %.1f км", distanceKM, radiusKM)
+		return ruleError(fmt.Sprintf("заказ вне зоны взятия: до него %.1f км, разрешено %.1f км", distanceKM, radiusKM))
 	}
 	return nil
-}
-
-// settingsFloat читает числовую системную настройку со значением по умолчанию.
-func (s *OrderService) settingsFloat(ctx context.Context, key string, defaultValue float64) float64 {
-	return settingFloat(ctx, s.settingsRepo, key, defaultValue)
 }
 
 // RejectAssignedOrder позволяет исполнителю бросить назначенный заказ.
@@ -734,7 +722,7 @@ func (s *OrderService) settingsFloat(ctx context.Context, key string, defaultVal
 // транзакцию, поэтому с исполнителя никогда не спишут за заказ, оставшийся за
 // ним.
 func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executorID uuid.UUID) error {
-	share := s.settingsFloat(ctx, "reject_penalty_share", defaultRejectPenaltyShare)
+	share := settingFloat(ctx, s.settingsRepo, "reject_penalty_share", defaultRejectPenaltyShare)
 	if share < 0 {
 		share = 0
 	}
@@ -745,10 +733,10 @@ func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executo
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
-			return errors.New("order not found")
+			return orderNotFound(err)
 		}
 		if !executorCanReject(order, executorID) {
-			return errors.New("order is not assigned to this executor")
+			return ErrOrderNotAssignedToExecutor
 		}
 
 		// Штраф собирают, а не уничтожают: он попадает на счёт штрафов.
@@ -764,14 +752,6 @@ func (s *OrderService) RejectAssignedOrder(ctx context.Context, orderID, executo
 	return err
 }
 
-// ExecuteOrder помечает заказ как EXECUTED исполнителем и шлёт системное сообщение в чат.
-func (s *OrderService) ExecuteOrder(ctx context.Context, orderID, executorID uuid.UUID) error {
-	return s.ExecuteOrderAt(ctx, orderID, executorID, nil)
-}
-
-// ErrOrderNotOnReview — вернуть в работу можно только заказ на проверке.
-var ErrOrderNotOnReview = errors.New("вернуть в работу можно только заказ на проверке")
-
 // ReturnToWork возвращает заказ на проверке (исполнитель отметил «Исполнил»,
 // заказчик ещё не подтвердил) исполнителю в работу. Так администратор или
 // модератор снимает отметку, поставленную без выполненной работы. Деньги не
@@ -781,7 +761,7 @@ func (s *OrderService) ReturnToWork(ctx context.Context, orderID, actorID uuid.U
 	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		locked, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
-			return errors.New("order not found")
+			return orderNotFound(err)
 		}
 		if locked.Status != repository.OrderStatusExecuted {
 			return ErrOrderNotOnReview
@@ -797,16 +777,11 @@ func (s *OrderService) ReturnToWork(ctx context.Context, orderID, actorID uuid.U
 	metrics.OrderEvent("returned")
 	log.Printf("[AUDIT] user %s returned order %s to work", actorID, orderID)
 
-	if s.chatRepo != nil && order.ExecutorID != nil {
-		if chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID); err == nil && chat != nil {
-			_, _ = s.chatRepo.SaveMessage(ctx, chat.ID, *order.ExecutorID, "🔄 Администрация вернула заказ в работу: отметка «Исполнил» снята.")
-		}
+	if order.ExecutorID != nil {
+		systemChatMessage(ctx, s.chatRepo, orderID, *order.ExecutorID, "🔄 Администрация вернула заказ в работу: отметка «Исполнил» снята.")
 	}
 	return nil
 }
-
-// ErrManualExecuteDisabled — услуга запрещает отмечать заказ исполненным вручную.
-var ErrManualExecuteDisabled = errors.New("этот заказ закрывается автоматически после проверки, отметить его исполненным вручную нельзя")
 
 // ExecuteOrderAt — отметка «Исполнил» с временем устройства. Оно приходит,
 // когда отметка пролежала в офлайн-очереди, и хранится рядом со временем
@@ -815,12 +790,12 @@ var ErrManualExecuteDisabled = errors.New("этот заказ закрывае�
 // Заказ, требующий фото-подтверждения, без загруженного снимка места заказа
 // исполненным не становится — ErrPhotoProofRequired.
 func (s *OrderService) ExecuteOrderAt(ctx context.Context, orderID, executorID uuid.UUID, deviceAt *time.Time) error {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
-		return errors.New("order not found")
+		return orderNotFound(err)
 	}
 	if order.Status != repository.OrderStatusAssigned || order.ExecutorID == nil || *order.ExecutorID != executorID {
-		return errors.New("order is not assigned to this executor")
+		return ErrOrderNotAssignedToExecutor
 	}
 	// Заказ, который закрывает скрипт услуги (верификация — по совпадению данных),
 	// отметкой исполнителя не закрывается: иначе заказчик подтвердил бы работу,
@@ -861,16 +836,11 @@ func (s *OrderService) ExecuteOrderAt(ctx context.Context, orderID, executorID u
 	}
 	metrics.OrderEvent("executed")
 
-	// Отправляем системное уведомление в чат
-	if s.chatRepo != nil {
-		chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
-		if err == nil && chat != nil {
-			_, _ = s.chatRepo.SaveMessage(ctx, chat.ID, executorID, "📦 Исполнитель отметил(а) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
-		}
-	}
-
+	systemChatMessage(ctx, s.chatRepo, orderID, executorID, "📦 Исполнитель отметил(а) выполнение заказа! Пожалуйста, подтвердите приемку работы.")
 	return nil
 }
+
+// --- Подтверждение и отмена -------------------------------------------------
 
 // ConfirmOrder завершает заказ и проводит платежи. Строка заказа блокируется и
 // перечитывается внутри транзакции, поэтому два параллельных подтверждения не
@@ -888,177 +858,6 @@ func (s *OrderService) ConfirmOrder(ctx context.Context, orderID uuid.UUID) erro
 	return err
 }
 
-// confirmTx — само подтверждение, внутри транзакции вызывающего. У него два
-// вызывающих: заказчик, который подтверждает, и применитель поведений,
-// закрывающий заказ, который скрипт объявил завершённым (скажем, состоявшуюся
-// верификацию). Оба обязаны выплачивать ровно теми же шагами, поэтому копия у
-// них одна.
-func (s *OrderService) confirmTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID) error {
-	order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
-	if err != nil {
-		return errors.New("order not found")
-	}
-	// Заказчик может одобрить и после того, как исполнитель пометил заказ
-	// EXECUTED, и раньше, пока он ещё ASSIGNED, — раннее одобрение просто
-	// закрывает заказ и платит исполнителю удержанную сумму, так же как путь
-	// EXECUTED ниже.
-	if order.Status != repository.OrderStatusExecuted && order.Status != repository.OrderStatusAssigned &&
-		order.Status != repository.OrderStatusDisputed {
-		return errors.New("order must be assigned or marked as executed before confirmation")
-	}
-	// Оспоренный заказ закрывается только вместе со спором: вызывающий обязан
-	// закрыть спор в этой же транзакции раньше, чем платить.
-	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
-		return err
-	}
-	if order.ExecutorID == nil {
-		return errors.New("order has no executor")
-	}
-
-	finalAmount, isDowngraded, err := s.payableAmount(ctx, order)
-	if err != nil {
-		return err
-	}
-
-	// Ставка платформы теперь персональная: уровень исполнителя снимает с неё
-	// по проценту за уровень, до нуля. Уровень читается внутри этой же
-	// транзакции, поэтому баллы, начисленные параллельно, не могут применить
-	// себя к заказу задним числом.
-	level := s.commissionLevel(ctx, tx, *order.ExecutorID)
-	commission := commissionAt(finalAmount, level.Percent)
-
-	// Эскроу держит по этому заказу ровно order.HoldAmount, и здесь он
-	// опустошается полностью: возврат заказчику + комиссия + вознаграждение.
-	// Распределение целиком делает реестр — он единственный, кому видно все три
-	// части сразу и кто поэтому может проверить, что исполнителю не досталось
-	// больше уплаченного заказчиком.
-	if err := s.ledger.SettleOrder(ctx, tx, OrderSettlement{
-		OrderID:    order.ID,
-		CustomerID: order.CustomerID,
-		ExecutorID: *order.ExecutorID,
-		Hold:       order.HoldAmount,
-		Paid:       finalAmount,
-		Commission: commission,
-	}); err != nil {
-		return err
-	}
-
-	if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
-		return err
-	}
-	if err := s.orderRepo.Confirm(ctx, tx, orderID, finalAmount, isDowngraded); err != nil {
-		return err
-	}
-	// Ставка и уровень сохраняются в заказе: без них через месяц никто не
-	// объяснит, почему по двум одинаковым заказам разная комиссия.
-	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level, level.PerkID); err != nil {
-		return err
-	}
-	if err := s.recordCompletion(ctx, tx, order, finalAmount); err != nil {
-		return err
-	}
-	return s.publishOrderEvent(ctx, tx, repository.EventOrderConfirmed, order, nil)
-}
-
-// payableAmount — сколько стоит заказ на момент закрытия: удержанное, а для
-// ASAP, закрываемого после срока, — цена со сниженным тарифом, если она ниже.
-func (s *OrderService) payableAmount(ctx context.Context, order *repository.Order) (money.Amount, bool, error) {
-	finalAmount := order.HoldAmount
-	isDowngraded := order.IsDowngraded
-	if order.IsAsap && order.DeadlineAt != nil && time.Now().After(*order.DeadlineAt) {
-		downgraded, err := s.CalculatePrice(ctx, order.ServiceVariantID, false, false, true)
-		if err != nil {
-			return 0, false, err
-		}
-		if downgraded < finalAmount {
-			isDowngraded = true
-			finalAmount = downgraded
-		}
-	}
-	return finalAmount, isDowngraded, nil
-}
-
-// commissionLevel читает уровень исполнителя внутри транзакции подтверждения.
-// Без подключённых уровней это нулевой уровень, то есть базовая ставка.
-func (s *OrderService) commissionLevel(ctx context.Context, tx *sql.Tx, executorID uuid.UUID) Level {
-	if s.levels == nil {
-		base := commissionPercent(s.loadSettings(ctx))
-		return Level{BasePercent: base, Percent: base, LevelPercent: base}
-	}
-	return s.levels.For(ctx, tx, executorID)
-}
-
-// recordCompletion пополняет агрегаты исполнителя в той же транзакции, что и
-// подтверждение. Отдельным проходом их считать нельзя: агрегат, посчитанный
-// позже, расходится с заказами ровно в тот момент, когда проход упал, — а по
-// нему решают, выдать ли ачивку.
-func (s *OrderService) recordCompletion(ctx context.Context, tx *sql.Tx, order *repository.Order, finalAmount money.Amount) error {
-	if s.stats == nil || order.ExecutorID == nil {
-		return nil
-	}
-	minutes := 0
-	if !order.CreatedAt.IsZero() {
-		minutes = int(time.Since(order.CreatedAt).Minutes())
-	}
-	return s.stats.RecordCompletion(ctx, tx, repository.CompletedOrder{
-		ExecutorID: *order.ExecutorID,
-		CustomerID: order.CustomerID,
-		Minutes:    minutes,
-		Earned:     finalAmount,
-	})
-}
-
-// maxTipAmount — потолок от промаха пальцем на одни чаевые. Настоящее
-// ограничение — проверка баланса; это лишь не даёт списать очевидно ошибочную
-// сумму до того, как заказчик заметит.
-var maxTipAmount = money.FromRubles(100_000)
-
-// TipOrder позволяет заказчику дать чаевые исполнителю завершённого заказа.
-// Чаевые переходят с баланса заказчика на баланс исполнителя, не более одного
-// раза на заказ: однократная охрана и списание делят одну транзакцию и одну
-// блокировку строки, поэтому дублирующий запрос не спишет дважды. Возвращает
-// ошибку нехватки баланса, когда заказчик не может покрыть чаевые.
-func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UUID, amount money.Amount) error {
-	if !amount.IsPositive() {
-		return errors.New("tip amount must be positive")
-	}
-	if amount > maxTipAmount {
-		return errors.New("tip amount is too large")
-	}
-
-	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
-		if err != nil {
-			return errors.New("order not found")
-		}
-		if order.CustomerID != customerID {
-			return errors.New("forbidden")
-		}
-		if order.Status != repository.OrderStatusCompleted {
-			return errors.New("tips can only be sent for completed orders")
-		}
-		if order.ExecutorID == nil {
-			return errors.New("order has no executor")
-		}
-
-		tipped, err := s.ledger.HasTip(ctx, tx, orderID)
-		if err != nil {
-			return err
-		}
-		if tipped {
-			return errors.New("this order has already been tipped")
-		}
-
-		return s.ledger.Tip(ctx, tx, customerID, *order.ExecutorID, amount, &order.ID)
-	})
-	// ErrInsufficientFunds пробрасывается, чтобы обработчик отрисовал её тем же
-	// «недостаточно средств» / 422, что и удержание по заказу.
-	if err == nil {
-		metrics.OrderEvent("tipped")
-	}
-	return err
-}
-
 // Confirm завершает заказ конкретного заказчика. Подтверждение оспоренного
 // заказа закрывает его спор: заказчик и исполнитель договорились, и арбитру
 // решать больше нечего.
@@ -1067,13 +866,13 @@ func (s *OrderService) Confirm(ctx context.Context, customerID, orderID uuid.UUI
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
-			return errors.New("order not found")
+			return orderNotFound(err)
 		}
 		if order.CustomerID != customerID {
-			return errors.New("forbidden")
+			return ErrForbidden
 		}
 		if order.Status == repository.OrderStatusDisputed {
-			closed, err = s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
+			closed, err = closeOpenDisputeTx(ctx, tx, s.disputes, orderID, repository.DisputeClosing{
 				Closure:  repository.DisputeClosureCustomerConfirmed,
 				ClosedBy: &customerID,
 			})
@@ -1125,309 +924,146 @@ func (s *OrderService) cancel(ctx context.Context, orderID uuid.UUID, allowed ..
 	return err
 }
 
-// cancelTx — сама отмена, внутри транзакции вызывающего: тот же возврат,
-// освобождение claim'а и событие, отменил ли заказчик, вымел ли воркер
-// невостребованный аукцион или попросил скрипт поведения.
-func (s *OrderService) cancelTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID, allowed ...repository.OrderStatus) error {
-	order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
-	if err != nil {
-		return errors.New("order not found")
-	}
-	permitted := false
-	for _, status := range allowed {
-		if order.Status == status {
-			permitted = true
-			break
-		}
-	}
-	if !permitted {
-		return errors.New("order cannot be canceled")
-	}
-	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
-		return err
-	}
-
-	if order.HoldAmount.IsPositive() {
-		if err := s.ledger.Release(ctx, tx, repository.AccountEscrow, order.CustomerID, order.HoldAmount, repository.TransactionTypeRefund, &order.ID, nil); err != nil {
-			return err
-		}
-		if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
-			return err
-		}
-	}
-	if err := s.orderRepo.Cancel(ctx, tx, orderID); err != nil {
-		return err
-	}
-	// Отменённый заказ возвращает пользователю его единственную попытку. Без
-	// этого заказчик, отменивший заказ верификации, никогда не смог бы заказать
-	// другой, а значит, и никогда не верифицировался бы.
-	if s.claimRepo != nil {
-		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
-		if err == nil && s.behaviors.ReleasesClaimOnCancel(variant) {
-			if err := s.claimRepo.ReleaseByOrder(ctx, tx, orderID); err != nil {
-				return err
-			}
-		}
-	}
-	// Отмена засчитывается исполнителю, если он у заказа был: ачивки смотрят на
-	// неё так же, как на выполнение, и агрегат должен меняться там же, где
-	// меняется сам заказ.
-	if s.stats != nil && order.ExecutorID != nil {
-		if err := s.stats.RecordCancel(ctx, tx, *order.ExecutorID); err != nil {
-			return err
-		}
-	}
-	return s.publishOrderEvent(ctx, tx, repository.EventOrderCanceled, order, nil)
-}
-
-// Cancel отменяет заказ конкретного заказчика (псевдоним, совместимый с обработчиком).
+// Cancel отменяет заказ конкретного заказчика. Владение проверяется под той же
+// блокировкой строки, что и сама отмена, как в Confirm: заказ, сменивший
+// владельца между чтением и отменой, невозможен, но и проверять его вне
+// транзакции незачем.
 func (s *OrderService) Cancel(ctx context.Context, customerID, orderID uuid.UUID) error {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
-	if err != nil {
-		return errors.New("order not found")
-	}
-	if order.CustomerID != customerID {
-		return errors.New("forbidden")
-	}
-	return s.CancelOrder(ctx, orderID)
-}
-
-// CreateConstructionOrder создаёт аукционный заказ на вывоз строительного мусора.
-func (s *OrderService) CreateConstructionOrder(ctx context.Context, customerID uuid.UUID, photoURL, address, comment string, lat, lon *float64) (*repository.Order, error) {
-	photoURL = strings.TrimSpace(photoURL)
-	if photoURL == "" {
-		return nil, errors.New("photo URL is required")
-	}
-	// Принимается только путь, порождённый нашим собственным эндпоинтом загрузки.
-	// Значение раньше сохранялось дословно и рисовалось в админ-панели, поэтому
-	// произвольный URL там — это чужой контент на нашей странице.
-	if !strings.HasPrefix(photoURL, "/uploads/") || strings.Contains(photoURL, "..") {
-		return nil, errors.New("photo must be uploaded through the app")
-	}
-
-	// GetNodeByCode видит только живые узлы, поэтому списанный строительный
-	// вариант читается как отсутствующий, а не как ошибка базы.
-	variant, err := s.catalogRepo.GetNodeByCode(ctx, "trash_construction")
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	if variant == nil || variant.IsDeleted() {
-		return nil, errors.New("construction variant not found")
-	}
-	if !variant.IsActive {
-		return nil, errors.New("service variant is not available")
-	}
-
-	// Та же проверка верификации заказчика, что и на пути обычного заказа, — на
-	// случай, если строительный вариант помечен requires_verification.
-	if s.userRepo != nil {
-		customer, err := s.userRepo.FindByID(ctx, customerID)
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
-			return nil, err
+			return orderNotFound(err)
 		}
-		if err := canCustomerOrderVariant(ctx, s.behaviors, s.penalties, customer, variant); err != nil {
-			return nil, err
+		if order.CustomerID != customerID {
+			return ErrForbidden
 		}
+		return s.cancelLockedTx(ctx, tx, order, customerCancelStatuses...)
+	})
+	if err == nil {
+		metrics.OrderEvent("cancelled")
 	}
-
-	var commentPtr *string
-	if strings.TrimSpace(comment) != "" {
-		c := strings.TrimSpace(comment)
-		commentPtr = &c
-	}
-
-	order := &repository.Order{
-		ID:               uuid.New(),
-		CustomerID:       customerID,
-		ServiceVariantID: variant.ID,
-		IsUrgent:         false,
-		IsAsap:           false,
-		Comment:          commentPtr,
-		Status:           repository.OrderStatusSearching,
-		HoldAmount:       money.Zero,
-		FinalAmount:      money.Zero,
-		PhotoURL:         &photoURL,
-		Address:          &address,
-		CreatedAt:        time.Now(),
-	}
-
-	if lat != nil && lon != nil {
-		order.PickupLat = lat
-		order.PickupLon = lon
-	} else if s.resolver != nil && address != "" {
-		// От клиента координат нет (старая сборка или набранная строка):
-		// разрешаем их один раз здесь, чтобы заказ можно было подобрать. Выбранная
-		// подсказка несёт свои и в эту ветку не попадает.
-		if geo, err := s.resolver.Resolve(ctx, address); err == nil {
-			order.PickupLat = &geo.Lat
-			order.PickupLon = &geo.Lon
-		}
-	}
-
-	if err := s.orderRepo.Create(ctx, nil, order); err != nil {
-		return nil, err
-	}
-
-	// Создаём чат-комнату для нового заказа. Неудача не фатальна.
-	if s.chatRepo != nil {
-		if _, err := s.chatRepo.CreateChat(ctx, order.ID); err != nil {
-			log.Printf("[OrderService] failed to create chat for order %s: %v", order.ID, err)
-		}
-	}
-
-	metrics.OrderEvent("created_auction")
-	s.hydrateServiceVariant(ctx, order)
-	return order, nil
+	return err
 }
 
-// GetAvailableConstructionOrdersForExecutor возвращает открытые строительные заказы, отфильтрованные для исполнителя.
-func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
-	executor, _ := s.userRepo.FindByID(ctx, executorID)
-	executorAge := 0
-	executorVerified := false
-	if executor != nil {
-		executorAge = executor.GetAge()
-		executorVerified = executor.IsVerified()
+// --- Чаевые -----------------------------------------------------------------
+
+// maxTipAmount — потолок от промаха пальцем на одни чаевые. Настоящее
+// ограничение — проверка баланса; это лишь не даёт списать очевидно ошибочную
+// сумму до того, как заказчик заметит.
+var maxTipAmount = money.FromRubles(100_000)
+
+// TipOrder позволяет заказчику дать чаевые исполнителю завершённого заказа.
+// Чаевые переходят с баланса заказчика на баланс исполнителя, не более одного
+// раза на заказ: однократная охрана и списание делят одну транзакцию и одну
+// блокировку строки, поэтому дублирующий запрос не спишет дважды. Возвращает
+// ошибку нехватки баланса, когда заказчик не может покрыть чаевые.
+func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UUID, amount money.Amount) error {
+	if !amount.IsPositive() {
+		return validationError("tip amount must be positive")
+	}
+	if amount > maxTipAmount {
+		return validationError("tip amount is too large")
 	}
 
+	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
+		if err != nil {
+			return orderNotFound(err)
+		}
+		if order.CustomerID != customerID {
+			return ErrForbidden
+		}
+		if order.Status != repository.OrderStatusCompleted {
+			return ErrTipNotAllowed
+		}
+		if order.ExecutorID == nil {
+			return ErrOrderHasNoExecutor
+		}
+
+		tipped, err := s.ledger.HasTip(ctx, tx, orderID)
+		if err != nil {
+			return err
+		}
+		if tipped {
+			return ErrTipAlreadySent
+		}
+
+		return s.ledger.Tip(ctx, tx, customerID, *order.ExecutorID, amount, &order.ID)
+	})
+	// ErrInsufficientFunds пробрасывается, чтобы обработчик отрисовал её тем же
+	// «недостаточно средств» / 422, что и удержание по заказу.
+	if err == nil {
+		metrics.OrderEvent("tipped")
+	}
+	return err
+}
+
+// --- Списки -----------------------------------------------------------------
+
+// GetAvailableConstructionOrdersForExecutor возвращает открытые строительные
+// заказы, которые исполнитель может увидеть и по которым может сделать ставку.
+//
+// Фильтр — тот же canViewOrTakeOrder, что и у карты, списка ближайших и самой
+// ставки: раньше список проверял верификацию и возраст сам и показывал заказы,
+// по которым ставку затем отклоняли (бан, тихая блокировка, только для
+// модераторов, скрипт услуги, собственный заказ). Сверх предиката действует
+// правило аукционов: показываются только заказы верифицированных заказчиков.
+func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Context, executorID uuid.UUID) ([]*OrderView, error) {
 	orders, err := s.orderRepo.GetAvailableAuctionOrders(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	var viewer *repository.User
+	if s.userRepo != nil {
+		viewer, _ = s.userRepo.FindByID(ctx, executorID)
+	}
+	blocked := silentlyBlocked(ctx, s.penalties, viewer, repository.RoleExecutor)
+
 	// Варианты, исполнители и заказчики, которых осматривает фильтр ниже, — всё за
 	// фиксированное число запросов, а не по набору на заказ.
-	customers := s.hydrateServiceVariants(ctx, orders)
-	presentFor(executorViewer(executorID), orders, customers, time.Now())
+	views, customers := s.viewsOf(ctx, orders)
+	presentFor(executorViewer(executorID), views, customers, time.Now())
 
-	filtered := []*repository.Order{}
-	for _, o := range orders {
-		// 1. Фильтр: заказчик ОБЯЗАН быть верифицирован («показ заказов только от верифицированных пользователей»)
-		if customer := customers[o.CustomerID]; customer != nil {
-			if !customer.IsVerified() {
-				continue
-			}
-		}
-
-		// 2. Фильтр: если вариант услуги требует верификации, исполнитель должен быть верифицирован
-		if o.ServiceVariant != nil {
-			if o.ServiceVariant.RequiresVerification && !executorVerified {
-				continue
-			}
-			// 3. Фильтр: если у варианта услуги есть возрастное ограничение (min_age > 0), возраст исполнителя должен быть >= min_age
-			if o.ServiceVariant.MinAge > 0 && executorAge < o.ServiceVariant.MinAge {
-				continue
-			}
-		}
-
-		filtered = append(filtered, o)
-	}
-
-	return filtered, nil
-}
-
-// FindNearbyOrdersForExecutor возвращает обычные/крупные заказы в поиске рядом
-// с координатами, отфильтрованные для исполнителя.
-//
-// Каждый заказ несёт can_accept и distance_km — ровно те же поля и с тем же
-// смыслом, что и на карте. Раньше список их не отдавал, и дашборд рисовал
-// кнопку взятия на каждой строке, не имея, чем её ограничить: радиус списка (5
-// км) молча расходился с радиусом взятия, и заказ вне круга брался обычным
-// нажатием. Поля добавлены к прежнему ответу, а не заменяют его, поэтому
-// установленные APK, которые о них не знают, продолжают работать как прежде.
-// Радиус задаёт сервер, а не запрос: это настройка map_overview_radius_km, та
-// же, по которой строится карта. Клиент раньше присылал своё число (дашборд —
-// зашитые 5 км, а принять эндпоинт был готов до 50), и именно поэтому список
-// показывал то, чего взять нельзя.
-func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executorID uuid.UUID, lat, lon float64) ([]*repository.MapOrder, error) {
-	radiusMeters := int(resolveMapOverviewRadiusKM(ctx, s.settingsRepo) * 1000)
-	// Привязываем поиск к авторитетной сохранённой позиции исполнителя — той же
-	// точке, что используют карта и проверка радиуса принятия. Координаты клиента
-	// (GPS устройства, который может отсутствовать или падать в базовую точку) —
-	// лишь запасной вариант, когда хранилище не подключено, и это не даёт списку
-	// разойтись с тем, что исполнитель реально может принять.
-	positionKnown := false
-	if s.executorGeoRepo != nil {
-		storedLat, storedLon, _, err := s.executorGeoRepo.GetExecutorLocation(ctx, executorID)
-		if err != nil {
-			return nil, err
-		}
-		if storedLat == nil || storedLon == nil {
-			// Рабочая позиция ещё не задана: принять нечего, поэтому и в списке ничего нет.
-			return []*repository.MapOrder{}, nil
-		}
-		lat, lon = *storedLat, *storedLon
-		positionKnown = true
-	}
-
-	// Что смотрящему можно видеть, решают его набор ролей и верификация; роли
-	// грузятся вместе с пользователем, поэтому модератор видит и заказы для модераторов.
-	viewer, _ := s.userRepo.FindByID(ctx, executorID)
-
-	orders, err := s.orderRepo.FindNearbyOrders(ctx, lat, lon, radiusMeters)
-	if err != nil {
-		return nil, err
-	}
-
-	customers := s.hydrateServiceVariants(ctx, orders)
-	presentFor(executorViewer(executorID), orders, customers, time.Now())
-
-	radiusKM := resolveAcceptRadiusKM(ctx, s.settingsRepo)
-
-	filtered := []*repository.MapOrder{}
-	for _, o := range orders {
-		// Один предикат и для карты, и для этого списка, и тот же, что применяет
-		// путь принятия: заказы только для модераторов идут модераторам; обычные
-		// заказы следуют сегментации по верификации заказчика и стандартным
-		// проверкам исполнителя (requires_verification, min_age, бан).
-		if canViewOrTakeOrder(ctx, s.behaviors, s.penalties, viewer, customers[o.CustomerID], o.ServiceVariant) != nil {
+	filtered := []*OrderView{}
+	for _, v := range views {
+		if v.CustomerID == executorID {
 			continue
 		}
-
-		item := &repository.MapOrder{Order: *o}
-		// Считать расстояние можно только от известной позиции. Когда хранилище
-		// не подключено, точка отсчёта — координаты клиента, которым доверять
-		// нельзя, поэтому can_accept остаётся выключенным, а решает всё равно
-		// сервер на пути принятия.
-		if positionKnown && o.PickupLat != nil && o.PickupLon != nil {
-			item.DistanceKM = HaversineDistanceKM(lat, lon, *o.PickupLat, *o.PickupLon)
-			item.CanAccept = item.DistanceKM <= radiusKM
+		customer := customers[v.CustomerID]
+		if customer != nil && !customer.IsVerified() {
+			continue
 		}
-		filtered = append(filtered, item)
+		if canViewOrTakeOrder(ctx, s.behaviors, blocked, viewer, customer, v.ServiceVariant) != nil {
+			continue
+		}
+		filtered = append(filtered, v)
 	}
-
 	return filtered, nil
 }
 
-// customersOf пакетно загружает заказчиков, разместивших данные заказы, — для
-// фильтров списка, которые смотрят на состояние верификации заказчика.
-//
-// Неудачная загрузка даёт пустую карту, которую вызывающие читают как «нет
-// сведений о заказчике» — то же, что раньше давало неудачное чтение по одному
-// заказу, и то прочтение, которое правила допуска уже умеют обрабатывать.
 // ListAssigned возвращает заказы, назначенные исполнителю.
-func (s *OrderService) ListAssigned(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.GetExecutorAssignedOrders(ctx, executorID)
+func (s *OrderService) ListAssigned(ctx context.Context, executorID uuid.UUID) ([]*OrderView, error) {
+	orders, err := s.orderRepo.FindAssignedByExecutor(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
-	s.presentOrders(ctx, executorViewer(executorID), orders)
-	return orders, nil
+	return s.presentOrders(ctx, executorViewer(executorID), orders), nil
 }
 
-// ListByCustomer возвращает заказы, созданные заказчиком.
-func (s *OrderService) ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]*repository.Order, error) {
-	orders, err := s.orderRepo.GetCustomerOrders(ctx, customerID)
+// ListByCustomer возвращает заказы, созданные заказчиком, — страницу размера
+// по умолчанию, см. repository.DefaultHistoryPageSize.
+func (s *OrderService) ListByCustomer(ctx context.Context, customerID uuid.UUID) ([]*OrderView, error) {
+	orders, err := s.orderRepo.FindByCustomer(ctx, customerID, 0)
 	if err != nil {
 		return nil, err
 	}
-	s.presentOrders(ctx, customerViewer(customerID), orders)
-	return orders, nil
+	return s.presentOrders(ctx, customerViewer(customerID), orders), nil
 }
 
 // ExecutorHistory отдаёт недавние заказы исполнителя для экрана истории —
 // собранными так же, как остальные его ленты.
-func (s *OrderService) ExecutorHistory(ctx context.Context, executorID uuid.UUID) ([]*repository.Order, error) {
+func (s *OrderService) ExecutorHistory(ctx context.Context, executorID uuid.UUID) ([]*OrderView, error) {
 	rows, err := s.orderRepo.FindAllByExecutor(ctx, executorID, 0)
 	if err != nil {
 		return nil, err
@@ -1436,41 +1072,17 @@ func (s *OrderService) ExecutorHistory(ctx context.Context, executorID uuid.UUID
 	for i := range rows {
 		orders[i] = &rows[i]
 	}
-	s.presentOrders(ctx, executorViewer(executorID), orders)
-	return orders, nil
+	return s.presentOrders(ctx, executorViewer(executorID), orders), nil
 }
 
-// loadOrderCategories возвращает родительские категории вариантов одним
-// запросом на список, а не одним на заказ. Подпись «категория / услуга» нужна
-// на каждом экране заказов, поэтому загрузка живёт в одном месте.
-func loadOrderCategories(
-	ctx context.Context,
-	catalogRepo repository.ServiceCatalogRepository,
-	variants map[uuid.UUID]*repository.ServiceNode,
-) map[uuid.UUID]*repository.ServiceNode {
-	if catalogRepo == nil || len(variants) == 0 {
-		return nil
+// systemChatMessage пишет служебное сообщение в чат заказа. Сбой не отменяет
+// действия, которое уже закоммичено: сообщение — уведомление, а не его часть.
+func systemChatMessage(ctx context.Context, chatRepo repository.ChatRepository, orderID, senderID uuid.UUID, text string) {
+	if chatRepo == nil {
+		return
 	}
-	parentIDs := make([]uuid.UUID, 0, len(variants))
-	for _, v := range variants {
-		if v != nil && v.ParentID != nil {
-			parentIDs = append(parentIDs, *v.ParentID)
-		}
+	chat, err := chatRepo.GetChatByOrderID(ctx, orderID)
+	if err == nil && chat != nil {
+		_, _ = chatRepo.SaveMessage(ctx, chat.ID, senderID, text)
 	}
-	if len(parentIDs) == 0 {
-		return nil
-	}
-	loaded, err := catalogRepo.GetNodesByIDs(ctx, parentIDs)
-	if err != nil {
-		return nil
-	}
-	return loaded
-}
-
-// categoryOf находит категорию варианта в уже загруженной пачке.
-func categoryOf(variant *repository.ServiceNode, categories map[uuid.UUID]*repository.ServiceNode) *repository.ServiceNode {
-	if variant == nil || variant.ParentID == nil || categories == nil {
-		return nil
-	}
-	return categories[*variant.ParentID]
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,6 +91,11 @@ type PenaltyRepository interface {
 	Status(ctx context.Context, q Querier, userID uuid.UUID, role string) (*PenaltyStatus, error)
 	// ListStatuses — состояния всех ролей пользователя.
 	ListStatuses(ctx context.Context, q Querier, userID uuid.UUID) ([]PenaltyStatus, error)
+	// StatusesOf — состояние одной роли у набора пользователей одним запросом:
+	// раунд подбора спрашивает про каждого кандидата, и запрос на кандидата
+	// делал бы стоимость тика произведением заказов и исполнителей.
+	// Пользователи без строки состояния в результате отсутствуют.
+	StatusesOf(ctx context.Context, q Querier, userIDs []uuid.UUID, role string) ([]PenaltyStatus, error)
 
 	// ApplySoftBan переводит пользователя в SOFT_BANNED и записывает, кто, когда
 	// и почему, одним оператором: статус без причины или причина без статуса
@@ -311,8 +317,23 @@ func (r *penaltyRepo) SaveStatus(ctx context.Context, q Querier, st *PenaltyStat
 }
 
 func (r *penaltyRepo) ListStatuses(ctx context.Context, q Querier, userID uuid.UUID) ([]PenaltyStatus, error) {
-	rows, err := exec(r.db, q).QueryContext(ctx,
+	return r.queryStatuses(ctx, q,
 		`SELECT `+penaltyStatusColumns+` FROM user_penalty_status WHERE user_id = $1 ORDER BY role`, userID)
+}
+
+func (r *penaltyRepo) StatusesOf(ctx context.Context, q Querier, userIDs []uuid.UUID, role string) ([]PenaltyStatus, error) {
+	placeholders, args := idList(userIDs)
+	if len(args) == 0 {
+		return []PenaltyStatus{}, nil
+	}
+	args = append(args, role)
+	return r.queryStatuses(ctx, q,
+		`SELECT `+penaltyStatusColumns+` FROM user_penalty_status
+		 WHERE user_id IN (`+placeholders+`) AND role = $`+strconv.Itoa(len(args)), args...)
+}
+
+func (r *penaltyRepo) queryStatuses(ctx context.Context, q Querier, query string, args ...interface{}) ([]PenaltyStatus, error) {
+	rows, err := exec(r.db, q).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

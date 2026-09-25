@@ -561,10 +561,6 @@ func TestFindByCustomerIsLimited(t *testing.T) {
 	if err != nil || len(all) != 5 {
 		t.Errorf("default page: %d orders, err %v; want 5", len(all), err)
 	}
-	viaForwarder, err := repo.GetCustomerOrders(ctx, customerID)
-	if err != nil || len(viaForwarder) != 5 {
-		t.Errorf("GetCustomerOrders: %d orders, err %v; want 5", len(viaForwarder), err)
-	}
 }
 
 func TestTransactionPeriodFilterAndScan(t *testing.T) {

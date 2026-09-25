@@ -60,7 +60,7 @@ func TestPenaltyJournalIntegration(t *testing.T) {
 	ctx := context.Background()
 	penalties := newIntegrationPenaltyService(f.db, f.srv)
 
-	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
+	dispute, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "не вывезли")
 	if err != nil {
 		t.Fatalf("open dispute: %v", err)
 	}

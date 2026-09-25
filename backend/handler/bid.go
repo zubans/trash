@@ -7,9 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -29,8 +27,8 @@ func NewBidHandler(bidService *service.BidService, orderService *service.OrderSe
 
 // CreateConstructionOrderHandler создаёт аукцион на вывоз строительного мусора.
 func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
+	user := userFromContext(r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -49,7 +47,7 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 
 	order, err := h.orderService.CreateConstructionOrder(r.Context(), user.ID, req.PhotoURL, req.Address, req.Comment, req.Lat, req.Lon)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -60,14 +58,13 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 
 // CreateBidHandler позволяет исполнителям делать ставки по строительным заказам.
 func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
+	user := userFromContext(r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := chi.URLParam(r, "id")
-	orderID, err := uuid.Parse(idStr)
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		http.Error(w, "invalid order ID", http.StatusBadRequest)
 		return
@@ -83,7 +80,7 @@ func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 
 	bid, err := h.bidService.CreateBid(r.Context(), orderID, user.ID, req.OfferedPrice)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -94,22 +91,20 @@ func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 
 // AcceptBidHandler позволяет заказчикам принять конкретную ставку.
 func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
+	user := userFromContext(r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := chi.URLParam(r, "id")
-	bidID, err := uuid.Parse(idStr)
+	bidID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		http.Error(w, "invalid bid ID", http.StatusBadRequest)
 		return
 	}
 
-	err = h.bidService.AcceptBid(r.Context(), bidID, user.ID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := h.bidService.AcceptBid(r.Context(), bidID, user.ID); err != nil {
+		writeDomainError(w, err)
 		return
 	}
 
@@ -120,14 +115,13 @@ func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetBidsHandler перечисляет все ставки по конкретному строительному заказу.
 func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
+	user := userFromContext(r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := chi.URLParam(r, "id")
-	orderID, err := uuid.Parse(idStr)
+	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		http.Error(w, "invalid order ID", http.StatusBadRequest)
 		return
@@ -135,28 +129,24 @@ func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 
 	bids, err := h.bidService.GetBidsForOrder(r.Context(), orderID, user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(bids)
+	writeJSON(w, bids)
 }
 
 // GetAvailableConstructionOrdersHandler перечисляет открытые строительные заказы для исполнителей.
 func (h *BidHandler) GetAvailableConstructionOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
+	user := userFromContext(r)
+	if user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	orders, err := h.orderService.GetAvailableConstructionOrdersForExecutor(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	writeJSON(w, orders)
 }

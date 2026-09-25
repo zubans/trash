@@ -31,7 +31,7 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 
 	resp, err := h.geoService.SetLocation(r.Context(), user.ID, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h *ExecutorGeoHandler) FollowDevice(w http.ResponseWriter, r *http.Request
 
 	resp, err := h.geoService.FollowDevice(r.Context(), user.ID, req.Lat, req.Lon)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request)
 	// user.ID и не может быть запрошено для кого-то другого.
 	resp, err := h.geoService.GetLocation(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request
 	// строки запроса, поэтому эндпоинтом нельзя сканировать произвольные районы.
 	orders, err := h.geoService.GetMapOrders(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *ExecutorGeoHandler) GetGeoAlerts(w http.ResponseWriter, r *http.Request
 
 	alerts, err := h.geoService.GetGeoAlerts(r.Context(), status, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 

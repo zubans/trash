@@ -13,6 +13,20 @@ import (
 	"healthlogin/backend/repository"
 )
 
+// Ошибки торгов.
+var (
+	// ErrBidNotPending — решить можно только ожидающую ставку.
+	ErrBidNotPending = stateError("bid is not pending")
+	// ErrBidStale — ставка уже неактуальна: заказ ушёл или её решили раньше.
+	ErrBidStale = conflictError("предложение уже неактуально, обновите список")
+	// ErrOrderNotSearching — ставки принимаются только по заказу в поиске.
+	ErrOrderNotSearching = stateError("order is no longer in searching status")
+	// ErrOrderNotAuction — заказ не аукционный, ставок по нему нет.
+	ErrOrderNotAuction = stateError("order is not an auction")
+	// ErrBidderOffShift — исполнитель, чью ставку принимают, уже не на смене.
+	ErrBidderOffShift = ruleError("исполнитель сейчас не на смене, выберите другое предложение")
+)
+
 // BidService управляет бизнес-операциями торгов.
 type BidService struct {
 	// penalties — тихая блокировка ролей; nil означает «механизм штрафов не подключён».
@@ -61,49 +75,40 @@ func NewBidService(
 	}
 }
 
-// maxBidPrice ограничивает предложение, чтобы опечатка (или злонамеренный
-// клиент) не протолкнула значение, которое не влезет в колонку NUMERIC(18,2).
-// maxBidPrice ограничивает предложение десятью миллионами рублей.
+// maxBidPrice ограничивает предложение десятью миллионами рублей, чтобы
+// опечатка (или злонамеренный клиент) не протолкнула значение, которое не
+// влезет в колонку NUMERIC(18,2).
 const maxBidPrice = money.Amount(10_000_000 * 100)
 
 // CreateBid подаёт ставку по заказу на вывоз строительного мусора.
 func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*repository.Bid, error) {
 	if !offeredPrice.IsPositive() {
-		return nil, errors.New("offered price must be greater than zero")
+		return nil, validationError("offered price must be greater than zero")
 	}
 	if offeredPrice > maxBidPrice {
-		return nil, errors.New("offered price is too large")
+		return nil, validationError("offered price is too large")
 	}
 
 	// Проверяем, что у исполнителя есть активная смена
-	shift, err := s.shiftRepo.GetActiveShift(ctx, executorID)
+	shift, err := s.shiftRepo.FindActiveByExecutor(ctx, executorID)
 	if err != nil {
 		return nil, err
 	}
 	if shift == nil {
-		return nil, errors.New("cannot place a bid without an active work shift")
+		return nil, ruleError("cannot place a bid without an active work shift")
 	}
 
 	// Те же правила возраста и верификации, что применяются к принятию заказа,
 	// применяются и к ставке по нему.
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
-		return nil, errors.New("order not found")
+		return nil, orderNotFound(err)
 	}
 	if order.CustomerID == executorID {
-		return nil, errors.New("нельзя делать ставки на собственный заказ")
+		return nil, ruleError("нельзя делать ставки на собственный заказ")
 	}
 	if s.userRepo != nil && s.catalogRepo != nil {
-		executor, err := s.userRepo.FindByID(ctx, executorID)
-		if err != nil {
-			return nil, errors.New("executor not found")
-		}
-		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
-		if err != nil {
-			return nil, err
-		}
-		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-		if err := canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, customer, variant); err != nil {
+		if _, err := eligibilityFor(ctx, s.userRepo, s.catalogRepo, s.behaviors, s.penalties, executorID, order); err != nil {
 			return nil, err
 		}
 	}
@@ -114,7 +119,7 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 			return nil, err
 		}
 		if balance.IsNegative() {
-			return nil, errors.New("нельзя делать ставки при отрицательном балансе (уход в минус)")
+			return nil, ruleError("нельзя делать ставки при отрицательном балансе (уход в минус)")
 		}
 	}
 
@@ -129,12 +134,12 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 // GetBidsForOrder перечисляет ставки по заказу, но только для владеющего им
 // заказчика — ставки несут контактные данные исполнителей.
 func (s *BidService) GetBidsForOrder(ctx context.Context, orderID, customerID uuid.UUID) ([]*repository.Bid, error) {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
-		return nil, errors.New("order not found")
+		return nil, orderNotFound(err)
 	}
 	if order.CustomerID != customerID {
-		return nil, errors.New("forbidden: you do not own this order")
+		return nil, ErrForbidden
 	}
 	return s.bidRepo.GetBidsForOrder(ctx, orderID)
 }
@@ -151,49 +156,49 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		bid, err := s.bidRepo.LockBidForUpdate(ctx, tx, bidID)
 		if err != nil {
-			return errors.New("bid not found")
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrNotFound) {
+				return ErrBidNotFound
+			}
+			return err
 		}
 		if bid.Status != "PENDING" {
-			return errors.New("bid is not pending")
+			return ErrBidNotPending
 		}
 
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, bid.OrderID)
 		if err != nil {
-			return errors.New("order not found")
+			return orderNotFound(err)
 		}
 		if order.CustomerID != customerID {
-			return errors.New("forbidden: you do not own this order")
+			return ErrForbidden
 		}
 		if order.Status != repository.OrderStatusSearching {
-			return errors.New("order is no longer in searching status")
-		}
-
-		variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID)
-		if err != nil {
-			return err
-		}
-		if variant == nil || !variant.IsAuction {
-			return errors.New("order is not an auction")
+			return ErrOrderNotSearching
 		}
 
 		// Исполнителю должно быть по-прежнему позволено взять этот заказ в момент,
 		// когда заказчик принимает, а не только когда ставка подавалась.
-		executor, err := s.userRepo.FindByID(ctx, bid.ExecutorID)
+		variant, err := eligibilityFor(ctx, s.userRepo, s.catalogRepo, s.behaviors, s.penalties, bid.ExecutorID, order)
 		if err != nil {
-			return errors.New("executor not found")
-		}
-		customer, _ := s.userRepo.FindByID(ctx, order.CustomerID)
-		if err := canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, customer, variant); err != nil {
 			return err
 		}
-		shift, err := s.shiftRepo.GetActiveShift(ctx, bid.ExecutorID)
-		if err != nil || shift == nil {
-			return errors.New("исполнитель сейчас не на смене, выберите другое предложение")
+		if variant == nil || !variant.IsAuction {
+			return ErrOrderNotAuction
+		}
+		shift, err := s.shiftRepo.FindActiveByExecutor(ctx, bid.ExecutorID)
+		if err != nil {
+			return err
+		}
+		if shift == nil {
+			return ErrBidderOffShift
 		}
 
 		// Принятая цена уходит от заказчика в эскроу, ровно как удержание по
 		// обычному заказу.
 		if err := s.ledger.Reserve(ctx, tx, customerID, repository.AccountEscrow, bid.OfferedPrice, repository.TransactionTypeHold, &order.ID); err != nil {
+			if errors.Is(err, repository.ErrInsufficientFunds) {
+				return ErrInsufficientBalance
+			}
 			return err
 		}
 		if err := s.orderRepo.AssignWithHold(ctx, tx, order.ID, bid.ExecutorID, bid.OfferedPrice); err != nil {
@@ -221,11 +226,8 @@ func (s *BidService) AcceptBid(ctx context.Context, bidID, customerID uuid.UUID)
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrInsufficientFunds) {
-			return errors.New("insufficient balance to accept this bid")
-		}
 		if errors.Is(err, repository.ErrConflict) {
-			return errors.New("предложение уже неактуально, обновите список")
+			return ErrBidStale
 		}
 		return err
 	}

@@ -15,12 +15,12 @@ type mockReviewRepo struct {
 	reviews []*repository.OrderReview
 }
 
-func (m *mockReviewRepo) CreateReview(ctx context.Context, r *repository.OrderReview) error {
+func (m *mockReviewRepo) CreateReview(ctx context.Context, q repository.Querier, r *repository.OrderReview) error {
 	m.reviews = append(m.reviews, r)
 	return nil
 }
 
-func (m *mockReviewRepo) GetReviewByOrderAndAuthor(ctx context.Context, orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
+func (m *mockReviewRepo) GetReviewByOrderAndAuthor(ctx context.Context, q repository.Querier, orderID, authorID uuid.UUID) (*repository.OrderReview, error) {
 	for _, rev := range m.reviews {
 		if rev.OrderID == orderID && rev.AuthorID == authorID {
 			return rev, nil
@@ -39,7 +39,7 @@ func (m *mockReviewRepo) GetReviewsForUser(ctx context.Context, targetID uuid.UU
 	return res, nil
 }
 
-func (m *mockReviewRepo) UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error {
+func (m *mockReviewRepo) UpdateUserRating(ctx context.Context, q repository.Querier, userID uuid.UUID, role string) error {
 	return nil
 }
 
@@ -209,7 +209,7 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 
 	custID := uuid.New()
 	execID := uuid.New()
-	order, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
+	order, _ := srv.Create(context.Background(), custID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: false, Address: "", Lat: nil, Lon: nil})
 
 	// Принятие
 	err := srv.Accept(context.Background(), order.ID, execID)
@@ -218,23 +218,24 @@ func TestOrderService_AcceptExecuteReject(t *testing.T) {
 	}
 
 	// ExecuteOrder
-	err = srv.ExecuteOrder(context.Background(), order.ID, execID)
+	err = srv.ExecuteOrderAt(context.Background(), order.ID, execID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error executing order: %v", err)
 	}
-	if order.Status != repository.OrderStatusExecuted {
-		t.Errorf("expected status EXECUTED, got %s", order.Status)
+	// Create отдаёт снимок карточки, а не строку хранилища: состояние перечитывается.
+	if stored, _ := orderRepo.FindByID(context.Background(), order.ID); stored.Status != repository.OrderStatusExecuted {
+		t.Errorf("expected status EXECUTED, got %s", stored.Status)
 	}
 
 	// RejectAssignedOrder (проверяем транзакцию штрафа в 50%)
-	order2, _ := srv.CreateOrder(context.Background(), custID, standardVariantID, false, false, "", nil, nil)
+	order2, _ := srv.Create(context.Background(), custID, CreateOrderRequest{ServiceVariantID: standardVariantID, IsUrgent: false, IsAsap: false, Address: "", Lat: nil, Lon: nil})
 	_ = srv.Accept(context.Background(), order2.ID, execID)
 	err = srv.RejectAssignedOrder(context.Background(), order2.ID, execID)
 	if err != nil {
 		t.Fatalf("unexpected error rejecting order: %v", err)
 	}
-	if order2.Status != repository.OrderStatusSearching {
-		t.Errorf("expected status SEARCHING after reject, got %s", order2.Status)
+	if stored, _ := orderRepo.FindByID(context.Background(), order2.ID); stored.Status != repository.OrderStatusSearching {
+		t.Errorf("expected status SEARCHING after reject, got %s", stored.Status)
 	}
 	if len(txRepo.txs) == 0 || txRepo.txs[len(txRepo.txs)-1].Type != "FINE" {
 		t.Errorf("expected FINE transaction created on rejection")
@@ -282,7 +283,8 @@ func (m *mockExecutorGeoRepo) GetGeoAlerts(ctx context.Context, status string, l
 func TestExecutorGeoService(t *testing.T) {
 	geoRepo := &mockExecutorGeoRepo{}
 	orderRepo := &mockOrderRepo{}
-	srv := NewExecutorGeoService(geoRepo, orderRepo)
+	orders := NewOrderService(orderRepo, testLedger(), nil, newMockUserRepo(), &orderMockShiftRepo{}, nil, newMockCatalogRepo(), nil)
+	srv := NewExecutorGeoService(geoRepo, nil).WithNearbyOrders(orders)
 
 	execID := uuid.New()
 
@@ -318,9 +320,9 @@ func TestExecutorGeoService(t *testing.T) {
 	})
 
 	// Координаты теперь берутся из сохранённого местоположения исполнителя, а не от вызывающего.
-	orders, err := srv.GetMapOrders(context.Background(), execID)
-	if err != nil || len(orders) != 1 {
-		t.Errorf("expected 1 map order, got %d", len(orders))
+	mapOrders, err := srv.GetMapOrders(context.Background(), execID)
+	if err != nil || len(mapOrders) != 1 {
+		t.Errorf("expected 1 map order, got %d", len(mapOrders))
 	}
 
 	alerts, err := srv.GetGeoAlerts(context.Background(), "NEW", 10, 0)
@@ -402,7 +404,7 @@ func TestChatService_Extended(t *testing.T) {
 
 func TestShiftService_Extended(t *testing.T) {
 	shiftRepo := &mockShiftRepo{}
-	srv := NewShiftService(shiftRepo, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{}, nil)
+	srv := NewShiftService(shiftRepo, testLedger(), &orderMockSettingsRepo{}, &mockOrderRepo{})
 
 	execID := uuid.New()
 	shift, err := srv.StartShift(context.Background(), execID, 3)
@@ -414,25 +416,21 @@ func TestShiftService_Extended(t *testing.T) {
 	}
 
 	_, _ = srv.GetExecutorFinancialHistory(context.Background(), execID)
-	_ = srv.EndShiftByID(context.Background(), shift.ID)
-	srv.AutoEndExpiredShifts(context.Background())
-
-	// Проверяем Start, GetActive, GetCurrent, End
-	execID2 := uuid.New()
-	s2, err := srv.Start(context.Background(), execID2, 1)
-	if err != nil {
-		t.Fatalf("unexpected error in Start: %v", err)
+	if err := srv.AutoEndExpiredShifts(context.Background()); err != nil {
+		t.Fatalf("auto end: %v", err)
 	}
-	act, err := srv.GetActive(context.Background(), execID2)
-	if err != nil || act.ID != s2.ID {
-		t.Errorf("expected active shift %s, got %v", s2.ID, act)
+
+	// Проверяем GetCurrent и End
+	execID2 := uuid.New()
+	s2, err := srv.StartShift(context.Background(), execID2, 1)
+	if err != nil {
+		t.Fatalf("unexpected error in StartShift: %v", err)
 	}
 	curr, err := srv.GetCurrent(context.Background(), execID2)
 	if err != nil || curr.ID != s2.ID {
 		t.Errorf("expected current shift %s, got %v", s2.ID, curr)
 	}
-	err = srv.End(context.Background(), execID2)
-	if err != nil {
+	if _, err := srv.End(context.Background(), execID2); err != nil {
 		t.Errorf("unexpected error in End: %v", err)
 	}
 }

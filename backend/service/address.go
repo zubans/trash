@@ -133,29 +133,3 @@ func (a Address) ToRecord() repository.Address {
 		Source:  a.Source,
 	}
 }
-
-// AddressFromRecord восстанавливает рабочий адрес из сохранённой строки,
-// заполняя части из отображаемой строки для записей старше их хранения.
-func AddressFromRecord(rec repository.Address) Address {
-	addr := Address{
-		Value:  rec.Address,
-		Region: rec.Region,
-		City:   rec.City,
-		Street: rec.Street,
-		House:  rec.House,
-		Flat:   rec.Flat,
-		FiasID: rec.FiasID,
-		Lat:    rec.Lat,
-		Lon:    rec.Lon,
-		Source: rec.Source,
-	}
-	if addr.City == "" && addr.Street == "" && addr.House == "" {
-		parsed := parseLegacyCanonical(rec.Address)
-		addr.Region, addr.City, addr.Street = parsed.Region, parsed.City, parsed.Street
-		addr.House, addr.Flat = parsed.House, parsed.Flat
-		if addr.Source == "" {
-			addr.Source = SourceLegacyText
-		}
-	}
-	return addr
-}

@@ -86,26 +86,10 @@ func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string
 	return sql.ErrNoRows
 }
 
-// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
-// querier игнорируется.
-func (m *mockRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
-	return m.UpdateVerified(ctx, id, verified)
-}
-
-func (m *mockRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+func (m *mockRepo) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Verified = verified
-			return nil
-		}
-	}
-	return sql.ErrNoRows
-}
-
-func (m *mockRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
-	for _, u := range m.users {
-		if u.ID == id {
-			u.Role = role
 			return nil
 		}
 	}
@@ -178,7 +162,7 @@ func (m *mockRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email,
 	return nil, errors.New("user not found")
 }
 
-func (m *mockRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
+func (m *mockRepo) UpdateUserBirthDate(ctx context.Context, q repository.Querier, userID uuid.UUID, birthDate time.Time) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			bd := birthDate
@@ -189,7 +173,7 @@ func (m *mockRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, bi
 	return nil
 }
 
-func (m *mockRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (m *mockRepo) UpdateUserName(ctx context.Context, q repository.Querier, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	for _, u := range m.users {
 		if u.ID == userID {
 			u.LastName = lastName

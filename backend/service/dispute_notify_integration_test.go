@@ -44,7 +44,9 @@ func TestDisputeNotificationsIntegration(t *testing.T) {
 	email := &fakeEmailSender{}
 	notifier := NewDisputeNotifier(repository.NewMailRepository(f.db), repository.New(f.db), email)
 	notifier.background = func(fn func()) { fn() }
-	f.srv.WithPenalties(newIntegrationPenaltyService(f.db, f.srv)).WithDisputeNotifier(notifier)
+	f.withPenalties(newIntegrationPenaltyService(f.db, f.srv))
+	f.srv.WithDisputeNotifier(notifier)
+	f.disputeSvc.WithNotifier(notifier)
 	t.Cleanup(func() {
 		_, _ = f.db.Exec(`DELETE FROM user_mail WHERE user_id IN ($1, $2)`, f.customerID, f.executorID)
 	})
@@ -59,7 +61,7 @@ func TestDisputeNotificationsIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dispute, err := f.srv.OpenDispute(ctx, f.customerID, f.order.ID, "мешки у подъезда")
+	dispute, err := f.disputeSvc.OpenDispute(ctx, f.customerID, f.order.ID, "мешки у подъезда")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestDisputeNotificationsIntegration(t *testing.T) {
 	}
 
 	arbiterID := seedExecutor(t, f.db)
-	if _, err := f.srv.ResolveDispute(ctx, dispute.ID, arbiterID, repository.DisputeDecisionCustomer, "фото нет"); err != nil {
+	if _, err := f.disputeSvc.ResolveDispute(ctx, dispute.ID, arbiterID, repository.DisputeDecisionCustomer, "фото нет"); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	customerMail := mailbox(t, f, f.customerID)
@@ -92,7 +94,7 @@ func TestDisputeNotificationsIntegration(t *testing.T) {
 	}
 
 	// Отклонённое решение никому ничего не пишет.
-	if _, err := f.srv.ResolveDispute(ctx, dispute.ID, arbiterID, repository.DisputeDecisionExecutor, ""); err == nil {
+	if _, err := f.disputeSvc.ResolveDispute(ctx, dispute.ID, arbiterID, repository.DisputeDecisionExecutor, ""); err == nil {
 		t.Fatal("resolved a closed dispute")
 	}
 	if len(mailbox(t, f, f.customerID)) != 1 || len(email.sent) != 1 {

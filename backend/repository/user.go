@@ -130,14 +130,13 @@ type UserRepository interface {
 	// пользователь для фильтрующего список вызывающего нормальный исход, а не ошибка.
 	FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
-	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
 	// SetUserRoles заменяет набор ролей пользователя заданным и держит users.role
 	// (основную роль) указывающей на одну из них.
 	SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error
-	UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error
-	// UpdateVerifiedTx — та же запись внутри транзакции вызывающего, для тех, кто
-	// обязан закоммитить её вместе с доменным событием.
-	UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error
+	// UpdateVerified выставляет флаг ручной верификации. Querier — транзакция
+	// вызывающего, для тех, кто обязан закоммитить флаг вместе с доменным
+	// событием; nil — пул соединений.
+	UpdateVerified(ctx context.Context, q Querier, id uuid.UUID, verified bool) error
 	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error
 	VerifyEmailToken(ctx context.Context, token string) (*User, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error
@@ -146,8 +145,10 @@ type UserRepository interface {
 	// UpdateUserEmail записывает новый адрес как ожидающий подтверждения и
 	// возвращает полную запись пользователя.
 	UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
-	UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error
-	UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error
+	// UpdateUserName и UpdateUserBirthDate принимают Querier: заявка на
+	// верификацию дозаполняет профиль и размещает заказ одной транзакцией.
+	UpdateUserName(ctx context.Context, q Querier, userID uuid.UUID, lastName, firstName, patronymic string) error
+	UpdateUserBirthDate(ctx context.Context, q Querier, userID uuid.UUID, birthDate time.Time) error
 }
 
 // repo реализует UserRepository поверх *sql.DB.
@@ -454,25 +455,13 @@ func (r *repo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) er
 	return err
 }
 
-// UpdateRole — легаси-сеттер одной роли: он делает заданную роль единственной
-// ролью пользователя, держа user_roles (мультиролевой источник истины) в такт,
-// чтобы эти двое никогда не разъезжались.
-func (r *repo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
-	return r.SetUserRoles(ctx, id, []string{role})
-}
-
-// UpdateVerified выставляет флаг ручной верификации на собственном соединении.
-func (r *repo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
-	return r.UpdateVerifiedTx(ctx, nil, id, verified)
-}
-
-// UpdateVerifiedTx выставляет флаг внутри транзакции вызывающего. Такой нужен
+// UpdateVerified выставляет флаг внутри транзакции вызывающего. Такой нужен
 // обоим писателям users.is_verified: админский эндпоинт публикует вместе с
 // изменением событие user.verified, а применитель поведений выставляет флаг
 // заодно с закрытием заказа и оплатой проверяющему. Флаг без своего события или
 // событие без флага — ровно тот разрыв, который outbox и существует
 // предотвращать.
-func (r *repo) UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error {
+func (r *repo) UpdateVerified(ctx context.Context, q Querier, id uuid.UUID, verified bool) error {
 	_, err := exec(r.db, q).ExecContext(ctx, `UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
 	return err
 }
@@ -510,16 +499,16 @@ func (r *repo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, ver
 	return r.FindByID(ctx, id)
 }
 
-func (r *repo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
-	_, err := r.db.ExecContext(ctx,
+func (r *repo) UpdateUserName(ctx context.Context, q Querier, userID uuid.UUID, lastName, firstName, patronymic string) error {
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE users SET last_name = $1, first_name = $2, patronymic = $3 WHERE id = $4`,
 		lastName, firstName, patronymic, userID,
 	)
 	return err
 }
 
-func (r *repo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
-	_, err := r.db.ExecContext(ctx,
+func (r *repo) UpdateUserBirthDate(ctx context.Context, q Querier, userID uuid.UUID, birthDate time.Time) error {
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE users SET birth_date = $1 WHERE id = $2`,
 		birthDate, userID,
 	)

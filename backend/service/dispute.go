@@ -22,50 +22,80 @@ import (
 // выполнил, или решил арбитр. Каждое закрытие берёт блокировку строки заказа,
 // поэтому два закрытия одного спора не пройдут: второе увидит уже закрытый
 // заказ.
+//
+// Подтверждение заказчиком живёт в OrderService.Confirm: это его обычное
+// действие, которое заодно закрывает спор. Всё остальное — здесь.
 
 // maxDisputeClaimRunes ограничивает претензию: это описание, что не так, а не
 // переписка — для неё есть чат заказа.
 const maxDisputeClaimRunes = 2000
 
-var (
-	// ErrDisputeClaimRequired — претензия пустая.
-	ErrDisputeClaimRequired = errors.New("опишите, что не выполнено")
-	// ErrDisputeClaimTooLong — претензия длиннее maxDisputeClaimRunes.
-	ErrDisputeClaimTooLong = errors.New("описание претензии слишком длинное")
-	// ErrDisputeNotAllowed — заказ нельзя оспорить в его нынешнем виде.
-	ErrDisputeNotAllowed = errors.New("оспорить можно только заказ, отмеченный исполнителем как выполненный")
-	// ErrDisputeAlreadyOpen — по заказу уже идёт спор.
-	ErrDisputeAlreadyOpen = errors.New("по заказу уже открыт спор")
-	// ErrDisputeNotOpen — по заказу нет открытого спора.
-	ErrDisputeNotOpen = errors.New("по заказу нет открытого спора")
-	// ErrDisputeDecision — неизвестное решение арбитра.
-	ErrDisputeDecision = errors.New("решение арбитра: executor, customer или unknown")
-	// ErrDisputeClosed — спор уже закрыт: заказчиком, исполнителем или другим
-	// арбитром раньше.
-	ErrDisputeClosed = errors.New("спор уже закрыт")
-	// ErrDisputeNotFound — спора нет.
-	ErrDisputeNotFound = errors.New("спор не найден")
-	// ErrOrderHasOpenDispute — заказ пытаются закрыть в обход его спора.
-	ErrOrderHasOpenDispute = errors.New("по заказу открыт спор")
-)
-
 // maxResolutionNoteRunes ограничивает комментарий арбитра.
 const maxResolutionNoteRunes = 2000
 
+var (
+	// ErrDisputeClaimRequired — претензия пустая.
+	ErrDisputeClaimRequired = validationError("опишите, что не выполнено")
+	// ErrDisputeClaimTooLong — претензия длиннее maxDisputeClaimRunes.
+	ErrDisputeClaimTooLong = validationError("описание претензии слишком длинное")
+	// ErrDisputeNoteTooLong — комментарий арбитра длиннее maxResolutionNoteRunes.
+	ErrDisputeNoteTooLong = validationError("комментарий арбитра слишком длинный")
+	// ErrDisputeNotAllowed — заказ нельзя оспорить в его нынешнем виде.
+	ErrDisputeNotAllowed = stateError("оспорить можно только заказ, отмеченный исполнителем как выполненный")
+	// ErrDisputeAlreadyOpen — по заказу уже идёт спор.
+	ErrDisputeAlreadyOpen = stateError("по заказу уже открыт спор")
+	// ErrDisputeNotOpen — по заказу нет открытого спора.
+	ErrDisputeNotOpen = stateError("по заказу нет открытого спора")
+	// ErrDisputeDecision — неизвестное решение арбитра.
+	ErrDisputeDecision = validationError("решение арбитра: executor, customer или unknown")
+	// ErrDisputeClosed — спор уже закрыт: заказчиком, исполнителем или другим
+	// арбитром раньше.
+	ErrDisputeClosed = stateError("спор уже закрыт")
+	// ErrOrderHasOpenDispute — заказ пытаются закрыть в обход его спора.
+	ErrOrderHasOpenDispute = stateError("по заказу открыт спор")
+	// ErrDisputeStatusFilter — фильтр очереди арбитража не OPEN и не CLOSED.
+	ErrDisputeStatusFilter = validationError("invalid status filter")
+)
+
+// DisputeService ведёт споры: открытие, признание исполнителя, решение арбитра,
+// очередь и карточку доказательств. Заказ он закрывает через OrderLifecycle —
+// теми же шагами, что и обычное подтверждение или отмена.
+type DisputeService struct {
+	orders    OrderLifecycle
+	orderRepo repository.OrderRepository
+	ledger    *Ledger
+	disputes  repository.DisputeRepository
+	catalog   repository.ServiceCatalogRepository
+	chatRepo  repository.ChatRepository
+	// penalties начисляет штрафные баллы по решению арбитра. Без них арбитраж недоступен.
+	penalties *PenaltyService
+	// notifier сообщает сторонам об открытии и закрытии спора.
+	notifier *DisputeNotifier
+	// evidence, geoRepo и settings — карточка доказательств; см. dispute_evidence.go.
+	evidence ProofEvidenceSource
+	geoRepo  repository.ExecutorGeoRepository
+	settings repository.SettingsRepository
+}
+
+// NewDisputeService создаёт DisputeService.
+func NewDisputeService(orders OrderLifecycle, orderRepo repository.OrderRepository, ledger *Ledger, disputes repository.DisputeRepository, catalog repository.ServiceCatalogRepository, chatRepo repository.ChatRepository) *DisputeService {
+	return &DisputeService{orders: orders, orderRepo: orderRepo, ledger: ledger, disputes: disputes, catalog: catalog, chatRepo: chatRepo}
+}
+
 // WithPenalties подключает штрафные баллы, которые начисляет решение арбитра.
-func (s *OrderService) WithPenalties(penalties *PenaltyService) *OrderService {
+func (s *DisputeService) WithPenalties(penalties *PenaltyService) *DisputeService {
 	s.penalties = penalties
 	return s
 }
 
-// WithDisputes подключает споры.
-func (s *OrderService) WithDisputes(disputes repository.DisputeRepository) *OrderService {
-	s.disputes = disputes
+// WithNotifier подключает уведомления сторонам.
+func (s *DisputeService) WithNotifier(n *DisputeNotifier) *DisputeService {
+	s.notifier = n
 	return s
 }
 
 // OpenDispute — заказчик заявляет, что исполненный заказ не выполнен.
-func (s *OrderService) OpenDispute(ctx context.Context, customerID, orderID uuid.UUID, claim string) (*repository.Dispute, error) {
+func (s *DisputeService) OpenDispute(ctx context.Context, customerID, orderID uuid.UUID, claim string) (*repository.Dispute, error) {
 	if s.disputes == nil {
 		return nil, ErrDisputeNotAllowed
 	}
@@ -81,10 +111,10 @@ func (s *OrderService) OpenDispute(ctx context.Context, customerID, orderID uuid
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
-			return errors.New("order not found")
+			return orderNotFound(err)
 		}
 		if order.CustomerID != customerID {
-			return errors.New("forbidden")
+			return ErrForbidden
 		}
 		if order.Status == repository.OrderStatusDisputed {
 			return ErrDisputeAlreadyOpen
@@ -95,7 +125,7 @@ func (s *OrderService) OpenDispute(ctx context.Context, customerID, orderID uuid
 		// Скриптовая услуга (верификация) закрывается сама по своему событию, а не
 		// подтверждением заказчика, — спорить в ней не о чем, и спор повис бы
 		// против скрипта, который его не видит.
-		if variant, err := s.catalogRepo.GetNodeByID(ctx, order.ServiceVariantID); err == nil && variant.HasBehavior() {
+		if variant, err := s.catalog.GetNodeByID(ctx, order.ServiceVariantID); err == nil && variant.HasBehavior() {
 			return ErrDisputeNotAllowed
 		}
 
@@ -114,23 +144,23 @@ func (s *OrderService) OpenDispute(ctx context.Context, customerID, orderID uuid
 			}
 			return err
 		}
-		return s.publishOrderEvent(ctx, tx, repository.EventDisputeOpened, order, &customerID)
+		return s.orders.publishOrderEvent(ctx, tx, repository.EventDisputeOpened, order, &customerID)
 	})
 	if err != nil {
 		return nil, err
 	}
 	metrics.OrderEvent("disputed")
 
-	s.systemChatMessage(ctx, orderID, customerID, "⚠️ Заказчик оспорил выполнение заказа: «"+claim+"». "+
+	systemChatMessage(ctx, s.chatRepo, orderID, customerID, "⚠️ Заказчик оспорил выполнение заказа: «"+claim+"». "+
 		"Спор передан на разбор. Заказчик может закрыть его, подтвердив выполнение, исполнитель — признав, что заказ не выполнен.")
-	s.disputeNotifier.DisputeOpened(ctx, dispute)
+	s.notifier.DisputeOpened(ctx, dispute)
 	return dispute, nil
 }
 
 // ConcedeDispute — исполнитель признаёт, что оспоренный заказ не выполнен.
 // Заказ отменяется с полным возвратом заказчику, штрафного балла нет: признание
 // избавляет обе стороны от арбитража, и платформа его поощряет, а не наказывает.
-func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID uuid.UUID) error {
+func (s *DisputeService) ConcedeDispute(ctx context.Context, executorID, orderID uuid.UUID) error {
 	if s.disputes == nil {
 		return ErrDisputeNotOpen
 	}
@@ -138,15 +168,15 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 		if err != nil {
-			return errors.New("order not found")
+			return orderNotFound(err)
 		}
 		if order.ExecutorID == nil || *order.ExecutorID != executorID {
-			return errors.New("forbidden")
+			return ErrForbidden
 		}
 		if order.Status != repository.OrderStatusDisputed {
 			return ErrDisputeNotOpen
 		}
-		closed, err = s.closeOpenDisputeTx(ctx, tx, orderID, repository.DisputeClosing{
+		closed, err = closeOpenDisputeTx(ctx, tx, s.disputes, orderID, repository.DisputeClosing{
 			Closure:  repository.DisputeClosureExecutorConceded,
 			ClosedBy: &executorID,
 		})
@@ -156,19 +186,19 @@ func (s *OrderService) ConcedeDispute(ctx context.Context, executorID, orderID u
 		if closed == nil {
 			return ErrDisputeNotOpen
 		}
-		if err := s.cancelTx(ctx, tx, orderID, repository.OrderStatusDisputed); err != nil {
+		if err := s.orders.cancelTx(ctx, tx, orderID, repository.OrderStatusDisputed); err != nil {
 			return err
 		}
-		return s.publishOrderEvent(ctx, tx, repository.EventDisputeConceded, order, &executorID)
+		return s.orders.publishOrderEvent(ctx, tx, repository.EventDisputeConceded, order, &executorID)
 	})
 	if err != nil {
 		return err
 	}
 	metrics.OrderEvent("conceded")
 
-	s.systemChatMessage(ctx, orderID, executorID, "Исполнитель признал, что заказ не выполнен. "+
+	systemChatMessage(ctx, s.chatRepo, orderID, executorID, "Исполнитель признал, что заказ не выполнен. "+
 		"Заказ отменён, деньги возвращены заказчику. Спор закрыт.")
-	s.disputeNotifier.DisputeClosed(ctx, closed)
+	s.notifier.DisputeClosed(ctx, closed)
 	return nil
 }
 
@@ -204,7 +234,7 @@ var disputeDecisionText = map[string]string{
 // Деньги, закрытие спора и баллы — одна транзакция. Строка заказа блокируется
 // первой, как и в подтверждении заказчиком, поэтому решение, опоздавшее за
 // подтверждением, увидит закрытый спор и получит ErrDisputeClosed.
-func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID uuid.UUID, decision, note string) (*repository.Dispute, error) {
+func (s *DisputeService) ResolveDispute(ctx context.Context, disputeID, arbiterID uuid.UUID, decision, note string) (*repository.Dispute, error) {
 	if s.disputes == nil || s.penalties == nil {
 		return nil, ErrDisputeNotFound
 	}
@@ -213,7 +243,7 @@ func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID 
 	}
 	note = strings.TrimSpace(note)
 	if utf8.RuneCountInString(note) > maxResolutionNoteRunes {
-		return nil, errors.New("комментарий арбитра слишком длинный")
+		return nil, ErrDisputeNoteTooLong
 	}
 
 	found, err := s.disputes.FindByID(ctx, nil, disputeID)
@@ -228,7 +258,7 @@ func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID 
 	err = s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		locked, lockErr := s.orderRepo.LockForUpdate(ctx, tx, found.OrderID)
 		if lockErr != nil {
-			return errors.New("order not found")
+			return orderNotFound(lockErr)
 		}
 		order = locked
 		if err := s.disputes.Close(ctx, tx, disputeID, repository.DisputeClosing{
@@ -252,12 +282,12 @@ func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID 
 		var awards []PenaltyAward
 		switch decision {
 		case repository.DisputeDecisionExecutor:
-			if err := s.confirmTx(ctx, tx, found.OrderID); err != nil {
+			if err := s.orders.confirmTx(ctx, tx, found.OrderID); err != nil {
 				return err
 			}
 			awards = []PenaltyAward{customerPoint}
 		case repository.DisputeDecisionCustomer:
-			if err := s.cancelTx(ctx, tx, found.OrderID, repository.OrderStatusDisputed); err != nil {
+			if err := s.orders.cancelTx(ctx, tx, found.OrderID, repository.OrderStatusDisputed); err != nil {
 				return err
 			}
 			awards = []PenaltyAward{executorPoint}
@@ -270,7 +300,7 @@ func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID 
 		if _, err := s.penalties.AwardTx(ctx, tx, awards...); err != nil {
 			return err
 		}
-		return s.publishOrderEvent(ctx, tx, repository.EventDisputeResolved, order, &arbiterID)
+		return s.orders.publishOrderEvent(ctx, tx, repository.EventDisputeResolved, order, &arbiterID)
 	})
 	if err != nil {
 		return nil, err
@@ -281,25 +311,25 @@ func (s *OrderService) ResolveDispute(ctx context.Context, disputeID, arbiterID 
 	if note != "" {
 		text += " Комментарий арбитра: «" + note + "»."
 	}
-	s.systemChatMessage(ctx, found.OrderID, arbiterID, text)
+	systemChatMessage(ctx, s.chatRepo, found.OrderID, arbiterID, text)
 
 	resolved, err := s.disputes.FindByID(ctx, nil, disputeID)
 	if err != nil {
 		return nil, err
 	}
-	s.disputeNotifier.DisputeClosed(ctx, resolved)
+	s.notifier.DisputeClosed(ctx, resolved)
 	return resolved, nil
 }
 
 // ListDisputes — очередь арбитража.
-func (s *OrderService) ListDisputes(ctx context.Context, status string, limit, offset int) ([]repository.AdminDispute, error) {
+func (s *DisputeService) ListDisputes(ctx context.Context, status string, limit, offset int) ([]repository.AdminDispute, error) {
 	if s.disputes == nil {
 		return []repository.AdminDispute{}, nil
 	}
 	switch status {
 	case "", repository.DisputeStatusOpen, repository.DisputeStatusClosed:
 	default:
-		return nil, errors.New("invalid status filter")
+		return nil, ErrDisputeStatusFilter
 	}
 	return s.disputes.ListForAdmin(ctx, status, limit, offset)
 }
@@ -313,90 +343,29 @@ func (s *OrderService) ListDisputes(ctx context.Context, status string, limit, o
 // order.confirmed не публикуется: заказчик выполнение не подтверждал, и ачивки
 // за подтверждённый заказ здесь не выдаются. Агрегаты исполнителя пополняются —
 // заказ завершён и оплачен.
-func (s *OrderService) settleUnknownDisputeTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID) error {
+func (s *DisputeService) settleUnknownDisputeTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID) error {
 	order, err := s.orderRepo.LockForUpdate(ctx, tx, orderID)
 	if err != nil {
-		return errors.New("order not found")
+		return orderNotFound(err)
 	}
 	if order.Status != repository.OrderStatusDisputed || order.ExecutorID == nil {
 		return ErrDisputeNotOpen
 	}
-	if err := s.requireNoOpenDisputeTx(ctx, tx, order); err != nil {
+	if err := requireNoOpenDisputeTx(ctx, tx, s.disputes, order); err != nil {
 		return err
 	}
+	return s.orders.closeOrderPaidTx(ctx, tx, order, s.settleUnknown)
+}
 
-	payout, isDowngraded, err := s.payableAmount(ctx, order)
-	if err != nil {
-		return err
-	}
-	level := s.commissionLevel(ctx, tx, *order.ExecutorID)
-	commission := commissionAt(payout, level.Percent)
-
-	if err := s.ledger.SettleUnknownDispute(ctx, tx, UnknownDisputeSettlement{
+// settleUnknown — деньги решения «неизвестно»: заказчику возврат из эскроу,
+// исполнителю выплата с DISPUTES.
+func (s *DisputeService) settleUnknown(ctx context.Context, tx *sql.Tx, order *repository.Order, payout, commission money.Amount, _ Level) error {
+	return s.ledger.SettleUnknownDispute(ctx, tx, UnknownDisputeSettlement{
 		OrderID:    order.ID,
 		CustomerID: order.CustomerID,
 		ExecutorID: *order.ExecutorID,
 		Hold:       order.HoldAmount,
 		Payout:     payout,
 		Commission: commission,
-	}); err != nil {
-		return err
-	}
-	if err := s.orderRepo.SetHoldAmount(ctx, tx, order.ID, money.Zero); err != nil {
-		return err
-	}
-	if err := s.orderRepo.Confirm(ctx, tx, orderID, payout, isDowngraded); err != nil {
-		return err
-	}
-	if err := s.orderRepo.SetCommission(ctx, tx, order.ID, level.Percent, level.Level, level.PerkID); err != nil {
-		return err
-	}
-	return s.recordCompletion(ctx, tx, order, payout)
-}
-
-// closeOpenDisputeTx закрывает открытый спор заказа в транзакции вызывающего,
-// который уже держит блокировку строки заказа, и возвращает его закрытым. Заказ
-// в DISPUTED без открытого спора закрывать нечем — это не ошибка вызывающего:
-// nil, nil.
-func (s *OrderService) closeOpenDisputeTx(ctx context.Context, tx *sql.Tx, orderID uuid.UUID, closing repository.DisputeClosing) (*repository.Dispute, error) {
-	if s.disputes == nil {
-		return nil, nil
-	}
-	dispute, err := s.disputes.FindOpenByOrder(ctx, tx, orderID)
-	if err != nil || dispute == nil {
-		return nil, err
-	}
-	if err := s.disputes.Close(ctx, tx, dispute.ID, closing); err != nil {
-		return nil, err
-	}
-	return s.disputes.FindByID(ctx, tx, dispute.ID)
-}
-
-// requireNoOpenDisputeTx не даёт закрыть заказ, спор которого ещё открыт.
-// Подтверждение и отмена — общие пути для заказчика, скриптов и воркеров, и
-// только те из них, что знают про спор, закрывают его раньше.
-func (s *OrderService) requireNoOpenDisputeTx(ctx context.Context, tx *sql.Tx, order *repository.Order) error {
-	if s.disputes == nil || order.Status != repository.OrderStatusDisputed {
-		return nil
-	}
-	dispute, err := s.disputes.FindOpenByOrder(ctx, tx, order.ID)
-	if err != nil {
-		return err
-	}
-	if dispute != nil {
-		return ErrOrderHasOpenDispute
-	}
-	return nil
-}
-
-// systemChatMessage пишет служебное сообщение в чат заказа. Сбой не отменяет
-// действия, которое уже закоммичено: сообщение — уведомление, а не его часть.
-func (s *OrderService) systemChatMessage(ctx context.Context, orderID, senderID uuid.UUID, text string) {
-	if s.chatRepo == nil {
-		return
-	}
-	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
-	if err == nil && chat != nil {
-		_, _ = s.chatRepo.SaveMessage(ctx, chat.ID, senderID, text)
-	}
+	})
 }

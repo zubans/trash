@@ -242,23 +242,29 @@ func main() {
 	permissions := service.NewPermissions(roleRepo)
 	roleService := service.NewRoleService(roleRepo, userRepo, adminRepo, permissions).
 		WithSessions(authService)
+	disputeNotifier := service.NewDisputeNotifier(mailRepo, userRepo, mailer)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
 		WithExecutorGeo(executorGeoRepo).
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
 		WithAchievements(levels, executorStatsRepo).
 		WithDisputes(disputeRepo).
 		WithPenalties(penaltyService).
-		WithDisputeNotifier(service.NewDisputeNotifier(mailRepo, userRepo, mailer)).
-		WithPhotoProof(photoProofService).
-		WithEvidence(photoProofService)
-	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo, catalogRepo).
-		WithBehaviors(serviceBehaviors).
+		WithDisputeNotifier(disputeNotifier).
+		WithPhotoProof(photoProofService)
+	// Споры закрывают заказ теми же шагами, что и заказчик: через жизненный
+	// цикл заказа, а не мимо него.
+	disputeService := service.NewDisputeService(orderService, orderRepo, ledger, disputeRepo, catalogRepo, chatRepo).
 		WithPenalties(penaltyService).
+		WithNotifier(disputeNotifier).
+		WithEvidence(photoProofService, executorGeoRepo, settingsRepo)
+	// Карта берёт заказы у сервиса заказов: у неё и списка «Заказы поблизости»
+	// одна реализация.
+	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, settingsRepo).
+		WithNearbyOrders(orderService).
 		WithTrack(photoProofService)
 	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
 	// сохранённой позиции исполнителя один писатель и один набор правил.
-	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo, db).
+	shiftService := service.NewShiftService(shiftRepo, ledger, settingsRepo, orderRepo).
 		WithExecutorLocation(executorGeoService).
 		WithOrderHistory(orderService)
 	// Автоматический подбор ограничен расстоянием, для чего нужны сохранённая
@@ -278,6 +284,7 @@ func main() {
 		WithMail(mailRepo).
 		WithRoles(roleRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo).
+		WithTx(ledger).
 		WithExecutorStats(executorStatsRepo)
 
 	// Каждая периодическая задача ниже меняет состояние, которое должно измениться
@@ -390,7 +397,7 @@ func main() {
 	rolh := handler.NewRoleHandler(roleService)
 	oh := handler.NewOrderHandler(orderService)
 	evh := handler.NewExecutorVerificationHandler(service.NewExecutorVerificationService(
-		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService))
+		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService, ledger))
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
 	ch := handler.NewChatHandler(chatService).WithShopLinks(shopService.ShopOrderLinks)
@@ -401,7 +408,7 @@ func main() {
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
 	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
-	dh := handler.NewDisputeHandler(orderService)
+	dh := handler.NewDisputeHandler(disputeService)
 	pnh := handler.NewPenaltyHandler(penaltyService)
 	pph := photoproof.NewHandler(photoProofService, handler.CallerID)
 	mh := handler.NewMailHandler(mailRepo, userRepo)
@@ -478,13 +485,13 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("CUSTOMER", "ADMIN"))
-			r.Post("/customer/orders", oh.CreateOrderHandler)
+			r.Post("/customer/orders", oh.CreateOrder)
 			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
-			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrderHandler)
-			r.Post("/customer/orders/{id}/dispute", oh.OpenDispute)
-			r.Post("/customer/orders/{id}/tip", oh.TipOrderHandler)
-			r.Post("/customer/orders/{id}/cancel", oh.CancelOrderHandler)
-			r.Get("/customer/orders", oh.GetCustomerOrdersHandler)
+			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrder)
+			r.Post("/customer/orders/{id}/dispute", dh.OpenDispute)
+			r.Post("/customer/orders/{id}/tip", oh.TipOrder)
+			r.Post("/customer/orders/{id}/cancel", oh.CancelOrder)
+			r.Get("/customer/orders", oh.ListCustomerOrders)
 			r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)
 			r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
 		})
@@ -542,10 +549,10 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware.RequireAuth)
 			r.Use(middleware.RequireRole("EXECUTOR", "MODERATOR", "ADMIN"))
-			r.Post("/executor/shifts", sh.StartShiftHandler)
-			r.Post("/executor/shifts/end", sh.EndShiftHandler)
-			r.Post("/executor/shifts/early-end", sh.EarlyEndShiftHandler)
-			r.Post("/executor/shifts/location", sh.UploadLocationHandler)
+			r.Post("/executor/shifts", sh.StartShift)
+			r.Post("/executor/shifts/end", sh.EndShift)
+			r.Post("/executor/shifts/early-end", sh.EarlyEndShift)
+			r.Post("/executor/shifts/location", sh.RecordLocation)
 			r.Post("/executor/set-location", egh.SetLocation)
 			// Возобновляет автоматическое позиционирование после ручного выбора.
 			r.Post("/executor/follow-device", egh.FollowDevice)
@@ -553,13 +560,13 @@ func main() {
 			r.Get("/executor/map-orders", egh.GetMapOrders)
 			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
 			r.Get("/executor/history", sh.GetExecutorHistoryHandler)
-			r.Get("/executor/orders/assigned", oh.GetExecutorAssignedOrdersHandler)
+			r.Get("/executor/orders/assigned", oh.ListAssignedOrders)
 			r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
-			r.Get("/executor/orders/nearby", oh.GetNearbyOrdersHandler)
+			r.Get("/executor/orders/nearby", oh.NearbyOrders)
 			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
 			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
-			r.Post("/executor/orders/{id}/reject", oh.RejectOrderHandler)
-			r.Post("/executor/orders/{id}/dispute/concede", oh.ConcedeDispute)
+			r.Post("/executor/orders/{id}/reject", oh.RejectOrder)
+			r.Post("/executor/orders/{id}/dispute/concede", dh.ConcedeDispute)
 			pph.RegisterExecutorRoutes(r)
 			// Данные, которые исполнитель отправляет на проверку по скриптовой услуге, —
 			// проверка личности в заказе верификации.

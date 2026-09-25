@@ -4,11 +4,6 @@ import (
 	"math"
 )
 
-// IsWithinRadius проверяет, лежит ли точка внутри круга, в метрах.
-func IsWithinRadius(lat1, lon1, lat2, lon2 float64, radius int) bool {
-	return haversineDistance(lat1, lon1, lat2, lon2) <= float64(radius)
-}
-
 func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	const EarthRadius = 6371000.0
 	dLat := (lat2 - lat1) * math.Pi / 180.0

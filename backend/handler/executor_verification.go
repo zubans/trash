@@ -27,7 +27,7 @@ func (h *ExecutorVerificationHandler) GetStatus(w http.ResponseWriter, r *http.R
 	}
 	status, err := h.verification.Status(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -80,7 +80,7 @@ func (h *ExecutorVerificationHandler) Request(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -97,7 +97,7 @@ func (h *ExecutorVerificationHandler) Cancel(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.verification.Cancel(r.Context(), user.ID); err != nil {
-		writeOrderError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

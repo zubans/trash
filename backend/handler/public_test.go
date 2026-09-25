@@ -74,23 +74,7 @@ func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
-	for _, u := range m.users {
-		if u.ID == id {
-			u.Role = role
-			return nil
-		}
-	}
-	return sql.ErrNoRows
-}
-
-// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
-// querier игнорируется.
-func (m *mockUserRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
-	return m.UpdateVerified(ctx, id, verified)
-}
-
-func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+func (m *mockUserRepo) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Verified = verified
@@ -129,11 +113,11 @@ func (m *mockUserRepo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, em
 	return nil, nil
 }
 
-func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
+func (m *mockUserRepo) UpdateUserBirthDate(ctx context.Context, q repository.Querier, userID uuid.UUID, birthDate time.Time) error {
 	return nil
 }
 
-func (m *mockUserRepo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (m *mockUserRepo) UpdateUserName(ctx context.Context, q repository.Querier, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	return nil
 }
 

@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,14 +119,14 @@ type fakeOrderRepo struct {
 	order *repository.Order
 }
 
-func (f *fakeOrderRepo) GetOrderByID(ctx context.Context, id uuid.UUID) (*repository.Order, error) {
+func (f *fakeOrderRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.Order, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if f.order != nil && f.order.ID == id {
 		return f.order, nil
 	}
-	return nil, errors.New("order not found")
+	return nil, sql.ErrNoRows
 }
 
 // withUser подкладывает пользователя в контекст, как это делает RequireAuth.

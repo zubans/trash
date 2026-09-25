@@ -291,7 +291,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 			addrRecord.Lat = resLat
 			addrRecord.Lon = resLon
 		}
-		if _, err := s.addressRepo.Add(ctx, created.ID, addrRecord); err != nil {
+		if _, err := s.addressRepo.Add(ctx, nil, created.ID, addrRecord); err != nil {
 			log.Printf("[AuthService] failed to save initial address for user %s: %v", created.ID, err)
 		}
 	}
@@ -568,7 +568,7 @@ func (s *AuthService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.UpdateUserBirthDate(ctx, userID, t); err != nil {
+	if err := s.repo.UpdateUserBirthDate(ctx, nil, userID, t); err != nil {
 		return nil, err
 	}
 	return s.repo.FindByID(ctx, userID)

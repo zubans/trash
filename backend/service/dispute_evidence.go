@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"math"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,9 +44,12 @@ type ProofEvidenceSource interface {
 	Gestures(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]photoproof.Symbol, error)
 }
 
-// WithEvidence подключает источник доказательств для арбитража.
-func (s *OrderService) WithEvidence(source ProofEvidenceSource) *OrderService {
+// WithEvidence подключает источники карточки доказательств: снимки и трек,
+// аномалии скорости и пороги из настроек.
+func (s *DisputeService) WithEvidence(source ProofEvidenceSource, geoRepo repository.ExecutorGeoRepository, settings repository.SettingsRepository) *DisputeService {
 	s.evidence = source
+	s.geoRepo = geoRepo
+	s.settings = settings
 	return s
 }
 
@@ -56,9 +58,9 @@ type DisputeEvidence struct {
 	Dispute *repository.Dispute `json:"dispute"`
 	Order   EvidenceOrder       `json:"order"`
 	// Gesture — жест, выданный заказу при взятии; nil, если фото не требовалось.
-	Gesture *repository.OrderGesture `json:"gesture,omitempty"`
-	Proofs  []ProofEvidence          `json:"proofs"`
-	Limits  EvidenceLimits           `json:"limits"`
+	Gesture *OrderGesture   `json:"gesture,omitempty"`
+	Proofs  []ProofEvidence `json:"proofs"`
+	Limits  EvidenceLimits  `json:"limits"`
 }
 
 // EvidenceOrder — заказ глазами сверки.
@@ -122,36 +124,23 @@ func minutesBetween(a, b time.Time) float64 {
 	return b.Sub(a).Minutes()
 }
 
-func (s *OrderService) evidenceLimits(ctx context.Context) EvidenceLimits {
-	limits := EvidenceLimits{
-		MaxTimeDiffMin:  defaultPhotoProofMaxTimeDiffMin,
-		MaxDistanceM:    defaultPhotoProofMaxDistanceM,
-		MaxTrackGapMin:  15,
+// evidenceLimits читает пороги; ноль и минус для порога бессмысленны и
+// читаются как незаданные.
+func (s *DisputeService) evidenceLimits(ctx context.Context) EvidenceLimits {
+	settings := loadSettingsMap(ctx, s.settings)
+	return EvidenceLimits{
+		MaxTimeDiffMin:  settings.positiveInt(SettingPhotoProofMaxTimeDiffMin, defaultPhotoProofMaxTimeDiffMin),
+		MaxDistanceM:    settings.positiveInt(SettingPhotoProofMaxDistanceM, defaultPhotoProofMaxDistanceM),
+		MaxTrackGapMin:  settings.positiveInt(photoproof.SettingMaxTrackGapMin, 15),
 		GeoAlertWindowM: int(geoAlertWindow.Minutes()),
 	}
-	if s.settingsRepo == nil {
-		return limits
-	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return limits
-	}
-	read := func(key string, into *int) {
-		if v, err := strconv.Atoi(settings[key]); err == nil && v > 0 {
-			*into = v
-		}
-	}
-	read(SettingPhotoProofMaxTimeDiffMin, &limits.MaxTimeDiffMin)
-	read(SettingPhotoProofMaxDistanceM, &limits.MaxDistanceM)
-	read(photoproof.SettingMaxTrackGapMin, &limits.MaxTrackGapMin)
-	return limits
 }
 
 // DisputeEvidence собирает карточку доказательств спора: снимки, жест, времена,
 // расстояния, ближайшую точку трека и аномалии скорости — с отметками там, где
 // значения расходятся больше порогов. Отметка — повод присмотреться, а не
 // решение: решает арбитр.
-func (s *OrderService) DisputeEvidence(ctx context.Context, disputeID uuid.UUID) (*DisputeEvidence, error) {
+func (s *DisputeService) DisputeEvidence(ctx context.Context, disputeID uuid.UUID) (*DisputeEvidence, error) {
 	if s.disputes == nil {
 		return nil, ErrDisputeNotFound
 	}
@@ -162,9 +151,9 @@ func (s *OrderService) DisputeEvidence(ctx context.Context, disputeID uuid.UUID)
 	if err != nil {
 		return nil, err
 	}
-	order, err := s.orderRepo.GetOrderByID(ctx, dispute.OrderID)
+	order, err := s.orderRepo.FindByID(ctx, dispute.OrderID)
 	if err != nil {
-		return nil, err
+		return nil, orderNotFound(err)
 	}
 
 	ev := &DisputeEvidence{
@@ -189,10 +178,7 @@ func (s *OrderService) DisputeEvidence(ctx context.Context, disputeID uuid.UUID)
 			return nil, err
 		}
 		if g, ok := gestures[*order.WatermarkSymbolID]; ok {
-			ev.Gesture = &repository.OrderGesture{
-				Code: g.Code, Number: g.Number, Title: g.Title, Description: g.Description,
-				HintImageURL: g.HintImageURL, FitsInSelfie: g.FitsInSelfie,
-			}
+			ev.Gesture = orderGestureOf(g)
 		}
 	}
 
@@ -214,7 +200,7 @@ func (s *OrderService) DisputeEvidence(ctx context.Context, disputeID uuid.UUID)
 	return ev, nil
 }
 
-func (s *OrderService) proofEvidence(ctx context.Context, limits EvidenceLimits, order *repository.Order, executedAt *time.Time, p photoproof.Proof) (ProofEvidence, error) {
+func (s *DisputeService) proofEvidence(ctx context.Context, limits EvidenceLimits, order *repository.Order, executedAt *time.Time, p photoproof.Proof) (ProofEvidence, error) {
 	item := ProofEvidence{
 		Proof:     p,
 		FileURL:   "/api/admin/photo-proofs/" + p.ID.String() + "/file",
@@ -273,8 +259,8 @@ func (s *OrderService) proofEvidence(ctx context.Context, limits EvidenceLimits,
 		item.Track = track
 	}
 
-	if s.executorGeoRepo != nil {
-		alerts, err := s.executorGeoRepo.GeoAlertsBetween(ctx, p.ExecutorID,
+	if s.geoRepo != nil {
+		alerts, err := s.geoRepo.GeoAlertsBetween(ctx, p.ExecutorID,
 			p.DeviceTakenAt.Add(-geoAlertWindow), p.DeviceTakenAt.Add(geoAlertWindow))
 		if err != nil {
 			return item, err

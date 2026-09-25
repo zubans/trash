@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -41,9 +42,9 @@ const (
 
 var (
 	// ErrVerificationUnavailable — услуга верификации выключена или не заведена.
-	ErrVerificationUnavailable = errors.New("услуга верификации сейчас недоступна")
+	ErrVerificationUnavailable = ruleError("услуга верификации сейчас недоступна")
 	// ErrAlreadyVerified — аккаунт уже подтверждён, заказывать нечего.
-	ErrAlreadyVerified = errors.New("ваш аккаунт уже подтверждён")
+	ErrAlreadyVerified = stateError("ваш аккаунт уже подтверждён")
 )
 
 // VerificationDataMissingError перечисляет незаполненные поля: клиент по нему
@@ -63,7 +64,7 @@ type ExecutorVerificationStatus struct {
 	Missing []string `json:"missing"`
 	Address string   `json:"address,omitempty"`
 	// Order — незавершённый заказ на верификацию, если он уже размещён.
-	Order *repository.Order `json:"order,omitempty"`
+	Order *OrderView `json:"order,omitempty"`
 }
 
 // ExecutorVerificationRequest дозаполняет недостающие данные. Уже заполненные
@@ -83,12 +84,14 @@ type ExecutorVerificationService struct {
 	catalog   repository.ServiceCatalogRepository
 	orderRepo repository.OrderRepository
 	behaviors *Behaviors
-	orders    *OrderService
+	orders    OrderLifecycle
+	tx        TxRunner
 }
 
-// NewExecutorVerificationService собирает сервис заявок на верификацию.
-func NewExecutorVerificationService(users repository.UserRepository, addresses repository.AddressRepository, catalog repository.ServiceCatalogRepository, orderRepo repository.OrderRepository, behaviors *Behaviors, orders *OrderService) *ExecutorVerificationService {
-	return &ExecutorVerificationService{users: users, addresses: addresses, catalog: catalog, orderRepo: orderRepo, behaviors: behaviors, orders: orders}
+// NewExecutorVerificationService собирает сервис заявок на верификацию. tx —
+// транзакция, в которой дозаполнение профиля и заказ коммитятся вместе.
+func NewExecutorVerificationService(users repository.UserRepository, addresses repository.AddressRepository, catalog repository.ServiceCatalogRepository, orderRepo repository.OrderRepository, behaviors *Behaviors, orders OrderLifecycle, tx TxRunner) *ExecutorVerificationService {
+	return &ExecutorVerificationService{users: users, addresses: addresses, catalog: catalog, orderRepo: orderRepo, behaviors: behaviors, orders: orders, tx: tx}
 }
 
 // Status сообщает, подтверждён ли аккаунт, чего не хватает для заявки и есть ли
@@ -96,7 +99,7 @@ func NewExecutorVerificationService(users repository.UserRepository, addresses r
 func (s *ExecutorVerificationService) Status(ctx context.Context, userID uuid.UUID) (*ExecutorVerificationStatus, error) {
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, userNotFound(err)
 	}
 	address, err := s.defaultAddress(ctx, userID)
 	if err != nil {
@@ -109,7 +112,9 @@ func (s *ExecutorVerificationService) Status(ctx context.Context, userID uuid.UU
 	status := &ExecutorVerificationStatus{
 		IsVerified: user.IsVerified(),
 		Missing:    missingVerificationFields(user, address != nil),
-		Order:      order,
+	}
+	if order != nil {
+		status.Order = &OrderView{Order: *order}
 	}
 	if address != nil {
 		status.Address = address.Address
@@ -119,11 +124,13 @@ func (s *ExecutorVerificationService) Status(ctx context.Context, userID uuid.UU
 
 // Request дозаполняет недостающие данные и размещает заказ на верификацию.
 // Сначала проверяется всё присланное, и только потом что-либо пишется: отказ по
-// дате рождения не должен оставлять после себя сохранённое ФИО.
-func (s *ExecutorVerificationService) Request(ctx context.Context, userID uuid.UUID, req ExecutorVerificationRequest) (*repository.Order, error) {
+// дате рождения не должен оставлять после себя сохранённое ФИО. Записи —
+// имя, дата рождения, адрес и сам заказ — идут одной транзакцией: заявка либо
+// размещена целиком, либо не оставила следа.
+func (s *ExecutorVerificationService) Request(ctx context.Context, userID uuid.UUID, req ExecutorVerificationRequest) (*OrderView, error) {
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, userNotFound(err)
 	}
 	if user.IsVerified() {
 		return nil, ErrAlreadyVerified
@@ -176,31 +183,41 @@ func (s *ExecutorVerificationService) Request(ctx context.Context, userID uuid.U
 		}
 	}
 
-	if nameChanged {
-		if err := s.users.UpdateUserName(ctx, userID, lastName, firstName, patronymic); err != nil {
-			return nil, err
+	var placed *preparedOrder
+	if err := s.tx.RunInTx(ctx, func(tx *sql.Tx) error {
+		if nameChanged {
+			if err := s.users.UpdateUserName(ctx, tx, userID, lastName, firstName, patronymic); err != nil {
+				return err
+			}
 		}
-	}
-	if birthDate != nil {
-		if err := s.users.UpdateUserBirthDate(ctx, userID, *birthDate); err != nil {
-			return nil, err
-		}
-	}
-	if address == nil {
-		record := req.Address.ToRecord()
-		record.IsDefault = true
-		if _, err := s.addresses.Add(ctx, userID, record); err != nil {
-			return nil, err
-		}
-		if address, err = s.defaultAddress(ctx, userID); err != nil {
-			return nil, err
+		if birthDate != nil {
+			if err := s.users.UpdateUserBirthDate(ctx, tx, userID, *birthDate); err != nil {
+				return err
+			}
 		}
 		if address == nil {
-			return nil, errors.New("не удалось сохранить адрес")
+			record := req.Address.ToRecord()
+			record.IsDefault = true
+			saved, err := s.addresses.Add(ctx, tx, userID, record)
+			if err != nil {
+				return err
+			}
+			if address = defaultOf(saved); address == nil {
+				return errors.New("не удалось сохранить адрес")
+			}
 		}
+		p, err := s.orders.prepareOrder(ctx, userID, CreateOrderRequest{
+			ServiceVariantID: variant.ID, Address: address.Address, Lat: address.Lat, Lon: address.Lon,
+		})
+		if err != nil {
+			return err
+		}
+		placed = p
+		return s.orders.placeOrderTx(ctx, tx, p)
+	}); err != nil {
+		return nil, err
 	}
-
-	return s.orders.CreateOrderWithComment(ctx, userID, variant.ID, false, false, address.Address, "", address.Lat, address.Lon)
+	return s.orders.orderPlaced(ctx, placed), nil
 }
 
 // Cancel отменяет открытую заявку — так же, как заказчик отменяет свой заказ.
@@ -210,96 +227,84 @@ func (s *ExecutorVerificationService) Cancel(ctx context.Context, userID uuid.UU
 		return err
 	}
 	if order == nil {
-		return errors.New("заявка на верификацию не найдена")
+		return ErrVerificationRequestNotFound
 	}
 	return s.orders.Cancel(ctx, userID, order.ID)
 }
 
-// variant находит включённый вариант услуги верификации.
+// variant находит включённый вариант услуги верификации: первый заказываемый
+// среди verificationVariants.
 func (s *ExecutorVerificationService) variant(ctx context.Context) (*repository.ServiceNode, error) {
-	variants, err := s.catalog.GetActiveVariants(ctx)
+	variants, err := s.verificationVariants(ctx)
 	if err != nil {
 		return nil, err
 	}
-	orderable := make([]*repository.ServiceNode, 0, len(variants))
 	for _, v := range variants {
 		if v.IsOrderable() {
-			orderable = append(orderable, v)
-		}
-	}
-	matched, err := s.verificationNodes(ctx, orderable)
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range orderable {
-		if matched[v.ID] {
 			return v, nil
 		}
 	}
 	return nil, ErrVerificationUnavailable
 }
 
-// verificationNodes отмечает варианты, относящиеся к услуге верификации: по
-// системному коду варианта или его категории либо по библиотечному поведению.
-func (s *ExecutorVerificationService) verificationNodes(ctx context.Context, variants []*repository.ServiceNode) (map[uuid.UUID]bool, error) {
-	parentIDs := []uuid.UUID{}
-	for _, v := range variants {
-		if v.ParentID != nil {
-			parentIDs = append(parentIDs, *v.ParentID)
-		}
+// verificationVariants — варианты услуги верификации, найденные по системному
+// коду: сам узел с кодом, если это вариант, или живые варианты под ним, если
+// это категория. Когда кода в каталоге нет, остаётся библиотечное поведение:
+// узлы, исполняющие его скрипт, знает движок — по коду, не обходом каталога.
+func (s *ExecutorVerificationService) verificationVariants(ctx context.Context) ([]*repository.ServiceNode, error) {
+	node, err := s.catalog.GetNodeByCode(ctx, VerificationServiceCode)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
 	}
-	parents := map[uuid.UUID]*repository.ServiceNode{}
-	if len(parentIDs) > 0 {
-		found, err := s.catalog.GetNodesByIDs(ctx, parentIDs)
-		if err != nil {
-			return nil, err
-		}
-		parents = found
+	switch {
+	case node == nil:
+		return s.behaviorVariants(ctx)
+	case node.IsVariant():
+		return []*repository.ServiceNode{node}, nil
+	default:
+		return s.catalog.GetChildren(ctx, node.ID, repository.FilterLive())
 	}
-	matched := map[uuid.UUID]bool{}
-	for _, v := range variants {
-		switch {
-		case v.Code == VerificationServiceCode, s.behaviors.Code(v) == VerificationBehaviorCode:
-			matched[v.ID] = true
-		case v.ParentID != nil && parents[*v.ParentID] != nil && parents[*v.ParentID].Code == VerificationServiceCode:
-			matched[v.ID] = true
+}
+
+// behaviorVariants — варианты, исполняющие библиотечное поведение верификации,
+// когда системный код не задан. Это запасной путь: он читает все живые
+// варианты, и держать его основным значило бы платить за обход каталога на
+// каждый экран верификации.
+func (s *ExecutorVerificationService) behaviorVariants(ctx context.Context) ([]*repository.ServiceNode, error) {
+	all, err := s.catalog.GetActiveVariants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matched []*repository.ServiceNode
+	for _, v := range all {
+		if s.behaviors.Code(v) == VerificationBehaviorCode {
+			matched = append(matched, v)
 		}
 	}
 	return matched, nil
 }
 
 // openOrder возвращает незавершённый заказ пользователя на верификацию.
+// Незакрытых заказов у человека единицы, а история — сотни, поэтому читаются
+// только открытые.
 func (s *ExecutorVerificationService) openOrder(ctx context.Context, userID uuid.UUID) (*repository.Order, error) {
-	orders, err := s.orderRepo.GetCustomerOrders(ctx, userID)
+	open, err := s.orderRepo.FindOpenByCustomer(ctx, userID)
 	if err != nil {
 		return nil, err
-	}
-	var open []*repository.Order
-	variantIDs := []uuid.UUID{}
-	for _, o := range orders {
-		if o.Status == repository.OrderStatusCompleted || o.Status == repository.OrderStatusCanceled {
-			continue
-		}
-		open = append(open, o)
-		variantIDs = append(variantIDs, o.ServiceVariantID)
 	}
 	if len(open) == 0 {
 		return nil, nil
 	}
-	nodes, err := s.catalog.GetNodesByIDs(ctx, variantIDs)
+	variants, err := s.verificationVariants(ctx)
 	if err != nil {
 		return nil, err
 	}
-	variants := make([]*repository.ServiceNode, 0, len(nodes))
-	for _, n := range nodes {
-		variants = append(variants, n)
-	}
-	matched, err := s.verificationNodes(ctx, variants)
-	if err != nil {
-		return nil, err
+	ids := make(map[uuid.UUID]bool, len(variants))
+	for _, v := range variants {
+		ids[v.ID] = true
 	}
 	for _, o := range open {
-		if matched[o.ServiceVariantID] {
+		if ids[o.ServiceVariantID] {
 			return o, nil
 		}
 	}
@@ -315,15 +320,20 @@ func (s *ExecutorVerificationService) defaultAddress(ctx context.Context, userID
 	if err != nil {
 		return nil, err
 	}
+	return defaultOf(addresses), nil
+}
+
+// defaultOf выбирает адрес по умолчанию, иначе первый.
+func defaultOf(addresses []repository.Address) *repository.Address {
 	for i := range addresses {
 		if addresses[i].IsDefault {
-			return &addresses[i], nil
+			return &addresses[i]
 		}
 	}
 	if len(addresses) > 0 {
-		return &addresses[0], nil
+		return &addresses[0]
 	}
-	return nil, nil
+	return nil
 }
 
 func missingVerificationFields(user *repository.User, hasAddress bool) []string {

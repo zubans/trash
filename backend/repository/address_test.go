@@ -72,7 +72,7 @@ func TestAddressRepository_CRUD(t *testing.T) {
 		Source:  "dadata",
 	}
 
-	list, err := repo.Add(ctx, userID, addr1)
+	list, err := repo.Add(ctx, nil, userID, addr1)
 	if err != nil {
 		t.Fatalf("unexpected error adding first address: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestAddressRepository_CRUD(t *testing.T) {
 		Lon:     &lon2,
 	}
 
-	list, err = repo.Add(ctx, userID, addr2)
+	list, err = repo.Add(ctx, nil, userID, addr2)
 	if err != nil {
 		t.Fatalf("unexpected error adding second address: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestAddressRepository_CRUD(t *testing.T) {
 
 	// 3. Попытка добавить третий адрес должна вернуть ErrAddressLimitReached
 	addr3 := repository.Address{Address: "Россия, г. Москва, ул. Ленина, д. 1"}
-	_, err = repo.Add(ctx, userID, addr3)
+	_, err = repo.Add(ctx, nil, userID, addr3)
 	if err != repository.ErrAddressLimitReached {
 		t.Fatalf("expected ErrAddressLimitReached, got %v", err)
 	}
@@ -154,14 +154,14 @@ func TestAddressRepository_ResavingKeepsDefault(t *testing.T) {
 	userID := createTestUser(t, db, "CUSTOMER")
 
 	line := "Россия, г. Москва, ул. Арбат, д. 10"
-	if _, err := repo.Add(ctx, userID, repository.Address{Address: line, City: "Москва"}); err != nil {
+	if _, err := repo.Add(ctx, nil, userID, repository.Address{Address: line, City: "Москва"}); err != nil {
 		t.Fatalf("unexpected error adding address: %v", err)
 	}
 
 	// Та же строка ещё раз, теперь с координатами, приходящими с подсказкой,
 	// и без просьбы стать адресом по умолчанию.
 	lat, lon := 55.7512, 37.6000
-	list, err := repo.Add(ctx, userID, repository.Address{
+	list, err := repo.Add(ctx, nil, userID, repository.Address{
 		Address: line, City: "Москва", Lat: &lat, Lon: &lon,
 	})
 	if err != nil {
@@ -190,20 +190,20 @@ func TestAddressRepository_LimitAllowsUpdatingExisting(t *testing.T) {
 
 	first := "Россия, г. Москва, ул. Арбат, д. 10"
 	second := "Россия, г. Москва, ул. Тверская, д. 5"
-	if _, err := repo.Add(ctx, userID, repository.Address{Address: first}); err != nil {
+	if _, err := repo.Add(ctx, nil, userID, repository.Address{Address: first}); err != nil {
 		t.Fatalf("unexpected error adding first address: %v", err)
 	}
-	if _, err := repo.Add(ctx, userID, repository.Address{Address: second}); err != nil {
+	if _, err := repo.Add(ctx, nil, userID, repository.Address{Address: second}); err != nil {
 		t.Fatalf("unexpected error adding second address: %v", err)
 	}
 
 	// На пределе: новый адрес отвергается...
-	if _, err := repo.Add(ctx, userID, repository.Address{Address: "Россия, г. Москва, ул. Ленина, д. 1"}); err != repository.ErrAddressLimitReached {
+	if _, err := repo.Add(ctx, nil, userID, repository.Address{Address: "Россия, г. Москва, ул. Ленина, д. 1"}); err != repository.ErrAddressLimitReached {
 		t.Fatalf("expected ErrAddressLimitReached for a new address, got %v", err)
 	}
 
 	// ...но обновление уже сохранённого — не новый адрес.
-	list, err := repo.Add(ctx, userID, repository.Address{Address: second, City: "Москва", House: "5"})
+	list, err := repo.Add(ctx, nil, userID, repository.Address{Address: second, City: "Москва", House: "5"})
 	if err != nil {
 		t.Fatalf("updating an existing address at the limit must succeed, got %v", err)
 	}
@@ -229,11 +229,11 @@ func TestAddressRepository_AddAsDefaultPromotes(t *testing.T) {
 
 	first := "Россия, г. Москва, ул. Арбат, д. 10"
 	second := "Россия, г. Москва, ул. Тверская, д. 5"
-	if _, err := repo.Add(ctx, userID, repository.Address{Address: first}); err != nil {
+	if _, err := repo.Add(ctx, nil, userID, repository.Address{Address: first}); err != nil {
 		t.Fatalf("unexpected error adding first address: %v", err)
 	}
 
-	list, err := repo.Add(ctx, userID, repository.Address{Address: second, IsDefault: true})
+	list, err := repo.Add(ctx, nil, userID, repository.Address{Address: second, IsDefault: true})
 	if err != nil {
 		t.Fatalf("unexpected error adding default address: %v", err)
 	}

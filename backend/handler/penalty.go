@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"healthlogin/backend/service"
@@ -31,7 +30,7 @@ func (h *PenaltyHandler) MyPenaltyStatus(w http.ResponseWriter, r *http.Request)
 	}
 	view, err := h.penalties.ViewFor(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	writeJSON(w, view)
@@ -46,7 +45,7 @@ func (h *PenaltyHandler) AdminUserPenalties(w http.ResponseWriter, r *http.Reque
 	}
 	view, err := h.penalties.AdminViewFor(r.Context(), userID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	writeJSON(w, view)
@@ -71,16 +70,11 @@ func (h *PenaltyHandler) AdminRevokePoint(w http.ResponseWriter, r *http.Request
 	}
 
 	point, err := h.penalties.Revoke(r.Context(), pointID, admin.ID, userID)
-	switch {
-	case err == nil:
-		writeJSON(w, point)
-	case errors.Is(err, service.ErrPenaltyPointNotFound):
-		http.Error(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, service.ErrPenaltyPointNotLive):
-		http.Error(w, err.Error(), http.StatusConflict)
-	default:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err != nil {
+		writeDomainError(w, err)
+		return
 	}
+	writeJSON(w, point)
 }
 
 // AdminResetSilentBlockFlag обслуживает
@@ -98,7 +92,7 @@ func (h *PenaltyHandler) AdminResetSilentBlockFlag(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := h.penalties.ResetSilentBlockFlag(r.Context(), userID, admin.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "flag cleared"})

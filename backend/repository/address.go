@@ -41,7 +41,9 @@ type Address struct {
 // AddressRepository хранит сохранённые адреса заказчиков и исполнителей.
 type AddressRepository interface {
 	List(ctx context.Context, userID uuid.UUID) ([]Address, error)
-	Add(ctx context.Context, userID uuid.UUID, address Address) ([]Address, error)
+	// Add принимает Querier, чтобы адрес лёг в транзакцию вызывающего (заявка
+	// на верификацию сохраняет адрес и размещает заказ разом); nil — своя.
+	Add(ctx context.Context, q Querier, userID uuid.UUID, address Address) ([]Address, error)
 	Delete(ctx context.Context, userID, addressID uuid.UUID) ([]Address, error)
 	SetDefault(ctx context.Context, userID, addressID uuid.UUID) ([]Address, error)
 	// SetDefaultByValue сохраняет работоспособность старых клиентов: они опознают
@@ -81,7 +83,11 @@ func scanAddresses(rows *sql.Rows) ([]Address, error) {
 
 // List возвращает адреса: сначала адрес по умолчанию, затем от старых к новым.
 func (r *addressRepo) List(ctx context.Context, userID uuid.UUID) ([]Address, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return r.listWith(ctx, r.db, userID)
+}
+
+func (r *addressRepo) listWith(ctx context.Context, q Querier, userID uuid.UUID) ([]Address, error) {
+	rows, err := q.QueryContext(ctx,
 		`SELECT `+addressSelectCols+` FROM addresses
 		 WHERE user_id = $1 ORDER BY is_default DESC, created_at ASC`, userID)
 	if err != nil {
@@ -95,13 +101,23 @@ func (r *addressRepo) List(ctx context.Context, userID uuid.UUID) ([]Address, er
 // Add сохраняет адрес, делая его адресом по умолчанию, если он у пользователя
 // первый или если вызывающий об этом попросил. Повторное сохранение уже
 // имеющегося адреса — это обновление, а не новый адрес: оно освежает части и координаты.
-func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address) ([]Address, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
+func (r *addressRepo) Add(ctx context.Context, q Querier, userID uuid.UUID, address Address) ([]Address, error) {
+	if q != nil {
+		if err := r.addIn(ctx, q, userID, address); err != nil {
+			return nil, err
+		}
+		return r.listWith(ctx, q, userID)
+	}
+	if err := runInTx(ctx, r.db, func(tx *sql.Tx) error {
+		return r.addIn(ctx, tx, userID, address)
+	}); err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	return r.List(ctx, userID)
+}
 
+// addIn — тело Add на соединении вызывающего.
+func (r *addressRepo) addIn(ctx context.Context, tx Querier, userID uuid.UUID, address Address) error {
 	// Предел считает адреса, поэтому отклонять он может только по-настоящему
 	// новый. Взимание его за обновление и мешало пользователю на пределе
 	// пересохранить уже имеющийся адрес — например, чтобы прикрепить
@@ -110,20 +126,20 @@ func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address
 	if err := tx.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM addresses WHERE user_id = $1 AND address = $2)`,
 		userID, address.Address).Scan(&exists); err != nil {
-		return nil, err
+		return err
 	}
 	var count int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM addresses WHERE user_id = $1`, userID).Scan(&count); err != nil {
-		return nil, err
+		return err
 	}
 	if !exists && count >= MaxUserAddresses {
-		return nil, ErrAddressLimitReached
+		return ErrAddressLimitReached
 	}
 
 	isDefault := count == 0 || address.IsDefault
 	if isDefault && count > 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE addresses SET is_default = FALSE WHERE user_id = $1`, userID); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -144,12 +160,9 @@ func (r *addressRepo) Add(ctx context.Context, userID uuid.UUID, address Address
 		address.Region, address.City, address.Street, address.House, address.Flat, address.FiasID,
 		address.Lat, address.Lon, address.Source,
 	); err != nil {
-		return nil, err
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return r.List(ctx, userID)
+	return nil
 }
 
 // Delete удаляет адрес. Если он был по умолчанию, им становится другой оставшийся.

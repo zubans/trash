@@ -59,8 +59,8 @@ func setupAcceptRadius(t *testing.T, deltaLat float64) *acceptRadiusFixture {
 		WithExecutorGeo(executorGeoRepo)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, nil, catalogRepo, nil).
 		WithExecutorGeo(executorGeoRepo)
-	geoService := service.NewExecutorGeoService(executorGeoRepo, orderRepo).
-		WithEligibility(userRepo, settingsRepo, catalogRepo)
+	geoService := service.NewExecutorGeoService(executorGeoRepo, settingsRepo).
+		WithNearbyOrders(orderService)
 
 	variantID := uuid.New()
 	if _, err := db.Exec(
@@ -83,12 +83,11 @@ func setupAcceptRadius(t *testing.T, deltaLat float64) *acceptRadiusFixture {
 		t.Fatalf("customer registration: %v", err)
 	}
 	_ = transactionRepo.UpdateBalance(ctx, nil, customer.ID, money.FromRubles(5000))
-	_ = userRepo.UpdateVerified(ctx, customer.ID, true)
+	_ = userRepo.UpdateVerified(ctx, nil, customer.ID, true)
 
-	order, err := orderService.CreateOrder(
-		ctx, customer.ID, variantID, false, false,
-		"Россия, г. Москва, ул. Арбат, д. 10", &custLat, &custLon,
-	)
+	order, err := orderService.Create(ctx, customer.ID, service.CreateOrderRequest{
+		ServiceVariantID: variantID, Address: "Россия, г. Москва, ул. Арбат, д. 10", Lat: &custLat, Lon: &custLon,
+	})
 	if err != nil {
 		t.Fatalf("create order: %v", err)
 	}
@@ -102,8 +101,8 @@ func setupAcceptRadius(t *testing.T, deltaLat float64) *acceptRadiusFixture {
 	if err != nil {
 		t.Fatalf("executor registration: %v", err)
 	}
-	_ = userRepo.UpdateVerified(ctx, executor.ID, true)
-	_ = userRepo.UpdateUserBirthDate(ctx, executor.ID, time.Now().AddDate(-25, 0, 0))
+	_ = userRepo.UpdateVerified(ctx, nil, executor.ID, true)
+	_ = userRepo.UpdateUserBirthDate(ctx, nil, executor.ID, time.Now().AddDate(-25, 0, 0))
 	_ = transactionRepo.UpdateBalance(ctx, nil, executor.ID, money.FromRubles(5000))
 
 	if _, err := shiftRepo.StartShift(ctx, executor.ID, 3); err != nil {
@@ -159,7 +158,7 @@ func TestAcceptRejectedOutsideRadius(t *testing.T) {
 	}
 
 	// Заказ остался свободным: отказ не должен ничего назначать.
-	updated, err := f.orderRepo.GetOrderByID(ctx, f.orderID)
+	updated, err := f.orderRepo.FindByID(ctx, f.orderID)
 	if err != nil {
 		t.Fatalf("reload order: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestAcceptAllowedInsideRadius(t *testing.T) {
 		t.Fatalf("заказ внутри круга должен браться, получено: %v", err)
 	}
 
-	updated, err := f.orderRepo.GetOrderByID(ctx, f.orderID)
+	updated, err := f.orderRepo.FindByID(ctx, f.orderID)
 	if err != nil {
 		t.Fatalf("reload order: %v", err)
 	}

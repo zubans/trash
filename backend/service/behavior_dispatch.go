@@ -50,7 +50,7 @@ type BehaviorDispatcher struct {
 	passports   repository.PassportRepository
 	ledger      *Ledger
 	behaviors   *Behaviors
-	orderSvc    *OrderService
+	orderSvc    OrderLifecycle
 
 	// batchSize ограничивает один тик; maxAttempts ограничивает жизнь одного
 	// события, чтобы постоянно падающее событие перестало занимать пачку, а не
@@ -80,7 +80,7 @@ func NewBehaviorDispatcher(
 	settings repository.SettingsRepository,
 	ledger *Ledger,
 	behaviors *Behaviors,
-	orderSvc *OrderService,
+	orderSvc OrderLifecycle,
 ) *BehaviorDispatcher {
 	return &BehaviorDispatcher{
 		events: events, orders: orders, users: users, catalog: catalog,
@@ -210,7 +210,7 @@ func (d *BehaviorDispatcher) targets(ctx context.Context, event *repository.Doma
 	var orders []*repository.Order
 	switch event.SubjectType {
 	case repository.EventSubjectOrder:
-		order, err := d.orders.GetOrderByID(ctx, event.SubjectID)
+		order, err := d.orders.FindByID(ctx, event.SubjectID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, nil
@@ -391,7 +391,7 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err := d.requireModeratorExecutor(ctx, t); err != nil {
 			return err
 		}
-		if err := d.users.UpdateVerifiedTx(ctx, tx, subject, true); err != nil {
+		if err := d.users.UpdateVerified(ctx, tx, subject, true); err != nil {
 			return err
 		}
 		log.Printf("[AUDIT] behavior %s verified user %s through order %s", d.behaviors.Code(t.variant), subject, t.order.ID)

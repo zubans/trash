@@ -67,20 +67,7 @@ func (m *mockUserRepository) UpdateStatus(ctx context.Context, id uuid.UUID, sta
 	return nil
 }
 
-func (m *mockUserRepository) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
-	if u, ok := m.users[id]; ok {
-		u.Role = role
-	}
-	return nil
-}
-
-// UpdateVerifiedTx выполняет ту же запись; у подделки нет транзакций, поэтому
-// querier игнорируется.
-func (m *mockUserRepository) UpdateVerifiedTx(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
-	return m.UpdateVerified(ctx, id, verified)
-}
-
-func (m *mockUserRepository) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+func (m *mockUserRepository) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
 	if u, ok := m.users[id]; ok {
 		u.Verified = verified
 	}
@@ -111,7 +98,7 @@ func (m *mockUserRepository) UpdateUserEmail(ctx context.Context, userID uuid.UU
 	return nil, nil
 }
 
-func (m *mockUserRepository) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error {
+func (m *mockUserRepository) UpdateUserBirthDate(ctx context.Context, q repository.Querier, userID uuid.UUID, birthDate time.Time) error {
 	if u, ok := m.users[userID]; ok {
 		bd := birthDate
 		u.BirthDate = &bd
@@ -119,7 +106,7 @@ func (m *mockUserRepository) UpdateUserBirthDate(ctx context.Context, userID uui
 	return nil
 }
 
-func (m *mockUserRepository) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {
+func (m *mockUserRepository) UpdateUserName(ctx context.Context, q repository.Querier, userID uuid.UUID, lastName, firstName, patronymic string) error {
 	if u, ok := m.users[userID]; ok {
 		u.LastName = lastName
 		u.FirstName = firstName

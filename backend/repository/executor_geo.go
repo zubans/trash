@@ -21,15 +21,6 @@ type GeoAlert struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
-type MapOrder struct {
-	Order
-	CanAccept  bool    `json:"can_accept"`
-	DistanceKM float64 `json:"distance_km"`
-	// CategoryName — родительская категория варианта услуги, разрешённая, чтобы
-	// карта показывала «категория · услуга», не заставляя клиента обходить дерево каталога.
-	CategoryName string `json:"category_name,omitempty"`
-}
-
 type ExecutorGeoRepository interface {
 	UpdateExecutorLocation(ctx context.Context, executorID uuid.UUID, lat, lon float64, isManual bool) error
 	GetExecutorLocation(ctx context.Context, executorID uuid.UUID) (lat *float64, lon *float64, lastManual *time.Time, err error)
