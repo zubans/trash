@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -166,13 +167,6 @@ func NewAchievementRepository(db *sql.DB) AchievementRepository {
 	return &achievementRepo{db: db}
 }
 
-func (r *achievementRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 const achievementColumns = `code, is_active, available_from, available_to, weight, config, sort_order, constants, source, deleted_at, created_at, updated_at`
 
 func (r *achievementRepo) List(ctx context.Context) ([]*Achievement, error) {
@@ -235,8 +229,8 @@ func scanAchievement(row rowScanner) (*Achievement, error) {
 		value := int(weight.Int64)
 		a.Weight = &value
 	}
-	if len(config) > 0 {
-		_ = json.Unmarshal(config, &a.Config)
+	if err := unmarshalJSON(config, &a.Config); err != nil {
+		return nil, fmt.Errorf("achievement %s: config: %w", a.Code, err)
 	}
 	return &a, nil
 }
@@ -321,7 +315,7 @@ func (r *achievementRepo) Grant(ctx context.Context, q Querier, grant *UserAchie
 	// транзакцией, в которой больше ничего нельзя сделать, и следующей же
 	// строкой был бы «could not complete operation in a failed transaction» —
 	// вместо спокойного «эта ачивка у него уже есть».
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         INSERT INTO user_achievements (id, user_id, code, grant_key, points, order_id, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (user_id, code, grant_key) DO NOTHING
@@ -340,7 +334,7 @@ func (r *achievementRepo) Grant(ctx context.Context, q Querier, grant *UserAchie
 }
 
 func (r *achievementRepo) AddPoints(ctx context.Context, q Querier, userID uuid.UUID, points int, sourceType, sourceCode string, sourceID *uuid.UUID, reason string, expiresAt *time.Time) error {
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO user_points (user_id, points, source_type, source_code, source_id, reason, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
     `, userID, points, sourceType, sourceCode, sourceID, reason, expiresAt)
@@ -352,7 +346,7 @@ func (r *achievementRepo) ActivePoints(ctx context.Context, q Querier, userID uu
 	// Действующий балл — не отозванный и не истёкший. Срок проверяется запросом,
 	// а не сгоранием по расписанию: воркер, который «гасит» баллы, — это ещё
 	// один способ разойтись с тем, что видит пользователь.
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         SELECT COALESCE(SUM(points), 0) FROM user_points
         WHERE user_id = $1 AND revoked_at IS NULL
           AND (expires_at IS NULL OR expires_at > now())
@@ -362,7 +356,7 @@ func (r *achievementRepo) ActivePoints(ctx context.Context, q Querier, userID uu
 
 func (r *achievementRepo) PointsToday(ctx context.Context, q Querier, userID uuid.UUID) (int, error) {
 	var points int
-	err := r.exec(q).QueryRowContext(ctx,
+	err := exec(r.db, q).QueryRowContext(ctx,
 		`SELECT COALESCE(points, 0) FROM user_points_daily WHERE user_id = $1 AND day = CURRENT_DATE`,
 		userID).Scan(&points)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -373,7 +367,7 @@ func (r *achievementRepo) PointsToday(ctx context.Context, q Querier, userID uui
 
 func (r *achievementRepo) BumpPointsToday(ctx context.Context, q Querier, userID uuid.UUID, points int) (int, error) {
 	var total int
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         INSERT INTO user_points_daily (user_id, day, points)
         VALUES ($1, CURRENT_DATE, $2)
         ON CONFLICT (user_id, day) DO UPDATE SET points = user_points_daily.points + EXCLUDED.points
@@ -436,7 +430,7 @@ func (r *achievementRepo) SummaryForUser(ctx context.Context, userID uuid.UUID) 
 }
 
 func (r *achievementRepo) RevokeByOrder(ctx context.Context, q Querier, orderID uuid.UUID, reason string) (int, error) {
-	exec := r.exec(q)
+	exec := exec(r.db, q)
 	rows, err := exec.QueryContext(ctx, `
         UPDATE user_achievements
            SET revoked_at = now(), revoke_reason = $2

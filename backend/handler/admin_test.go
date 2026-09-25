@@ -87,26 +87,11 @@ func (m *mockUserRepository) UpdateVerified(ctx context.Context, id uuid.UUID, v
 	return nil
 }
 
-func (m *mockUserRepository) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
-	if u, ok := m.users[id]; ok {
-		u.Balance = balance
-	}
-	return nil
-}
-
 func (m *mockUserRepository) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
 }
 
-func (m *mockUserRepository) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
-	return &repository.CustomerProfile{UserID: userID}, nil
-}
-
 func (m *mockUserRepository) FindByEmail(ctx context.Context, email string) (*repository.User, error) {
-	return nil, nil
-}
-
-func (m *mockUserRepository) FindByEmailVerificationToken(ctx context.Context, token string) (*repository.User, error) {
 	return nil, nil
 }
 
@@ -172,14 +157,6 @@ func (m *mockAdminRepository) GetTopUpRequests(ctx context.Context, limit, offse
 	return list, nil
 }
 
-func (m *mockAdminRepository) GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*repository.TopUpRequest, error) {
-	r, ok := m.requests[id]
-	if !ok {
-		return nil, nil
-	}
-	return r, nil
-}
-
 func (m *mockAdminRepository) CreateTopUpRequest(ctx context.Context, q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
 	r := &repository.TopUpRequest{
 		ID:        uuid.New(),
@@ -193,10 +170,6 @@ func (m *mockAdminRepository) CreateTopUpRequest(ctx context.Context, q reposito
 }
 
 func (m *mockAdminRepository) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*repository.WithdrawalRequest, error) {
-	return nil, nil
-}
-
-func (m *mockAdminRepository) GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*repository.WithdrawalRequest, error) {
 	return nil, nil
 }
 
@@ -485,10 +458,6 @@ func (m *mockUserRepository) UpdatePassword(ctx context.Context, userID uuid.UUI
 		}
 	}
 	return nil
-}
-
-func (m *mockUserRepository) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
-	return nil, nil
 }
 
 func (m *mockUserRepository) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {

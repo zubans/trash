@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,7 +13,7 @@ import (
 
 // ErrPerkNotFound возвращается для привилегии, которой нет или которая уже
 // отозвана: отозвать её второй раз нечего.
-var ErrPerkNotFound = errors.New("perk not found")
+var ErrPerkNotFound = fmt.Errorf("perk not found: %w", ErrNotFound)
 
 // UserPerk — привилегия пользователя на срок. Действует, пока
 // starts_at ≤ now < expires_at и её не отозвали.
@@ -93,13 +94,6 @@ func NewPerkRepository(db *sql.DB) PerkRepository {
 	return &perkRepo{db: db}
 }
 
-func (r *perkRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 const perkColumns = `p.id, p.user_id, p.rule_code, r.title, p.rule_version_id, p.config,
 	p.starts_at, p.expires_at, p.shop_order_id,
 	so.number, p.revoked_at, p.revoked_by, p.granted_by, p.reason, p.created_at`
@@ -131,7 +125,7 @@ func scanPerk(row rowScanner) (*UserPerk, error) {
 }
 
 func (r *perkRepo) list(ctx context.Context, q Querier, query string, args ...interface{}) ([]*UserPerk, error) {
-	rows, err := r.exec(q).QueryContext(ctx, query, args...)
+	rows, err := exec(r.db, q).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +155,7 @@ func (r *perkRepo) LockQueue(ctx context.Context, tx *sql.Tx, userID uuid.UUID) 
 
 func (r *perkRepo) NextStart(ctx context.Context, q Querier, userID uuid.UUID, now time.Time) (time.Time, error) {
 	var last sql.NullTime
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT MAX(expires_at) FROM user_perks
 		WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $2`,
 		userID, now).Scan(&last)
@@ -176,7 +170,7 @@ func (r *perkRepo) NextStart(ctx context.Context, q Querier, userID uuid.UUID, n
 
 func (r *perkRepo) CountQueued(ctx context.Context, q Querier, userID uuid.UUID, now time.Time) (int, error) {
 	var count int
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM user_perks
 		WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $2`,
 		userID, now).Scan(&count)
@@ -194,7 +188,7 @@ func (r *perkRepo) Create(ctx context.Context, q Querier, perk *UserPerk) error 
 	if err != nil {
 		return err
 	}
-	return r.exec(q).QueryRowContext(ctx, `
+	return exec(r.db, q).QueryRowContext(ctx, `
 		INSERT INTO user_perks (id, user_id, rule_code, rule_version_id, config, starts_at, expires_at,
 		                        shop_order_id, granted_by, reason)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -205,7 +199,7 @@ func (r *perkRepo) Create(ctx context.Context, q Querier, perk *UserPerk) error 
 
 func (r *perkRepo) Revoke(ctx context.Context, q Querier, id, adminID uuid.UUID) (*UserPerk, error) {
 	var revokedID uuid.UUID
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		UPDATE user_perks SET revoked_at = now(), revoked_by = $2
 		WHERE id = $1 AND revoked_at IS NULL
 		RETURNING id`, id, adminID).Scan(&revokedID)
@@ -219,7 +213,7 @@ func (r *perkRepo) Revoke(ctx context.Context, q Querier, id, adminID uuid.UUID)
 }
 
 func (r *perkRepo) Get(ctx context.Context, q Querier, id uuid.UUID) (*UserPerk, error) {
-	p, err := scanPerk(r.exec(q).QueryRowContext(ctx, `SELECT `+perkColumns+perkFrom+` WHERE p.id = $1`, id))
+	p, err := scanPerk(exec(r.db, q).QueryRowContext(ctx, `SELECT `+perkColumns+perkFrom+` WHERE p.id = $1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPerkNotFound
 	}
@@ -261,7 +255,7 @@ func (r *perkRepo) DueReminders(ctx context.Context, now, deadline time.Time, li
 }
 
 func (r *perkRepo) MarkReminded(ctx context.Context, q Querier, id uuid.UUID) (bool, error) {
-	res, err := r.exec(q).ExecContext(ctx,
+	res, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE user_perks SET reminded_at = now() WHERE id = $1 AND reminded_at IS NULL`, id)
 	if err != nil {
 		return false, err

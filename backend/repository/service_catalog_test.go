@@ -71,8 +71,8 @@ func TestServiceNodeFilter_Where(t *testing.T) {
 		filter ServiceNodeFilter
 		want   string
 	}{
-		"live":            {FilterLive, " AND deleted_at IS NULL"},
-		"active":          {FilterActive, " AND deleted_at IS NULL AND is_active = TRUE"},
+		"live":            {FilterLive(), " AND deleted_at IS NULL"},
+		"active":          {FilterActive(), " AND deleted_at IS NULL AND is_active = TRUE"},
 		"include deleted": {ServiceNodeFilter{IncludeDeleted: true}, ""},
 	}
 	for name, tc := range cases {
@@ -81,7 +81,7 @@ func TestServiceNodeFilter_Where(t *testing.T) {
 		}
 	}
 
-	if got := FilterLive.where("sn."); got != " AND sn.deleted_at IS NULL" {
+	if got := FilterLive().where("sn."); got != " AND sn.deleted_at IS NULL" {
 		t.Errorf("expected the alias to be applied, got %q", got)
 	}
 }

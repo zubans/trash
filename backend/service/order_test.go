@@ -251,7 +251,7 @@ func (m *mockOrderRepo) FindAssignedByExecutor(ctx context.Context, executorID u
 	return result, nil
 }
 
-func (m *mockOrderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]repository.Order, error) {
+func (m *mockOrderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]repository.Order, error) {
 	orders, err := m.GetCustomerOrders(context.Background(), customerID)
 	if err != nil {
 		return nil, err
@@ -499,9 +499,6 @@ func (m *mockCatalogRepo) GetChildren(ctx context.Context, parentID uuid.UUID, f
 func (m *mockCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
-func (m *mockCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*repository.ServiceNode, error) {
-	return nil, nil
-}
 func (m *mockCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
@@ -523,13 +520,7 @@ func (m *mockCatalogRepo) ListNodesWithScript(ctx context.Context) ([]*repositor
 func (m *mockCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*repository.ServiceNode, []*repository.ServiceNode, error) {
 	return nil, nil, nil
 }
-func (m *mockCatalogRepo) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
-	return false, nil
-}
 func (m *mockCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool, error) {
-	return false, nil
-}
-func (m *mockCatalogRepo) IsDescendantOf(ctx context.Context, a, b uuid.UUID) (bool, error) {
 	return false, nil
 }
 
@@ -591,10 +582,6 @@ func (m *orderMockShiftRepo) Create(ctx context.Context, shift *repository.Shift
 
 func (m *orderMockShiftRepo) End(ctx context.Context, shiftID uuid.UUID) error { return nil }
 
-func (m *orderMockShiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
-	return nil
-}
-
 func (m *orderMockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
 	return nil
 }
@@ -608,6 +595,9 @@ func (m *orderMockShiftRepo) UpdateShiftStatus(ctx context.Context, shiftID uuid
 }
 
 type mockUserRepo struct {
+	// users — пользователи с заданными ролями; остальные ID получают
+	// исполнителя по умолчанию из FindByID.
+	users map[uuid.UUID]*repository.User
 }
 
 func newMockUserRepo() *mockUserRepo {
@@ -619,6 +609,9 @@ func (m *mockUserRepo) FindByPhone(ctx context.Context, phone string) (*reposito
 }
 func (m *mockUserRepo) Create(ctx context.Context, user *repository.User) error { return nil }
 func (m *mockUserRepo) FindByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
+	if u, ok := m.users[id]; ok {
+		return u, nil
+	}
 	// Верифицированный совершеннолетний пользователь: правила допуска проверяются отдельно.
 	birth := time.Now().AddDate(-30, 0, 0)
 	return &repository.User{ID: id, Role: "EXECUTOR", Status: "ACTIVE", Verified: true, BirthDate: &birth}, nil
@@ -650,19 +643,10 @@ func (m *mockUserRepo) UpdateVerifiedTx(ctx context.Context, q repository.Querie
 func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) error {
 	return nil
 }
-func (m *mockUserRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
-	return nil
-}
 func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
 }
-func (m *mockUserRepo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
-	return &repository.CustomerProfile{UserID: userID}, nil
-}
 func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*repository.User, error) {
-	return nil, nil
-}
-func (m *mockUserRepo) FindByEmailVerificationToken(ctx context.Context, token string) (*repository.User, error) {
 	return nil, nil
 }
 func (m *mockUserRepo) VerifyEmailToken(ctx context.Context, token string) (*repository.User, error) {
@@ -1150,10 +1134,6 @@ func TestOrderService_TipOrder_Rejections(t *testing.T) {
 			t.Fatal("expected an oversized tip to be rejected")
 		}
 	})
-}
-
-func (m *mockUserRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
-	return nil, nil
 }
 
 func (m *mockUserRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {

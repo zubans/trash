@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ const (
 )
 
 // ErrShopOrderNotFound возвращается для покупки, которой нет или которая чужая.
-var ErrShopOrderNotFound = errors.New("shop order not found")
+var ErrShopOrderNotFound = fmt.Errorf("shop order not found: %w", ErrNotFound)
 
 // ShopOrder — покупка в магазине.
 type ShopOrder struct {
@@ -150,13 +151,6 @@ func NewShopOrderRepository(db *sql.DB) ShopOrderRepository {
 	return &shopOrderRepo{db: db}
 }
 
-func (r *shopOrderRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 const shopOrderColumns = `o.id, o.number, o.user_id, o.request_id, o.product_id, o.product_snapshot,
 	o.variant, o.quantity, o.unit_price, o.total, o.status, o.fulfillment, o.refunded_amount,
 	o.offer_version, o.cancel_reason, o.canceled_by, o.created_at, o.updated_at`
@@ -175,12 +169,12 @@ func scanShopOrder(row rowScanner, extra ...interface{}) (*ShopOrder, error) {
 	}
 	o.UnitPrice, o.Total, o.RefundedAmount = money.Amount(unitPrice), money.Amount(total), money.Amount(refunded)
 	o.ProductSnapshot = map[string]interface{}{}
-	if len(snapshot) > 0 {
-		_ = json.Unmarshal(snapshot, &o.ProductSnapshot)
+	if err := unmarshalJSON(snapshot, &o.ProductSnapshot); err != nil {
+		return nil, fmt.Errorf("shop order %s: product_snapshot: %w", o.ID, err)
 	}
 	o.Fulfillment = map[string]interface{}{}
-	if len(fulfillment) > 0 {
-		_ = json.Unmarshal(fulfillment, &o.Fulfillment)
+	if err := unmarshalJSON(fulfillment, &o.Fulfillment); err != nil {
+		return nil, fmt.Errorf("shop order %s: fulfillment: %w", o.ID, err)
 	}
 	return &o, nil
 }
@@ -203,7 +197,7 @@ func (r *shopOrderRepo) Create(ctx context.Context, q Querier, order *ShopOrder)
 	// ON CONFLICT DO NOTHING, а не проверка перед вставкой: две одинаковые
 	// попытки, пришедшие одновременно, иначе обе увидели бы «покупки нет».
 	// Вторая здесь дождётся коммита первой и ничего не вставит.
-	err = r.exec(q).QueryRowContext(ctx, `
+	err = exec(r.db, q).QueryRowContext(ctx, `
 		INSERT INTO shop_orders (id, user_id, request_id, product_id, product_snapshot, variant,
 			quantity, unit_price, total, status, fulfillment, offer_version)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -222,7 +216,7 @@ func (r *shopOrderRepo) Create(ctx context.Context, q Querier, order *ShopOrder)
 }
 
 func (r *shopOrderRepo) one(ctx context.Context, q Querier, where string, args ...interface{}) (*ShopOrder, error) {
-	o, err := scanShopOrder(r.exec(q).QueryRowContext(ctx,
+	o, err := scanShopOrder(exec(r.db, q).QueryRowContext(ctx,
 		`SELECT `+shopOrderColumns+` FROM shop_orders o WHERE `+where, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrShopOrderNotFound
@@ -371,7 +365,7 @@ func (r *shopOrderRepo) RefundRequestAt(ctx context.Context, id uuid.UUID) (*tim
 
 func (r *shopOrderRepo) CountForUserProduct(ctx context.Context, q Querier, userID, productID uuid.UUID) (int, error) {
 	var count int
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM shop_orders WHERE user_id = $1 AND product_id = $2 AND status <> $3`,
 		userID, productID, ShopOrderCanceled).Scan(&count)
 	return count, err
@@ -391,7 +385,7 @@ func (r *shopOrderRepo) SetStatus(ctx context.Context, q Querier, id uuid.UUID, 
 	if err != nil {
 		return err
 	}
-	err = execExpectingOne(ctx, r.exec(q),
+	err = execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE shop_orders SET status = $2, fulfillment = $3, updated_at = now() WHERE id = $1`,
 		id, status, raw)
 	if errors.Is(err, ErrConflict) {
@@ -403,7 +397,7 @@ func (r *shopOrderRepo) SetStatus(ctx context.Context, q Querier, id uuid.UUID, 
 func (r *shopOrderRepo) Cancel(ctx context.Context, q Querier, id uuid.UUID, reason string, adminID uuid.UUID, refund money.Amount) error {
 	// Статус проверяется ещё раз в самом операторе: отмена, прошедшая мимо
 	// блокировки, не должна вернуть деньги второй раз.
-	err := execExpectingOne(ctx, r.exec(q), `
+	err := execExpectingOne(ctx, exec(r.db, q), `
 		UPDATE shop_orders
 		   SET status = $2, cancel_reason = $3, canceled_by = $4,
 		       refunded_amount = refunded_amount + $5, updated_at = now()
@@ -460,24 +454,19 @@ func (r *shopOrderRepo) SupportChatID(ctx context.Context, userID uuid.UUID) (*u
 
 func (r *shopOrderRepo) Transactions(ctx context.Context, id uuid.UUID) ([]*Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, user_id, type::text, amount, COALESCE(counterparty, ''), admin_id, created_at
-		FROM transactions WHERE shop_order_id = $1 ORDER BY created_at`, id)
+		SELECT `+transactionColumns+`
+		FROM transactions t WHERE t.shop_order_id = $1 ORDER BY t.created_at`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]*Transaction, 0)
 	for rows.Next() {
-		var t Transaction
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Type, &t.Amount, &t.Counterparty, &t.AdminID, &t.CreatedAt); err != nil {
+		t, err := scanTransaction(rows)
+		if err != nil {
 			return nil, err
 		}
-		shopOrderID := id
-		t.ShopOrderID = &shopOrderID
-		if sign, ok := LedgerSign(TransactionType(t.Type)); ok {
-			t.Direction = sign
-		}
-		out = append(out, &t)
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }
@@ -503,8 +492,8 @@ func (r *shopOrderRepo) Sales(ctx context.Context, from, to time.Time) ([]*ShopS
 			return nil, err
 		}
 		row.Total, row.Refunded = money.Amount(total), money.Amount(refunded)
-		if len(title) > 0 {
-			_ = json.Unmarshal(title, &row.Title)
+		if err := unmarshalJSON(title, &row.Title); err != nil {
+			return nil, fmt.Errorf("shop sales %s: title: %w", row.ProductID, err)
 		}
 		out = append(out, &row)
 	}

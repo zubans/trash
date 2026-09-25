@@ -68,17 +68,6 @@ func (m *mockShiftRepo) End(ctx context.Context, shiftID uuid.UUID) error {
 	return m.UpdateShiftStatus(context.Background(), shiftID, string(repository.ShiftStatusCompleted))
 }
 
-func (m *mockShiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
-	for _, s := range m.shifts {
-		if s.ID == shiftID {
-			s.Status = repository.ShiftStatusPenalized
-			s.FineAmount += fine
-			return nil
-		}
-	}
-	return errors.New("not found")
-}
-
 func (m *mockShiftRepo) EarlyEnd(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
 	for _, s := range m.shifts {
 		if s.ID == shiftID {

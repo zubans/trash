@@ -32,12 +32,75 @@ var upgrader = websocket.Upgrader{
 // заталкивать в базу неограниченный текст.
 const maxMessageRunes = 4000
 
+// maxFrameBytes — предел одного входящего кадра сокета. Кадр несёт только тип
+// и текст не длиннее maxMessageRunes; вложения по сокету не ходят, они
+// загружаются по REST. Худший случай JSON — каждая руна экранирована
+// суррогатной парой `\uXXXX\uXXXX`, 12 байт; остаток — на конверт кадра.
+// Без предела клиент мог бы заставить сервер буферизовать кадр любого размера.
+const maxFrameBytes = maxMessageRunes*12 + 1024
+
+// Дедлайны сокета по стандартной схеме gorilla: сервер сам шлёт ping чуть чаще,
+// чем ждёт pong, поэтому живой клиент никогда не упирается в дедлайн чтения, а
+// полуоткрытое соединение (ушедший в спячку телефон, оборванная сеть без FIN)
+// рвётся через pongWait вместо того, чтобы вечно держать горутину, комнату и
+// датчик metrics.ChatConnected.
+const (
+	defaultWSWriteWait = 10 * time.Second
+	defaultWSPongWait  = 60 * time.Second
+)
+
+// wsTimeouts — дедлайны одного соединения. Это поля сервиса, а не константы,
+// чтобы тест мог уронить их до миллисекунд.
+type wsTimeouts struct {
+	// writeWait — сколько ждать записи одного кадра клиенту.
+	writeWait time.Duration
+	// pongWait — сколько ждать от клиента хоть какого-то кадра (pong в том числе).
+	pongWait time.Duration
+}
+
+// pingPeriod — интервал ping-ов; строго меньше pongWait, чтобы pong успевал.
+func (t wsTimeouts) pingPeriod() time.Duration { return t.pongWait * 9 / 10 }
+
+// orDefault подставляет рабочие значения там, где клиента собрали без них.
+func (t wsTimeouts) orDefault() wsTimeouts {
+	if t.writeWait <= 0 {
+		t.writeWait = defaultWSWriteWait
+	}
+	if t.pongWait <= 0 {
+		t.pongWait = defaultWSPongWait
+	}
+	return t
+}
+
 // ChatClient представляет активную клиентскую сессию WebSocket.
 type ChatClient struct {
 	Conn   *websocket.Conn
 	UserID uuid.UUID
-	Role   string
 	Send   chan []byte
+
+	timeouts wsTimeouts
+	// writeMu делает ChatClient единственным писателем в сокет: gorilla
+	// допускает одного пишущего одновременно, а писать надо и из насоса записи
+	// (сообщения, ping), и из читателя (ошибка «чат закрыт» только этому клиенту).
+	writeMu sync.Mutex
+}
+
+// write — единственная точка записи в сокет; ставит дедлайн на каждый кадр,
+// чтобы клиент, переставший читать, не подвесил писателя навсегда.
+func (c *ChatClient) write(messageType int, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(c.timeouts.orDefault().writeWait))
+	return c.Conn.WriteMessage(messageType, data)
+}
+
+// writeJSON шлёт кадр только этому клиенту, минуя комнату.
+func (c *ChatClient) writeJSON(payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return c.write(websocket.TextMessage, data)
 }
 
 // ChatRoom хранит активные клиентские соединения чата одного заказа.
@@ -66,24 +129,64 @@ type ChatRoom struct {
 	done chan struct{}
 }
 
+// deliver передаёт кадр горутине комнаты, которая разошлёт его клиентам.
+//
+// Это единственное поведение рассылки. Раньше их было два: неблокирующая
+// отправка с `default` и отправка с секундным таймаутом. Первая теряла кадр
+// всякий раз, когда горутина комнаты была занята чем-то другим (регистрацией
+// соседа, предыдущим кадром) — в обычной работе, а не в отказе. Вторая ждала
+// секунду на пути REST-запроса ради комнаты, которая уже умерла. Ожидание
+// «комната взяла или комната закрылась» точнее обоих: горутина комнаты между
+// кадрами ничего не ждёт, поэтому взятие происходит сразу, а done закрывается
+// в тот момент, когда уходит последний держатель, поэтому в мёртвую комнату
+// никто не пишет.
+func (room *ChatRoom) deliver(payload []byte) {
+	select {
+	case room.Broadcast <- payload:
+	case <-room.done:
+	}
+}
+
+// deliverJSON — deliver для нагрузки, которую ещё надо сериализовать.
+func (room *ChatRoom) deliverJSON(payload any) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	room.deliver(data)
+}
+
+// statusUpdate — кадр «статус этих сообщений изменился», который обе стороны
+// получают после подтверждений доставки и прочтения.
+func statusUpdate(messageIDs []uuid.UUID, status string) map[string]any {
+	return map[string]any{
+		"type":        "status_update",
+		"message_ids": messageIDs,
+		"status":      status,
+	}
+}
+
 // ChatService управляет группами WebSocket-сессий, обработкой сообщений и получением истории.
 type ChatService struct {
 	chatRepo  repository.ChatRepository
 	orderRepo repository.OrderRepository
 	rooms     map[uuid.UUID]*ChatRoom // с ключом OrderID
 	mu        sync.RWMutex
+	// wsTimeouts выдаётся каждому новому соединению; см. wsTimeouts.
+	wsTimeouts wsTimeouts
 }
 
 // NewChatService создаёт новый ChatService.
 func NewChatService(chatRepo repository.ChatRepository, orderRepo repository.OrderRepository) *ChatService {
 	return &ChatService{
-		chatRepo:  chatRepo,
-		orderRepo: orderRepo,
-		rooms:     make(map[uuid.UUID]*ChatRoom),
+		chatRepo:   chatRepo,
+		orderRepo:  orderRepo,
+		rooms:      make(map[uuid.UUID]*ChatRoom),
+		wsTimeouts: wsTimeouts{}.orDefault(),
 	}
 }
 
-func (s *ChatService) getOrCreateRoom(ctx context.Context, orderID, chatID uuid.UUID) *ChatRoom {
+func (s *ChatService) getOrCreateRoom(orderID, chatID uuid.UUID) *ChatRoom {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,7 +202,7 @@ func (s *ChatService) getOrCreateRoom(ctx context.Context, orderID, chatID uuid.
 			done:       make(chan struct{}),
 		}
 		s.rooms[orderID] = room
-		go s.runRoom(ctx, room)
+		go runRoom(room)
 	}
 	// Вызывающий теперь держит комнату и обязан вызвать releaseRoom, когда его
 	// соединение закончится. Взято под тем же замком, что её создал или нашёл,
@@ -126,7 +229,10 @@ func (s *ChatService) releaseRoom(room *ChatRoom) {
 	close(room.done)
 }
 
-func (s *ChatService) runRoom(ctx context.Context, room *ChatRoom) {
+// runRoom — горутина комнаты. Она живёт, пока комнату держит хоть одно
+// соединение, и ни от какого контекста не зависит: комната переживает любой
+// отдельный запрос.
+func runRoom(room *ChatRoom) {
 	for {
 		select {
 		case client := <-room.Register:
@@ -158,22 +264,52 @@ func (s *ChatService) runRoom(ctx context.Context, room *ChatRoom) {
 	}
 }
 
-// WritePump проталкивает сообщения из канала отправки клиенту WebSocket.
+// WritePump проталкивает сообщения из канала отправки клиенту WebSocket и
+// пингует его, чтобы дедлайн чтения на той стороне и здесь не срабатывал у
+// живого соединения. Выходит, когда комната закрыла Send или сокет умер; в
+// обоих случаях закрывает сокет, чем выбивает ReadPump из чтения — а тот уже
+// отписывает клиента и отпускает комнату.
 func (c *ChatClient) WritePump() {
+	ticker := time.NewTicker(c.timeouts.orDefault().pingPeriod())
 	defer func() {
+		ticker.Stop()
 		c.Conn.Close()
 	}()
-	for msg := range c.Send {
-		err := c.Conn.WriteMessage(websocket.TextMessage, msg)
-		if err != nil {
-			return
+	for {
+		select {
+		case msg, ok := <-c.Send:
+			if !ok {
+				_ = c.write(websocket.CloseMessage, nil)
+				return
+			}
+			if err := c.write(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			if err := c.write(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }
 
+// inboundFrame — всё, что клиент может прислать по сокету. У обычного
+// сообщения тип пуст: {"text": "..."}; подтверждения и ping несут только тип.
+type inboundFrame struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 // ReadPump слушает сообщения от клиента WebSocket и рассылает их.
+//
+// ctx — контекст соединения, а не запроса: net/http отменяет контекст запроса
+// сразу после возврата обработчика, ещё до проверки, что соединение перехвачено,
+// а этот цикл живёт много дольше. Здесь у него собственная отмена, чтобы всё,
+// что от него породили, отпустилось вместе с соединением.
 func (s *ChatService) ReadPump(ctx context.Context, client *ChatClient, room *ChatRoom) {
+	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
+		cancel()
 		// Сначала отписка, потом отпускание: пока это соединение всё ещё держит
 		// комнату, её горутина гарантированно работает и это примет.
 		room.Unregister <- client
@@ -181,108 +317,106 @@ func (s *ChatService) ReadPump(ctx context.Context, client *ChatClient, room *Ch
 		client.Conn.Close()
 	}()
 
+	conn := client.Conn
+	pongWait := client.timeouts.orDefault().pongWait
+	conn.SetReadLimit(maxFrameBytes)
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	// Pong-и приходят в этой же горутине, изнутри ReadMessage, поэтому сдвигать
+	// дедлайн отсюда безопасно.
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
 	for {
-		_, messageBytes, err := client.Conn.ReadMessage()
+		_, raw, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
 
-		// 1. Читаем текущий статус заказа, чтобы проверить состояние чата
-		order, err := s.orderRepo.GetOrderByID(ctx, room.OrderID)
-		if err != nil {
-			log.Printf("[ChatService] Failed to check order status: %v", err)
+		// Сначала разбираем кадр, потом решаем, нужна ли база: подтверждения и
+		// ping не пишут сообщений, и статус заказа им ни к чему. Раньше каждый
+		// кадр стоил двух запросов ещё до взгляда на его тип.
+		var frame inboundFrame
+		if err := json.Unmarshal(raw, &frame); err != nil {
 			continue
 		}
-
-		// Если заказ уже COMPLETED или CANCELED, гасим чат
-		if order.Status == "COMPLETED" || order.Status == "CANCELED" {
-			_ = s.chatRepo.DeactivateChat(ctx, room.ChatID)
-			sysMsg, _ := json.Marshal(map[string]string{
-				"type":   "system",
-				"action": "lock",
+		switch frame.Type {
+		case "delivery_ack":
+			s.acknowledge(ctx, client, room, "delivered", s.chatRepo.MarkMessagesAsDelivered)
+		case "read_ack":
+			s.acknowledge(ctx, client, room, "read", s.chatRepo.MarkMessagesAsRead)
+		case "ping":
+			// Диагностический round-trip: доказательство, что кадр, отправленный
+			// клиентом, реально дошёл до сервера. Pong рассылается через писателя
+			// комнаты. Клиенты игнорируют pong в интерфейсе и только логируют.
+			room.deliverJSON(map[string]any{
+				"type": "pong",
+				"ts":   time.Now().UnixMilli(),
 			})
-			room.Broadcast <- sysMsg
-			break
-		}
-
-		// Проверяем, активна ли чат-комната в базе
-		chat, err := s.chatRepo.GetChatByOrderID(ctx, room.OrderID)
-		if err != nil || chat == nil || !chat.IsActive {
-			warnMsg, _ := json.Marshal(map[string]string{
-				"type":    "error",
-				"message": "Chat is locked (read-only).",
-			})
-			_ = client.Conn.WriteMessage(websocket.TextMessage, warnMsg)
-			continue
-		}
-
-		// Проверяем, не является ли сообщение подтверждением статуса (delivery_ack / read_ack)
-		var eventReq struct {
-			Type   string   `json:"type"`
-			Text   string   `json:"text"`
-			MsgIDs []string `json:"message_ids"`
-		}
-		if err := json.Unmarshal(messageBytes, &eventReq); err == nil && eventReq.Type != "" {
-			if eventReq.Type == "delivery_ack" {
-				updatedIDs, err := s.chatRepo.MarkMessagesAsDelivered(ctx, room.ChatID, client.UserID)
-				if err == nil && len(updatedIDs) > 0 {
-					ackBytes, _ := json.Marshal(map[string]interface{}{
-						"type":        "status_update",
-						"message_ids": updatedIDs,
-						"status":      "delivered",
-					})
-					room.Broadcast <- ackBytes
-				}
-				continue
-			} else if eventReq.Type == "read_ack" {
-				updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, room.ChatID, client.UserID)
-				if err == nil && len(updatedIDs) > 0 {
-					ackBytes, _ := json.Marshal(map[string]interface{}{
-						"type":        "status_update",
-						"message_ids": updatedIDs,
-						"status":      "read",
-					})
-					room.Broadcast <- ackBytes
-				}
-				continue
-			} else if eventReq.Type == "ping" {
-				// Диагностический round-trip: доказательство, что кадр, отправленный
-				// клиентом, реально дошёл до сервера. Pong рассылается через писателя
-				// комнаты (и никогда не пишется в сокет прямо отсюда — это гонка с
-				// насосом записи). Клиенты игнорируют pong в интерфейсе и только логируют.
-				pongBytes, _ := json.Marshal(map[string]interface{}{
-					"type": "pong",
-					"ts":   time.Now().UnixMilli(),
-				})
-				room.Broadcast <- pongBytes
-				continue
+		default:
+			if !s.receiveMessage(ctx, client, room, frame.Text) {
+				return
 			}
 		}
-
-		// Разбираем входящее текстовое сообщение
-		var msgReq struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(messageBytes, &msgReq); err != nil || msgReq.Text == "" {
-			continue
-		}
-		if len([]rune(msgReq.Text)) > maxMessageRunes {
-			continue
-		}
-
-		// Сохраняем сообщение в базу
-		savedMsg, err := s.chatRepo.SaveMessage(ctx, room.ChatID, client.UserID, msgReq.Text)
-		if err != nil {
-			log.Printf("[ChatService] Failed to save message: %v", err)
-			continue
-		}
-
-		// Рассылаем сообщение
-		broadcastBytes, err := json.Marshal(savedMsg)
-		if err == nil {
-			room.Broadcast <- broadcastBytes
-		}
 	}
+}
+
+// acknowledge помечает сообщения собеседника доставленными или прочитанными и
+// сообщает об этом комнате, если что-то действительно изменилось.
+func (s *ChatService) acknowledge(ctx context.Context, client *ChatClient, room *ChatRoom, status string,
+	mark func(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error)) {
+	updatedIDs, err := mark(ctx, room.ChatID, client.UserID)
+	if err == nil && len(updatedIDs) > 0 {
+		room.deliverJSON(statusUpdate(updatedIDs, status))
+	}
+}
+
+// receiveMessage — путь обычного сообщения: единственный вид кадра, которому
+// нужны статус заказа и активность чата. Возвращает false, когда заказ уже
+// закрыт и соединение пора рвать.
+func (s *ChatService) receiveMessage(ctx context.Context, client *ChatClient, room *ChatRoom, text string) bool {
+	if text == "" {
+		return true
+	}
+
+	// Читаем текущий статус заказа, чтобы проверить состояние чата.
+	order, err := s.orderRepo.GetOrderByID(ctx, room.OrderID)
+	if err != nil {
+		log.Printf("[ChatService] Failed to check order status: %v", err)
+		return true
+	}
+
+	// Если заказ уже COMPLETED или CANCELED, гасим чат.
+	if orderChatClosed(order.Status) {
+		_ = s.chatRepo.DeactivateChat(ctx, room.ChatID)
+		room.deliverJSON(map[string]string{
+			"type":   "system",
+			"action": "lock",
+		})
+		return false
+	}
+
+	// Проверяем, активна ли чат-комната в базе.
+	chat, err := s.chatRepo.GetChatByOrderID(ctx, room.OrderID)
+	if err != nil || chat == nil || !chat.IsActive {
+		_ = client.writeJSON(map[string]string{
+			"type":    "error",
+			"message": "Chat is locked (read-only).",
+		})
+		return true
+	}
+
+	if len([]rune(text)) > maxMessageRunes {
+		return true
+	}
+
+	savedMsg, err := s.chatRepo.SaveMessage(ctx, room.ChatID, client.UserID, text)
+	if err != nil {
+		log.Printf("[ChatService] Failed to save message: %v", err)
+		return true
+	}
+	room.deliverJSON(savedMsg)
+	return true
 }
 
 // MarkMessagesAsRead помечает сообщения заказа прочитанными.
@@ -293,20 +427,7 @@ func (s *ChatService) MarkMessagesAsRead(ctx context.Context, orderID, userID uu
 	}
 	updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, chat.ID, userID)
 	if err == nil && len(updatedIDs) > 0 {
-		s.mu.RLock()
-		room, exists := s.rooms[orderID]
-		s.mu.RUnlock()
-		if exists {
-			ackBytes, _ := json.Marshal(map[string]interface{}{
-				"type":        "status_update",
-				"message_ids": updatedIDs,
-				"status":      "read",
-			})
-			select {
-			case room.Broadcast <- ackBytes:
-			default:
-			}
-		}
+		s.broadcast(orderID, statusUpdate(updatedIDs, "read"))
 	}
 	return updatedIDs, err
 }
@@ -320,12 +441,8 @@ func (s *ChatService) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) (
 // участвует в переписке. Окно выбирает вызывающий (см. repository.MessageQuery);
 // пустой запрос даёт самую свежую страницу.
 func (s *ChatService) GetMessages(ctx context.Context, orderID, userID uuid.UUID, q repository.MessageQuery) ([]*repository.Message, error) {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
-	if err != nil {
+	if _, err := s.participantOrder(ctx, orderID, userID); err != nil {
 		return nil, err
-	}
-	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
-		return nil, ErrForbidden
 	}
 
 	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
@@ -346,24 +463,9 @@ func (s *ChatService) GetMessages(ctx context.Context, orderID, userID uuid.UUID
 // WS-клиентам. Это классический запасной путь по HTTP, используемый, когда путь
 // отправки по WebSocket недоступен (например, в WebView, где мост глотает ws.send()).
 func (s *ChatService) SendMessage(ctx context.Context, orderID, userID uuid.UUID, text string) (*repository.Message, error) {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
+	chat, err := s.writableChat(ctx, orderID, userID)
 	if err != nil {
 		return nil, err
-	}
-	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
-		return nil, ErrForbidden
-	}
-
-	if order.Status == "COMPLETED" || order.Status == "CANCELED" {
-		return nil, fmt.Errorf("%w: order completed or canceled", ErrChatLocked)
-	}
-
-	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if chat == nil || !chat.IsActive {
-		return nil, ErrChatLocked
 	}
 
 	if len([]rune(text)) > maxMessageRunes {
@@ -376,26 +478,35 @@ func (s *ChatService) SendMessage(ctx context.Context, orderID, userID uuid.UUID
 	}
 	metrics.ChatMessage("order")
 
-	// Рассылаем всем активным клиентам WebSocket в комнате.
-	bytes, err := json.Marshal(savedMsg)
-	if err == nil {
-		s.mu.RLock()
-		room, exists := s.rooms[orderID]
-		s.mu.RUnlock()
-		if exists {
-			select {
-			case room.Broadcast <- bytes:
-			default:
-				// отбрасываем, если буфер переполнен; клиенты перезапросят историю
-			}
-		}
-	}
-
+	s.broadcast(orderID, savedMsg)
 	return savedMsg, nil
 }
 
 // SendMessageWithAttachment сохраняет сообщение чата с вложением через REST и рассылает его.
 func (s *ChatService) SendMessageWithAttachment(ctx context.Context, orderID, userID uuid.UUID, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	chat, err := s.writableChat(ctx, orderID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	savedMsg, err := s.chatRepo.SaveMessageWithAttachment(ctx, chat.ID, userID, text, fileURL, fileName, fileType, fileSize)
+	if err != nil {
+		return nil, err
+	}
+
+	s.broadcast(orderID, savedMsg)
+	return savedMsg, nil
+}
+
+// orderChatClosed сообщает, что заказ завершён и его чат больше не принимает
+// сообщений.
+func orderChatClosed(status repository.OrderStatus) bool {
+	return status == "COMPLETED" || status == "CANCELED"
+}
+
+// participantOrder возвращает заказ, если пользователь — его заказчик или
+// исполнитель, и ErrForbidden — если нет.
+func (s *ChatService) participantOrder(ctx context.Context, orderID, userID uuid.UUID) (*repository.Order, error) {
 	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, err
@@ -403,8 +514,18 @@ func (s *ChatService) SendMessageWithAttachment(ctx context.Context, orderID, us
 	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
 		return nil, ErrForbidden
 	}
+	return order, nil
+}
 
-	if order.Status == "COMPLETED" || order.Status == "CANCELED" {
+// writableChat — общий пролог записи в чат заказа: вызывающий должен быть
+// участником, заказ — ещё открытым, а чат — активным. Возвращает чат, в
+// который можно писать.
+func (s *ChatService) writableChat(ctx context.Context, orderID, userID uuid.UUID) (*repository.Chat, error) {
+	order, err := s.participantOrder(ctx, orderID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if orderChatClosed(order.Status) {
 		return nil, fmt.Errorf("%w: order completed or canceled", ErrChatLocked)
 	}
 
@@ -415,38 +536,17 @@ func (s *ChatService) SendMessageWithAttachment(ctx context.Context, orderID, us
 	if chat == nil || !chat.IsActive {
 		return nil, ErrChatLocked
 	}
-
-	savedMsg, err := s.chatRepo.SaveMessageWithAttachment(ctx, chat.ID, userID, text, fileURL, fileName, fileType, fileSize)
-	if err != nil {
-		return nil, err
-	}
-
-	// Рассылаем активным клиентам WebSocket.
-	bytes, err := json.Marshal(savedMsg)
-	if err == nil {
-		s.mu.RLock()
-		room, exists := s.rooms[orderID]
-		s.mu.RUnlock()
-		if exists {
-			select {
-			case room.Broadcast <- bytes:
-			default:
-			}
-		}
-	}
-
-	return savedMsg, nil
+	return chat, nil
 }
 
 // HandleWS обрабатывает апгрейды, авторизацию и циклы.
-func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, orderID, userID uuid.UUID, role string) {
-	order, err := s.orderRepo.GetOrderByID(ctx, orderID)
-	if err != nil {
+func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, orderID, userID uuid.UUID) {
+	if _, err := s.participantOrder(ctx, orderID, userID); err != nil {
+		if errors.Is(err, ErrForbidden) {
+			http.Error(w, "forbidden: you are not a participant in this order", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "order not found", http.StatusNotFound)
-		return
-	}
-	if order.CustomerID != userID && (order.ExecutorID == nil || *order.ExecutorID != userID) {
-		http.Error(w, "forbidden: you are not a participant in this order", http.StatusForbidden)
 		return
 	}
 
@@ -469,12 +569,12 @@ func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *ht
 		return
 	}
 
-	room := s.getOrCreateRoom(ctx, orderID, chat.ID)
+	room := s.getOrCreateRoom(orderID, chat.ID)
 	client := &ChatClient{
-		Conn:   conn,
-		UserID: userID,
-		Role:   role,
-		Send:   make(chan []byte, 256),
+		Conn:     conn,
+		UserID:   userID,
+		Send:     make(chan []byte, 256),
+		timeouts: s.wsTimeouts,
 	}
 	room.Register <- client
 
@@ -482,23 +582,23 @@ func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *ht
 
 	// Автоматически помечаем сообщения прочитанными, когда пользователь подключается к комнате, и уведомляем собеседника
 	if updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, chat.ID, userID); err == nil && len(updatedIDs) > 0 {
-		ackBytes, _ := json.Marshal(map[string]interface{}{
-			"type":        "status_update",
-			"message_ids": updatedIDs,
-			"status":      "read",
-		})
-		select {
-		case room.Broadcast <- ackBytes:
-		default:
-		}
+		room.deliverJSON(statusUpdate(updatedIDs, "read"))
 	}
+
+	// Контекст соединения. Обработчик возвращается сразу после запуска насосов,
+	// а net/http отменяет контекст запроса сразу после возврата обработчика —
+	// раньше, чем проверяет, что соединение перехвачено. С контекстом запроса
+	// каждый запрос к базе из читателя падал бы с context canceled. WithoutCancel
+	// сохраняет значения промежуточных слоёв (пользователя и прочее) и снимает
+	// только отмену; свою отмену читатель заводит сам.
+	connCtx := context.WithoutCancel(ctx)
 
 	// Датчик парно ставится здесь, а не внутри ReadPump, чтобы соединение никогда
 	// не было посчитано без своего парного уменьшения.
 	metrics.ChatConnected("order")
 	go func() {
 		defer metrics.ChatDisconnected("order")
-		s.ReadPump(ctx, client, room)
+		s.ReadPump(connCtx, client, room)
 	}()
 }
 
@@ -520,7 +620,7 @@ func (s *ChatService) EditMessage(ctx context.Context, messageID, senderID, orde
 	}
 
 	// Рассылаем событие правки в комнату, если она активна
-	editPayload, _ := json.Marshal(map[string]interface{}{
+	s.broadcast(orderID, map[string]any{
 		"type":       "message_edited",
 		"message_id": messageID,
 		"order_id":   orderID,
@@ -528,16 +628,6 @@ func (s *ChatService) EditMessage(ctx context.Context, messageID, senderID, orde
 		"updated_at": msg.UpdatedAt,
 		"message":    msg,
 	})
-
-	s.mu.RLock()
-	room, exists := s.rooms[orderID]
-	s.mu.RUnlock()
-	if exists {
-		select {
-		case room.Broadcast <- editPayload:
-		default:
-		}
-	}
 
 	return msg, nil
 }
@@ -549,21 +639,11 @@ func (s *ChatService) DeleteMessage(ctx context.Context, messageID, senderID, or
 	}
 
 	// Рассылаем событие удаления в комнату, если она активна
-	deletePayload, _ := json.Marshal(map[string]interface{}{
+	s.broadcast(orderID, map[string]any{
 		"type":       "message_deleted",
 		"message_id": messageID,
 		"order_id":   orderID,
 	})
-
-	s.mu.RLock()
-	room, exists := s.rooms[orderID]
-	s.mu.RUnlock()
-	if exists {
-		select {
-		case room.Broadcast <- deletePayload:
-		default:
-		}
-	}
 
 	return nil
 }
@@ -579,25 +659,22 @@ func (s *ChatService) assertMessageInOrder(ctx context.Context, msg *repository.
 }
 
 // BroadcastSystemMessage отправляет произвольную нагрузку всем активным
-// соединениям заказа. Отправка никогда не блокируется: у комнаты, чей последний
-// клиент только что отключился, не осталось читателя, а блокирующая отправка
-// навсегда утекла бы горутиной вызывающего.
+// соединениям заказа. Комнаты без соединений нет, и тогда сообщение просто
+// некому вручить.
 func (s *ChatService) BroadcastSystemMessage(ctx context.Context, orderID uuid.UUID, msg interface{}) {
+	s.broadcast(orderID, msg)
+}
+
+// broadcast сериализует нагрузку и вручает её комнате заказа, если та открыта.
+// Семантика ожидания описана у ChatRoom.deliver.
+func (s *ChatService) broadcast(orderID uuid.UUID, payload any) {
 	s.mu.RLock()
 	room, exists := s.rooms[orderID]
 	s.mu.RUnlock()
 	if !exists {
 		return
 	}
-	bytes, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	select {
-	case room.Broadcast <- bytes:
-	case <-time.After(time.Second):
-		log.Printf("[ChatService] dropped system message for order %s: room is not reading", orderID)
-	}
+	room.deliverJSON(payload)
 }
 
 // GetOrCreateSupportChat возвращает чат поддержки пользователя.

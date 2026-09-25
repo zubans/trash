@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,13 +90,6 @@ func NewMoneyIncidentRepository(db *sql.DB) MoneyIncidentRepository {
 	return &moneyIncidentRepo{db: db}
 }
 
-func (r *moneyIncidentRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *moneyIncidentRepo) Record(ctx context.Context, q Querier, incident *MoneyIncident) error {
 	if incident.ID == uuid.Nil {
 		incident.ID = uuid.New()
@@ -111,7 +105,7 @@ func (r *moneyIncidentRepo) Record(ctx context.Context, q Querier, incident *Mon
 		}
 		details = encoded
 	}
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO money_incidents (id, kind, severity, order_id, user_id, expected, actual, applied, details)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, incident.ID, incident.Kind, incident.Severity, incident.OrderID, incident.UserID,
@@ -168,8 +162,8 @@ func (r *moneyIncidentRepo) list(ctx context.Context, limit int, openOnly bool) 
 		incident.Expected = nullAmount(expected)
 		incident.Actual = nullAmount(actual)
 		incident.Applied = nullAmount(applied)
-		if len(details) > 0 {
-			_ = json.Unmarshal(details, &incident.Details)
+		if err := unmarshalJSON(details, &incident.Details); err != nil {
+			return nil, fmt.Errorf("money incident %s: details: %w", incident.ID, err)
 		}
 		incidents = append(incidents, &incident)
 	}

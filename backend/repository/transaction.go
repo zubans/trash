@@ -161,7 +161,7 @@ func (r *transactionRepo) GetBalance(ctx context.Context, userID uuid.UUID) (mon
 }
 
 func (r *transactionRepo) UpdateBalance(ctx context.Context, tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
-	return execExpectingOne(ctx, r.querier(ctx, tx),
+	return execExpectingOne(ctx, r.querier(tx),
 		`UPDATE users SET balance = balance + $1 WHERE id = $2`, delta, userID)
 }
 
@@ -171,7 +171,7 @@ func (r *transactionRepo) Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUI
 	if amount.IsNegative() {
 		return errors.New("debit amount must not be negative")
 	}
-	err := execExpectingOne(ctx, r.querier(ctx, tx),
+	err := execExpectingOne(ctx, r.querier(tx),
 		`UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1`, amount, userID)
 	if errors.Is(err, ErrConflict) {
 		return ErrInsufficientFunds
@@ -179,7 +179,9 @@ func (r *transactionRepo) Debit(ctx context.Context, tx *sql.Tx, userID uuid.UUI
 	return err
 }
 
-func (r *transactionRepo) querier(ctx context.Context, tx *sql.Tx) Querier {
+// querier — то же, что exec, но для методов, принимающих *sql.Tx: нулевой
+// указатель нельзя отдать в exec напрямую, он стал бы ненулевым интерфейсом.
+func (r *transactionRepo) querier(tx *sql.Tx) Querier {
 	if tx != nil {
 		return tx
 	}
@@ -187,16 +189,7 @@ func (r *transactionRepo) querier(ctx context.Context, tx *sql.Tx) Querier {
 }
 
 func (r *transactionRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return runInTx(ctx, r.db, fn)
 }
 
 // CreateTransaction записывает проводку. Counterparty пишется вместе с ней: без
@@ -218,7 +211,7 @@ func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *
 		t.CreatedAt = time.Now()
 	}
 	// ShopOrderID привязывает проводку к покупке магазина: order_id занят заказами.
-	_, err := r.querier(ctx, tx).ExecContext(ctx,
+	_, err := r.querier(tx).ExecContext(ctx,
 		`INSERT INTO transactions (id, user_id, order_id, shop_order_id, type, amount, counterparty, admin_id, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		t.ID, t.UserID, t.OrderID, t.ShopOrderID, t.Type, t.Amount,
@@ -231,24 +224,37 @@ func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *sql.Tx, t *
 // одному типу.
 func (r *transactionRepo) HasTip(ctx context.Context, q Querier, orderID uuid.UUID) (bool, error) {
 	var exists bool
-	err := r.querierAny(ctx, q).QueryRowContext(ctx,
+	err := exec(r.db, q).QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM transactions WHERE order_id = $1 AND type = $2)`,
 		orderID, TransactionTypeTip,
 	).Scan(&exists)
 	return exists, err
 }
 
-func (r *transactionRepo) querierAny(ctx context.Context, q Querier) Querier {
-	if q != nil {
-		return q
+// transactionColumns — колонки проводки в порядке, который читает
+// scanTransaction. Таблица обязана идти под псевдонимом t.
+const transactionColumns = `t.id, t.user_id, t.order_id, t.shop_order_id, t.type::text, t.amount,
+	COALESCE(t.counterparty, ''), t.admin_id, t.created_at`
+
+// scanTransaction читает проводку из transactionColumns; extra — приёмники
+// колонок, которые вызывающий дописал после них (телефон из JOIN и т. п.).
+// Direction берётся из единственного объявления соглашения о знаках, чтобы
+// ни один из четырёх прежних сканов не выводил его по-своему.
+func scanTransaction(row rowScanner, extra ...interface{}) (*Transaction, error) {
+	var t Transaction
+	dest := []interface{}{&t.ID, &t.UserID, &t.OrderID, &t.ShopOrderID, &t.Type, &t.Amount,
+		&t.Counterparty, &t.AdminID, &t.CreatedAt}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
+		return nil, err
 	}
-	return r.db
+	t.Direction, _ = LedgerSign(TransactionType(t.Type))
+	return &t, nil
 }
 
 func (r *transactionRepo) GetTransactionsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]*Transaction, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, user_id, order_id, type, amount, admin_id, created_at
-		 FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+		`SELECT `+transactionColumns+`
+		 FROM transactions t WHERE t.user_id = $1 ORDER BY t.created_at DESC LIMIT $2`,
 		userID, historyLimit(limit),
 	)
 	if err != nil {
@@ -258,11 +264,11 @@ func (r *transactionRepo) GetTransactionsByUserID(ctx context.Context, userID uu
 
 	var result []*Transaction
 	for rows.Next() {
-		var t Transaction
-		if err := rows.Scan(&t.ID, &t.UserID, &t.OrderID, &t.Type, &t.Amount, &t.AdminID, &t.CreatedAt); err != nil {
+		t, err := scanTransaction(rows)
+		if err != nil {
 			return nil, err
 		}
-		result = append(result, &t)
+		result = append(result, t)
 	}
 	return result, rows.Err()
 }

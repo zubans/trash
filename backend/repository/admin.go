@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"healthlogin/backend/money"
 )
@@ -80,12 +82,10 @@ type AdminRepository interface {
 	// а с includeUnverified — и те, по ссылке подтверждения которых не переходили.
 	BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error)
 	GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error)
-	GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*TopUpRequest, error)
 	CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
 	LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error)
 	SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
 	GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*WithdrawalRequest, error)
-	GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*WithdrawalRequest, error)
 	// Выводы — денежный процесс и живут в AdminService; репозиторий предоставляет
 	// заблокированное чтение и отдельные записи, которые ему нужны.
 	CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
@@ -160,13 +160,25 @@ const (
 	OrderGroupAll       = "all"
 )
 
-// OrderStatusGroups — статусы каждой группы. Спор (DISPUTED) — в активных: его
+// orderStatusGroups — статусы каждой группы. Спор (DISPUTED) — в активных: его
 // разбирают, и заказ не должен пропадать из списка, пока спор открыт.
-var OrderStatusGroups = map[string][]OrderStatus{
+var orderStatusGroups = map[string][]OrderStatus{
 	OrderGroupActive:    {OrderStatusSearching, OrderStatusAssigned, OrderStatusDisputed},
 	OrderGroupReview:    {OrderStatusExecuted},
 	OrderGroupCompleted: {OrderStatusCompleted},
 	OrderGroupCanceled:  {OrderStatusCanceled},
+}
+
+// OrderStatusGroup отдаёт статусы группы списка заказов; для неизвестной группы
+// (в том числе OrderGroupAll) — nil, что фильтр читает как «все статусы».
+// Возвращается копия: карта — общее состояние пакета, и вызывающий не должен
+// уметь его переписать.
+func OrderStatusGroup(group string) []OrderStatus {
+	statuses, ok := orderStatusGroups[group]
+	if !ok {
+		return nil
+	}
+	return append([]OrderStatus(nil), statuses...)
 }
 
 // OrdersFilter описывает одну страницу списка заказов. Statuses сужает набор до
@@ -199,6 +211,33 @@ var orderSorts = map[string]string{
 	"customer":     "cu.phone",
 	"executor":     "eu.phone",
 	"status":       "o.status",
+}
+
+// periodPattern — единственная форма периода, которую принимают фильтры: YYYY-MM.
+var periodPattern = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
+
+// periodArgs дописывает условие «column попадает в месяц period» как диапазон
+// column >= начало месяца AND column < начало следующего, а не как
+// to_char(column, 'YYYY-MM') = period: диапазон использует индекс по колонке,
+// а to_char вычислялся для каждой строки таблицы. Границы считает база через
+// to_timestamp в часовом поясе сессии — в том же, в котором фасеты собирают
+// список периодов через to_char, поэтому оба видят месяц одинаково.
+//
+// Период не по форме раньше просто не совпадал ни с одной строкой; здесь он
+// делает то же самое, а не роняет запрос ошибкой разбора даты.
+func periodArgs(where string, args []interface{}, column, period string) (string, []interface{}) {
+	period = strings.TrimSpace(period)
+	if period == "" {
+		return where, args
+	}
+	if !periodPattern.MatchString(period) {
+		return where + " AND FALSE", args
+	}
+	args = append(args, period)
+	n := len(args)
+	return where + fmt.Sprintf(
+		" AND %s >= to_timestamp($%d, 'YYYY-MM') AND %s < to_timestamp($%d, 'YYYY-MM') + interval '1 month'",
+		column, n, column, n), args
 }
 
 // statusArgs дописывает условие по статусам в where и аргументы.
@@ -263,12 +302,13 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	// Получаем постраничный список с адресом заказчика по умолчанию. Адрес теперь
 	// живёт в единой таблице `addresses` (миграция 037 удалила
 	// customer_profiles.address), поэтому читается оттуда. Набор мультиролей
-	// берётся отдельно (attachRoles), чтобы отсутствующая таблица user_roles
-	// никогда не могла уронить весь админский список.
+	// читается тем же запросом, что и у FindBy*: отдельный «по мере возможности»
+	// запрос молча оставлял Roles пустым при любом сбое.
 	listQuery := fmt.Sprintf(
 		`SELECT u.id, u.role, u.phone, u.balance, u.status, u.is_verified, u.created_at,
 		        COALESCE((SELECT a.address FROM addresses a WHERE a.user_id = u.id AND a.is_default LIMIT 1), '') AS address,
-		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, ''), u.birth_date
+		        COALESCE(u.last_name, ''), COALESCE(u.first_name, ''), COALESCE(u.patronymic, ''), u.birth_date,
+		        COALESCE((SELECT array_agg(ur.role ORDER BY ur.role) FROM user_roles ur WHERE ur.user_id = u.id), '{}')
 		 FROM users u
 		 %s ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argCount, argCount+1,
@@ -285,10 +325,11 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	for rows.Next() {
 		var u User
 		var birthDate sql.NullTime
+		var roles []string
 		// Хеш пароля намеренно не выбирается: в админском списке он бесполезен и
 		// вообще не должен путешествовать через приложение.
 		err := rows.Scan(&u.ID, &u.Role, &u.Phone, &u.Balance, &u.Status, &u.Verified, &u.CreatedAt, &u.Address,
-			&u.LastName, &u.FirstName, &u.Patronymic, &birthDate)
+			&u.LastName, &u.FirstName, &u.Patronymic, &birthDate, pq.Array(&roles))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -296,12 +337,12 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 			bd := birthDate.Time
 			u.BirthDate = &bd
 		}
+		u.Roles = roles
 		users = append(users, &u)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	r.attachRoles(ctx, users)
 
 	return users, total, nil
 }
@@ -339,40 +380,6 @@ func (r *adminRepo) BroadcastEmails(ctx context.Context, role string, includeUnv
 	return emails, rows.Err()
 }
 
-// attachRoles заполняет набор мультиролей каждого пользователя из user_roles.
-// Он намеренно «по мере возможности»: любой сбой (прежде всего ещё не
-// существующая таблица, потому что миграция 039 не выполнялась) проглатывается
-// и оставляет Roles пустым, поэтому список всё равно рисуется — клиент откатится к основной роли.
-func (r *adminRepo) attachRoles(ctx context.Context, users []*User) {
-	if len(users) == 0 {
-		return
-	}
-	placeholders := make([]string, len(users))
-	args := make([]interface{}, len(users))
-	byID := make(map[uuid.UUID]*User, len(users))
-	for i, u := range users {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = u.ID
-		byID[u.ID] = u
-	}
-	query := "SELECT user_id, role FROM user_roles WHERE user_id IN (" + strings.Join(placeholders, ", ") + ") ORDER BY role"
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var uid uuid.UUID
-		var role string
-		if err := rows.Scan(&uid, &role); err != nil {
-			return
-		}
-		if u, ok := byID[uid]; ok {
-			u.Roles = append(u.Roles, role)
-		}
-	}
-}
-
 func (r *adminRepo) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error) {
 	query := `
 		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
@@ -399,20 +406,6 @@ func (r *adminRepo) GetTopUpRequests(ctx context.Context, limit, offset int) ([]
 	return reqs, rows.Err()
 }
 
-func (r *adminRepo) GetTopUpRequestByID(ctx context.Context, id uuid.UUID) (*TopUpRequest, error) {
-	var req TopUpRequest
-	query := `
-		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
-		FROM balance_topup_requests r
-		JOIN users u ON r.user_id = u.id
-		WHERE r.id = $1`
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
 func (r *adminRepo) CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error) {
 	id := uuid.New()
 	query := `
@@ -421,7 +414,7 @@ func (r *adminRepo) CreateTopUpRequest(ctx context.Context, q Querier, userID uu
 		RETURNING id, user_id, amount, status, created_at`
 
 	var req TopUpRequest
-	err := r.exec(ctx, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
+	err := exec(r.db, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +425,7 @@ func (r *adminRepo) CreateTopUpRequest(ctx context.Context, q Querier, userID uu
 // решающих одновременно, сериализовались, а не зачислили баланс оба.
 func (r *adminRepo) LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error) {
 	var req TopUpRequest
-	err := r.exec(ctx, q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
 		FROM balance_topup_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
 		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
@@ -445,7 +438,7 @@ func (r *adminRepo) LockTopUpRequest(ctx context.Context, q Querier, requestID u
 // SetTopUpStatus решает судьбу ожидающей заявки; охрана не даёт второму решению
 // зачислить баланс дважды.
 func (r *adminRepo) SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
-	return execExpectingOne(ctx, r.exec(ctx, q), `
+	return execExpectingOne(ctx, exec(r.db, q), `
 		UPDATE balance_topup_requests
 		SET status = $1::topup_status, admin_id = $2, updated_at = now()
 		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
@@ -477,27 +470,6 @@ func (r *adminRepo) GetWithdrawalRequests(ctx context.Context, limit, offset int
 	return reqs, rows.Err()
 }
 
-func (r *adminRepo) GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*WithdrawalRequest, error) {
-	var req WithdrawalRequest
-	query := `
-		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
-		FROM balance_withdrawal_requests r
-		JOIN users u ON r.user_id = u.id
-		WHERE r.id = $1`
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-func (r *adminRepo) exec(ctx context.Context, q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *adminRepo) CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error) {
 	id := uuid.New()
 	query := `
@@ -506,7 +478,7 @@ func (r *adminRepo) CreateWithdrawalRequest(ctx context.Context, q Querier, user
 		RETURNING id, user_id, amount, status, created_at`
 
 	var req WithdrawalRequest
-	err := r.exec(ctx, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
+	err := exec(r.db, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +489,7 @@ func (r *adminRepo) CreateWithdrawalRequest(ctx context.Context, q Querier, user
 // действующих одновременно админа сериализовались, а не увидели её оба как PENDING.
 func (r *adminRepo) LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error) {
 	var req WithdrawalRequest
-	err := r.exec(ctx, q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
 		FROM balance_withdrawal_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
 		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
@@ -530,7 +502,7 @@ func (r *adminRepo) LockWithdrawalRequest(ctx context.Context, q Querier, reques
 // SetWithdrawalStatus решает судьбу ожидающей заявки. Охрана заставляет второе
 // решение по той же заявке упасть, а не переписать первое.
 func (r *adminRepo) SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
-	return execExpectingOne(ctx, r.exec(ctx, q), `
+	return execExpectingOne(ctx, exec(r.db, q), `
 		UPDATE balance_withdrawal_requests
 		SET status = $1::withdrawal_status, admin_id = $2, updated_at = now()
 		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
@@ -584,10 +556,7 @@ func (r *adminRepo) GetTransactions(ctx context.Context, f TransactionsFilter) (
 		where += fmt.Sprintf(" AND t.type = $%d", len(args))
 	}
 
-	if period := strings.TrimSpace(f.Period); period != "" {
-		args = append(args, period)
-		where += fmt.Sprintf(" AND to_char(t.created_at, 'YYYY-MM') = $%d", len(args))
-	}
+	where, args = periodArgs(where, args, "t.created_at", f.Period)
 
 	from := `
 		FROM transactions t
@@ -610,8 +579,7 @@ func (r *adminRepo) GetTransactions(ctx context.Context, f TransactionsFilter) (
 
 	args = append(args, f.Limit, f.Offset)
 	query := fmt.Sprintf(`
-		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount,
-		       COALESCE(t.counterparty, ''), t.admin_id, t.created_at
+		SELECT `+transactionColumns+`, u.phone
 		%s
 		ORDER BY %s %s NULLS LAST, t.created_at DESC
 		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
@@ -624,16 +592,13 @@ func (r *adminRepo) GetTransactions(ctx context.Context, f TransactionsFilter) (
 
 	var txs []*Transaction
 	for rows.Next() {
-		var tx Transaction
-		err := rows.Scan(&tx.ID, &tx.UserID, &tx.UserPhone, &tx.OrderID, &tx.Type, &tx.Amount,
-			&tx.Counterparty, &tx.AdminID, &tx.CreatedAt)
+		var phone string
+		tx, err := scanTransaction(rows, &phone)
 		if err != nil {
 			return nil, 0, err
 		}
-		// Знак берётся из единственного объявления соглашения, а не выводится
-		// на клиенте заново.
-		tx.Direction, _ = LedgerSign(TransactionType(tx.Type))
-		txs = append(txs, &tx)
+		tx.UserPhone = phone
+		txs = append(txs, tx)
 	}
 	return txs, total, rows.Err()
 }
@@ -718,8 +683,7 @@ func (r *adminRepo) GetUserTransactions(ctx context.Context, userID uuid.UUID, l
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.id, t.user_id, u.phone, t.order_id, t.type, t.amount,
-		       COALESCE(t.counterparty, ''), t.admin_id, t.created_at
+		SELECT `+transactionColumns+`, u.phone
 		FROM transactions t
 		JOIN users u ON t.user_id = u.id
 		WHERE t.user_id = $1
@@ -732,24 +696,18 @@ func (r *adminRepo) GetUserTransactions(ctx context.Context, userID uuid.UUID, l
 
 	txs := make([]*Transaction, 0, limit)
 	for rows.Next() {
-		var tx Transaction
-		if err := rows.Scan(&tx.ID, &tx.UserID, &tx.UserPhone, &tx.OrderID, &tx.Type, &tx.Amount,
-			&tx.Counterparty, &tx.AdminID, &tx.CreatedAt); err != nil {
+		var phone string
+		tx, err := scanTransaction(rows, &phone)
+		if err != nil {
 			return nil, 0, err
 		}
-		// Знак берётся из единственного объявления соглашения, а не выводится
-		// на клиенте заново.
-		tx.Direction, _ = LedgerSign(TransactionType(tx.Type))
-		txs = append(txs, &tx)
+		tx.UserPhone = phone
+		txs = append(txs, tx)
 	}
 	return txs, total, rows.Err()
 }
 
 // GetUserOrders отдаёт заказы пользователя в обеих ролях и всех статусах.
-//
-// Телефон исполнителя приходит через LEFT JOIN и у заказа в поиске равен NULL,
-// поэтому он сводится к пустой строке в самом запросе: NULL, прочитанный в
-// обычную строку, — ошибка драйвера, а не пустое значение.
 func (r *adminRepo) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*AdminOrder, int, error) {
 	limit, offset = clampPage(limit, offset)
 
@@ -760,10 +718,7 @@ func (r *adminRepo) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, 
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
-		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at,
-		       cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)
+		SELECT `+adminOrderColumns+`
 		FROM orders o
 		JOIN users cu ON o.customer_id = cu.id
 		LEFT JOIN users eu ON o.executor_id = eu.id
@@ -778,18 +733,30 @@ func (r *adminRepo) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, 
 
 	orders := make([]*AdminOrder, 0, limit)
 	for rows.Next() {
-		var o AdminOrder
-		if err := rows.Scan(
-			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
-			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
-			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
-			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
-		); err != nil {
+		o, err := scanAdminOrder(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		orders = append(orders, &o)
+		orders = append(orders, o)
 	}
 	return orders, total, rows.Err()
+}
+
+// adminOrderColumns — заказ целиком плюс телефоны сторон и название услуги.
+// Таблицы обязаны идти под псевдонимами o, cu, eu и sn. Телефон исполнителя —
+// через COALESCE: у заказа в поиске исполнителя нет, и NULL из LEFT JOIN,
+// прочитанный в строку, — ошибка драйвера, а не пустое значение.
+const adminOrderColumns = orderColumns + `, cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)`
+
+// scanAdminOrder читает строку adminOrderColumns.
+func scanAdminOrder(row rowScanner) (*AdminOrder, error) {
+	var a AdminOrder
+	o, err := scanOrder(row, &a.CustomerPhone, &a.ExecutorPhone, &a.ServiceVariantName)
+	if err != nil {
+		return nil, err
+	}
+	a.Order = o
+	return &a, nil
 }
 
 // clampPage приводит страницу к разумным границам: без верхнего предела один
@@ -840,10 +807,7 @@ func (r *adminRepo) GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrde
 		where += fmt.Sprintf(" AND COALESCE(sn.name->>'ru', sn.code) = $%d", len(args))
 	}
 
-	if period := strings.TrimSpace(f.Period); period != "" {
-		args = append(args, period)
-		where += fmt.Sprintf(" AND to_char(%s, 'YYYY-MM') = $%d", orderEventAt, len(args))
-	}
+	where, args = periodArgs(where, args, orderEventAt, f.Period)
 
 	from := `
 		FROM orders o
@@ -867,13 +831,8 @@ func (r *adminRepo) GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrde
 	}
 
 	args = append(args, f.Limit, f.Offset)
-	// Телефон исполнителя — через COALESCE: у заказа в поиске исполнителя нет,
-	// и NULL из LEFT JOIN, прочитанный в строку, — ошибка драйвера.
 	query := fmt.Sprintf(`
-		SELECT o.id, o.customer_id, o.executor_id, o.service_variant_id, o.is_urgent, o.is_asap, o.status,
-		       o.hold_amount, o.final_amount, o.is_downgraded, o.photo_url, o.address, o.pickup_lat, o.pickup_lon,
-		       o.created_at, o.assigned_at, o.deadline_at, o.completed_at, o.canceled_at, o.executed_at,
-		       cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)
+		SELECT `+adminOrderColumns+`
 		%s
 		ORDER BY %s %s NULLS LAST, o.created_at DESC
 		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
@@ -886,17 +845,11 @@ func (r *adminRepo) GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrde
 
 	orders := []*AdminOrder{}
 	for rows.Next() {
-		var o AdminOrder
-		err := rows.Scan(
-			&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
-			&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address, &o.PickupLat, &o.PickupLon,
-			&o.CreatedAt, &o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt, &o.ExecutedAt,
-			&o.CustomerPhone, &o.ExecutorPhone, &o.ServiceVariantName,
-		)
+		o, err := scanAdminOrder(rows)
 		if err != nil {
 			return nil, 0, err
 		}
-		orders = append(orders, &o)
+		orders = append(orders, o)
 	}
 	return orders, total, rows.Err()
 }

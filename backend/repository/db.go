@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -27,7 +28,54 @@ var (
 
 	// ErrInsufficientFunds возвращается, когда списание увело бы баланс ниже нуля.
 	ErrInsufficientFunds = errors.New("insufficient balance")
+
+	// ErrNotFound — общий предок всех «не найдено» репозиториев. Доменные
+	// ошибки вроде ErrShopOrderNotFound оборачивают его, поэтому обработчик,
+	// которому всё равно, чего именно нет, проверяет errors.Is(err, ErrNotFound)
+	// один раз, а не перечисляет каждую сущность.
+	ErrNotFound = errors.New("not found")
 )
+
+// rowScanner удовлетворяется и *sql.Row, и *sql.Rows: одна функция сканирования
+// обслуживает и чтение одной строки, и цикл по выборке.
+type rowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// unmarshalJSON разбирает JSON-колонку в dst; пустое значение (NULL или ”)
+// оставляет dst как есть. Ошибка разбора возвращается: прежде она молча
+// отбрасывалась, и повреждённое поле читалось как пустое.
+func unmarshalJSON(raw []byte, dst interface{}) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return json.Unmarshal(raw, dst)
+}
+
+// exec выбирает Querier: открытую транзакцию вызывающего, если она передана, и
+// пул соединений в противном случае. Единственная реализация на весь пакет:
+// раньше у каждого репозитория была своя копия с тем же телом.
+func exec(db *sql.DB, q Querier) Querier {
+	if q == nil {
+		return db
+	}
+	return q
+}
+
+// runInTx выполняет fn в транзакции и коммитит её, если fn вернула nil.
+// Rollback отложен, поэтому паника внутри fn не оставит соединение с открытой
+// транзакцией; после Commit он безвреден.
+func runInTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 const (
 	// DefaultHistoryPageSize ограничивает списки истории — прошлые заказы

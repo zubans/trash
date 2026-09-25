@@ -4,17 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // ErrRoleExists сообщает, что код роли уже занят.
 var ErrRoleExists = errors.New("role with this code already exists")
 
 // ErrRoleNotFound сообщает, что роли с таким кодом нет.
-var ErrRoleNotFound = errors.New("role not found")
+var ErrRoleNotFound = fmt.Errorf("role not found: %w", ErrNotFound)
 
 // Role — строка справочника ролей. Права хранятся отдельными строками и
 // подгружаются вместе с ролью: список ролей в панели показывает и то, что роль
@@ -234,13 +236,17 @@ func (r *roleRepo) SetPermissions(ctx context.Context, code string, permissions 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM role_permissions WHERE role_code = $1`, code); err != nil {
 		return err
 	}
+	clean := make([]string, 0, len(permissions))
 	for _, permission := range permissions {
-		if strings.TrimSpace(permission) == "" {
-			continue
+		if strings.TrimSpace(permission) != "" {
+			clean = append(clean, permission)
 		}
+	}
+	if len(clean) > 0 {
+		// Одним оператором на весь набор, а не по строке на право.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO role_permissions (role_code, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			code, permission); err != nil {
+			`INSERT INTO role_permissions (role_code, permission) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+			code, pq.Array(clean)); err != nil {
 			return err
 		}
 	}

@@ -268,10 +268,6 @@ func (m *mockExecutorGeoRepo) RecordDevicePosition(ctx context.Context, executor
 	return nil
 }
 
-func (m *mockExecutorGeoRepo) GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*repository.ExecutorPosition, error) {
-	return nil, nil
-}
-
 func (m *mockExecutorGeoRepo) FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
 	return nil
 }
@@ -536,17 +532,6 @@ func TestMatchingService_MatchOrders(t *testing.T) {
 	err := srv.MatchOrders(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error matching orders: %v", err)
-	}
-
-	// Проверяем StartMatchingWorker
-	srv.StartMatchingWorker(context.Background(), 10*time.Millisecond)
-	time.Sleep(25 * time.Millisecond)
-}
-
-func TestAuthService_NewAuthService(t *testing.T) {
-	authSrv := NewAuthService(newMockRepo(), nil)
-	if authSrv == nil {
-		t.Error("expected non-nil AuthService")
 	}
 }
 

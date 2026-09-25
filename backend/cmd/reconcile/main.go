@@ -8,16 +8,13 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"time"
 
-	_ "github.com/lib/pq"
-
+	"healthlogin/backend/dbconn"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
@@ -27,28 +24,11 @@ func main() {
 	tolerance := flag.Float64("tolerance", 0.01, "difference to ignore, in rubles")
 	flag.Parse()
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		env("DB_HOST", "localhost"), env("DB_PORT", "5432"),
-		env("DB_USER", "healthlogin"), env("DB_PASSWORD", "healthlogin"),
-		env("DB_NAME", "healthlogin"), env("DB_SSLMODE", "disable"),
-	)
-
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		log.Fatalf("open database: %v", err)
-	}
-	defer db.Close()
-
-	for i := 0; i < 10; i++ {
-		if err = db.Ping(); err == nil {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
+	db, err := dbconn.OpenFromEnv(context.Background())
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
 	}
+	defer db.Close()
 
 	report, err := repository.NewReconciliationRepository(db).Reconcile(context.Background(), money.FromRubles(*tolerance))
 	if err != nil {
@@ -93,11 +73,4 @@ func printReport(report *repository.ReconciliationReport) {
 	for _, a := range report.HoldAnomalies {
 		fmt.Printf("  order %s (%s, hold %s): %s\n", a.OrderID, a.Status, a.HoldAmount, a.Reason)
 	}
-}
-
-func env(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

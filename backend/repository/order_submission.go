@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,7 +53,7 @@ type BehaviorEscalation struct {
 }
 
 // ErrEscalationNotFound возвращается для id, по которому нет открытой эскалации.
-var ErrEscalationNotFound = errors.New("escalation not found")
+var ErrEscalationNotFound = fmt.Errorf("escalation not found: %w", ErrNotFound)
 
 // SubmissionRepository хранит отправки исполнителей и порождаемые ими
 // эскалации.
@@ -61,8 +62,6 @@ type SubmissionRepository interface {
 	// выводится в том же операторе, поэтому две гоняющиеся отправки не могут обе
 	// быть «попыткой 2».
 	Record(ctx context.Context, q Querier, submission *OrderSubmission) error
-	CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error)
-	ListForOrder(ctx context.Context, orderID uuid.UUID) ([]*OrderSubmission, error)
 	// AttemptsSinceEscalation — сколько попыток сделано после последней
 	// закрытой администратором эскалации, считая текущую.
 	//
@@ -94,13 +93,6 @@ func NewSubmissionRepository(db *sql.DB) SubmissionRepository {
 	return &submissionRepo{db: db}
 }
 
-func (r *submissionRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *submissionRepo) Record(ctx context.Context, q Querier, submission *OrderSubmission) error {
 	if submission.ID == uuid.Nil {
 		submission.ID = uuid.New()
@@ -112,7 +104,7 @@ func (r *submissionRepo) Record(ctx context.Context, q Querier, submission *Orde
 	if submission.Mismatches == nil {
 		submission.Mismatches = []string{}
 	}
-	return r.exec(q).QueryRowContext(ctx, `
+	return exec(r.db, q).QueryRowContext(ctx, `
         INSERT INTO order_submissions (id, order_id, executor_id, attempt, matched, fields, mismatches)
         VALUES ($1, $2, $3,
                 (SELECT COALESCE(MAX(attempt), 0) + 1 FROM order_submissions WHERE order_id = $2),
@@ -129,7 +121,7 @@ func (r *submissionRepo) Record(ctx context.Context, q Querier, submission *Orde
 // прежнего поведения.
 func (r *submissionRepo) AttemptsSinceEscalation(ctx context.Context, q Querier, orderID uuid.UUID) (int, error) {
 	var count int
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         SELECT COUNT(*) FROM order_submissions
         WHERE order_id = $1
           AND created_at > COALESCE(
@@ -140,46 +132,13 @@ func (r *submissionRepo) AttemptsSinceEscalation(ctx context.Context, q Querier,
 	return count, err
 }
 
-func (r *submissionRepo) CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM order_submissions WHERE order_id = $1`, orderID).Scan(&count)
-	return count, err
-}
-
-func (r *submissionRepo) ListForOrder(ctx context.Context, orderID uuid.UUID) ([]*OrderSubmission, error) {
-	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, order_id, executor_id, attempt, matched, fields, mismatches, created_at
-        FROM order_submissions WHERE order_id = $1 ORDER BY attempt
-    `, orderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	submissions := []*OrderSubmission{}
-	for rows.Next() {
-		var s OrderSubmission
-		var fields []byte
-		if err := rows.Scan(&s.ID, &s.OrderID, &s.ExecutorID, &s.Attempt, &s.Matched,
-			&fields, pq.Array(&s.Mismatches), &s.CreatedAt); err != nil {
-			return nil, err
-		}
-		if len(fields) > 0 {
-			_ = json.Unmarshal(fields, &s.Fields)
-		}
-		submissions = append(submissions, &s)
-	}
-	return submissions, rows.Err()
-}
-
 func (r *submissionRepo) Escalate(ctx context.Context, q Querier, escalation *BehaviorEscalation) error {
 	if escalation.ID == uuid.Nil {
 		escalation.ID = uuid.New()
 	}
 	// Идемпотентным это делает частичный уникальный индекс; конфликт — нормальный
 	// исход, а не ошибка.
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO behavior_escalations (id, order_id, behavior_code, reason)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT DO NOTHING
@@ -231,15 +190,53 @@ func (r *submissionRepo) ListEscalations(ctx context.Context, status string, lim
 	}
 
 	// Отправленные попытки — смысл этого экрана: администратор сравнивает
-	// прочитанное модератором в документе с учётной записью.
+	// прочитанное модератором в документе с учётной записью. Читаются одним
+	// запросом на всю страницу, а не по запросу на эскалацию.
+	orderIDs := make([]uuid.UUID, 0, len(escalations))
 	for _, e := range escalations {
-		submissions, err := r.ListForOrder(ctx, e.OrderID)
-		if err != nil {
-			return nil, err
+		orderIDs = append(orderIDs, e.OrderID)
+	}
+	byOrder, err := r.listForOrders(ctx, orderIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range escalations {
+		e.Submissions = byOrder[e.OrderID]
+		if e.Submissions == nil {
+			e.Submissions = []*OrderSubmission{}
 		}
-		e.Submissions = submissions
 	}
 	return escalations, nil
+}
+
+// listForOrders — отправки по каждому из заказов, по номеру попытки.
+func (r *submissionRepo) listForOrders(ctx context.Context, orderIDs []uuid.UUID) (map[uuid.UUID][]*OrderSubmission, error) {
+	out := make(map[uuid.UUID][]*OrderSubmission, len(orderIDs))
+	if len(orderIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT id, order_id, executor_id, attempt, matched, fields, mismatches, created_at
+        FROM order_submissions WHERE order_id = ANY($1) ORDER BY order_id, attempt
+    `, pq.Array(orderIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s OrderSubmission
+		var fields []byte
+		if err := rows.Scan(&s.ID, &s.OrderID, &s.ExecutorID, &s.Attempt, &s.Matched,
+			&fields, pq.Array(&s.Mismatches), &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(fields, &s.Fields); err != nil {
+			return nil, fmt.Errorf("submission %s: fields: %w", s.ID, err)
+		}
+		out[s.OrderID] = append(out[s.OrderID], &s)
+	}
+	return out, rows.Err()
 }
 
 func (r *submissionRepo) ResolveEscalation(ctx context.Context, id, adminID uuid.UUID) error {
@@ -255,7 +252,7 @@ func (r *submissionRepo) ResolveEscalation(ctx context.Context, id, adminID uuid
 }
 
 func (r *submissionRepo) ResolveByOrder(ctx context.Context, q Querier, orderID uuid.UUID, adminID *uuid.UUID) error {
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         UPDATE behavior_escalations
         SET status = 'RESOLVED', resolved_at = now(), resolved_by = $2
         WHERE order_id = $1 AND status = 'OPEN'

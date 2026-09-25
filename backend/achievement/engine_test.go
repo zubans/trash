@@ -1,7 +1,9 @@
 package achievement_test
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -185,7 +187,7 @@ func TestMarathonKeyIsTheCalendarMonth(t *testing.T) {
 // сохранении скрипта, а не при выдаче.
 func TestScriptCannotTouchCommission(t *testing.T) {
 	e := achievement.New(achievement.DefaultLimits)
-	err := e.Compile("greedy", "achievement.star", []byte(`
+	err := compileOne(e, "greedy", "achievement.star", []byte(`
 MANIFEST = {"title": "x", "audience": "EXECUTOR", "events": ["order.confirmed"]}
 
 def check(f):
@@ -201,7 +203,7 @@ def check(f):
 
 func TestAudienceIsRequired(t *testing.T) {
 	e := achievement.New(achievement.DefaultLimits)
-	err := e.Compile("nameless", "achievement.star", []byte(`
+	err := compileOne(e, "nameless", "achievement.star", []byte(`
 MANIFEST = {"title": "x", "events": ["order.confirmed"]}
 
 def check(f):
@@ -216,7 +218,7 @@ def check(f):
 // компиляции переводит это в ошибку, которую видно на сохранении.
 func TestEventsAreRequired(t *testing.T) {
 	e := achievement.New(achievement.DefaultLimits)
-	err := e.Compile("silent", "achievement.star", []byte(`
+	err := compileOne(e, "silent", "achievement.star", []byte(`
 MANIFEST = {"title": "x", "audience": "EXECUTOR"}
 
 def check(f):
@@ -229,7 +231,7 @@ def check(f):
 
 func TestProgressIsClamped(t *testing.T) {
 	e := achievement.New(achievement.DefaultLimits)
-	if err := e.Compile("eager", "achievement.star", []byte(`
+	if err := compileOne(e, "eager", "achievement.star", []byte(`
 MANIFEST = {"title": "x", "audience": "EXECUTOR", "events": ["order.confirmed"]}
 
 def check(f):
@@ -246,5 +248,92 @@ def progress(f):
 	}
 	if value != 1 {
 		t.Errorf("progress = %v, want it clamped to 1", value)
+	}
+}
+
+// compileOne регистрирует однофайловую ачивку: тестам хватает одного файла,
+// а загрузчик и админ-панель всегда идут через CompileFiles.
+func compileOne(e *achievement.Engine, code, filename string, src []byte) error {
+	return e.CompileFiles(code, []achievement.SourceFile{{Name: filename, Src: src}})
+}
+
+// Ачивка с неверным манифестом не остаётся в рантайме: иначе Has отвечал бы
+// «да» на то, чего Manifest не находит.
+func TestInvalidManifestIsNotRegistered(t *testing.T) {
+	e := achievement.New(achievement.DefaultLimits)
+	if err := compileOne(e, "silent", "achievement.star", []byte(`
+MANIFEST = {"title": "x", "audience": "EXECUTOR"}
+
+def check(f):
+    return None
+`)); err == nil {
+		t.Fatal("an achievement without events compiled")
+	}
+	if e.Has("silent") {
+		t.Error("a rejected achievement stayed registered")
+	}
+	if _, ok := e.Manifest("silent"); ok {
+		t.Error("a rejected achievement has a manifest")
+	}
+}
+
+// Регистрация, снятие и перечисление идут параллельно — как правка ачивки в
+// админ-панели во время синхронизации и чтения списка. Манифест выводится из
+// рантайма, поэтому перечисленное и найденное по коду не могут разойтись;
+// гонок быть не должно (go test -race).
+func TestManifestsStayConsistentUnderConcurrentUse(t *testing.T) {
+	e := achievement.New(achievement.DefaultLimits)
+	src := []byte(`
+MANIFEST = {"title": "t", "audience": "EXECUTOR", "events": ["order.confirmed"], "weight": 7}
+
+def check(f):
+    return None
+`)
+	const workers = 4
+	const rounds = 50
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(2)
+		code := fmt.Sprintf("ach-%d", w)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < rounds; i++ {
+				if err := compileOne(e, code, "achievement.star", src); err != nil {
+					t.Errorf("compile %s: %v", code, err)
+					return
+				}
+				e.Remove(code)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < rounds; i++ {
+				for _, m := range e.Manifests() {
+					if m.Code == "" || m.Audience != achievement.AudienceExecutor || m.Weight != 7 {
+						t.Errorf("listed manifest is not derived properly: %+v", m)
+						return
+					}
+				}
+				if m, ok := e.Manifest(code); ok && (m.Audience != achievement.AudienceExecutor || m.Weight != 7) {
+					t.Errorf("manifest by code is not derived properly: %+v", m)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := e.Manifests(); len(got) != 0 {
+		t.Errorf("after every Remove the engine still lists %d achievements", len(got))
+	}
+	if err := compileOne(e, "kept", "achievement.star", src); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := e.Manifests(); len(got) != 1 || got[0].Code != "kept" {
+		t.Errorf("Manifests() = %+v, want the one registered achievement", got)
+	}
+	if _, ok := e.Manifest("kept"); !ok {
+		t.Error("Manifest() does not see what Manifests() lists")
 	}
 }

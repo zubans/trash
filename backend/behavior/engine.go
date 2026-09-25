@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
-	"sync"
 	"time"
 
 	"go.starlark.net/starlark"
@@ -56,18 +55,18 @@ func IsNodeCode(code string) bool { return strings.HasPrefix(code, NodeCodePrefi
 
 // Engine — рантайм скриптов, настроенный под услуги: его встроенные функции
 // строят эффекты заказа, а манифесты разбираются в Manifest этого пакета.
+//
+// Всё состояние живёт в рантайме: манифест услуги выводится из общего
+// манифеста при каждом обращении, а не хранится второй картой под вторым
+// мьютексом, которая могла бы разойтись с первой.
 type Engine struct {
 	runtime *script.Engine
-
-	mu        sync.RWMutex
-	manifests map[string]Manifest
 }
 
 // New создаёт пустой движок.
 func New(limits Limits) *Engine {
 	return &Engine{
-		runtime:   script.New(limits, script.Options{Builtins: predeclared, Hooks: hookNames}),
-		manifests: map[string]Manifest{},
+		runtime: script.New(limits, script.Options{Builtins: predeclared, Hooks: hookNames}),
 	}
 }
 
@@ -77,26 +76,12 @@ func (e *Engine) Load(fsys fs.FS, label string) error {
 	return script.Load(fsys, label, e)
 }
 
-// Compile разбирает однофайловое поведение. Существует для тестов и для самого
-// простого возможного поведения; загрузчик выше использует CompileFiles.
-func (e *Engine) Compile(code, filename string, src []byte) error {
-	return e.CompileFiles(code, []SourceFile{{Name: filename, Src: src}})
-}
-
 // CompileFiles разбирает файлы одного поведения по порядку и регистрирует его
-// под кодом code, разбирая заодно поля манифеста, которые есть только у услуг.
+// под кодом code. Поля манифеста, которые есть только у услуг, разбираются
+// при чтении (см. Manifest), поэтому регистрация — это регистрация в рантайме
+// и больше ничего.
 func (e *Engine) CompileFiles(code string, files []SourceFile) error {
-	if err := e.runtime.CompileFiles(code, files); err != nil {
-		return err
-	}
-	raw, ok := e.runtime.Manifest(code)
-	if !ok {
-		return fmt.Errorf("behavior %s compiled but has no manifest", code)
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.manifests[code] = manifestFrom(raw)
-	return nil
+	return e.runtime.CompileFiles(code, files)
 }
 
 // Remove снимает регистрацию поведения. Используется при удалении собственного
@@ -106,9 +91,6 @@ func (e *Engine) Remove(code string) {
 		return
 	}
 	e.runtime.Remove(code)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	delete(e.manifests, code)
 }
 
 // Validate компилирует кандидата, не регистрируя его, чтобы админ-панель могла
@@ -131,10 +113,11 @@ func (e *Engine) Manifest(code string) (Manifest, bool) {
 	if e == nil {
 		return Manifest{}, false
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	m, ok := e.manifests[code]
-	return m, ok
+	raw, ok := e.runtime.Manifest(code)
+	if !ok {
+		return Manifest{}, false
+	}
+	return manifestFrom(raw), true
 }
 
 // Manifests перечисляет все загруженные поведения — для выбора в админ-панели.
@@ -142,11 +125,10 @@ func (e *Engine) Manifests() []Manifest {
 	if e == nil {
 		return nil
 	}
-	out := make([]Manifest, 0)
-	for _, raw := range e.runtime.Manifests() {
-		if m, ok := e.Manifest(raw.Code); ok {
-			out = append(out, m)
-		}
+	raws := e.runtime.Manifests()
+	out := make([]Manifest, 0, len(raws))
+	for _, raw := range raws {
+		out = append(out, manifestFrom(raw))
 	}
 	return out
 }

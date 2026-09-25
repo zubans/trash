@@ -201,7 +201,7 @@ func TestSubmissionsNumberTheirAttempts(t *testing.T) {
 		}
 	}
 
-	stored, err := submissions.ListForOrder(ctx, orderID)
+	stored, err := repository.ListSubmissionsForOrder(ctx, submissions, orderID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

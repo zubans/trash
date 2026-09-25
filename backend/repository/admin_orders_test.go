@@ -43,7 +43,7 @@ func TestGetOrdersHandlesUnassignedOrder(t *testing.T) {
 	}
 
 	orders, _, err := repo.GetOrders(ctx, repository.OrdersFilter{
-		Statuses: repository.OrderStatusGroups[repository.OrderGroupActive], Limit: 50,
+		Statuses: repository.OrderStatusGroup(repository.OrderGroupActive), Limit: 50,
 	})
 	if err != nil {
 		t.Fatalf("GetOrders вернул ошибку на заказе без исполнителя: %v", err)
@@ -63,7 +63,7 @@ func TestGetOrdersHandlesUnassignedOrder(t *testing.T) {
 	}
 
 	review, _, err := repo.GetOrders(ctx, repository.OrdersFilter{
-		Statuses: repository.OrderStatusGroups[repository.OrderGroupReview], Search: orderID.String(), Limit: 50,
+		Statuses: repository.OrderStatusGroup(repository.OrderGroupReview), Search: orderID.String(), Limit: 50,
 	})
 	if err != nil {
 		t.Fatalf("GetOrders(review): %v", err)

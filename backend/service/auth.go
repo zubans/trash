@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -41,19 +40,9 @@ type JWTClaims struct {
 	Role   string
 }
 
-// NewAuthService создаёт AuthService на переданном репозитории.
-// Секрет подписи JWT читается из JWT_SECRET; если переменная не задана,
-// используется значение по умолчанию для разработки.
-func NewAuthService(repo repository.UserRepository, resolver AddressResolver) *AuthService {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		secret = "dev-secret-change-me"
-	}
-	return NewAuthServiceWithSecret(repo, secret, resolver, NewSmtpMailSender())
-}
-
-// NewAuthServiceWithSecret создаёт AuthService с явным секретом JWT. Полезно
-// для тестов и для окружений, куда секрет внедряют напрямую.
+// NewAuthServiceWithSecret создаёт AuthService с явным секретом JWT. Другого
+// конструктора нет намеренно: запасной секрет «для разработки» — это известный
+// всем ключ подписи, и он не должен существовать даже как удобство.
 func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, resolver AddressResolver, mailer MailSender) *AuthService {
 	if mailer == nil {
 		mailer = NewSmtpMailSender()
@@ -164,6 +153,13 @@ func validRegistrationRole(role string) bool {
 	return role == "CUSTOMER" || role == "EXECUTOR"
 }
 
+// normalizeEmail приводит адрес к тому виду, в каком он хранится: без пробелов
+// по краям и в нижнем регистре. Уникальность в базе — по LOWER(email)
+// (миграция 066), и всё, что пишет адрес, обязано пройти через это.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // Register создаёт нового пользователя с указанными телефоном, почтой, паролем, датой рождения, адресом подачи и ролью.
@@ -193,7 +189,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 	if err != nil {
 		return nil, err
 	}
-	email = strings.TrimSpace(email)
+	email = normalizeEmail(email)
 	if email == "" || !emailRegex.MatchString(email) {
 		return nil, errors.New("a valid email is required")
 	}
@@ -327,10 +323,9 @@ func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password s
 	if strings.Contains(input, "@") {
 		user, err = s.repo.FindByEmail(ctx, input)
 	} else {
+		// Только канонический номер: телефоны в базе нормализованы (миграция
+		// 026), а повторный поиск по сырому вводу шёл мимо индекса.
 		user, err = s.repo.FindByPhone(ctx, normalizePhone(input))
-		if (err != nil || user == nil) && input != "" {
-			user, err = s.repo.FindByPhone(ctx, input)
-		}
 	}
 
 	if err != nil || user == nil {
@@ -407,7 +402,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repositor
 
 // RequestPasswordReset генерирует 6-значный код сброса пароля и отправляет его письмом.
 func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) error {
-	email = strings.TrimSpace(email)
+	email = normalizeEmail(email)
 	if email == "" {
 		return errors.New("укажите Email")
 	}
@@ -459,7 +454,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) er
 
 // ResetPassword проверяет код и обновляет пароль.
 func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPassword string) error {
-	email = strings.TrimSpace(email)
+	email = normalizeEmail(email)
 	code = strings.TrimSpace(code)
 	if email == "" || code == "" || newPassword == "" {
 		return errors.New("укажите Email, код и новый пароль")
@@ -519,7 +514,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 
 // UpdateUserEmail обновляет почту пользователя и запускает подтверждение.
 func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, newEmail string) (*repository.User, error) {
-	newEmail = strings.TrimSpace(newEmail)
+	newEmail = normalizeEmail(newEmail)
 	if newEmail == "" || !emailRegex.MatchString(newEmail) {
 		return nil, errors.New("a valid email is required")
 	}

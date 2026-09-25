@@ -310,9 +310,17 @@ func checkMark(data []byte, in CheckInput) string {
 }
 
 // luminance отдаёт яркость пикселя по той же формуле, что клиент считает из RGB.
+//
+// JPEG декодируется в YCbCr или, для чёрно-белого снимка, в Gray; у обоих
+// яркость лежит в плоскости как есть, и читается она без обращения через
+// интерфейс, которое на каждом пикселе стоило бы аллокации. Общий путь через
+// At остаётся для остального.
 func luminance(img image.Image) func(x, y int) float64 {
-	if ycc, ok := img.(*image.YCbCr); ok {
-		return func(x, y int) float64 { return float64(ycc.Y[ycc.YOffset(x, y)]) }
+	switch im := img.(type) {
+	case *image.YCbCr:
+		return func(x, y int) float64 { return float64(im.Y[im.YOffset(x, y)]) }
+	case *image.Gray:
+		return func(x, y int) float64 { return float64(im.Pix[im.PixOffset(x, y)]) }
 	}
 	return func(x, y int) float64 {
 		r, g, b, _ := img.At(x, y).RGBA()

@@ -25,7 +25,7 @@ const (
 
 // Ошибки каталога, которые слой обработчиков отображает в коды статуса HTTP.
 var (
-	ErrServiceNodeNotFound      = errors.New("service node not found")
+	ErrServiceNodeNotFound      = fmt.Errorf("service node not found: %w", ErrNotFound)
 	ErrServiceNodeDeleted       = errors.New("service node is deleted")
 	ErrServiceNodeNotDeleted    = errors.New("service node is not deleted")
 	ErrServiceNodeHasChildren   = errors.New("cannot delete a node that still has children")
@@ -205,11 +205,13 @@ type ServiceNodeFilter struct {
 	IncludeDeleted bool
 }
 
-// FilterActive возвращает только узлы, которые приложение может предлагать пользователям.
-var FilterActive = ServiceNodeFilter{ActiveOnly: true}
+// FilterActive возвращает только узлы, которые приложение может предлагать
+// пользователям. Функция, а не переменная: значение — общее для пакета, и
+// вызывающий не должен уметь его переписать.
+func FilterActive() ServiceNodeFilter { return ServiceNodeFilter{ActiveOnly: true} }
 
 // FilterLive возвращает активные и неактивные узлы, но не удалённые.
-var FilterLive = ServiceNodeFilter{}
+func FilterLive() ServiceNodeFilter { return ServiceNodeFilter{} }
 
 // where отдаёт фильтр как SQL-предикаты, добавляемые к существующему WHERE.
 // col — псевдоним таблицы, содержащей колонки узла.
@@ -250,7 +252,6 @@ type ServiceCatalogRepository interface {
 	GetRootCategories(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error)
 	GetChildren(ctx context.Context, parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error)
 	GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error)
-	GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*ServiceNode, error)
 	GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*ServiceNode, error)
 
 	// Помощники каталога
@@ -262,9 +263,7 @@ type ServiceCatalogRepository interface {
 	GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*ServiceNode, []*ServiceNode, error)
 
 	// Транзакционные помощники, используемые слоем сервисов.
-	HasChildren(ctx context.Context, id uuid.UUID) (bool, error)
 	HasOrders(ctx context.Context, id uuid.UUID) (bool, error)
-	IsDescendantOf(ctx context.Context, candidateAncestor, candidateDescendant uuid.UUID) (bool, error)
 }
 
 type serviceCatalogRepo struct {
@@ -283,12 +282,7 @@ const serviceNodeColumns = `
     COALESCE(behavior_constants, ''), COALESCE(behavior_source, ''), created_at, updated_at, deleted_at
 `
 
-// rowScanner удовлетворяется и *sql.Row, и *sql.Rows.
-type rowScanner interface {
-	Scan(dest ...interface{}) error
-}
-
-func scanServiceNodeInto(s rowScanner) (*ServiceNode, error) {
+func scanServiceNode(s rowScanner) (*ServiceNode, error) {
 	var n ServiceNode
 	err := s.Scan(
 		&n.ID, &n.ParentID, &n.Code, &n.Name, &n.Description, &n.NodeType,
@@ -302,14 +296,6 @@ func scanServiceNodeInto(s rowScanner) (*ServiceNode, error) {
 	return &n, nil
 }
 
-func scanServiceNode(row *sql.Row) (*ServiceNode, error) {
-	return scanServiceNodeInto(row)
-}
-
-func scanServiceNodeRows(rows *sql.Rows) (*ServiceNode, error) {
-	return scanServiceNodeInto(rows)
-}
-
 func (r *serviceCatalogRepo) queryNodes(ctx context.Context, query string, args ...interface{}) ([]*ServiceNode, error) {
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -319,7 +305,7 @@ func (r *serviceCatalogRepo) queryNodes(ctx context.Context, query string, args 
 
 	nodes := []*ServiceNode{}
 	for rows.Next() {
-		n, err := scanServiceNodeRows(rows)
+		n, err := scanServiceNode(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -428,7 +414,7 @@ func (r *serviceCatalogRepo) UpdateNode(ctx context.Context, node *ServiceNode) 
 	node.DeletedAt = nil
 
 	if node.ParentID != nil {
-		if err := checkParentCycle(ctx, node.ID, *node.ParentID, r.IsDescendantOf); err != nil {
+		if err := checkParentCycle(ctx, node.ID, *node.ParentID, r.isDescendantOf); err != nil {
 			return err
 		}
 		// Перенос живого узла под удалённую категорию спрятал бы его из каталога,
@@ -647,15 +633,10 @@ func (r *serviceCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid
 	return r.queryNodes(ctx, query, args...)
 }
 
-// GetAncestors и GetVariantPath сохраняют удалённые узлы: их читают, чтобы
-// отрисовать положение узла, в том числе для заказов по услуге, списанной
-// позже. Живой узел никогда не может стоять под удалённым, поэтому путь живого
-// узла тоже всегда живой.
-func (r *serviceCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*ServiceNode, error) {
-	query := "SELECT " + serviceNodeColumns + " FROM service_node_paths p JOIN service_nodes sn ON sn.id = p.ancestor_id WHERE p.descendant_id = $1 AND p.depth > 0 ORDER BY p.depth"
-	return r.queryNodes(ctx, query, descendantID)
-}
-
+// GetVariantPath сохраняет удалённые узлы: его читают, чтобы отрисовать
+// положение узла, в том числе для заказов по услуге, списанной позже. Живой
+// узел никогда не может стоять под удалённым, поэтому путь живого узла тоже
+// всегда живой.
 func (r *serviceCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_node_paths p JOIN service_nodes sn ON sn.id = p.ancestor_id WHERE p.descendant_id = $1 ORDER BY p.depth"
 	return r.queryNodes(ctx, query, variantID)
@@ -663,7 +644,7 @@ func (r *serviceCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.
 
 func (r *serviceCatalogRepo) GetActiveVariants(ctx context.Context) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE node_type = 'VARIANT'" +
-		FilterActive.where("") + " ORDER BY sort_order, name->>'ru'"
+		FilterActive().where("") + " ORDER BY sort_order, name->>'ru'"
 	return r.queryNodes(ctx, query)
 }
 
@@ -688,14 +669,6 @@ func (r *serviceCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid
 	return variant, path, nil
 }
 
-// HasChildren считает только живых детей: категорию, всё поддерево которой
-// списано, можно списать следом.
-func (r *serviceCatalogRepo) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM service_nodes WHERE parent_id = $1 AND deleted_at IS NULL`, id).Scan(&count)
-	return count > 0, err
-}
-
 // HasOrders сообщает, заказывали ли узел когда-либо. Он больше не блокирует
 // удаление — он говорит админ-панели, что списание услуги оставляет за собой
 // историю заказов.
@@ -705,7 +678,8 @@ func (r *serviceCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool,
 	return count > 0, err
 }
 
-func (r *serviceCatalogRepo) IsDescendantOf(ctx context.Context, candidateAncestor, candidateDescendant uuid.UUID) (bool, error) {
+// isDescendantOf отвечает по таблице замыкания, включая удалённые узлы.
+func (r *serviceCatalogRepo) isDescendantOf(ctx context.Context, candidateAncestor, candidateDescendant uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, `
         SELECT EXISTS(

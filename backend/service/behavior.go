@@ -357,7 +357,18 @@ func (b *Behaviors) translate(node *repository.ServiceNode, hook string, err err
 func (b *Behaviors) report(node *repository.ServiceNode, hook string, err error) {
 	code := b.codeFor(node)
 	log.Printf("[behavior] %s.%s on node %s: %v", code, hook, node.Code, err)
-	metrics.BehaviorHookError(code, hook)
+	metrics.BehaviorHookError(behaviorMetricLabel(code), hook)
+}
+
+// behaviorMetricLabel — значение лейбла behavior в метриках. Собственные
+// скрипты узлов сворачиваются в одно значение: код такого поведения содержит
+// id узла, а лейбл с id — это ряд метрики на каждый узел. Какой именно узел —
+// говорит строка журнала рядом.
+func behaviorMetricLabel(code string) string {
+	if behavior.IsNodeCode(code) {
+		return "node"
+	}
+	return code
 }
 
 // Code — поведение, которое выполняет узел, для вызывающих вне этого файла,

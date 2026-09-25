@@ -20,7 +20,7 @@ type SLAWorker struct {
 	orderService *service.OrderService
 	chatService  *service.ChatService
 	ledger       *service.Ledger
-	guard func(func() error) error
+	guard        Guard
 }
 
 // NewSLAWorker создаёт новый SLAWorker. Реестр обязателен: понижение возвращает
@@ -36,16 +36,9 @@ func NewSLAWorker(db *sql.DB, orderService *service.OrderService, chatService *s
 }
 
 // Start периодически выполняет цикл воркера.
-func (w *SLAWorker) Start(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			if err := metrics.TrackWorker("sla", func() error { return w.runGuarded(w.CheckSLAOverdue) }); err != nil {
-				log.Printf("[SLAWorker] Error checking overdue orders: %v", err)
-			}
-		}
-	}()
-	log.Printf("[SLAWorker] Background worker started every %v", interval)
+func (w *SLAWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	return periodic{name: "SLAWorker", metric: "sla", guard: w.guard}.
+		Start(ctx, interval, w.CheckSLAOverdue)
 }
 
 type overdueOrder struct {
@@ -56,7 +49,7 @@ type overdueOrder struct {
 }
 
 // CheckSLAOverdue ищет просроченные заказы и обновляет их.
-func (w *SLAWorker) CheckSLAOverdue() error {
+func (w *SLAWorker) CheckSLAOverdue(ctx context.Context) error {
 	query := `
 		SELECT id, customer_id, service_variant_id, hold_amount 
 		FROM orders 
@@ -65,7 +58,7 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 		  AND deadline_at < now() 
 		  AND (is_urgent = TRUE OR is_asap = TRUE)`
 
-	rows, err := w.db.QueryContext(context.Background(), query)
+	rows, err := w.db.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -80,9 +73,12 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 		}
 		list = append(list, o)
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	for _, o := range list {
-		err := w.downgradeOrder(o)
+		err := w.downgradeOrder(ctx, o)
 		if err != nil {
 			log.Printf("[SLAWorker] Failed to downgrade order %s: %v", o.ID, err)
 		} else {
@@ -94,15 +90,15 @@ func (w *SLAWorker) CheckSLAOverdue() error {
 	return nil
 }
 
-func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
-	tx, err := w.db.BeginTx(context.Background(), nil)
+func (w *SLAWorker) downgradeOrder(ctx context.Context, o overdueOrder) error {
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	// 1. Считаем базовую (несрочную) цену варианта.
-	basePrice, err := w.orderService.CalculatePrice(context.Background(), o.ServiceVariantID, false, false, false)
+	basePrice, err := w.orderService.CalculatePrice(ctx, o.ServiceVariantID, false, false, false)
 	if err != nil {
 		return err
 	}
@@ -121,7 +117,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	// выплата в момент подтверждения выводится из удержания, поэтому оставленное
 	// исходное срочное удержание выплатило бы исполнителю полную срочную цену уже
 	// после того, как заказчику вернули разницу.
-	res, err := tx.Exec(`
+	res, err := tx.ExecContext(ctx, `
 		UPDATE orders
 		SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, hold_amount = $1, is_downgraded = TRUE
 		WHERE id = $2 AND status = 'ASSIGNED' AND is_downgraded = FALSE`, basePrice, o.ID)
@@ -145,7 +141,7 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	// претендовал ни один заказ, — один из путей, которыми книги платформы
 	// разошлись с суммой балансов пользователей.
 	if refund.IsPositive() {
-		if err := w.ledger.Release(context.Background(), tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
+		if err := w.ledger.Release(ctx, tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
 			return err
 		}
 	}
@@ -155,8 +151,10 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 		return err
 	}
 
-	// 4. Отправляем уведомление по websocket в активные комнаты
-	w.chatService.BroadcastSystemMessage(context.Background(), o.ID, map[string]interface{}{
+	// 4. Отправляем уведомление по websocket в активные комнаты. Возврат уже
+	// зафиксирован, и уведомление о нём должно дойти, даже если проход застало
+	// выключение процесса: отмена ctx его не отменяет.
+	w.chatService.BroadcastSystemMessage(context.WithoutCancel(ctx), o.ID, map[string]interface{}{
 		"type":         "system",
 		"action":       "downgrade",
 		"is_urgent":    false,
@@ -165,16 +163,6 @@ func (w *SLAWorker) downgradeOrder(o overdueOrder) error {
 	})
 
 	return nil
-}
-
-// guard выполняет один тик под advisory-блокировкой задачи, когда подключён
-// Leader, чтобы вторая реплика пропустила тик, а не продублировала его. Без
-// него выполняется напрямую — так и делают однопроцессный деплой и тесты.
-func (w *SLAWorker) runGuarded(job func() error) error {
-	if w.guard == nil {
-		return job()
-	}
-	return w.guard(job)
 }
 
 // WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.

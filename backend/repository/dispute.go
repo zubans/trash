@@ -115,18 +115,11 @@ func NewDisputeRepository(db *sql.DB) DisputeRepository {
 	return &disputeRepo{db: db}
 }
 
-func (r *disputeRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 const disputeColumns = `id, order_id, customer_id, executor_id, claim, status,
     COALESCE(closure, ''), COALESCE(decision, ''), COALESCE(resolution_note, ''),
     created_at, closed_at, closed_by`
 
-func scanDispute(row interface{ Scan(...interface{}) error }) (*Dispute, error) {
+func scanDispute(row rowScanner) (*Dispute, error) {
 	var d Dispute
 	var closedBy uuid.NullUUID
 	if err := row.Scan(&d.ID, &d.OrderID, &d.CustomerID, &d.ExecutorID, &d.Claim, &d.Status,
@@ -140,7 +133,7 @@ func scanDispute(row interface{ Scan(...interface{}) error }) (*Dispute, error) 
 }
 
 func (r *disputeRepo) Open(ctx context.Context, q Querier, d *Dispute) error {
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         INSERT INTO order_disputes (order_id, customer_id, executor_id, claim)
         VALUES ($1, $2, $3, $4)
         RETURNING id, status, created_at
@@ -153,7 +146,7 @@ func (r *disputeRepo) Open(ctx context.Context, q Querier, d *Dispute) error {
 }
 
 func (r *disputeRepo) FindOpenByOrder(ctx context.Context, q Querier, orderID uuid.UUID) (*Dispute, error) {
-	d, err := scanDispute(r.exec(q).QueryRowContext(ctx,
+	d, err := scanDispute(exec(r.db, q).QueryRowContext(ctx,
 		`SELECT `+disputeColumns+` FROM order_disputes WHERE order_id = $1 AND status = 'OPEN'`, orderID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -169,7 +162,7 @@ func (r *disputeRepo) Close(ctx context.Context, q Querier, disputeID uuid.UUID,
 	if c.Note != "" {
 		note = c.Note
 	}
-	return execExpectingOne(ctx, r.exec(q), `
+	return execExpectingOne(ctx, exec(r.db, q), `
         UPDATE order_disputes
         SET status = 'CLOSED', closure = $2, decision = $3, resolution_note = $4,
             closed_at = now(), closed_by = $5
@@ -178,7 +171,7 @@ func (r *disputeRepo) Close(ctx context.Context, q Querier, disputeID uuid.UUID,
 }
 
 func (r *disputeRepo) FindByID(ctx context.Context, q Querier, disputeID uuid.UUID) (*Dispute, error) {
-	return scanDispute(r.exec(q).QueryRowContext(ctx,
+	return scanDispute(exec(r.db, q).QueryRowContext(ctx,
 		`SELECT `+disputeColumns+` FROM order_disputes WHERE id = $1`, disputeID))
 }
 

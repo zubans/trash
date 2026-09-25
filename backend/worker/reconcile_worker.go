@@ -17,7 +17,7 @@ import (
 type ReconcileWorker struct {
 	repo      repository.ReconciliationRepository
 	tolerance money.Amount
-	guard func(func() error) error
+	guard     Guard
 }
 
 // NewReconcileWorker создаёт ReconcileWorker.
@@ -26,26 +26,20 @@ func NewReconcileWorker(repo repository.ReconciliationRepository, tolerance mone
 }
 
 // Start выполняет проход сразу, а затем на каждом интервале.
-func (w *ReconcileWorker) Start(interval time.Duration) {
-	go func() {
-		w.runGuarded()
-		ticker := time.NewTicker(interval)
-		for range ticker.C {
-			w.runGuarded()
-		}
-	}()
-	log.Printf("[ReconcileWorker] Balance reconciliation scheduled every %v", interval)
+//
+// Под защитой лидера: проход только читает и сообщает, поэтому дубль
+// безвреден — но он поднял бы тот же алерт дважды, а этот шум никому не нужен.
+func (w *ReconcileWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	return periodic{name: "ReconcileWorker", metric: "reconcile", guard: w.guard, runAtStart: true}.
+		Start(ctx, interval, w.Run)
 }
 
 // Run выполняет один проход и логирует исход.
-func (w *ReconcileWorker) Run() {
-	started := time.Now()
-	report, err := w.repo.Reconcile(context.Background(), w.tolerance)
-	metrics.WorkerRun("reconcile", time.Since(started), err)
+func (w *ReconcileWorker) Run(ctx context.Context) error {
+	report, err := w.repo.Reconcile(ctx, w.tolerance)
 	if err != nil {
 		metrics.ReconcileFailed()
-		log.Printf("[ReconcileWorker] reconciliation failed: %v", err)
-		return
+		return err
 	}
 
 	metrics.ReconcileReport(
@@ -59,7 +53,7 @@ func (w *ReconcileWorker) Run() {
 
 	if report.OK() {
 		log.Printf("[ReconcileWorker] %s", report.Summary())
-		return
+		return nil
 	}
 
 	// Громко и с достаточной детализацией, чтобы действовать, не открывая клиент базы.
@@ -82,20 +76,7 @@ func (w *ReconcileWorker) Run() {
 	for _, a := range report.HoldAnomalies {
 		log.Printf("[ALERT] order %s (%s): hold %s — %s", a.OrderID, a.Status, a.HoldAmount, a.Reason)
 	}
-}
-
-// runGuarded выполняет один проход под advisory-блокировкой задачи, когда
-// подключён Leader. Проход только читает и сообщает, поэтому дубль безвреден —
-// но он поднял бы тот же алерт дважды, а этот шум никому не нужен.
-func (w *ReconcileWorker) runGuarded() {
-	if w.guard == nil {
-		w.Run()
-		return
-	}
-	_ = w.guard(func() error {
-		w.Run()
-		return nil
-	})
+	return nil
 }
 
 // WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.

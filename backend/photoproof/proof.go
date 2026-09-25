@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,9 @@ type Storage interface {
 	Save(orderID uuid.UUID, name string, data []byte) (string, error)
 	// Open открывает сохранённый файл по пути, который вернул Save.
 	Open(fileURL string) (io.ReadCloser, error)
+	// Remove удаляет сохранённый файл по пути, который вернул Save. Файла
+	// уже нет — не ошибка.
+	Remove(fileURL string) error
 }
 
 // DiskStorage кладёт снимки в каталог загрузок: <root>/photo-proofs/<заказ>/.
@@ -132,15 +136,36 @@ func (d DiskStorage) Save(orderID uuid.UUID, name string, data []byte) (string, 
 	return "/uploads/photo-proofs/" + orderID.String() + "/" + name, nil
 }
 
-// Open открывает файл снимка. Путь принимается только того вида, какой отдаёт
-// Save: никакого выхода за каталог снимков.
+// Open открывает файл снимка.
 func (d DiskStorage) Open(fileURL string) (io.ReadCloser, error) {
+	path, err := d.path(fileURL)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path)
+}
+
+// Remove удаляет файл снимка.
+func (d DiskStorage) Remove(fileURL string) error {
+	path, err := d.path(fileURL)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// path переводит путь, который отдал Save, в путь на диске. Принимается только
+// путь того вида: никакого выхода за каталог снимков.
+func (d DiskStorage) path(fileURL string) (string, error) {
 	const prefix = "/uploads/photo-proofs/"
 	rel := strings.TrimPrefix(fileURL, prefix)
 	if rel == fileURL || strings.Contains(rel, "..") || strings.HasPrefix(rel, "/") {
-		return nil, os.ErrNotExist
+		return "", os.ErrNotExist
 	}
-	return os.Open(filepath.Join(d.Root, "photo-proofs", filepath.FromSlash(rel)))
+	return filepath.Join(d.Root, "photo-proofs", filepath.FromSlash(rel)), nil
 }
 
 // ProofByID отдаёт снимок по id.
@@ -217,9 +242,17 @@ func (in *UploadInput) validate() error {
 //   - Повтор с тем же ключом отправки возвращает уже принятый снимок: очередь в
 //     офлайне повторяет то, что не смогла подтвердить.
 //   - Новый снимок того же вида до отметки заменяет прежний — исполнитель
-//     переснял кадр.
+//     переснял кадр; файл прежнего удаляется.
 //   - Файл сохраняется как есть, без пересжатия: EXIF — часть доказательства.
 //   - Координаты телефона уходят и в трек, точкой со снимком.
+//
+// Проверка снимка — декодирование JPEG до 15 МБ и проход по всем его блокам —
+// стоит секунды процессора, и держать на это время строку заказа под
+// блокировкой нельзя: каждый UPDATE этого заказа ждал бы её. Поэтому приём
+// идёт в три шага: короткое чтение заказа без блокировки, вся тяжёлая работа
+// вне транзакции, и короткая транзакция, которая под блокировкой строки
+// перепроверяет то же самое и пишет снимок. Файл, записанный под снимок,
+// который в итоге не принят, удаляется.
 func (s *Service) UploadProof(ctx context.Context, executorID, orderID uuid.UUID, in UploadInput) (*Proof, error) {
 	if s.storage == nil || s.db == nil {
 		return nil, errors.New("приём снимков не подключён")
@@ -228,82 +261,73 @@ func (s *Service) UploadProof(ctx context.Context, executorID, orderID uuid.UUID
 		return nil, err
 	}
 
-	var proof *Proof
-	err := s.runInTx(ctx, func(tx *sql.Tx) error {
-		var orderExecutor uuid.NullUUID
-		var status string
-		var required bool
-		var symbolID uuid.NullUUID
-		var key []byte
-		err := tx.QueryRowContext(ctx, `
-            SELECT executor_id, status::text, photo_required, watermark_symbol_id, proof_key
-            FROM orders WHERE id = $1 FOR UPDATE
-        `, orderID).Scan(&orderExecutor, &status, &required, &symbolID, &key)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrProofOrderAbsent
-		}
+	// 1. Чей заказ, в каком он статусе и не принят ли уже этот снимок.
+	order, err := s.readProofOrder(ctx, s.db, orderID, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := order.admits(executorID); err != nil {
+		return nil, err
+	}
+	if existing, err := s.proofByClientKey(ctx, s.db, orderID, in.ClientKey); err != nil || existing != nil {
+		return existing, err
+	}
+	if order.status != orderStatusAssigned {
+		return nil, ErrProofClosed
+	}
+	symbol, err := s.symbols.Get(ctx, order.symbolID.UUID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Тяжёлая часть — вне какой-либо транзакции.
+	sum := sha256.Sum256(in.Data)
+	facts := readExif(in.Data, in.DeviceTakenAt.Location())
+	seal, mark := s.checker.Check(in.Data, CheckInput{
+		OrderID: orderID, SymbolCode: symbol.Code, SymbolNumber: symbol.Number, Key: order.key,
+		DeviceTakenAt: in.DeviceTakenAt, DeviceLat: in.DeviceLat, DeviceLon: in.DeviceLon,
+	})
+	url, err := s.storage.Save(orderID, uuid.NewString()+".jpg", in.Data)
+	if err != nil {
+		return nil, err
+	}
+	proof := &Proof{
+		OrderID: orderID, ExecutorID: executorID, Kind: in.Kind, Camera: in.Camera,
+		SymbolID: symbol.ID, ClientKey: in.ClientKey, FileURL: url,
+		FileSHA256: hex.EncodeToString(sum[:]), FileSize: int64(len(in.Data)),
+		ExifTakenAt: facts.TakenAt, ExifLat: facts.Lat, ExifLon: facts.Lon,
+		DeviceTakenAt: in.DeviceTakenAt, DeviceLat: in.DeviceLat, DeviceLon: in.DeviceLon,
+		SealStatus: seal, MarkStatus: mark,
+	}
+
+	// 3. Под блокировкой строки заказа: те же проверки ещё раз — пока шла
+	// проверка, заказ мог закрыться, перейти к другому или принять этот же
+	// снимок из параллельной отправки, — и запись.
+	var accepted *Proof
+	var replaced []string
+	err = s.runInTx(ctx, func(tx *sql.Tx) error {
+		order, err := s.readProofOrder(ctx, tx, orderID, true)
 		if err != nil {
 			return err
 		}
-		if !orderExecutor.Valid || orderExecutor.UUID != executorID {
-			return ErrProofForbidden
-		}
-		if !required || !symbolID.Valid {
-			return ErrProofNotRequired
-		}
-
-		// Повтор уже принятой отправки отвечает тем же снимком — даже после
-		// отметки «Исполнил»: очередь могла отправить снимок, отметку, а
-		// подтверждение снимка потерять.
-		if existing, err := s.proofByClientKey(ctx, tx, orderID, in.ClientKey); err != nil || existing != nil {
-			proof = existing
+		if err := order.admits(executorID); err != nil {
 			return err
 		}
-		if status != "ASSIGNED" {
+		if existing, err := s.proofByClientKey(ctx, tx, orderID, in.ClientKey); err != nil || existing != nil {
+			accepted = existing
+			return err
+		}
+		if order.status != orderStatusAssigned {
 			return ErrProofClosed
 		}
 
-		symbol, err := s.symbols.Get(ctx, symbolID.UUID)
+		replaced, err = s.deleteProofsOfKind(ctx, tx, orderID, in.Kind)
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(in.Data)
-		url, err := s.storage.Save(orderID, uuid.NewString()+".jpg", in.Data)
-		if err != nil {
+		if err := s.insertProof(ctx, tx, proof); err != nil {
 			return err
 		}
-
-		facts := readExif(in.Data, in.DeviceTakenAt.Location())
-		seal, mark := s.checker.Check(in.Data, CheckInput{
-			OrderID: orderID, SymbolCode: symbol.Code, SymbolNumber: symbol.Number, Key: key,
-			DeviceTakenAt: in.DeviceTakenAt, DeviceLat: in.DeviceLat, DeviceLon: in.DeviceLon,
-		})
-
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM order_photo_proofs WHERE order_id = $1 AND kind = $2`, orderID, in.Kind); err != nil {
-			return err
-		}
-		proof = &Proof{
-			OrderID: orderID, ExecutorID: executorID, Kind: in.Kind, Camera: in.Camera,
-			SymbolID: symbol.ID, ClientKey: in.ClientKey, FileURL: url,
-			FileSHA256: hex.EncodeToString(sum[:]), FileSize: int64(len(in.Data)),
-			ExifTakenAt: facts.TakenAt, ExifLat: facts.Lat, ExifLon: facts.Lon,
-			DeviceTakenAt: in.DeviceTakenAt, DeviceLat: in.DeviceLat, DeviceLon: in.DeviceLon,
-			SealStatus: seal, MarkStatus: mark,
-		}
-		if err := tx.QueryRowContext(ctx, `
-            INSERT INTO order_photo_proofs (order_id, executor_id, kind, camera, symbol_id, client_key,
-                file_url, file_sha256, file_size, exif_taken_at, exif_lat, exif_lon,
-                device_taken_at, device_lat, device_lon, seal_status, mark_status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-            RETURNING id, uploaded_at
-        `, proof.OrderID, proof.ExecutorID, proof.Kind, proof.Camera, proof.SymbolID, proof.ClientKey,
-			proof.FileURL, proof.FileSHA256, proof.FileSize, proof.ExifTakenAt, proof.ExifLat, proof.ExifLon,
-			proof.DeviceTakenAt, proof.DeviceLat, proof.DeviceLon, proof.SealStatus, proof.MarkStatus).
-			Scan(&proof.ID, &proof.UploadedAt); err != nil {
-			return err
-		}
-
 		if s.track != nil && in.DeviceLat != nil && in.DeviceLon != nil {
 			if _, err := s.track.Add(ctx, tx, []Position{{
 				ExecutorID: executorID, Lat: *in.DeviceLat, Lon: *in.DeviceLon, AccuracyM: in.DeviceAccM,
@@ -313,12 +337,97 @@ func (s *Service) UploadProof(ctx context.Context, executorID, orderID uuid.UUID
 				return err
 			}
 		}
+		accepted = proof
 		return nil
 	})
+	if err != nil || accepted != proof {
+		// Снимка с этим файлом не будет: транзакция не прошла или тот же ключ
+		// уже принят параллельной отправкой.
+		s.removeFile(url)
+		return accepted, err
+	}
+	for _, old := range replaced {
+		s.removeFile(old)
+	}
+	return proof, nil
+}
+
+// orderStatusAssigned — единственный статус, в котором принимаются снимки.
+const orderStatusAssigned = "ASSIGNED"
+
+// proofOrder — то, что о заказе нужно знать приёму снимка.
+type proofOrder struct {
+	executor uuid.NullUUID
+	status   string
+	required bool
+	symbolID uuid.NullUUID
+	key      []byte
+}
+
+// readProofOrder читает заказ; forUpdate блокирует строку на время транзакции.
+func (s *Service) readProofOrder(ctx context.Context, q Querier, orderID uuid.UUID, forUpdate bool) (proofOrder, error) {
+	query := `SELECT executor_id, status::text, photo_required, watermark_symbol_id, proof_key FROM orders WHERE id = $1`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	var o proofOrder
+	err := q.QueryRowContext(ctx, query, orderID).Scan(&o.executor, &o.status, &o.required, &o.symbolID, &o.key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return o, ErrProofOrderAbsent
+	}
+	return o, err
+}
+
+// admits проверяет, может ли исполнитель вообще присылать снимки к заказу.
+func (o proofOrder) admits(executorID uuid.UUID) error {
+	if !o.executor.Valid || o.executor.UUID != executorID {
+		return ErrProofForbidden
+	}
+	if !o.required || !o.symbolID.Valid {
+		return ErrProofNotRequired
+	}
+	return nil
+}
+
+// deleteProofsOfKind снимает прежние снимки этого вида и отдаёт пути их
+// файлов — удалить их можно только после фиксации транзакции.
+func (s *Service) deleteProofsOfKind(ctx context.Context, q Querier, orderID uuid.UUID, kind string) ([]string, error) {
+	rows, err := q.QueryContext(ctx,
+		`DELETE FROM order_photo_proofs WHERE order_id = $1 AND kind = $2 RETURNING file_url`, orderID, kind)
 	if err != nil {
 		return nil, err
 	}
-	return proof, nil
+	defer rows.Close()
+	var urls []string
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, err
+		}
+		urls = append(urls, url)
+	}
+	return urls, rows.Err()
+}
+
+func (s *Service) insertProof(ctx context.Context, q Querier, proof *Proof) error {
+	return q.QueryRowContext(ctx, `
+        INSERT INTO order_photo_proofs (order_id, executor_id, kind, camera, symbol_id, client_key,
+            file_url, file_sha256, file_size, exif_taken_at, exif_lat, exif_lon,
+            device_taken_at, device_lat, device_lon, seal_status, mark_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        RETURNING id, uploaded_at
+    `, proof.OrderID, proof.ExecutorID, proof.Kind, proof.Camera, proof.SymbolID, proof.ClientKey,
+		proof.FileURL, proof.FileSHA256, proof.FileSize, proof.ExifTakenAt, proof.ExifLat, proof.ExifLon,
+		proof.DeviceTakenAt, proof.DeviceLat, proof.DeviceLon, proof.SealStatus, proof.MarkStatus).
+		Scan(&proof.ID, &proof.UploadedAt)
+}
+
+// removeFile удаляет файл снимка, которого больше нет в базе. Неудача — только
+// в журнал: снимок уже принят или отклонён, и лишний файл на диске этого не меняет.
+func (s *Service) removeFile(fileURL string) {
+	if err := s.storage.Remove(fileURL); err != nil {
+		log.Printf("[photoproof] cannot remove file %s: %v", fileURL, err)
+	}
 }
 
 const proofColumns = `id, order_id, executor_id, kind, camera, symbol_id, client_key, file_url, file_sha256,

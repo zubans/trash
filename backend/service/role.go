@@ -13,6 +13,33 @@ import (
 	"healthlogin/backend/repository"
 )
 
+// ErrAdminRequired — отказ в действии, которое меняет, кто управляет ролями:
+// назначить ADMIN, выдать право roles.* или раздать роль, у которой оно есть.
+// Право roles.edit проходит RequirePermission наравне с остальными, и без этой
+// проверки его носитель сделал бы администратором себя.
+var ErrAdminRequired = errors.New("назначать роль ADMIN и раздавать права на роли может только администратор")
+
+// managesRoles сообщает, есть ли среди прав хоть одно из раздела roles. Такое
+// право равносильно любому другому: его носитель может выдать себе остальные.
+func managesRoles(permissions []string) bool {
+	for _, code := range permissions {
+		if strings.HasPrefix(code, "roles.") {
+			return true
+		}
+	}
+	return false
+}
+
+// requireAdminActor пропускает только ADMIN. Актор перечитывается из базы, а не
+// берётся из запроса: до этой точки его пустило право, а не роль.
+func requireAdminActor(ctx context.Context, users repository.UserRepository, actorID uuid.UUID) error {
+	actor, err := users.FindByID(ctx, actorID)
+	if err != nil || actor == nil || !actor.HasRole(repository.RoleAdmin) {
+		return ErrAdminRequired
+	}
+	return nil
+}
+
 // roleCodePattern ограничивает код роли тем, что можно без оговорок положить в
 // users.role, в JWT-независимую проверку прав и в фильтр списка пользователей:
 // заглавные латинские буквы, цифры и подчёркивание.
@@ -94,6 +121,11 @@ func (s *RoleService) Create(ctx context.Context, actorID uuid.UUID, code, name,
 	if err != nil {
 		return nil, err
 	}
+	if managesRoles(clean) {
+		if err := requireAdminActor(ctx, s.users, actorID); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.roles.Create(ctx, &repository.Role{Code: code, Name: name, Description: strings.TrimSpace(description)}); err != nil {
 		return nil, err
@@ -120,6 +152,13 @@ func (s *RoleService) Update(ctx context.Context, actorID uuid.UUID, code, name,
 	clean, err := cleanPermissions(permissions)
 	if err != nil {
 		return nil, err
+	}
+	// Роль, которая управляет ролями, — до правки или после неё — принадлежит
+	// администратору целиком, включая название.
+	if code != repository.RoleAdmin && (managesRoles(current.Permissions) || managesRoles(clean)) {
+		if err := requireAdminActor(ctx, s.users, actorID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.roles.Update(ctx, code, name, strings.TrimSpace(description)); err != nil {
@@ -174,8 +213,14 @@ func (s *RoleService) ListUsers(ctx context.Context, code, search string, limit,
 // AssignUser подключает роль пользователю.
 func (s *RoleService) AssignUser(ctx context.Context, actorID uuid.UUID, code string, userID uuid.UUID) error {
 	code = strings.ToUpper(strings.TrimSpace(code))
-	if _, err := s.roles.Get(ctx, code); err != nil {
+	role, err := s.roles.Get(ctx, code)
+	if err != nil {
 		return err
+	}
+	if code == repository.RoleAdmin || managesRoles(role.Permissions) {
+		if err := requireAdminActor(ctx, s.users, actorID); err != nil {
+			return err
+		}
 	}
 	if _, err := s.users.FindByID(ctx, userID); err != nil {
 		return errors.New("пользователь не найден")

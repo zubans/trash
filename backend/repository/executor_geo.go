@@ -40,8 +40,6 @@ type ExecutorGeoRepository interface {
 	// остаётся там, куда его поставили, пока не попросят снова следовать за
 	// устройством: периодический отчёт не должен отменять осознанный выбор.
 	RecordDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error
-	// GetDevicePosition возвращает последнюю позицию, о которой сообщил телефон исполнителя.
-	GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*ExecutorPosition, error)
 	// FollowDevicePosition переносит рабочий якорь на координату устройства и
 	// снимает ручное переопределение, чтобы автоотчёты снова двигали якорь.
 	FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error
@@ -118,23 +116,6 @@ func (r *executorGeoRepository) RecordDevicePosition(ctx context.Context, execut
 	`
 	_, err := r.db.ExecContext(ctx, query, lat, lon, executorID, time.Now())
 	return err
-}
-
-func (r *executorGeoRepository) GetDevicePosition(ctx context.Context, executorID uuid.UUID) (*ExecutorPosition, error) {
-	var lat, lon sql.NullFloat64
-	err := r.db.QueryRowContext(ctx,
-		`SELECT device_lat, device_lon FROM executor_profiles WHERE user_id = $1`, executorID).
-		Scan(&lat, &lon)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if !lat.Valid || !lon.Valid {
-		return nil, nil
-	}
-	return &ExecutorPosition{Lat: lat.Float64, Lon: lon.Float64}, nil
 }
 
 func (r *executorGeoRepository) FollowDevicePosition(ctx context.Context, executorID uuid.UUID, lat, lon float64) error {
@@ -274,5 +255,5 @@ func (r *executorGeoRepository) scanGeoAlerts(ctx context.Context, query string,
 		}
 		alerts = append(alerts, a)
 	}
-	return alerts, nil
+	return alerts, rows.Err()
 }

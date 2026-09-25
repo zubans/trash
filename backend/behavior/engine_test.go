@@ -1,8 +1,10 @@
 package behavior
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -438,7 +440,7 @@ MANIFEST = {"name": "t", "events": ["order.executed"]}
 def on_event(f):
     return [pay_bonus(to = "u", amount = 10, key = "")]
 `)
-	if err := e.Compile("t", "t.star", src); err != nil {
+	if err := compileOne(e, "t", "t.star", src); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	_, err := e.OnEvent("t", Facts{Event: "order.executed"})
@@ -458,7 +460,7 @@ def visible(f):
         total += i
     return True
 `)
-	if err := e.Compile("t", "t.star", src); err != nil {
+	if err := compileOne(e, "t", "t.star", src); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	visible, err := e.Visible("t", Facts{})
@@ -489,7 +491,7 @@ func asDenied(err error, target **DeniedError) bool {
 // Скрипт, не упомянувший manual_execute, кнопку «Исполнил» не отнимает.
 func TestManualExecuteDefaultsToAllowed(t *testing.T) {
 	e := New(DefaultLimits)
-	if err := e.Compile("t", "t.star", []byte(`MANIFEST = {"name": "t"}`)); err != nil {
+	if err := compileOne(e, "t", "t.star", []byte(`MANIFEST = {"name": "t"}`)); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	m, ok := e.Manifest("t")
@@ -506,7 +508,7 @@ func TestManualExecuteDefaultsToAllowed(t *testing.T) {
 func TestCheckFieldsForbidManualExecute(t *testing.T) {
 	e := New(DefaultLimits)
 	src := []byte(`MANIFEST = {"name": "t", "check_fields": ["last_name"]}`)
-	if err := e.Compile("t", "t.star", src); err != nil {
+	if err := compileOne(e, "t", "t.star", src); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	m, ok := e.Manifest("t")
@@ -515,5 +517,68 @@ func TestCheckFieldsForbidManualExecute(t *testing.T) {
 	}
 	if m.ExecutableByHand() {
 		t.Error("a service with check_fields must not be executable by hand")
+	}
+}
+
+// compileOne регистрирует однофайловый скрипт: тестам хватает одного файла,
+// а загрузчик и админ-панель всегда идут через CompileFiles.
+func compileOne(e *Engine, code, filename string, src []byte) error {
+	return e.CompileFiles(code, []SourceFile{{Name: filename, Src: src}})
+}
+
+// Регистрация, снятие и перечисление идут параллельно — как правка узла в
+// админ-панели во время синхронизации на другом процессе и чтения списка
+// шаблонов. Манифест выводится из рантайма, поэтому перечисленное и
+// найденное по коду не могут разойтись; гонок быть не должно (go test -race).
+func TestManifestsStayConsistentUnderConcurrentUse(t *testing.T) {
+	e := New(DefaultLimits)
+	src := []byte(`MANIFEST = {"name": "t", "check_fields": ["last_name"]}`)
+	const workers = 4
+	const rounds = 50
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(2)
+		code := NodeCode(fmt.Sprintf("node-%d", w))
+		go func() {
+			defer wg.Done()
+			for i := 0; i < rounds; i++ {
+				if err := compileOne(e, code, "t.star", src); err != nil {
+					t.Errorf("compile %s: %v", code, err)
+					return
+				}
+				e.Remove(code)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < rounds; i++ {
+				for _, m := range e.Manifests() {
+					// Перечисленный манифест — уже выведенный, с полями услуги.
+					if m.Code == "" || m.Name != "t" || m.ExecutableByHand() {
+						t.Errorf("listed manifest is not derived properly: %+v", m)
+						return
+					}
+				}
+				if m, ok := e.Manifest(code); ok && (m.Name != "t" || m.ExecutableByHand()) {
+					t.Errorf("manifest by code is not derived properly: %+v", m)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := e.Manifests(); len(got) != 0 {
+		t.Errorf("after every Remove the engine still lists %d behaviours", len(got))
+	}
+	if err := compileOne(e, "kept", "t.star", src); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := e.Manifests(); len(got) != 1 || got[0].Code != "kept" {
+		t.Errorf("Manifests() = %+v, want the one registered behaviour", got)
+	}
+	if _, ok := e.Manifest("kept"); !ok {
+		t.Error("Manifest() does not see what Manifests() lists")
 	}
 }

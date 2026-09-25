@@ -5,7 +5,6 @@ import (
 	"log"
 	"time"
 
-	"healthlogin/backend/metrics"
 	"healthlogin/backend/service"
 )
 
@@ -22,7 +21,7 @@ type PenaltyWorker struct {
 	// же проходом: это такая же уборка по времени, и заводить ради неё второй
 	// воркер незачем.
 	track TrackSweeper
-	guard func(func() error) error
+	guard Guard
 }
 
 // TrackSweeper удаляет точки трека старше срока хранения. Ему удовлетворяет
@@ -48,32 +47,18 @@ func (w *PenaltyWorker) WithLeader(leader *Leader, name string) *PenaltyWorker {
 	return w
 }
 
-func (w *PenaltyWorker) runGuarded(job func() error) error {
-	if w.guard == nil {
-		return job()
-	}
-	return w.guard(job)
-}
-
 // Start периодически выполняет проход обслуживания.
-func (w *PenaltyWorker) Start(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			if err := metrics.TrackWorker("penalty_sweep", func() error { return w.runGuarded(w.Run) }); err != nil {
-				log.Printf("[PenaltyWorker] sweep failed: %v", err)
-			}
-		}
-	}()
-	log.Printf("[PenaltyWorker] Background worker started every %v", interval)
+func (w *PenaltyWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	return periodic{name: "PenaltyWorker", metric: "penalty_sweep", guard: w.guard}.
+		Start(ctx, interval, w.Run)
 }
 
 // Run — один проход.
-func (w *PenaltyWorker) Run() error {
+func (w *PenaltyWorker) Run(ctx context.Context) error {
 	if w.penalties == nil {
 		return nil
 	}
-	result, err := w.penalties.Sweep(context.Background())
+	result, err := w.penalties.Sweep(ctx)
 	if err != nil {
 		return err
 	}
@@ -81,7 +66,7 @@ func (w *PenaltyWorker) Run() error {
 		log.Printf("[PenaltyWorker] %d penalty points expired, %d silent blocks lifted", result.PointsBurnt, result.BlocksLifted)
 	}
 	if w.track != nil {
-		removed, err := w.track.SweepTrack(context.Background())
+		removed, err := w.track.SweepTrack(ctx)
 		if err != nil {
 			return err
 		}

@@ -142,7 +142,7 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.adminService.UpdateUserRole(r.Context(), userID, admin.ID, req.Role); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), roleChangeStatus(err))
 		return
 	}
 
@@ -152,6 +152,15 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 
 // UpdateUserRolesHandler заменяет полный набор ролей пользователя
 // (мультироль). Только для админов.
+// roleChangeStatus — код ответа на отказ сменить роли: попытка назначить
+// ADMIN не администратором — 403, всё остальное — 400 с текстом службы.
+func roleChangeStatus(err error) int {
+	if errors.Is(err, service.ErrAdminRequired) {
+		return http.StatusForbidden
+	}
+	return http.StatusBadRequest
+}
+
 func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(idStr)
@@ -175,7 +184,7 @@ func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := h.adminService.UpdateUserRoles(r.Context(), userID, admin.ID, req.Roles); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), roleChangeStatus(err))
 		return
 	}
 
@@ -848,7 +857,7 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 func (h *AdminHandler) GetOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	q := r.URL.Query()
-	statuses := repository.OrderStatusGroups[q.Get("status")]
+	statuses := repository.OrderStatusGroup(q.Get("status"))
 	orders, total, err := h.adminService.GetOrders(r.Context(), repository.OrdersFilter{
 		Statuses: statuses,
 		Search:   q.Get("search"),

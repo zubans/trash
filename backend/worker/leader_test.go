@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"sync"
@@ -39,7 +40,7 @@ func leaderTestDB(t *testing.T) *sql.DB {
 func TestLeaderWithoutDatabaseRunsTheJob(t *testing.T) {
 	ran := false
 	guard := NewLeader(nil).Guard("test")
-	if err := guard(func() error { ran = true; return nil }); err != nil {
+	if err := guard(context.Background(), func() error { ran = true; return nil }); err != nil {
 		t.Fatalf("guard returned %v", err)
 	}
 	if !ran {
@@ -50,10 +51,11 @@ func TestLeaderWithoutDatabaseRunsTheJob(t *testing.T) {
 func TestLeaderRunsTheJobAndPropagatesItsError(t *testing.T) {
 	db := leaderTestDB(t)
 	defer db.Close()
+	ctx := context.Background()
 
 	guard := NewLeader(db).Guard("leader-test-runs")
 	ran := false
-	if err := guard(func() error { ran = true; return nil }); err != nil {
+	if err := guard(ctx, func() error { ran = true; return nil }); err != nil {
 		t.Fatalf("guard returned %v", err)
 	}
 	if !ran {
@@ -62,7 +64,7 @@ func TestLeaderRunsTheJobAndPropagatesItsError(t *testing.T) {
 
 	// Собственный сбой задачи обязан дойти до вызывающего, который его и логирует.
 	wantErr := sql.ErrNoRows
-	if err := guard(func() error { return wantErr }); err != wantErr {
+	if err := guard(ctx, func() error { return wantErr }); err != wantErr {
 		t.Errorf("guard returned %v, want the job's error", err)
 	}
 }
@@ -72,6 +74,7 @@ func TestLeaderRunsTheJobAndPropagatesItsError(t *testing.T) {
 func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	db := leaderTestDB(t)
 	defer db.Close()
+	ctx := context.Background()
 
 	leader := NewLeader(db)
 	const job = "leader-test-exclusion"
@@ -83,7 +86,7 @@ func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_ = leader.Guard(job)(func() error {
+		_ = leader.Guard(job)(ctx, func() error {
 			close(inside)
 			<-release
 			return nil
@@ -97,7 +100,7 @@ func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	}
 
 	secondRan := false
-	if err := leader.Guard(job)(func() error { secondRan = true; return nil }); err != nil {
+	if err := leader.Guard(job)(ctx, func() error { secondRan = true; return nil }); err != nil {
 		t.Fatalf("second guard returned %v", err)
 	}
 	if secondRan {
@@ -110,7 +113,7 @@ func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 	// А когда держатель закончил, блокировка снова свободна — блокировка, которую
 	// взяли и не отпустили, остановила бы задачу навсегда.
 	afterRan := false
-	if err := leader.Guard(job)(func() error { afterRan = true; return nil }); err != nil {
+	if err := leader.Guard(job)(ctx, func() error { afterRan = true; return nil }); err != nil {
 		t.Fatalf("third guard returned %v", err)
 	}
 	if !afterRan {
@@ -122,6 +125,7 @@ func TestLeaderExcludesConcurrentRuns(t *testing.T) {
 func TestLeaderJobsAreIndependent(t *testing.T) {
 	db := leaderTestDB(t)
 	defer db.Close()
+	ctx := context.Background()
 
 	leader := NewLeader(db)
 	inside := make(chan struct{})
@@ -131,7 +135,7 @@ func TestLeaderJobsAreIndependent(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_ = leader.Guard("leader-test-job-a")(func() error {
+		_ = leader.Guard("leader-test-job-a")(ctx, func() error {
 			close(inside)
 			<-release
 			return nil
@@ -145,7 +149,7 @@ func TestLeaderJobsAreIndependent(t *testing.T) {
 	}
 
 	otherRan := false
-	if err := leader.Guard("leader-test-job-b")(func() error { otherRan = true; return nil }); err != nil {
+	if err := leader.Guard("leader-test-job-b")(ctx, func() error { otherRan = true; return nil }); err != nil {
 		t.Fatalf("guard returned %v", err)
 	}
 	if !otherRan {

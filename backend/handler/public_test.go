@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
@@ -101,22 +100,8 @@ func (m *mockUserRepo) UpdateVerified(ctx context.Context, id uuid.UUID, verifie
 	return sql.ErrNoRows
 }
 
-func (m *mockUserRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
-	for _, u := range m.users {
-		if u.ID == id {
-			u.Balance = balance
-			return nil
-		}
-	}
-	return sql.ErrNoRows
-}
-
 func (m *mockUserRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
-}
-
-func (m *mockUserRepo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
-	return &repository.CustomerProfile{UserID: userID}, nil
 }
 
 func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*repository.User, error) {
@@ -125,10 +110,6 @@ func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*reposito
 			return u, nil
 		}
 	}
-	return nil, nil
-}
-
-func (m *mockUserRepo) FindByEmailVerificationToken(ctx context.Context, token string) (*repository.User, error) {
 	return nil, nil
 }
 
@@ -160,7 +141,7 @@ func newTestPublicHandler() *PublicHandler {
 	repo := newMockUserRepo()
 	// Сессии теперь часть пути входа, поэтому тесты обработчиков подключают то же
 	// хранилище, что и сервер.
-	auth := service.NewAuthService(repo, nil).
+	auth := service.NewAuthServiceWithSecret(repo, "test-secret", nil, nil).
 		WithSessionStorage(newMockRefreshRepo(), newMockAccessTokenRepo())
 	return NewPublicHandler(auth)
 }
@@ -368,10 +349,6 @@ func (m *mockUserRepo) UpdatePassword(ctx context.Context, userID uuid.UUID, new
 		}
 	}
 	return nil
-}
-
-func (m *mockUserRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
-	return nil, nil
 }
 
 func (m *mockUserRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {

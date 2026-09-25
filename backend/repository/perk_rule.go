@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ const (
 )
 
 // ErrPerkRuleNotFound — правила с таким кодом нет.
-var ErrPerkRuleNotFound = errors.New("perk rule not found")
+var ErrPerkRuleNotFound = fmt.Errorf("perk rule not found: %w", ErrNotFound)
 
 // PerkRule — строка справочника правил.
 type PerkRule struct {

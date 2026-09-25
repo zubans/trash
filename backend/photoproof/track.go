@@ -82,34 +82,84 @@ func (p *Position) validate() error {
 	return nil
 }
 
+// Add пишет пачку одним оператором: офлайн-очередь присылает до пятисот точек
+// за запрос, и по одному INSERT на точку это было бы пятьсот обращений к базе.
+// Повтор (тот же client_key у того же исполнителя) отсекает ON CONFLICT, а не
+// ошибка уникальности: внутри транзакции вызывающего ошибка обрывала бы её.
+// Id выдаются здесь, чтобы по RETURNING узнать, какие именно точки записаны.
 func (r *trackRepo) Add(ctx context.Context, q Querier, positions []Position) (int, error) {
-	added := 0
+	n := len(positions)
+	if n == 0 {
+		return 0, nil
+	}
+	var (
+		ids       = make([]string, n)
+		executors = make([]string, n)
+		lats      = make([]float64, n)
+		lons      = make([]float64, n)
+		accuracy  = make([]sql.NullFloat64, n)
+		sources   = make([]string, n)
+		orders    = make([]sql.NullString, n)
+		deviceAts = make([]string, n)
+		keys      = make([]sql.NullString, n)
+		byID      = make(map[uuid.UUID]int, n)
+	)
 	for i := range positions {
 		p := &positions[i]
 		if err := p.validate(); err != nil {
+			return 0, err
+		}
+		id := uuid.New()
+		byID[id] = i
+		ids[i] = id.String()
+		executors[i] = p.ExecutorID.String()
+		lats[i], lons[i] = p.Lat, p.Lon
+		if p.AccuracyM != nil {
+			accuracy[i] = sql.NullFloat64{Float64: *p.AccuracyM, Valid: true}
+		}
+		sources[i] = p.Source
+		if p.OrderID != nil {
+			orders[i] = sql.NullString{String: p.OrderID.String(), Valid: true}
+		}
+		// Время уходит строкой: элемент массива с пробелом внутри должен быть
+		// в кавычках, и строку драйвер кавычит сам.
+		deviceAts[i] = p.DeviceAt.Format(time.RFC3339Nano)
+		if p.ClientKey != "" {
+			keys[i] = sql.NullString{String: p.ClientKey, Valid: true}
+		}
+	}
+
+	rows, err := r.exec(q).QueryContext(ctx, `
+        INSERT INTO executor_positions (id, executor_id, lat, lon, accuracy_m, source, order_id, device_at, client_key)
+        SELECT * FROM unnest(
+            $1::uuid[], $2::uuid[], $3::float8[], $4::float8[], $5::float8[],
+            $6::text[], $7::uuid[], $8::timestamptz[], $9::text[]
+        )
+        ON CONFLICT (executor_id, client_key) WHERE client_key IS NOT NULL DO NOTHING
+        RETURNING id, reported_at
+    `, pq.Array(ids), pq.Array(executors), pq.Array(lats), pq.Array(lons), pq.Array(accuracy),
+		pq.Array(sources), pq.Array(orders), pq.Array(deviceAts), pq.Array(keys))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	added := 0
+	for rows.Next() {
+		var id uuid.UUID
+		var reportedAt time.Time
+		if err := rows.Scan(&id, &reportedAt); err != nil {
 			return added, err
 		}
-		var clientKey interface{}
-		if p.ClientKey != "" {
-			clientKey = p.ClientKey
-		}
-		err := r.exec(q).QueryRowContext(ctx, `
-            INSERT INTO executor_positions (executor_id, lat, lon, accuracy_m, source, order_id, device_at, client_key)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, reported_at
-        `, p.ExecutorID, p.Lat, p.Lon, p.AccuracyM, p.Source, p.OrderID, p.DeviceAt, clientKey).
-			Scan(&p.ID, &p.ReportedAt)
-		var pgErr *pq.Error
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			// Повтор пачки: точка уже записана, и это норма, а не ошибка.
+		i, ok := byID[id]
+		if !ok {
 			continue
 		}
-		if err != nil {
-			return added, err
-		}
+		positions[i].ID = id
+		positions[i].ReportedAt = reportedAt
 		added++
 	}
-	return added, nil
+	return added, rows.Err()
 }
 
 func (r *trackRepo) Nearest(ctx context.Context, q Querier, executorID uuid.UUID, at time.Time, window time.Duration) (*Position, error) {

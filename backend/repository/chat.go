@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -299,11 +301,12 @@ func (r *chatRepo) MarkMessagesAsDelivered(ctx context.Context, chatID, recipien
 	updatedIDs := make([]uuid.UUID, 0)
 	for rows.Next() {
 		var id uuid.UUID
-		if err := rows.Scan(&id); err == nil {
-			updatedIDs = append(updatedIDs, id)
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
+		updatedIDs = append(updatedIDs, id)
 	}
-	return updatedIDs, nil
+	return updatedIDs, rows.Err()
 }
 
 func (r *chatRepo) MarkMessagesAsRead(ctx context.Context, chatID, recipientID uuid.UUID) ([]uuid.UUID, error) {
@@ -321,23 +324,22 @@ func (r *chatRepo) MarkMessagesAsRead(ctx context.Context, chatID, recipientID u
 	updatedIDs := make([]uuid.UUID, 0)
 	for rows.Next() {
 		var id uuid.UUID
-		if err := rows.Scan(&id); err == nil {
-			updatedIDs = append(updatedIDs, id)
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
+		updatedIDs = append(updatedIDs, id)
 	}
-	return updatedIDs, nil
+	return updatedIDs, rows.Err()
 }
 
+// GetUnreadOrderIDs — заказы пользователя, в чате которых есть непрочитанное
+// им сообщение. Клиент опрашивает это постоянно, поэтому запрос идёт от заказов
+// пользователя (индексы по customer_id / executor_id) к их чатам и проверяет
+// сообщения через EXISTS по частичному индексу непрочитанных (миграция 066).
+// Прежний вариант начинал с messages без условия по chat_id и стоил как все
+// непрочитанные сообщения платформы на каждый опрос.
 func (r *chatRepo) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
-	query := `
-		SELECT DISTINCT c.order_id
-		FROM messages m
-		JOIN chats c ON c.id = m.chat_id
-		JOIN orders o ON o.id = c.order_id
-		WHERE m.sender_id != $1
-		  AND m.status != 'read'
-		  AND (o.customer_id = $1 OR o.executor_id = $1)`
-	rows, err := r.db.QueryContext(ctx, query, userID)
+	rows, err := r.db.QueryContext(ctx, unreadOrderIDsSQL, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -346,11 +348,12 @@ func (r *chatRepo) GetUnreadOrderIDs(ctx context.Context, userID uuid.UUID) ([]u
 	orderIDs := make([]uuid.UUID, 0)
 	for rows.Next() {
 		var id uuid.UUID
-		if err := rows.Scan(&id); err == nil {
-			orderIDs = append(orderIDs, id)
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
+		orderIDs = append(orderIDs, id)
 	}
-	return orderIDs, nil
+	return orderIDs, rows.Err()
 }
 
 func (r *chatRepo) DeleteMessage(ctx context.Context, messageID, senderID uuid.UUID) error {
@@ -383,22 +386,48 @@ func (r *chatRepo) UpdateMessage(ctx context.Context, messageID, senderID uuid.U
 	return &m, nil
 }
 
+const unreadOrderIDsSQL = `
+	SELECT o.id
+	FROM orders o
+	JOIN chats c ON c.order_id = o.id
+	WHERE (o.customer_id = $1 OR o.executor_id = $1)
+	  AND EXISTS (
+	      SELECT 1 FROM messages m
+	      WHERE m.chat_id = c.id AND m.status <> 'read' AND m.sender_id <> $1)`
+
+// supportChatSelect — чат поддержки пользователя со счётчиком непрочитанного
+// и текстом последнего сообщения.
+const supportChatSelect = `
+	SELECT sc.id, sc.user_id, COALESCE(sc.is_banned, false), sc.banned_until, sc.created_at, sc.updated_at,
+	       (SELECT COUNT(*) FROM support_messages sm
+	         WHERE sm.chat_id = sc.id AND sm.sender_id <> sc.user_id AND sm.read_at IS NULL),
+	       (SELECT COALESCE(NULLIF(sm.text, ''), sm.file_name, 'Вложение') FROM support_messages sm
+	         WHERE sm.chat_id = sc.id ORDER BY sm.created_at DESC LIMIT 1)
+	FROM support_chats sc
+	WHERE sc.user_id = $1`
+
+// GetOrCreateSupportChat сначала читает: открытие чата — это чтение, и оно не
+// должно оставлять за собой блокировку строки и мёртвую версию, как делал
+// прежний INSERT ... ON CONFLICT DO UPDATE на каждый вызов. Вставка — только
+// когда чата ещё нет; гонку двух первых открытий разрешает уникальный индекс
+// по user_id, после чего строка перечитывается.
 func (r *chatRepo) GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID) (*SupportChat, error) {
+	sc, err := r.findSupportChat(ctx, userID)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return sc, err
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`INSERT INTO support_chats (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, userID); err != nil {
+		return nil, err
+	}
+	return r.findSupportChat(ctx, userID)
+}
+
+func (r *chatRepo) findSupportChat(ctx context.Context, userID uuid.UUID) (*SupportChat, error) {
 	var sc SupportChat
 	var bannedUntil sql.NullTime
 	var lastMsg sql.NullString
-	err := r.db.QueryRowContext(ctx, `
-		WITH sc_row AS (
-			INSERT INTO support_chats (user_id, updated_at)
-			VALUES ($1, now())
-			ON CONFLICT (user_id) DO UPDATE SET updated_at = support_chats.updated_at
-			RETURNING id, user_id, COALESCE(is_banned, false) as is_banned, banned_until, created_at, updated_at
-		)
-		SELECT 
-			id, user_id, is_banned, banned_until, created_at, updated_at,
-			(SELECT COUNT(*) FROM support_messages sm WHERE sm.chat_id = sc_row.id AND sm.sender_id != sc_row.user_id AND sm.read_at IS NULL) as unread_count,
-			(SELECT COALESCE(NULLIF(text, ''), file_name, 'Вложение') FROM support_messages WHERE chat_id = sc_row.id ORDER BY created_at DESC LIMIT 1) as last_message
-		FROM sc_row`, userID).Scan(
+	err := r.db.QueryRowContext(ctx, supportChatSelect, userID).Scan(
 		&sc.ID, &sc.UserID, &sc.IsBanned, &bannedUntil, &sc.CreatedAt, &sc.UpdatedAt,
 		&sc.UnreadCount, &lastMsg,
 	)
@@ -408,7 +437,11 @@ func (r *chatRepo) GetOrCreateSupportChat(ctx context.Context, userID uuid.UUID)
 	if bannedUntil.Valid {
 		if time.Now().After(bannedUntil.Time) {
 			sc.IsBanned = false
-			_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, sc.ID)
+			// Истёкший бан снимается один раз; ответ и без этого верен, поэтому
+			// сбой записи не должен ронять чтение чата.
+			if _, err := r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, sc.ID); err != nil {
+				log.Printf("[chat] support chat %s: expired ban was not cleared: %v", sc.ID, err)
+			}
 		} else {
 			sc.BannedUntil = &bannedUntil.Time
 		}
@@ -467,7 +500,9 @@ func (r *chatRepo) SaveSupportMessage(ctx context.Context, chatID, senderID uuid
 	if err != nil {
 		return nil, err
 	}
-	_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
+	if _, err := r.db.ExecContext(ctx, `UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID); err != nil {
+		return nil, err
+	}
 	return &m, nil
 }
 
@@ -482,13 +517,20 @@ func (r *chatRepo) SaveSupportMessageWithAttachment(ctx context.Context, chatID,
 	if err != nil {
 		return nil, err
 	}
-	_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID)
+	if _, err := r.db.ExecContext(ctx, `UPDATE support_chats SET updated_at = now() WHERE id = $1`, chatID); err != nil {
+		return nil, err
+	}
 	return &m, nil
 }
 
+// GetAdminSupportChatList читает последнее сообщение каждого чата одним
+// LATERAL-подзапросом (текст и время разом, по индексу chat_id, created_at) и
+// непрочитанное — вторым, по частичному индексу непрочитанных; прежде «последнее
+// сообщение» считалось трижды на строку, а непрочитанное — через GROUP BY по
+// девяти колонкам.
 func (r *chatRepo) GetAdminSupportChatList(ctx context.Context, limit int) ([]*SupportChatListItem, error) {
 	query := `
-		SELECT 
+		SELECT
 			sc.id,
 			sc.user_id,
 			u.phone,
@@ -496,16 +538,26 @@ func (r *chatRepo) GetAdminSupportChatList(ctx context.Context, limit int) ([]*S
 			COALESCE(u.last_name, ''),
 			COALESCE(u.patronymic, ''),
 			u.role,
-			COUNT(sm.id) FILTER (WHERE sm.sender_id = u.id AND sm.read_at IS NULL) as unread_count,
-			COALESCE(sc.is_banned, false) as is_banned,
+			COALESCE(un.cnt, 0) AS unread_count,
+			COALESCE(sc.is_banned, false) AS is_banned,
 			sc.banned_until,
-			(SELECT COALESCE(NULLIF(text, ''), file_name, 'Вложение') FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_message,
-			(SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1) as last_time
+			lm.text AS last_message,
+			lm.created_at AS last_time
 		FROM support_chats sc
 		JOIN users u ON u.id = sc.user_id
-		LEFT JOIN support_messages sm ON sm.chat_id = sc.id AND sm.sender_id = u.id AND sm.read_at IS NULL
-		GROUP BY sc.id, sc.user_id, u.phone, u.first_name, u.last_name, u.patronymic, u.role, sc.is_banned, sc.banned_until
-		ORDER BY COALESCE((SELECT created_at FROM support_messages WHERE chat_id = sc.id ORDER BY created_at DESC LIMIT 1), sc.created_at) DESC
+		LEFT JOIN LATERAL (
+			SELECT COALESCE(NULLIF(sm.text, ''), sm.file_name, 'Вложение') AS text, sm.created_at
+			FROM support_messages sm
+			WHERE sm.chat_id = sc.id
+			ORDER BY sm.created_at DESC
+			LIMIT 1
+		) lm ON true
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS cnt
+			FROM support_messages sm
+			WHERE sm.chat_id = sc.id AND sm.sender_id = sc.user_id AND sm.read_at IS NULL
+		) un ON true
+		ORDER BY COALESCE(lm.created_at, sc.created_at) DESC
 		LIMIT $1
 	`
 	rows, err := r.db.QueryContext(ctx, query, historyLimit(limit))
@@ -548,7 +600,7 @@ func (r *chatRepo) GetAdminSupportChatList(ctx context.Context, limit int) ([]*S
 		}
 		items = append(items, &item)
 	}
-	return items, nil
+	return items, rows.Err()
 }
 
 func (r *chatRepo) MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID) error {
@@ -590,7 +642,10 @@ func (r *chatRepo) IsSupportChatBanned(ctx context.Context, chatID uuid.UUID) (b
 	}
 	if isBanned && bannedUntil.Valid {
 		if time.Now().After(bannedUntil.Time) {
-			_, _ = r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, chatID)
+			// См. findSupportChat: ответ верен и без этой записи.
+			if _, err := r.db.ExecContext(ctx, `UPDATE support_chats SET is_banned = false, banned_until = NULL WHERE id = $1`, chatID); err != nil {
+				log.Printf("[chat] support chat %s: expired ban was not cleared: %v", chatID, err)
+			}
 			return false, nil, nil
 		}
 		return true, &bannedUntil.Time, nil

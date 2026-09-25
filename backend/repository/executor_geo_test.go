@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"healthlogin/backend/repository"
@@ -67,15 +68,17 @@ func TestExecutorGeo_DeviceReportLeavesManualAnchorAlone(t *testing.T) {
 	}
 
 	// Отчёт всё равно записывается — он просто не распоряжается якорем.
-	device, err := repo.GetDevicePosition(ctx, executorID)
-	if err != nil {
+	var deviceLat, deviceLon sql.NullFloat64
+	if err := db.QueryRowContext(ctx,
+		`SELECT device_lat, device_lon FROM executor_profiles WHERE user_id = $1`, executorID,
+	).Scan(&deviceLat, &deviceLon); err != nil {
 		t.Fatalf("unexpected error reading device position: %v", err)
 	}
-	if device == nil {
+	if !deviceLat.Valid || !deviceLon.Valid {
 		t.Fatal("the device position should still be stored")
 	}
-	if device.Lat != 55.7512 || device.Lon != 37.6 {
-		t.Errorf("device position (%f, %f) does not match the reported fix", device.Lat, device.Lon)
+	if deviceLat.Float64 != 55.7512 || deviceLon.Float64 != 37.6 {
+		t.Errorf("device position (%f, %f) does not match the reported fix", deviceLat.Float64, deviceLon.Float64)
 	}
 }
 

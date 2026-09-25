@@ -5,7 +5,6 @@ import (
 	"log"
 	"time"
 
-	"healthlogin/backend/metrics"
 	"healthlogin/backend/service"
 )
 
@@ -18,7 +17,7 @@ import (
 // он будил бы дежурного после каждого здорового прохода.
 type PerkReminderWorker struct {
 	shop  *service.ShopService
-	guard func(func() error) error
+	guard Guard
 }
 
 // NewPerkReminderWorker создаёт PerkReminderWorker.
@@ -33,28 +32,17 @@ func (w *PerkReminderWorker) WithLeader(leader *Leader, name string) *PerkRemind
 }
 
 // Start периодически выполняет проход.
-func (w *PerkReminderWorker) Start(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			job := w.Run
-			if w.guard != nil {
-				job = func() error { return w.guard(w.Run) }
-			}
-			if err := metrics.TrackWorker("perk_reminder", job); err != nil {
-				log.Printf("[PerkReminderWorker] pass failed: %v", err)
-			}
-		}
-	}()
-	log.Printf("[PerkReminderWorker] Background worker started every %v", interval)
+func (w *PerkReminderWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	return periodic{name: "PerkReminderWorker", metric: "perk_reminder", guard: w.guard}.
+		Start(ctx, interval, w.Run)
 }
 
 // Run — один проход.
-func (w *PerkReminderWorker) Run() error {
+func (w *PerkReminderWorker) Run(ctx context.Context) error {
 	if w.shop == nil {
 		return nil
 	}
-	sent, err := w.shop.SendPerkReminders(context.Background())
+	sent, err := w.shop.SendPerkReminders(ctx)
 	if sent > 0 {
 		log.Printf("[PerkReminderWorker] %d perk reminders sent", sent)
 	}

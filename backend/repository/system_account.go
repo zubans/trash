@@ -78,13 +78,6 @@ func NewSystemAccountRepository(db *sql.DB) SystemAccountRepository {
 	return &systemAccountRepo{db: db}
 }
 
-func (r *systemAccountRepo) exec(ctx context.Context, q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *systemAccountRepo) Credit(ctx context.Context, q Querier, code string, amount money.Amount) error {
 	return r.move(ctx, q, code, amount)
 }
@@ -99,7 +92,7 @@ func (r *systemAccountRepo) move(ctx context.Context, q Querier, code string, de
 	if delta.IsZero() {
 		return nil
 	}
-	err := execExpectingOne(ctx, r.exec(ctx, q),
+	err := execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE system_accounts SET balance = balance + $1, updated_at = now() WHERE code = $2`,
 		delta, code)
 	if errors.Is(err, ErrConflict) {
@@ -117,7 +110,7 @@ func (r *systemAccountRepo) DebitAvailable(ctx context.Context, q Querier, code 
 	if amount.IsZero() {
 		return nil
 	}
-	err := execExpectingOne(ctx, r.exec(ctx, q),
+	err := execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE system_accounts SET balance = balance - $1, updated_at = now() WHERE code = $2 AND balance >= $1`,
 		amount, code)
 	if errors.Is(err, ErrConflict) {

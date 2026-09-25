@@ -253,7 +253,7 @@ func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.chatService.HandleWS(r.Context(), w, r, orderID, user.ID, user.Role)
+	h.chatService.HandleWS(r.Context(), w, r, orderID, user.ID)
 }
 
 // MarkReadHandler отмечает все сообщения чата прочитанными.
@@ -494,22 +494,50 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user.ID, user.Role, messageQueryFrom(r))
+	q := messageQueryFrom(r)
+	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user.ID, user.Role, q)
 	if err != nil {
 		writeChatError(w, err)
 		return
 	}
-	if h.shopLinks != nil {
+	// Размечать нечего, когда страница пуста, — а опрос почти всегда возвращает
+	// пустую страницу, и владельца чата ради неё искать незачем.
+	if h.shopLinks != nil && len(messages) > 0 {
 		if owner, err := h.chatService.SupportChatOwner(r.Context(), chatID); err == nil && owner != user.ID {
 			if err := h.shopLinks(r.Context(), owner, messages); err != nil {
 				log.Printf("[chat] cannot link shop orders in support chat %s: %v", chatID, err)
 			}
 		}
 	}
-	_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user.ID, user.Role)
+	// Прочитанным помечает только открытие переписки — запрос без курсора, то
+	// есть самая свежая страница. Опрос (?after=) и прокрутка назад (?before=)
+	// идут по этому же адресу каждые несколько секунд, и раньше каждый из них
+	// стоил ещё одного UPDATE по всем сообщениям чата.
+	if q.After == nil && q.Before == nil {
+		_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user.ID, user.Role)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(messages)
+}
+
+// supportChatWritable отвечает, можно ли сейчас писать в чат поддержки, и сам
+// отвечает клиенту 403, если нельзя. Бан чата — мера против его владельца;
+// администратора (в любой из его ролей) он не касается.
+func (h *ChatHandler) supportChatWritable(w http.ResponseWriter, r *http.Request, user *repository.User, chatID uuid.UUID) bool {
+	if user.HasRole(repository.RoleAdmin) {
+		return true
+	}
+	banned, until, err := h.chatService.IsSupportChatBanned(r.Context(), chatID)
+	if err != nil || !banned {
+		return true
+	}
+	msg := "Чат поддержки заблокирован администратором"
+	if until != nil {
+		msg = fmt.Sprintf("Чат заблокирован до %s", until.Format("15:04 02.01.2006"))
+	}
+	http.Error(w, msg, http.StatusForbidden)
+	return false
 }
 
 // SendSupportMessageHandler публикует текстовое сообщение в чат поддержки.
@@ -527,16 +555,8 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if user.Role != "ADMIN" {
-		banned, until, err := h.chatService.IsSupportChatBanned(r.Context(), chatID)
-		if err == nil && banned {
-			msg := "Чат поддержки заблокирован администратором"
-			if until != nil {
-				msg = fmt.Sprintf("Чат заблокирован до %s", until.Format("15:04 02.01.2006"))
-			}
-			http.Error(w, msg, http.StatusForbidden)
-			return
-		}
+	if !h.supportChatWritable(w, r, user, chatID) {
+		return
 	}
 
 	var req struct {
@@ -572,16 +592,8 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	if user.Role != "ADMIN" {
-		banned, until, err := h.chatService.IsSupportChatBanned(r.Context(), chatID)
-		if err == nil && banned {
-			msg := "Чат поддержки заблокирован администратором"
-			if until != nil {
-				msg = fmt.Sprintf("Чат заблокирован до %s", until.Format("15:04 02.01.2006"))
-			}
-			http.Error(w, msg, http.StatusForbidden)
-			return
-		}
+	if !h.supportChatWritable(w, r, user, chatID) {
+		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
@@ -638,14 +650,10 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	json.NewEncoder(w).Encode(msg)
 }
 
-// GetAdminSupportChatListHandler возвращает список чатов в стиле Telegram для админ-панели.
+// GetAdminSupportChatListHandler возвращает список чатов в стиле Telegram для
+// админ-панели. Кого сюда пускать, решает право support_chats.view на маршруте,
+// а не роль: модератор с этим правом читает список наравне с админом.
 func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil || user.Role != "ADMIN" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	list, err := h.chatService.GetAdminSupportChatList(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -702,14 +710,9 @@ func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": false})
 }
 
-// GetAdminSupportUnreadSummaryHandler возвращает общее число непрочитанного для боковой панели админа.
+// GetAdminSupportUnreadSummaryHandler возвращает общее число непрочитанного для
+// боковой панели админа. Доступ, как и у списка, охраняет право на маршруте.
 func (h *ChatHandler) GetAdminSupportUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil || user.Role != "ADMIN" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	total, err := h.chatService.GetAdminSupportUnreadCount(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

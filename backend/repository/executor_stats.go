@@ -71,17 +71,10 @@ func NewExecutorStatsRepository(db *sql.DB) ExecutorStatsRepository {
 	return &executorStatsRepo{db: db}
 }
 
-func (r *executorStatsRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *executorStatsRepo) Get(ctx context.Context, q Querier, userID uuid.UUID) (*ExecutorStats, error) {
 	stats := &ExecutorStats{UserID: userID}
 	var fastest, earned sql.NullInt64
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         SELECT orders_completed, orders_completed_month, month_key, distinct_customers,
                fastest_completion_min, five_star_streak, rating_count, cancels, earned_total, updated_at
         FROM executor_stats WHERE user_id = $1
@@ -111,7 +104,7 @@ func (r *executorStatsRepo) Get(ctx context.Context, q Querier, userID uuid.UUID
 }
 
 func (r *executorStatsRepo) RecordCompletion(ctx context.Context, q Querier, order CompletedOrder) error {
-	exec := r.exec(q)
+	exec := exec(r.db, q)
 	month := time.Now().Format("2006-01")
 
 	// Заказчик засчитывается до агрегата, потому что «новый ли он» решает,
@@ -164,7 +157,7 @@ func (r *executorStatsRepo) RecordCompletion(ctx context.Context, q Querier, ord
 }
 
 func (r *executorStatsRepo) RecordCancel(ctx context.Context, q Querier, executorID uuid.UUID) error {
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO executor_stats (user_id, cancels, updated_at) VALUES ($1, 1, now())
         ON CONFLICT (user_id) DO UPDATE SET
             cancels = executor_stats.cancels + 1, updated_at = now()
@@ -177,7 +170,7 @@ func (r *executorStatsRepo) RecordRating(ctx context.Context, q Querier, executo
 	if rating >= 5 {
 		streak = 1
 	}
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO executor_stats (user_id, rating_count, five_star_streak, updated_at)
         VALUES ($1, 1, $2, now())
         ON CONFLICT (user_id) DO UPDATE SET

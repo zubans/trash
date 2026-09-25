@@ -118,7 +118,7 @@ func (r *reviewRepository) GetReviewsForUser(ctx context.Context, targetID uuid.
 		rev.Photos = json.RawMessage(photosJSON)
 		reviews = append(reviews, rev)
 	}
-	return reviews, nil
+	return reviews, rows.Err()
 }
 
 func (r *reviewRepository) UpdateUserRating(ctx context.Context, userID uuid.UUID, role string) error {

@@ -177,10 +177,6 @@ func (m *mockCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid.UU
 	return out, nil
 }
 
-func (m *mockCatalogRepo) GetAncestors(ctx context.Context, descendantID uuid.UUID) ([]*repository.ServiceNode, error) {
-	return nil, nil
-}
-
 func (m *mockCatalogRepo) GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
@@ -209,11 +205,6 @@ func (m *mockCatalogRepo) GetActiveVariants(ctx context.Context) ([]*repository.
 func (m *mockCatalogRepo) GetVariantWithCategory(ctx context.Context, id uuid.UUID) (*repository.ServiceNode, []*repository.ServiceNode, error) {
 	node, err := m.GetNodeByID(context.Background(), id)
 	return node, nil, err
-}
-
-func (m *mockCatalogRepo) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
-	children, _ := m.GetChildren(context.Background(), id, repository.FilterLive)
-	return len(children) > 0, nil
 }
 
 func (m *mockCatalogRepo) HasOrders(ctx context.Context, id uuid.UUID) (bool, error) {

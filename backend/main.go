@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
-
-	_ "github.com/lib/pq"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -21,6 +20,7 @@ import (
 	"healthlogin/backend/achievements"
 	"healthlogin/backend/behavior"
 	"healthlogin/backend/behaviors"
+	"healthlogin/backend/dbconn"
 	"healthlogin/backend/handler"
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
@@ -34,25 +34,18 @@ import (
 )
 
 func main() {
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		getEnv("DB_HOST", "localhost"),
-		getEnv("DB_PORT", "5432"),
-		getEnv("DB_USER", "healthlogin"),
-		getEnv("DB_PASSWORD", "healthlogin"),
-		getEnv("DB_NAME", "healthlogin"),
-	)
+	// Сигнал завершения отменяет этот контекст: на него смотрят воркеры, а
+	// HTTP-серверы по нему выключаются штатно. До сих пор SIGTERM обрывал
+	// процесс посреди тика — у SLA это между фиксацией возврата и уведомлением.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := dbconn.OpenFromEnv(ctx)
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 	configurePool(db)
-
-	if err := waitForDB(db); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
 
 	// Наблюдаемость. Счётчики пула регистрируются до того, как им начнут
 	// пользоваться, чтобы забитый пул был виден и на старте.
@@ -292,33 +285,37 @@ func main() {
 	// выполняться на одном процессе, поэтому вторая реплика его пропускает, а не
 	// делает работу дважды. С одним процессом это стоит одной advisory-блокировки на тик и больше ничего.
 	leader := worker.NewLeader(db)
+	// Все воркеры живут на ctx и собираются здесь: при выключении main ждёт,
+	// пока каждый доведёт начатый проход до конца.
+	var workers worker.Group
 
 	// Запускаем фоновый подборщик заказов
-	matchingService.WithLeaderGuard(leader.Guard("matching"))
-	matchingService.StartMatchingWorker(context.Background(), 5*time.Second)
+	workers.Add(worker.NewMatchingWorker(matchingService).
+		WithLeader(leader, "matching").
+		Start(ctx, 5*time.Second))
 
 	// Запускаем фоновые воркеры
-	slaWorker := worker.NewSLAWorker(db, orderService, chatService, ledger).
-		WithLeader(leader, "sla")
-	slaWorker.Start(30 * time.Second)
+	workers.Add(worker.NewSLAWorker(db, orderService, chatService, ledger).
+		WithLeader(leader, "sla").
+		Start(ctx, 30*time.Second))
 
-	auctionWorker := worker.NewAuctionWorker(db, orderService).
-		WithLeader(leader, "auction")
-	auctionWorker.Start(1 * time.Minute)
+	workers.Add(worker.NewAuctionWorker(db, orderService).
+		WithLeader(leader, "auction").
+		Start(ctx, 1*time.Minute))
 
 	// Заказы без координат подачи — от старого клиента, который их не прислал и
 	// чей адрес не удалось разрешить при создании, или заказы, появившиеся до
 	// захвата координат, — не видны на карте исполнителя. Здесь они дозаполняются
 	// через разрешатель адресов, вне пути запроса.
-	geocodeWorker := worker.NewGeocodeBackfillWorker(orderRepo, addressSuggester).
-		WithLeader(leader, "geocode_backfill")
-	geocodeWorker.Start(1 * time.Minute)
+	workers.Add(worker.NewGeocodeBackfillWorker(orderRepo, addressSuggester).
+		WithLeader(leader, "geocode_backfill").
+		Start(ctx, 1*time.Minute))
 
 	// Единственное, что закрывает истёкшую смену: один периодический проход, он же
 	// подбирает смены, которые шли в момент перезапуска процесса.
-	shiftWorker := worker.NewShiftWorker(shiftService).
-		WithLeader(leader, "shift_autoclose")
-	shiftWorker.Start(1 * time.Minute)
+	workers.Add(worker.NewShiftWorker(shiftService).
+		WithLeader(leader, "shift_autoclose").
+		Start(ctx, 1*time.Minute))
 
 	// Здесь доменные события доходят до своих поведений: заказ, закрывающий себя
 	// сам, когда его заказчик верифицирован, и идущее с этим вознаграждение.
@@ -332,10 +329,10 @@ func main() {
 	behaviorWorker := worker.NewBehaviorWorker(behaviorDispatcher).
 		WithLeader(leader, "behavior_dispatch").
 		WithScriptSync(serviceBehaviors)
-	behaviorWorker.Start(5 * time.Second)
+	workers.Add(behaviorWorker.Start(ctx, 5*time.Second))
 	// Скрипты, отредактированные на другом процессе или прямо в базе, доходят до
 	// этого в течение минуты.
-	behaviorWorker.StartScriptSync(1 * time.Minute)
+	workers.Add(behaviorWorker.StartScriptSync(ctx, 1*time.Minute))
 
 	// Ачивки читают тот же outbox, что и поведения, но со своим курсором.
 	// Интервал длиннее: значок вполне может появиться минутой позже, а каждый
@@ -345,40 +342,42 @@ func main() {
 		giftRepo, mailRepo, incidentRepo, ledger, levels, achievementEngine,
 	)
 	achievementWorker := worker.NewAchievementWorker(achievementDispatcher).
-		WithIncidents(incidentRepo).
 		WithScriptSync(achievementScripts).
 		WithLeader(leader, "achievement_dispatch")
-	achievementWorker.Start(15 * time.Second)
+	workers.Add(achievementWorker.Start(ctx, 15*time.Second))
 	// Скрипты, отредактированные на другом процессе или прямо в базе, доходят до
 	// этого в течение минуты — как и скрипты особых услуг.
-	achievementWorker.StartScriptSync(1 * time.Minute)
+	workers.Add(achievementWorker.StartScriptSync(ctx, 1*time.Minute))
+
+	// Датчик открытых денежных инцидентов: на нём алерт, поэтому он читается из
+	// таблицы на каждом процессе и не зависит от тика ачивок.
+	workers.Add(worker.NewGaugeWorker().
+		WithIncidents(incidentRepo).
+		Start(ctx, 30*time.Second))
 
 	// Сроки штрафов — время, а не событие: баллы сгорают, а тихие блокировки
 	// снимаются сами, даже если человеку больше ничего не начисляют.
-	penaltyWorker := worker.NewPenaltyWorker(penaltyService).
+	workers.Add(worker.NewPenaltyWorker(penaltyService).
 		WithTrack(photoProofService).
-		WithLeader(leader, "penalty_sweep")
-	penaltyWorker.Start(1 * time.Hour)
+		WithLeader(leader, "penalty_sweep").
+		Start(ctx, 1*time.Hour))
 
 	// Напоминание о конце привилегии магазина за три дня.
-	perkReminderWorker := worker.NewPerkReminderWorker(shopService).
-		WithLeader(leader, "perk_reminder")
-	perkReminderWorker.Start(10 * time.Minute)
+	workers.Add(worker.NewPerkReminderWorker(shopService).
+		WithLeader(leader, "perk_reminder").
+		Start(ctx, 10*time.Minute))
 
 	// Ночная проверка книг. Она только сообщает и никогда не чинит: баланс,
 	// разошедшийся со своим реестром, — это баг, который надо видеть, а не число, которое надо переписать.
-	reconcileWorker := worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
-		WithLeader(leader, "reconcile")
-	reconcileWorker.Start(24 * time.Hour)
+	workers.Add(worker.NewReconcileWorker(reconcileRepo, money.FromRubles(0.01)).
+		WithLeader(leader, "reconcile").
+		Start(ctx, 24*time.Hour))
 
 	// Истёкшие refresh-токены удаляются ежедневно; использованные хранятся до
 	// истечения срока, потому что обнаружение повторов должно их узнавать.
-	go func() {
-		authService.CleanupExpiredRefreshTokens(context.Background())
-		for range time.Tick(24 * time.Hour) {
-			authService.CleanupExpiredRefreshTokens(context.Background())
-		}
-	}()
+	workers.Add(worker.NewRefreshTokenWorker(authService).
+		WithLeader(leader, "refresh_token_cleanup").
+		Start(ctx, 24*time.Hour))
 
 	// Middleware
 	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret).
@@ -730,8 +729,10 @@ func main() {
 	keyFile := getEnv("TLS_KEY_FILE", "")
 
 	errChan := make(chan error, 2)
+	servers := []*http.Server{}
 
 	srv := newServer(addr, r)
+	servers = append(servers, srv)
 	if certFile != "" && keyFile != "" {
 		go func() {
 			log.Printf("Starting HTTPS server on %s", addr)
@@ -747,14 +748,38 @@ func main() {
 	// Необязательный обычный HTTP-сервер для мобильных/отладочных клиентов в той же сети.
 	// Задайте MOBILE_HTTP_ADDR (например, :8081), чтобы включить. По умолчанию выключен.
 	if mobileAddr := getEnv("MOBILE_HTTP_ADDR", ""); mobileAddr != "" {
+		mobile := newServer(mobileAddr, r)
+		servers = append(servers, mobile)
 		go func() {
 			log.Printf("Starting mobile HTTP server on %s", mobileAddr)
-			errChan <- newServer(mobileAddr, r).ListenAndServe()
+			errChan <- mobile.ListenAndServe()
 		}()
 	}
 
-	log.Fatalf("Server error: %v", <-errChan)
+	select {
+	case err := <-errChan:
+		log.Fatalf("Server error: %v", err)
+	case <-ctx.Done():
+	}
+	stop()
+	log.Printf("Shutting down: waiting up to %v for requests and workers", shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	for _, s := range servers {
+		if err := s.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown: %v", err)
+		}
+	}
+	if err := workers.Wait(shutdownCtx); err != nil {
+		log.Printf("Workers did not finish in time: %v", err)
+	}
+	log.Println("Shutdown complete")
 }
+
+// shutdownTimeout — сколько выключение ждёт текущие запросы и начатые проходы
+// воркеров. Меньше, чем даёт оркестратор до SIGKILL, чтобы defer'ы выше
+// (закрытие базы) ещё успели выполниться.
+const shutdownTimeout = 15 * time.Second
 
 // newServer собирает http.Server с явными таймаутами. У сервера с нулевыми
 // значениями их нет, что оставляет процесс открытым для истощения медленными клиентами.
@@ -796,20 +821,6 @@ func configurePool(db *sql.DB) {
 	log.Printf("[db] pool limited to %d open connections", maxOpen)
 }
 
-// waitForDB повторяет db.Ping с короткой паузой, пока база не будет готова.
-func waitForDB(db *sql.DB) error {
-	var err error
-	for i := 0; i < 10; i++ {
-		err = db.Ping()
-		if err == nil {
-			return nil
-		}
-		log.Printf("Database not ready, retrying... (%d/10)", i+1)
-		time.Sleep(2 * time.Second)
-	}
-	return err
-}
-
 func corsMiddleware(next http.Handler) http.Handler {
 	// Общий с проверкой Origin у WebSocket, чтобы оба оставались согласованными.
 	allowedOrigins := service.AllowedOrigins()
@@ -830,12 +841,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
+// getEnv — dbconn.Env: один ридер окружения на все бинарники.
+func getEnv(key, fallback string) string { return dbconn.Env(key, fallback) }
 
 // getEnvInt читает положительную целочисленную настройку, откатываясь к
 // умолчанию, если она не задана или не разбирается. Кривое значение забирает

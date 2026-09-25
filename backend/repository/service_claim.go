@@ -44,15 +44,8 @@ func NewServiceClaimRepository(db *sql.DB) ServiceClaimRepository {
 	return &serviceClaimRepo{db: db}
 }
 
-func (r *serviceClaimRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *serviceClaimRepo) Claim(ctx context.Context, q Querier, userID, variantID, orderID uuid.UUID) error {
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO user_service_claims (user_id, variant_id, order_id)
         VALUES ($1, $2, $3)
     `, userID, variantID, orderID)
@@ -64,7 +57,7 @@ func (r *serviceClaimRepo) Claim(ctx context.Context, q Querier, userID, variant
 }
 
 func (r *serviceClaimRepo) ReleaseByOrder(ctx context.Context, q Querier, orderID uuid.UUID) error {
-	_, err := r.exec(q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`DELETE FROM user_service_claims WHERE order_id = $1`, orderID)
 	return err
 }

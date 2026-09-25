@@ -115,15 +115,7 @@ func NewEventRepository(db *sql.DB) EventRepository {
 }
 
 func (r *eventRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return runInTx(ctx, r.db, fn)
 }
 
 func (r *eventRepo) Publish(ctx context.Context, q Querier, event *DomainEvent) error {
@@ -191,7 +183,9 @@ func (r *eventRepo) ClaimPending(ctx context.Context, consumer string, limit, ma
 			return nil, err
 		}
 		if len(payload) > 0 {
-			_ = json.Unmarshal(payload, &e.Payload)
+			if err := json.Unmarshal(payload, &e.Payload); err != nil {
+				return nil, fmt.Errorf("event %s: payload: %w", e.ID, err)
+			}
 		}
 		events = append(events, &e)
 	}

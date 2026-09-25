@@ -128,9 +128,6 @@ func isDigits(s string) bool {
 	return true
 }
 
-// Kopecks возвращает сырое количество.
-func (a Amount) Kopecks() int64 { return int64(a) }
-
 // Rubles отдаёт сумму как float. Для отображения и для вызывающих, которые всё
 // ещё говорят на float; никогда не подавайте результат обратно в арифметику.
 func (a Amount) Rubles() float64 { return float64(a) / kopecksPerRuble }

@@ -102,7 +102,7 @@ func (h *ServiceCatalogHandler) visibleTo(r *http.Request, nodes []*repository.S
 
 // ListRootCategories обслуживает GET /service-categories.
 func (h *ServiceCatalogHandler) ListRootCategories(w http.ResponseWriter, r *http.Request) {
-	nodes, err := h.catalogRepo.GetRootCategories(r.Context(), repository.FilterActive)
+	nodes, err := h.catalogRepo.GetRootCategories(r.Context(), repository.FilterActive())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -117,7 +117,7 @@ func (h *ServiceCatalogHandler) ListChildren(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "invalid category id", http.StatusBadRequest)
 		return
 	}
-	nodes, err := h.catalogRepo.GetChildren(r.Context(), id, repository.FilterActive)
+	nodes, err := h.catalogRepo.GetChildren(r.Context(), id, repository.FilterActive())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

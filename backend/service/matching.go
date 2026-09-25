@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"strconv"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -31,9 +30,6 @@ type MatchingService struct {
 	// назначить заказ тому, кто не смог бы принять его вручную.
 	// Необязательно.
 	behaviors *Behaviors
-	// leaderGuard, если задан, выполняет цикл только на процессе, держащем
-	// блокировку задачи подбора. См. WithLeaderGuard.
-	leaderGuard func(func() error) error
 }
 
 // NewMatchingService создаёт новый MatchingService.
@@ -112,39 +108,6 @@ func withinAutoMatchRadius(position repository.ExecutorPosition, known bool, ord
 		return false
 	}
 	return HaversineDistanceKM(*order.PickupLat, *order.PickupLon, position.Lat, position.Lon) <= radiusKM
-}
-
-// WithLeaderGuard заставляет воркер подбора выполняться не более одного раза
-// среди всех процессов. Защита приходит от вызывающего (worker.Leader), а не
-// строится здесь, потому что этот пакет не должен зависеть от пакета worker.
-//
-// Без неё два процесса назначали бы одни и те же ждущие заказы, а заказ можно
-// назначить лишь однажды — проигравший пишет ошибку каждый цикл.
-func (s *MatchingService) WithLeaderGuard(guard func(func() error) error) *MatchingService {
-	s.leaderGuard = guard
-	return s
-}
-
-// runGuarded выполняет один цикл подбора, под защитой, если она подключена.
-func (s *MatchingService) runGuarded(ctx context.Context) error {
-	job := func() error { return s.MatchOrders(ctx) }
-	if s.leaderGuard == nil {
-		return job()
-	}
-	return s.leaderGuard(job)
-}
-
-// StartMatchingWorker запускает фоновый цикл, периодически выполняющий подбор.
-func (s *MatchingService) StartMatchingWorker(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			if err := metrics.TrackWorker("matching", func() error { return s.runGuarded(ctx) }); err != nil {
-				log.Printf("[MatchingWorker] Error: %v", err)
-			}
-		}
-	}()
-	log.Printf("[MatchingWorker] Started background matching every %v", interval)
 }
 
 // matchingRound держит всё, что нужно одному циклу подбора, загруженное заранее.
@@ -237,7 +200,8 @@ func (s *MatchingService) executorEligible(ctx context.Context, round *matchingR
 	return canViewOrTakeOrder(ctx, s.behaviors, s.penalties, executor, round.users[order.CustomerID], variant) == nil
 }
 
-// MatchOrders выполняет цикл подбора.
+// MatchOrders выполняет один цикл подбора. По таймеру его запускает
+// worker.MatchingWorker — под защитой лидера, как и остальные периодические задачи.
 func (s *MatchingService) MatchOrders(ctx context.Context) error {
 	// Автоматическое назначение включается явно. Пока оно выключено (по
 	// умолчанию), воркер ничего не делает, и заказы берутся только вручную.

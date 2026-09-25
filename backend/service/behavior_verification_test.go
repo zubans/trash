@@ -272,16 +272,6 @@ func (s *verificationSubmissions) AttemptsSinceEscalation(ctx context.Context, q
 	return count, nil
 }
 
-func (s *verificationSubmissions) CountForOrder(ctx context.Context, orderID uuid.UUID) (int, error) {
-	count := 0
-	for _, submission := range s.submissions {
-		if submission.OrderID == orderID {
-			count++
-		}
-	}
-	return count, nil
-}
-
 func (s *verificationSubmissions) ListForOrder(ctx context.Context, orderID uuid.UUID) ([]*repository.OrderSubmission, error) {
 	var out []*repository.OrderSubmission
 	for _, submission := range s.submissions {

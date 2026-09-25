@@ -82,7 +82,7 @@ func setupAcceptRadius(t *testing.T, deltaLat float64) *acceptRadiusFixture {
 	if err != nil {
 		t.Fatalf("customer registration: %v", err)
 	}
-	_ = userRepo.UpdateBalance(ctx, customer.ID, money.FromRubles(5000))
+	_ = transactionRepo.UpdateBalance(ctx, nil, customer.ID, money.FromRubles(5000))
 	_ = userRepo.UpdateVerified(ctx, customer.ID, true)
 
 	order, err := orderService.CreateOrder(
@@ -104,7 +104,7 @@ func setupAcceptRadius(t *testing.T, deltaLat float64) *acceptRadiusFixture {
 	}
 	_ = userRepo.UpdateVerified(ctx, executor.ID, true)
 	_ = userRepo.UpdateUserBirthDate(ctx, executor.ID, time.Now().AddDate(-25, 0, 0))
-	_ = userRepo.UpdateBalance(ctx, executor.ID, money.FromRubles(5000))
+	_ = transactionRepo.UpdateBalance(ctx, nil, executor.ID, money.FromRubles(5000))
 
 	if _, err := shiftRepo.StartShift(ctx, executor.ID, 3); err != nil {
 		t.Fatalf("start shift: %v", err)

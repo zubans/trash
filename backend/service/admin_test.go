@@ -66,10 +66,6 @@ func (m *mockAdminRepo) GetWithdrawalRequests(ctx context.Context, limit, offset
 	return nil, nil
 }
 
-func (m *mockAdminRepo) GetWithdrawalRequestByID(ctx context.Context, id uuid.UUID) (*repository.WithdrawalRequest, error) {
-	return nil, errors.New("not found")
-}
-
 func (m *mockAdminRepo) CreateWithdrawalRequest(ctx context.Context, q repository.Querier, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
 	req := &repository.WithdrawalRequest{ID: uuid.New(), UserID: userID, Amount: amount, Status: "PENDING", CreatedAt: time.Now()}
 	if m.withdrawals == nil {
@@ -386,5 +382,39 @@ func TestAdminService_SoftBan(t *testing.T) {
 	// Фильтр списка знает новый статус.
 	if _, _, err := svc.GetUsers(ctx, 1, 20, "", repository.UserStatusSoftBanned, ""); err != nil {
 		t.Fatalf("status filter SOFT_BANNED rejected: %v", err)
+	}
+}
+
+// Карточка пользователя — второй путь к роли ADMIN: носитель roles.edit не
+// может назначить её ни себе, ни другому, как и роль с правом roles.*.
+func TestAdminService_OnlyAdminGrantsAdminRole(t *testing.T) {
+	userRepo := newMockRepo()
+	admin := &repository.User{ID: uuid.New(), Phone: "70000000001", Role: repository.RoleAdmin, Roles: []string{repository.RoleAdmin}}
+	manager := &repository.User{ID: uuid.New(), Phone: "70000000002", Role: "MANAGER", Roles: []string{"MANAGER"}}
+	other := &repository.User{ID: uuid.New(), Phone: "70000000003", Role: repository.RoleCustomer, Roles: []string{repository.RoleCustomer}}
+	for _, u := range []*repository.User{admin, manager, other} {
+		userRepo.users[u.Phone] = u
+	}
+	roles := newFakeRoleRepo()
+	roles.roles["MANAGER"] = &repository.Role{Code: "MANAGER", Name: "Управляющий"}
+	roles.perms["MANAGER"] = []string{"roles.edit"}
+	srv := NewAdminService(userRepo, &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}, "test-secret", nil).
+		WithRoles(roles)
+	ctx := context.Background()
+
+	if err := srv.UpdateUserRole(ctx, manager.ID, manager.ID, repository.RoleAdmin); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit сделал себя ADMIN: %v", err)
+	}
+	if err := srv.UpdateUserRoles(ctx, manager.ID, manager.ID, []string{"MANAGER", repository.RoleAdmin}); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit добавил себе ADMIN в набор: %v", err)
+	}
+	if err := srv.UpdateUserRole(ctx, other.ID, manager.ID, "MANAGER"); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit раздал роль с roles.*: %v", err)
+	}
+	if err := srv.UpdateUserRole(ctx, other.ID, manager.ID, repository.RoleCustomer); err != nil {
+		t.Fatalf("обычную роль носитель roles.edit назначать может: %v", err)
+	}
+	if err := srv.UpdateUserRole(ctx, manager.ID, admin.ID, repository.RoleAdmin); err != nil {
+		t.Fatalf("администратор назначает ADMIN: %v", err)
 	}
 }

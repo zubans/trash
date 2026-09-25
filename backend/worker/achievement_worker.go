@@ -2,16 +2,12 @@ package worker
 
 import (
 	"context"
-	"log"
 	"time"
 
-	"healthlogin/backend/metrics"
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
-// AchievementWorker вычерпывает outbox доменных событий в скрипты ачивок и
-// публикует число неразобранных денежных инцидентов.
+// AchievementWorker вычерпывает outbox доменных событий в скрипты ачивок.
 //
 // Он работает реже диспетчера поведений: там события несут то, чего кто-то
 // ждёт прямо сейчас — закрытие заказа и вознаграждение, — а здесь значок,
@@ -19,23 +15,13 @@ import (
 // каждый тик читает агрегаты и сводки по каждому субъекту события.
 type AchievementWorker struct {
 	dispatcher *service.AchievementDispatcher
-	incidents  repository.MoneyIncidentRepository
 	scripts    *service.Achievements
-	guard      func(func() error) error
+	guard      Guard
 }
 
 // NewAchievementWorker создаёт AchievementWorker.
 func NewAchievementWorker(dispatcher *service.AchievementDispatcher) *AchievementWorker {
 	return &AchievementWorker{dispatcher: dispatcher}
-}
-
-// WithIncidents заставляет воркер публиковать датчик открытых денежных
-// инцидентов. Датчик читается из таблицы, а не считается в процессе, потому что
-// на него повешен алерт: алерт про деньги обязан говорить только о том, что
-// закоммичено.
-func (w *AchievementWorker) WithIncidents(incidents repository.MoneyIncidentRepository) *AchievementWorker {
-	w.incidents = incidents
-	return w
 }
 
 // WithScriptSync заставляет воркер по таймеру перекомпилировать ачивки,
@@ -51,19 +37,11 @@ func (w *AchievementWorker) WithScriptSync(scripts *service.Achievements) *Achie
 }
 
 // StartScriptSync выполняет цикл пересинхронизации скриптов ачивок.
-func (w *AchievementWorker) StartScriptSync(interval time.Duration) {
+func (w *AchievementWorker) StartScriptSync(ctx context.Context, interval time.Duration) <-chan struct{} {
 	if w.scripts == nil {
-		return
+		return stopped
 	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			if err := w.scripts.SyncAll(context.Background()); err != nil {
-				log.Printf("[AchievementWorker] Error compiling achievement scripts: %v", err)
-			}
-		}
-	}()
-	log.Printf("[AchievementWorker] Achievement script sync started every %v", interval)
+	return periodic{name: "AchievementScriptSync"}.Start(ctx, interval, w.scripts.SyncAll)
 }
 
 // WithLeader заставляет воркер выполняться не более одного раза среди всех
@@ -75,48 +53,10 @@ func (w *AchievementWorker) WithLeader(leader *Leader, name string) *Achievement
 }
 
 // Start выполняет цикл диспетчеризации.
-func (w *AchievementWorker) Start(interval time.Duration) {
+func (w *AchievementWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
 	if w.dispatcher == nil {
-		return
+		return stopped
 	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			tick := func() error {
-				return w.runGuarded(func() error {
-					ctx := context.Background()
-					if err := w.dispatcher.Tick(ctx); err != nil {
-						return err
-					}
-					w.publishIncidents(ctx)
-					return nil
-				})
-			}
-			if err := metrics.TrackWorker("achievement_dispatch", tick); err != nil {
-				log.Printf("[AchievementWorker] Error dispatching domain events: %v", err)
-			}
-		}
-	}()
-	log.Printf("[AchievementWorker] Background worker started every %v", interval)
-}
-
-func (w *AchievementWorker) publishIncidents(ctx context.Context) {
-	if w.incidents == nil {
-		return
-	}
-	open, err := w.incidents.CountOpen(ctx)
-	if err != nil {
-		// Датчик остаётся при прежнем значении: не сумев прочитать таблицу,
-		// сказать «инцидентов нет» было бы хуже, чем не сказать ничего.
-		log.Printf("[AchievementWorker] cannot count open money incidents: %v", err)
-		return
-	}
-	metrics.SetMoneyIncidentsOpen(open)
-}
-
-func (w *AchievementWorker) runGuarded(job func() error) error {
-	if w.guard == nil {
-		return job()
-	}
-	return w.guard(job)
+	return periodic{name: "AchievementWorker", metric: "achievement_dispatch", guard: w.guard}.
+		Start(ctx, interval, w.dispatcher.Tick)
 }

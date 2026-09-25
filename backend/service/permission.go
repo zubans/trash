@@ -45,7 +45,7 @@ var permissionCatalog = []PermissionSection{
 		Hint:    "Правка — статус, верификация, роли, имя, адрес и пополнение баланса."},
 	{Key: "roles", Label: "Роли и права", Group: "Управление", Route: "/admin/roles",
 		Actions: []string{ActionView, ActionCreate, ActionEdit, ActionDelete},
-		Hint:    "Кто может заводить роли и раздавать права. Выдавайте с осторожностью: обладатель этого права может выдать себе любое другое."},
+		Hint:    "Кто может заводить роли и раздавать права. Роль ADMIN, права этого раздела и роли с ними раздаёт только администратор."},
 	{Key: "support_chats", Label: "Чаты поддержки", Group: "Управление", Route: "/admin/support-chats",
 		Actions: []string{ActionView, ActionEdit},
 		Hint:    "Правка — бан и разбан собеседника в чате поддержки."},

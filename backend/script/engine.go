@@ -168,9 +168,6 @@ func New(limits Limits, opts Options) *Engine {
 // Limits отдаёт ограничения движка — обёртке, которая создаёт по ним пробный экземпляр.
 func (e *Engine) Limits() Limits { return e.limits }
 
-// Options отдаёт настройки области — для той же цели.
-func (e *Engine) Options() Options { return e.opts }
-
 // Compiler — то, что умеет принять один каталог скриптов. Load принимает его
 // вместо самого движка, чтобы предметная обёртка могла разобрать манифест
 // по-своему и всё равно пользоваться общим загрузчиком.
@@ -258,12 +255,6 @@ func ReadDir(fsys fs.FS, dir string) ([]SourceFile, error) {
 		files = append(files, SourceFile{Name: path.Join(dir, name), Src: src})
 	}
 	return files, nil
-}
-
-// Compile разбирает однофайловый скрипт. Существует для тестов и для самого
-// простого возможного скрипта; загрузчик выше использует CompileFiles.
-func (e *Engine) Compile(code, filename string, src []byte) error {
-	return e.CompileFiles(code, []SourceFile{{Name: filename, Src: src}})
 }
 
 // CompileFiles разбирает файлы одного скрипта по порядку и регистрирует его под

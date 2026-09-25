@@ -7,8 +7,7 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/lib/pq"
-
+	"healthlogin/backend/dbconn"
 	"healthlogin/backend/repository"
 )
 
@@ -18,7 +17,7 @@ func main() {
 		platform = "android"
 	}
 
-	db, err := openDB()
+	db, err := openDB(context.Background())
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
@@ -33,29 +32,11 @@ func main() {
 	fmt.Print(nextCode)
 }
 
-func openDB() (*sql.DB, error) {
-	host := getEnv("DB_HOST", "localhost")
-	port := getEnv("DB_PORT", "5432")
-	user := getEnv("DB_USER", "healthlogin")
-	password := getEnv("DB_PASSWORD", "healthlogin")
-	dbname := getEnv("DB_NAME", "healthlogin")
-
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
-
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
-		return nil, err
-	}
-	return db, nil
-}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
+// openDB открывает базу по окружению без ожидания: это инструмент разработчика
+// и конвейера сборки, и отсутствующую базу он должен показать сразу, а не
+// через двадцать секунд ретраев.
+func openDB(ctx context.Context) (*sql.DB, error) {
+	cfg := dbconn.FromEnv()
+	cfg.Attempts = 1
+	return dbconn.Open(ctx, cfg)
 }

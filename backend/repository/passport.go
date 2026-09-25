@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ const (
 )
 
 // ErrPassportNotFound — у пользователя нет паспорта.
-var ErrPassportNotFound = errors.New("passport not found")
+var ErrPassportNotFound = fmt.Errorf("passport not found: %w", ErrNotFound)
 
 // PassportRecord — строка user_passports. Данные зашифрованы: расшифровывает
 // сервис, у которого есть ключ.
@@ -105,29 +106,14 @@ func NewPassportRepository(db *sql.DB) PassportRepository {
 	return &passportRepo{db: db}
 }
 
-func (r *passportRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *passportRepo) RunInTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return runInTx(ctx, r.db, fn)
 }
 
 func (r *passportRepo) Get(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error) {
 	var rec PassportRecord
 	var seal, mark sql.NullString
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT user_id, data_enc, photo_path, source, entered_by, key_version, created_at, updated_at,
 		       photo_seal, photo_mark, photo_taken_at
 		FROM user_passports WHERE user_id = $1`, userID).
@@ -144,7 +130,7 @@ func (r *passportRepo) Get(ctx context.Context, q Querier, userID uuid.UUID) (*P
 }
 
 func (r *passportRepo) Save(ctx context.Context, q Querier, rec *PassportRecord) error {
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
 		INSERT INTO user_passports (user_id, data_enc, source, entered_by, key_version)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (user_id) DO UPDATE SET
@@ -156,7 +142,7 @@ func (r *passportRepo) Save(ctx context.Context, q Querier, rec *PassportRecord)
 
 func (r *passportRepo) SetPhoto(ctx context.Context, q Querier, userID uuid.UUID, photo PassportPhoto) (*string, error) {
 	var previous *string
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		UPDATE user_passports p
 		SET photo_path = $2, photo_seal = $3, photo_mark = $4, photo_taken_at = $5, updated_at = now()
 		FROM (SELECT photo_path FROM user_passports WHERE user_id = $1 FOR UPDATE) old
@@ -170,7 +156,7 @@ func (r *passportRepo) SetPhoto(ctx context.Context, q Querier, userID uuid.UUID
 
 func (r *passportRepo) Delete(ctx context.Context, q Querier, userID uuid.UUID) (*PassportRecord, error) {
 	var rec PassportRecord
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		DELETE FROM user_passports WHERE user_id = $1
 		RETURNING user_id, data_enc, photo_path, source, entered_by, key_version, created_at, updated_at`, userID).
 		Scan(&rec.UserID, &rec.DataEnc, &rec.PhotoPath, &rec.Source, &rec.EnteredBy, &rec.KeyVersion, &rec.CreatedAt, &rec.UpdatedAt)
@@ -181,7 +167,7 @@ func (r *passportRepo) Delete(ctx context.Context, q Querier, userID uuid.UUID) 
 }
 
 func (r *passportRepo) LogAccess(ctx context.Context, q Querier, userID, viewerID uuid.UUID, action string) error {
-	_, err := r.exec(q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`INSERT INTO passport_access_log (user_id, viewer_id, action) VALUES ($1, $2, $3)`, userID, viewerID, action)
 	return err
 }
@@ -195,11 +181,11 @@ func (r *passportRepo) SetChecked(ctx context.Context, q Querier, userID uuid.UU
 		query = `UPDATE users SET is_checked = FALSE, checked_at = NULL, checked_by = NULL, check_requested_at = NULL WHERE id = $1`
 		args = args[:1]
 	}
-	return execExpectingOne(ctx, r.exec(q), query, args...)
+	return execExpectingOne(ctx, exec(r.db, q), query, args...)
 }
 
 func (r *passportRepo) RequestCheck(ctx context.Context, q Querier, userID uuid.UUID) error {
-	_, err := r.exec(q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE users SET check_requested_at = now()
 		 WHERE id = $1 AND is_checked = FALSE AND check_requested_at IS NULL`, userID)
 	return err
@@ -207,7 +193,7 @@ func (r *passportRepo) RequestCheck(ctx context.Context, q Querier, userID uuid.
 
 func (r *passportRepo) CheckRequestedAt(ctx context.Context, q Querier, userID uuid.UUID) (*time.Time, error) {
 	var at *time.Time
-	err := r.exec(q).QueryRowContext(ctx, `SELECT check_requested_at FROM users WHERE id = $1`, userID).Scan(&at)
+	err := exec(r.db, q).QueryRowContext(ctx, `SELECT check_requested_at FROM users WHERE id = $1`, userID).Scan(&at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -218,7 +204,7 @@ func (r *passportRepo) CheckRequests(ctx context.Context, q Querier, limit int) 
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, err := r.exec(q).QueryContext(ctx, `
+	rows, err := exec(r.db, q).QueryContext(ctx, `
 		SELECT u.id, u.phone, TRIM(CONCAT_WS(' ', u.last_name, u.first_name, u.patronymic)),
 		       u.role::text, u.is_verified, u.check_requested_at,
 		       p.photo_path IS NOT NULL, COALESCE(p.photo_seal, '')

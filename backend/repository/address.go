@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -15,7 +16,7 @@ const MaxUserAddresses = 2
 var ErrAddressLimitReached = errors.New("address limit reached")
 
 // ErrAddressNotFound возвращается для адреса, которого не существует или который принадлежит не вызывающему.
-var ErrAddressNotFound = errors.New("address not found")
+var ErrAddressNotFound = fmt.Errorf("address not found: %w", ErrNotFound)
 
 // Address — один сохранённый адрес вместе с его структурными частями.
 type Address struct {
@@ -220,4 +221,3 @@ func (r *addressRepo) setDefault(ctx context.Context, userID uuid.UUID, match st
 	}
 	return r.List(ctx, userID)
 }
-

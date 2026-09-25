@@ -115,7 +115,7 @@ func (r *bidRepo) GetBidsForOrder(ctx context.Context, orderID uuid.UUID) ([]*Bi
 // принимающих одновременно, сериализовались, а не увидели её оба как PENDING.
 func (r *bidRepo) LockBidForUpdate(ctx context.Context, q Querier, bidID uuid.UUID) (*Bid, error) {
 	var b Bid
-	err := r.exec(ctx, q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
 		SELECT id, order_id, executor_id, offered_price, status, created_at
 		FROM bids WHERE id = $1 FOR UPDATE`, bidID).Scan(
 		&b.ID, &b.OrderID, &b.ExecutorID, &b.OfferedPrice, &b.Status, &b.CreatedAt,
@@ -129,22 +129,15 @@ func (r *bidRepo) LockBidForUpdate(ctx context.Context, q Querier, bidID uuid.UU
 // SetBidStatus выводит ставку из PENDING; охрана не даёт параллельному принятию
 // переписать уже решённую ставку.
 func (r *bidRepo) SetBidStatus(ctx context.Context, q Querier, bidID uuid.UUID, status string) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE bids SET status = $1 WHERE id = $2 AND status = 'PENDING'`, status, bidID)
 }
 
 // RejectOtherBids закрывает все прочие открытые предложения по заказу. Он
 // законно может не затронуть ни одной строки, поэтому не охраняется.
 func (r *bidRepo) RejectOtherBids(ctx context.Context, q Querier, orderID, exceptBidID uuid.UUID) error {
-	_, err := r.exec(ctx, q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE bids SET status = 'REJECTED' WHERE order_id = $1 AND id != $2 AND status = 'PENDING'`,
 		orderID, exceptBidID)
 	return err
-}
-
-func (r *bidRepo) exec(ctx context.Context, q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
 }

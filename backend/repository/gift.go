@@ -6,10 +6,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"healthlogin/backend/money"
 )
@@ -133,13 +135,6 @@ func NewGiftRepository(db *sql.DB) GiftRepository {
 	return &giftRepo{db: db}
 }
 
-func (r *giftRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 const giftColumns = `code, kind, title, description, image_url, amount, partner, promo_code, stock, valid_days, is_active, created_at, updated_at`
 
 func (r *giftRepo) List(ctx context.Context, activeOnly bool) ([]*Gift, error) {
@@ -178,11 +173,11 @@ func scanGift(row rowScanner) (*Gift, error) {
 		return nil, err
 	}
 	g.Amount = giftAmount(amount)
-	if len(title) > 0 {
-		_ = json.Unmarshal(title, &g.Title)
+	if err := unmarshalJSON(title, &g.Title); err != nil {
+		return nil, fmt.Errorf("gift %s: title: %w", g.Code, err)
 	}
-	if len(description) > 0 {
-		_ = json.Unmarshal(description, &g.Description)
+	if err := unmarshalJSON(description, &g.Description); err != nil {
+		return nil, fmt.Errorf("gift %s: description: %w", g.Code, err)
 	}
 	if stock.Valid {
 		value := int(stock.Int64)
@@ -227,24 +222,34 @@ func (r *giftRepo) Upsert(ctx context.Context, gift *Gift) error {
 	return err
 }
 
+// AddCodes вставляет коды партнёра одним оператором: файл на тысячи кодов —
+// это один запрос, а не тысяча. Повторы внутри файла и коды, которые уже есть,
+// не считаются добавленными.
 func (r *giftRepo) AddCodes(ctx context.Context, giftCode string, secrets []string) (int, error) {
-	added := 0
+	seen := make(map[string]struct{}, len(secrets))
+	clean := make([]string, 0, len(secrets))
 	for _, secret := range secrets {
 		if secret == "" {
 			continue
 		}
-		result, err := r.db.ExecContext(ctx, `
-            INSERT INTO gift_codes (gift_code, secret) VALUES ($1, $2)
-            ON CONFLICT (gift_code, secret) DO NOTHING
-        `, giftCode, secret)
-		if err != nil {
-			return added, err
+		if _, dup := seen[secret]; dup {
+			continue
 		}
-		if affected, _ := result.RowsAffected(); affected > 0 {
-			added++
-		}
+		seen[secret] = struct{}{}
+		clean = append(clean, secret)
 	}
-	return added, nil
+	if len(clean) == 0 {
+		return 0, nil
+	}
+	result, err := r.db.ExecContext(ctx, `
+        INSERT INTO gift_codes (gift_code, secret) SELECT $1, unnest($2::text[])
+        ON CONFLICT (gift_code, secret) DO NOTHING
+    `, giftCode, pq.Array(clean))
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	return int(affected), err
 }
 
 func (r *giftRepo) CountFreeCodes(ctx context.Context, giftCode string) (int, error) {
@@ -266,7 +271,7 @@ func (r *giftRepo) issue(ctx context.Context, q Querier, gift *Gift, userID uuid
 	if gift == nil || !gift.IsActive {
 		return nil, ErrGiftUnavailable
 	}
-	exec := r.exec(q)
+	exec := exec(r.db, q)
 
 	var codeID *uuid.UUID
 	if gift.Kind == GiftKindCertificate {
@@ -372,7 +377,7 @@ func (r *giftRepo) ListForUser(ctx context.Context, userID uuid.UUID) ([]*UserGi
 }
 
 func (r *giftRepo) ListByShopOrder(ctx context.Context, q Querier, shopOrderID uuid.UUID) ([]*UserGift, error) {
-	rows, err := r.exec(q).QueryContext(ctx, `
+	rows, err := exec(r.db, q).QueryContext(ctx, `
         SELECT `+userGiftColumns+`
         FROM user_gifts ug
         JOIN gifts g ON g.code = ug.gift_code
@@ -406,14 +411,14 @@ func scanUserGifts(rows *sql.Rows) ([]*UserGift, error) {
 			return nil, err
 		}
 		g.Amount = giftAmount(amount)
-		if len(fulfillment) > 0 {
-			_ = json.Unmarshal(fulfillment, &ug.Fulfillment)
+		if err := unmarshalJSON(fulfillment, &ug.Fulfillment); err != nil {
+			return nil, fmt.Errorf("user gift %s: fulfillment: %w", ug.ID, err)
 		}
-		if len(title) > 0 {
-			_ = json.Unmarshal(title, &g.Title)
+		if err := unmarshalJSON(title, &g.Title); err != nil {
+			return nil, fmt.Errorf("gift %s: title: %w", g.Code, err)
 		}
-		if len(description) > 0 {
-			_ = json.Unmarshal(description, &g.Description)
+		if err := unmarshalJSON(description, &g.Description); err != nil {
+			return nil, fmt.Errorf("gift %s: description: %w", g.Code, err)
 		}
 		if stock.Valid {
 			value := int(stock.Int64)
@@ -509,7 +514,7 @@ func (r *giftRepo) RedeemCoupon(ctx context.Context, coupon string, adminID uuid
 }
 
 func (r *giftRepo) CancelShopCoupons(ctx context.Context, q Querier, shopOrderID uuid.UUID) (int, error) {
-	exec := r.exec(q)
+	exec := exec(r.db, q)
 	// Сначала коды, пока купоны ещё помнят, какие из них не открывали.
 	if _, err := exec.ExecContext(ctx, `
         UPDATE gift_codes gc SET issued_to = NULL, issued_at = NULL
@@ -536,7 +541,7 @@ func (r *giftRepo) RestoreStock(ctx context.Context, q Querier, giftCode string,
 	if units <= 0 {
 		return nil
 	}
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         UPDATE gifts SET stock = stock + $2, updated_at = now()
          WHERE code = $1 AND stock IS NOT NULL
     `, giftCode, units)

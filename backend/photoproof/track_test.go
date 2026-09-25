@@ -49,7 +49,14 @@ func TestTrackAcceptsOfflineBatch(t *testing.T) {
 	if err != nil || added != 3 {
 		t.Fatalf("first batch: %d %v", added, err)
 	}
-	// Повтор той же пачки — очередь не смогла подтвердить отправку.
+	// Каждая записанная точка получает id и время сервера.
+	for i, p := range batch {
+		if p.ID == uuid.Nil || p.ReportedAt.IsZero() {
+			t.Fatalf("point %d was written without id or reported_at: %+v", i, p)
+		}
+	}
+	// Повтор той же пачки — очередь не смогла подтвердить отправку. Записана
+	// только новая точка; повторная остаётся без id, как не записанная.
 	repeat := []photoproof.Position{
 		{Lat: 55.75, Lon: 37.60, Source: photoproof.SourceLive, DeviceAt: base, ClientKey: "k1"},
 		{Lat: 55.78, Lon: 37.63, Source: photoproof.SourceLive, DeviceAt: base.Add(3 * time.Minute), ClientKey: "k4"},
@@ -57,6 +64,9 @@ func TestTrackAcceptsOfflineBatch(t *testing.T) {
 	added, err = svc.RecordPositions(ctx, nil, executorID, repeat)
 	if err != nil || added != 1 {
 		t.Fatalf("repeated batch: %d %v", added, err)
+	}
+	if repeat[0].ID != uuid.Nil || repeat[1].ID == uuid.Nil {
+		t.Fatalf("ids after the repeated batch: duplicate %s, new %s", repeat[0].ID, repeat[1].ID)
 	}
 
 	var total, foreign int
@@ -144,5 +154,74 @@ func TestTrackSweep(t *testing.T) {
 	}
 	if left != 1 {
 		t.Fatalf("%d rows left, want the fresh one only", left)
+	}
+}
+
+// Пачка внутри транзакции вызывающего с повтором внутри: раньше ошибка
+// уникальности обрывала транзакцию, теперь повтор просто пропускается, а
+// транзакция фиксируется.
+func TestTrackAddInsideTransactionSkipsDuplicates(t *testing.T) {
+	db := testDB(t)
+	svc := trackService(t, db)
+	ctx := context.Background()
+	executorID := seedUser(t, db)
+
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if _, err := svc.RecordPositions(ctx, nil, executorID, []photoproof.Position{
+		{Lat: 55.1, Lon: 37.1, Source: photoproof.SourceLive, DeviceAt: base, ClientKey: "tx-1"},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	acc := 12.5
+	added, err := svc.RecordPositions(ctx, tx, executorID, []photoproof.Position{
+		{Lat: 55.1, Lon: 37.1, Source: photoproof.SourceLive, DeviceAt: base, ClientKey: "tx-1"},
+		{Lat: 55.2, Lon: 37.2, AccuracyM: &acc, Source: photoproof.SourceLive, DeviceAt: base.Add(time.Minute), ClientKey: "tx-2"},
+		// Точка без ключа записывается всегда.
+		{Lat: 55.3, Lon: 37.3, Source: photoproof.SourceLive, DeviceAt: base.Add(2 * time.Minute)},
+	})
+	if err != nil || added != 2 {
+		t.Fatalf("batch in tx: %d %v", added, err)
+	}
+	// Транзакция жива: следующий запрос в ней проходит.
+	var inTx int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM executor_positions WHERE executor_id = $1`, executorID).Scan(&inTx); err != nil {
+		t.Fatalf("query after the batch: %v", err)
+	}
+	if inTx != 3 {
+		t.Fatalf("%d rows visible in the transaction, want 3", inTx)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var stored float64
+	if err := db.QueryRow(`SELECT accuracy_m FROM executor_positions WHERE executor_id = $1 AND client_key = 'tx-2'`, executorID).Scan(&stored); err != nil || stored != acc {
+		t.Fatalf("accuracy_m of the batched point: %v %v", stored, err)
+	}
+}
+
+// Пачка с негодной точкой отклоняется целиком, до записи.
+func TestTrackAddRejectsTheWholeBatchOnInvalidPoint(t *testing.T) {
+	db := testDB(t)
+	svc := trackService(t, db)
+	ctx := context.Background()
+	executorID := seedUser(t, db)
+
+	added, err := svc.RecordPositions(ctx, nil, executorID, []photoproof.Position{
+		{Lat: 55.1, Lon: 37.1, Source: photoproof.SourceLive, DeviceAt: time.Now(), ClientKey: "ok"},
+		{Lat: 95, Lon: 37.1, Source: photoproof.SourceLive, DeviceAt: time.Now(), ClientKey: "bad"},
+	})
+	if err == nil || added != 0 {
+		t.Fatalf("batch with an invalid point: %d %v", added, err)
+	}
+	var stored int
+	if err := db.QueryRow(`SELECT count(*) FROM executor_positions WHERE executor_id = $1`, executorID).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("%d rows stored from a rejected batch (%v)", stored, err)
 	}
 }

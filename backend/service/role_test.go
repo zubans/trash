@@ -305,3 +305,43 @@ func TestAssignUnknownRoleRejected(t *testing.T) {
 		t.Fatalf("ожидалась ErrRoleNotFound, получено %v", err)
 	}
 }
+
+// Стать администратором через roles.edit нельзя: роль ADMIN, права roles.* и
+// роли с ними раздаёт только тот, кто уже администратор.
+func TestOnlyAdminGrantsAdminRoleAndRolePermissions(t *testing.T) {
+	repo := newFakeRoleRepo()
+	repo.roles["MANAGER"] = &repository.Role{Code: "MANAGER", Name: "Управляющий"}
+	repo.perms["MANAGER"] = []string{"roles.edit"}
+	admin := &repository.User{ID: uuid.New(), Role: repository.RoleAdmin, Roles: []string{repository.RoleAdmin}}
+	manager := &repository.User{ID: uuid.New(), Role: "MANAGER", Roles: []string{"MANAGER"}}
+	users := newMockUserRepo()
+	users.users = map[uuid.UUID]*repository.User{admin.ID: admin, manager.ID: manager}
+	svc := NewRoleService(repo, users, &mockAdminRepo{}, NewPermissions(repo))
+	ctx := context.Background()
+
+	if err := svc.AssignUser(ctx, manager.ID, repository.RoleAdmin, manager.ID); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit назначил ADMIN: %v", err)
+	}
+	if err := svc.AssignUser(ctx, manager.ID, "MANAGER", uuid.New()); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit раздал роль с roles.*: %v", err)
+	}
+	if _, err := svc.Create(ctx, manager.ID, "MANAGER2", "Ещё управляющий", "", []string{"roles.edit"}); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit завёл роль с roles.*: %v", err)
+	}
+	if _, err := svc.Update(ctx, manager.ID, "MANAGER", "Управляющий", "", []string{"roles.edit", "users.edit"}); !errors.Is(err, ErrAdminRequired) {
+		t.Fatalf("носитель roles.edit расширил роль с roles.*: %v", err)
+	}
+	if _, err := svc.Create(ctx, manager.ID, "FINANCE", "Финансист", "", []string{"transactions.view"}); err != nil {
+		t.Fatalf("обычную роль носитель roles.edit заводить может: %v", err)
+	}
+	if len(repo.holders[repository.RoleAdmin]) != 0 {
+		t.Fatal("после отказов носителей ADMIN быть не должно")
+	}
+
+	if err := svc.AssignUser(ctx, admin.ID, repository.RoleAdmin, manager.ID); err != nil {
+		t.Fatalf("администратор назначает ADMIN: %v", err)
+	}
+	if _, err := svc.Create(ctx, admin.ID, "MANAGER2", "Ещё управляющий", "", []string{"roles.edit"}); err != nil {
+		t.Fatalf("администратор заводит роль с roles.*: %v", err)
+	}
+}

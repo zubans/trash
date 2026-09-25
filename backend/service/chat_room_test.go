@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +11,7 @@ import (
 // joinAndLeave делает с комнатой то же, что одно соединение WebSocket: берёт
 // её, регистрируется, затем отписывается и отпускает.
 func joinAndLeave(s *ChatService, orderID, chatID uuid.UUID) {
-	room := s.getOrCreateRoom(context.Background(), orderID, chatID)
+	room := s.getOrCreateRoom(orderID, chatID)
 	client := &ChatClient{Send: make(chan []byte, 1)}
 	room.Register <- client
 	room.Unregister <- client
@@ -25,8 +24,8 @@ func TestChatRoomLifecycle(t *testing.T) {
 	s := NewChatService(nil, nil)
 	orderID, chatID := uuid.New(), uuid.New()
 
-	first := s.getOrCreateRoom(context.Background(), orderID, chatID)
-	second := s.getOrCreateRoom(context.Background(), orderID, chatID)
+	first := s.getOrCreateRoom(orderID, chatID)
+	second := s.getOrCreateRoom(orderID, chatID)
 	if first != second {
 		t.Fatal("two connections to the same order got different rooms")
 	}

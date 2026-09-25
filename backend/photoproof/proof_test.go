@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,6 +156,58 @@ func newProofFixture(t *testing.T, required bool) *proofFixture {
 	return &proofFixture{db: db, svc: svc, executorID: executorID, orderID: orderID, storage: storage}
 }
 
+// path — где на диске лежит файл по пути, который отдал сервис.
+func (f *proofFixture) path(fileURL string) string {
+	return filepath.Join(f.storage, strings.TrimPrefix(fileURL, "/uploads/"))
+}
+
+// files — сколько файлов лежит в каталоге снимков заказа.
+func (f *proofFixture) files(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(f.storage, "photo-proofs", f.orderID.String()))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read storage: %v", err)
+	}
+	return len(entries)
+}
+
+// withChecker подменяет проверку снимка: тесты гонок вставляют в неё
+// барьер, потому что она выполняется ровно между двумя проходами по базе.
+func (f *proofFixture) withChecker(c photoproof.Checker) {
+	f.svc.WithProofs(f.db, photoproof.DiskStorage{Root: f.storage}, c)
+}
+
+// checkerFunc — Checker из функции.
+type checkerFunc func(data []byte, in photoproof.CheckInput) (string, string)
+
+func (fn checkerFunc) Check(data []byte, in photoproof.CheckInput) (string, string) {
+	return fn(data, in)
+}
+
+// barrierChecker пропускает проверку только когда до неё дошли все n
+// загрузок: так каждая из них прочитала заказ до того, как любая записала снимок.
+func barrierChecker(n int) photoproof.Checker {
+	var mu sync.Mutex
+	arrived := 0
+	all := make(chan struct{})
+	return checkerFunc(func([]byte, photoproof.CheckInput) (string, string) {
+		mu.Lock()
+		arrived++
+		if arrived == n {
+			close(all)
+		}
+		mu.Unlock()
+		select {
+		case <-all:
+		case <-time.After(10 * time.Second):
+		}
+		return photoproof.SealMissing, photoproof.MarkNotFound
+	})
+}
+
 func (f *proofFixture) upload(kind, key string, data []byte, takenAt time.Time, lat, lon *float64) (*photoproof.Proof, error) {
 	return f.svc.UploadProof(context.Background(), f.executorID, f.orderID, photoproof.UploadInput{
 		Kind: kind, Camera: photoproof.CameraRear, ClientKey: key, DeviceTakenAt: takenAt,
@@ -227,6 +280,13 @@ func TestUploadProof(t *testing.T) {
 	if err != nil || retake.ID == proof.ID {
 		t.Fatalf("retake: %+v %v", retake, err)
 	}
+	// Файл заменённого снимка удалён, файл нового — на месте.
+	if _, err := os.Stat(f.path(proof.FileURL)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replaced photo file still exists: %v", err)
+	}
+	if _, err := os.Stat(f.path(retake.FileURL)); err != nil {
+		t.Fatalf("retake file: %v", err)
+	}
 	selfie, err := f.upload("SELFIE", "k3", plainJPEG(t), takenAt, nil, nil)
 	if err != nil {
 		t.Fatalf("selfie: %v", err)
@@ -256,5 +316,106 @@ func TestUploadProofNotRequired(t *testing.T) {
 	f := newProofFixture(t, false)
 	if _, err := f.upload("AREA", "k1", plainJPEG(t), time.Now(), nil, nil); !errors.Is(err, photoproof.ErrProofNotRequired) {
 		t.Fatalf("order without a requirement: %v", err)
+	}
+}
+
+// Две пересъёмки одного вида одновременно: обе проходят проверку до того, как
+// любая записана. Остаётся ровно один снимок и ровно один файл — проигравший
+// заменён, его файл удалён, ни одна из загрузок не упала.
+func TestUploadProofConcurrentRetakes(t *testing.T) {
+	f := newProofFixture(t, true)
+	f.withChecker(barrierChecker(2))
+	photo := plainJPEG(t)
+	takenAt := time.Now()
+
+	results := make([]*photoproof.Proof, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i, key := range []string{"race-1", "race-2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = f.upload("AREA", key, photo, takenAt, nil, nil)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("upload %d: %v", i, err)
+		}
+	}
+	if results[0].ID == results[1].ID {
+		t.Fatal("two different uploads answered with the same proof")
+	}
+
+	proofs, err := f.svc.ProofsForOrder(context.Background(), nil, f.orderID)
+	if err != nil || len(proofs) != 1 {
+		t.Fatalf("proofs after the race: %d %v", len(proofs), err)
+	}
+	if n := f.files(t); n != 1 {
+		t.Fatalf("%d files in storage, want the surviving one only", n)
+	}
+	if _, err := os.Stat(f.path(proofs[0].FileURL)); err != nil {
+		t.Fatalf("the surviving proof's file: %v", err)
+	}
+}
+
+// Один и тот же ключ отправки одновременно (очередь повторила отправку, не
+// дождавшись ответа): принят один снимок, обе загрузки получают его, файл один.
+func TestUploadProofConcurrentSameKey(t *testing.T) {
+	f := newProofFixture(t, true)
+	f.withChecker(barrierChecker(2))
+	photo := plainJPEG(t)
+	takenAt := time.Now()
+
+	results := make([]*photoproof.Proof, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = f.upload("SELFIE", "same-key", photo, takenAt, nil, nil)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("upload %d: %v", i, err)
+		}
+	}
+	if results[0].ID != results[1].ID {
+		t.Fatalf("the same client key produced two proofs: %s and %s", results[0].ID, results[1].ID)
+	}
+	proofs, err := f.svc.ProofsForOrder(context.Background(), nil, f.orderID)
+	if err != nil || len(proofs) != 1 {
+		t.Fatalf("proofs: %d %v", len(proofs), err)
+	}
+	if n := f.files(t); n != 1 {
+		t.Fatalf("%d files in storage, want one", n)
+	}
+}
+
+// Заказ отмечен исполненным, пока шла проверка снимка: вторая транзакция его
+// не принимает, строки нет, и файла, записанного под него, тоже нет.
+func TestUploadProofRejectedByTheSecondPassLeavesNothing(t *testing.T) {
+	f := newProofFixture(t, true)
+	f.withChecker(checkerFunc(func(_ []byte, in photoproof.CheckInput) (string, string) {
+		if _, err := f.db.Exec(`UPDATE orders SET status = 'EXECUTED' WHERE id = $1`, in.OrderID); err != nil {
+			t.Errorf("close the order: %v", err)
+		}
+		return photoproof.SealMissing, photoproof.MarkNotFound
+	}))
+
+	_, err := f.upload("AREA", "late", plainJPEG(t), time.Now(), nil, nil)
+	if !errors.Is(err, photoproof.ErrProofClosed) {
+		t.Fatalf("upload into an order closed mid-check: %v", err)
+	}
+	proofs, err := f.svc.ProofsForOrder(context.Background(), nil, f.orderID)
+	if err != nil || len(proofs) != 0 {
+		t.Fatalf("a rejected upload left %d proofs (%v)", len(proofs), err)
+	}
+	if n := f.files(t); n != 0 {
+		t.Fatalf("a rejected upload left %d files in storage", n)
 	}
 }

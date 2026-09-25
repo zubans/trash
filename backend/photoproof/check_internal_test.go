@@ -160,3 +160,27 @@ func TestMarkIsInvisible(t *testing.T) {
 		t.Fatalf("mark is visible: mean change %.2f, max %.0f", mean, max)
 	}
 }
+
+// Быстрые пути luminance дают то же, что общий путь через At: снимок,
+// декодированный в Gray или YCbCr, проверяется той же яркостью.
+func TestLuminanceFastPathsMatchGenericPath(t *testing.T) {
+	scene := sceneImage(64, 48, 7)
+	gray := image.NewGray(scene.Bounds())
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 64; x++ {
+			gray.Set(x, y, scene.At(x, y))
+		}
+	}
+	fast := luminance(gray)
+	generic := luminance(&genericImage{gray})
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 64; x++ {
+			if got, want := fast(x, y), generic(x, y); math.Abs(got-want) > 0.5 {
+				t.Fatalf("gray luminance at (%d,%d) = %v, generic path gives %v", x, y, got, want)
+			}
+		}
+	}
+}
+
+// genericImage прячет конкретный тип, чтобы luminance пошла общим путём.
+type genericImage struct{ image.Image }

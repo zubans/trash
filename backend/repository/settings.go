@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
 
 // SettingsRepository описывает операции с базой для системных настроек.
@@ -36,28 +38,25 @@ func (r *settingsRepo) GetSettings(ctx context.Context) (map[string]string, erro
 		}
 		settings[key] = value.String
 	}
-	return settings, nil
+	return settings, rows.Err()
 }
 
+// UpdateSettings пишет все пары одним оператором: он атомарен сам по себе,
+// поэтому транзакция вокруг построчных INSERT'ов больше не нужна.
 func (r *settingsRepo) UpdateSettings(ctx context.Context, settings map[string]string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	if len(settings) == 0 {
+		return nil
 	}
-	defer tx.Rollback()
-
-	query := `
-		INSERT INTO system_settings (key, value)
-		VALUES ($1, $2)
-		ON CONFLICT (key)
-		DO UPDATE SET value = EXCLUDED.value`
-
+	keys := make([]string, 0, len(settings))
+	values := make([]string, 0, len(settings))
 	for k, v := range settings {
-		_, err := tx.ExecContext(ctx, query, k, v)
-		if err != nil {
-			return err
-		}
+		keys = append(keys, k)
+		values = append(values, v)
 	}
-
-	return tx.Commit()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO system_settings (key, value)
+		SELECT * FROM unnest($1::text[], $2::text[])
+		ON CONFLICT (key)
+		DO UPDATE SET value = EXCLUDED.value`, pq.Array(keys), pq.Array(values))
+	return err
 }

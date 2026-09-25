@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"hash/fnv"
 	"log"
+	"time"
 )
 
 // Leader выдаёт защиту по задачам поверх advisory-блокировок PostgreSQL, чтобы
@@ -30,21 +32,19 @@ func NewLeader(db *sql.DB) *Leader {
 	return &Leader{db: db}
 }
 
-// Guard возвращает функцию, которая выполняет задачу, держа advisory-блокировку
+// Guard возвращает защиту, которая выполняет задачу, держа advisory-блокировку
 // для name, и пропускает её, когда блокировку держит другой процесс.
-func (l *Leader) Guard(name string) func(func() error) error {
+func (l *Leader) Guard(name string) Guard {
 	if l == nil || l.db == nil {
-		return func(job func() error) error { return job() }
+		return func(_ context.Context, job func() error) error { return job() }
 	}
 	key := lockKey(name)
-	return func(job func() error) error {
-		return l.run(name, key, job)
+	return func(ctx context.Context, job func() error) error {
+		return l.run(ctx, name, key, job)
 	}
 }
 
-func (l *Leader) run(name string, key int64, job func() error) error {
-	ctx := context.Background()
-
+func (l *Leader) run(ctx context.Context, name string, key int64, job func() error) error {
 	// Блокировку держит сессия, поэтому соединение надо закрепить на всю её
 	// жизнь: взятые и отпущенные на случайном соединении из пула, разблокировка
 	// могла бы попасть не в ту сессию, что и блокировка, и оставить задачу
@@ -70,15 +70,26 @@ func (l *Leader) run(name string, key int64, job func() error) error {
 		return nil
 	}
 	defer func() {
-		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, key); err != nil {
-			// Закрытие соединения завершает сессию и отпускает блокировку, поэтому
-			// это отчёт, а не утечка.
-			log.Printf("[leader] %s: failed to release the lock: %v", name, err)
+		// Разблокировка идёт и после отмены ctx — выключение процесса застаёт
+		// задачу посреди прохода, и блокировку всё равно надо отдать.
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unlockTimeout)
+		defer cancel()
+		if _, err := conn.ExecContext(unlockCtx, `SELECT pg_advisory_unlock($1)`, key); err != nil {
+			// Соединение с неотпущенной блокировкой нельзя возвращать в пул:
+			// сессия жила бы дальше и держала задачу закрытой для всех процессов.
+			// Пометка «плохое» заставляет пул закрыть его, а закрытие сессии
+			// отпускает блокировку.
+			log.Printf("[leader] %s: failed to release the lock, discarding the connection: %v", name, err)
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		}
 	}()
 
 	return job()
 }
+
+// unlockTimeout ограничивает разблокировку после прохода: она идёт вне
+// контекста задачи и не должна держать выключение процесса.
+const unlockTimeout = 5 * time.Second
 
 // lockKey выводит ключ advisory-блокировки из имени задачи, чтобы ключи не
 // могли разъехаться с задачами, которые они защищают, как разъехался бы

@@ -4,54 +4,22 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
 	"log"
-	"os"
-	"time"
 
-	_ "github.com/lib/pq"
-
+	"healthlogin/backend/dbconn"
 	"healthlogin/backend/repository"
 )
 
 func main() {
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		env("DB_HOST", "localhost"),
-		env("DB_PORT", "5432"),
-		env("DB_USER", "healthlogin"),
-		env("DB_PASSWORD", "healthlogin"),
-		env("DB_NAME", "healthlogin"),
-		env("DB_SSLMODE", "disable"),
-	)
-
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		log.Fatalf("open database: %v", err)
-	}
-	defer db.Close()
-
-	for i := 0; i < 10; i++ {
-		if err = db.Ping(); err == nil {
-			break
-		}
-		log.Printf("database not ready, retrying... (%d/10)", i+1)
-		time.Sleep(2 * time.Second)
-	}
+	db, err := dbconn.OpenFromEnv(context.Background())
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
 	}
+	defer db.Close()
 
-	if err := repository.Migrate(db, env("MIGRATIONS_DIR", "migrations")); err != nil {
+	if err := repository.Migrate(db, dbconn.Env("MIGRATIONS_DIR", "migrations")); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 	log.Println("migrations up to date")
-}
-
-func env(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

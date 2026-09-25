@@ -3,7 +3,6 @@ package achievement
 import (
 	"fmt"
 	"io/fs"
-	"sync"
 	"time"
 
 	"go.starlark.net/starlark"
@@ -40,18 +39,18 @@ const ConfigFile = script.ConfigFile
 var DefaultLimits = script.DefaultLimits
 
 // Engine — рантайм скриптов, настроенный под ачивки.
+//
+// Всё состояние живёт в рантайме: манифест ачивки выводится из общего
+// манифеста при каждом обращении, а не хранится второй картой под вторым
+// мьютексом, которая могла бы разойтись с первой.
 type Engine struct {
 	runtime *script.Engine
-
-	mu        sync.RWMutex
-	manifests map[string]Manifest
 }
 
 // New создаёт пустой движок.
 func New(limits Limits) *Engine {
 	return &Engine{
-		runtime:   script.New(limits, script.Options{Builtins: predeclared, Hooks: hookNames}),
-		manifests: map[string]Manifest{},
+		runtime: script.New(limits, script.Options{Builtins: predeclared, Hooks: hookNames}),
 	}
 }
 
@@ -61,32 +60,33 @@ func (e *Engine) Load(fsys fs.FS, label string) error {
 	return script.Load(fsys, label, e)
 }
 
-// Compile разбирает однофайловую ачивку — для тестов.
-func (e *Engine) Compile(code, filename string, src []byte) error {
-	return e.CompileFiles(code, []SourceFile{{Name: filename, Src: src}})
-}
-
 // CompileFiles разбирает файлы одной ачивки по порядку и регистрирует её.
+//
+// Ачивка без аудитории или без событий не сломана как скрипт, но никогда не
+// сработает, поэтому такая регистрация отменяется: в рантайме её не остаётся,
+// а вызывающий получает ошибку, которую видно на сохранении.
 func (e *Engine) CompileFiles(code string, files []SourceFile) error {
 	if err := e.runtime.CompileFiles(code, files); err != nil {
 		return err
 	}
-	raw, ok := e.runtime.Manifest(code)
-	if !ok {
-		return fmt.Errorf("achievement %s compiled but has no manifest", code)
+	raw, _ := e.runtime.Manifest(code)
+	if err := validateManifest(manifestFrom(raw)); err != nil {
+		e.runtime.Remove(code)
+		return err
 	}
-	m := manifestFrom(raw)
+	return nil
+}
+
+// validateManifest проверяет поля, без которых ачивка молча не срабатывала бы.
+func validateManifest(m Manifest) error {
 	if m.Audience != AudienceExecutor && m.Audience != AudienceCustomer {
 		// Аудитория решает, чьим именем подставляется User, поэтому её опечатка
 		// означала бы ачивку, которая молча никогда не срабатывает.
-		return fmt.Errorf("achievement %s: audience %q must be %s or %s", code, m.Audience, AudienceExecutor, AudienceCustomer)
+		return fmt.Errorf("achievement %s: audience %q must be %s or %s", m.Code, m.Audience, AudienceExecutor, AudienceCustomer)
 	}
 	if len(m.Events) == 0 {
-		return fmt.Errorf("achievement %s declares no events and would never be evaluated", code)
+		return fmt.Errorf("achievement %s declares no events and would never be evaluated", m.Code)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.manifests[code] = m
 	return nil
 }
 
@@ -96,9 +96,6 @@ func (e *Engine) Remove(code string) {
 		return
 	}
 	e.runtime.Remove(code)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	delete(e.manifests, code)
 }
 
 // Validate компилирует кандидата, не регистрируя его: админ-панель отклоняет
@@ -127,10 +124,11 @@ func (e *Engine) Manifest(code string) (Manifest, bool) {
 	if e == nil {
 		return Manifest{}, false
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	m, ok := e.manifests[code]
-	return m, ok
+	raw, ok := e.runtime.Manifest(code)
+	if !ok {
+		return Manifest{}, false
+	}
+	return manifestFrom(raw), true
 }
 
 // Manifests перечисляет загруженные ачивки — для админ-панели.
@@ -138,11 +136,10 @@ func (e *Engine) Manifests() []Manifest {
 	if e == nil {
 		return nil
 	}
-	out := make([]Manifest, 0)
-	for _, raw := range e.runtime.Manifests() {
-		if m, ok := e.Manifest(raw.Code); ok {
-			out = append(out, m)
-		}
+	raws := e.runtime.Manifests()
+	out := make([]Manifest, 0, len(raws))
+	for _, raw := range raws {
+		out = append(out, manifestFrom(raw))
 	}
 	return out
 }

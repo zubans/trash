@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,7 +27,7 @@ func (t *RefreshToken) IsUsable(now time.Time) bool {
 }
 
 // ErrRefreshTokenNotFound возвращается, когда предъявленному токену нет записи.
-var ErrRefreshTokenNotFound = errors.New("refresh token not found")
+var ErrRefreshTokenNotFound = fmt.Errorf("refresh token not found: %w", ErrNotFound)
 
 // RefreshTokenRepository хранит refresh-токены.
 type RefreshTokenRepository interface {

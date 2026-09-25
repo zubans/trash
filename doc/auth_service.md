@@ -32,9 +32,8 @@ backend/
 
 ```go
 type UserRepository interface {
-    FindByPhone(phone string) (*User, error)
-    FindByEmail(email string) (*User, error)
-    FindByEmailVerificationToken(token string) (*User, error)
+    FindByPhone(phone string) (*User, error)   // только канонический номер (+7XXXXXXXXXX)
+    FindByEmail(email string) (*User, error)   // без учёта регистра, по индексу LOWER(email)
     VerifyEmailToken(token string) (*User, error)
     SetPasswordResetCode(userID uuid.UUID, code string, expiresAt time.Time) error
     ResetPasswordWithCode(email, code, newHashedPassword string) (*User, error)
@@ -42,13 +41,18 @@ type UserRepository interface {
     FindByID(id uuid.UUID) (*User, error)
     UpdateStatus(id uuid.UUID, status string) error
     UpdateRole(id uuid.UUID, role string) error
-    UpdateBalance(id uuid.UUID, balance float64) error
     UpdateLastGeo(id uuid.UUID, lastGeo string) error
     CreateCustomerProfile(userID uuid.UUID, address CustomerAddress, lastGeo string) error
-    GetCustomerProfile(userID uuid.UUID) (*CustomerProfile, error)
     UpdateCustomerAddress(userID uuid.UUID, address CustomerAddress) error
 }
 ```
+
+Сервис нормализует ввод до обращения к репозиторию: телефон приводится к
+`+7XXXXXXXXXX` (`normalizePhone`), почта — к нижнему регистру без пробелов по
+краям (`normalizeEmail`) на всех путях записи: регистрация, смена почты, запрос
+и выполнение сброса пароля. Репозиторий ищет по точному номеру и по
+`LOWER(email)`; повторного поиска по сырому вводу нет. Баланс меняет только
+`TransactionRepository` (дельтой), абсолютного сеттера у `UserRepository` нет.
 
 ## Создание сервиса
 

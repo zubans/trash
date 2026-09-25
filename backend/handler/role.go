@@ -26,7 +26,8 @@ func NewRoleHandler(roles *service.RoleService) *RoleHandler {
 }
 
 // writeRoleError переводит ошибки службы ролей в коды ответа: отсутствующая
-// роль — 404, занятый код — 409, всё остальное — 400 с текстом, который можно
+// роль — 404, занятый код — 409, назначение ADMIN не администратором — 403,
+// всё остальное — 400 с текстом, который можно
 // показать администратору как есть (тексты службы уже на русском).
 func writeRoleError(w http.ResponseWriter, err error) {
 	switch {
@@ -34,6 +35,8 @@ func writeRoleError(w http.ResponseWriter, err error) {
 		http.Error(w, "роль не найдена", http.StatusNotFound)
 	case errors.Is(err, repository.ErrRoleExists):
 		http.Error(w, "роль с таким кодом уже есть", http.StatusConflict)
+	case errors.Is(err, service.ErrAdminRequired):
+		http.Error(w, err.Error(), http.StatusForbidden)
 	default:
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}

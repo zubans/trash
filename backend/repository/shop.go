@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -28,10 +29,10 @@ const (
 )
 
 // ErrShopProductNotFound возвращается для товара, которого нет.
-var ErrShopProductNotFound = errors.New("shop product not found")
+var ErrShopProductNotFound = fmt.Errorf("shop product not found: %w", ErrNotFound)
 
 // ErrShopPickupPointNotFound возвращается для пункта выдачи, которого нет.
-var ErrShopPickupPointNotFound = errors.New("shop pickup point not found")
+var ErrShopPickupPointNotFound = fmt.Errorf("shop pickup point not found: %w", ErrNotFound)
 
 // ShopProductVariant — вариант товара, например размер. Своего склада у
 // варианта в первой версии нет: остаток общий на товар, а выбранный вариант
@@ -138,13 +139,6 @@ func NewShopRepository(db *sql.DB) ShopRepository {
 	return &shopRepo{db: db}
 }
 
-func (r *shopRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 const shopProductColumns = `p.id, p.kind, p.category, p.title, p.description, p.images,
 	p.price, p.compare_at_price, p.roles, p.requires_verified, p.per_user_limit, p.max_qty_per_order,
 	p.gift_code, p.variants, p.fulfillment_methods,
@@ -223,7 +217,7 @@ func (r *shopRepo) GetProduct(ctx context.Context, id uuid.UUID) (*ShopProduct, 
 // Блокируется только строка товара: «FOR UPDATE» без OF упирался бы в
 // агрегированный подзапрос свободных кодов, который блокировать нечего.
 func (r *shopRepo) LockProduct(ctx context.Context, q Querier, id uuid.UUID) (*ShopProduct, error) {
-	return r.getProduct(ctx, r.exec(q), id, " FOR UPDATE OF p")
+	return r.getProduct(ctx, exec(r.db, q), id, " FOR UPDATE OF p")
 }
 
 func (r *shopRepo) getProduct(ctx context.Context, q Querier, id uuid.UUID, lock string) (*ShopProduct, error) {
@@ -256,19 +250,19 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 		&p.SortOrder, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &stock, &giftActive); err != nil {
 		return nil, err
 	}
-	if len(title) > 0 {
-		_ = json.Unmarshal(title, &p.Title)
+	if err := unmarshalJSON(title, &p.Title); err != nil {
+		return nil, fmt.Errorf("shop product %s: title: %w", p.ID, err)
 	}
-	if len(description) > 0 {
-		_ = json.Unmarshal(description, &p.Description)
+	if err := unmarshalJSON(description, &p.Description); err != nil {
+		return nil, fmt.Errorf("shop product %s: description: %w", p.ID, err)
 	}
 	p.Images = make([]string, 0)
-	if len(images) > 0 {
-		_ = json.Unmarshal(images, &p.Images)
+	if err := unmarshalJSON(images, &p.Images); err != nil {
+		return nil, fmt.Errorf("shop product %s: images: %w", p.ID, err)
 	}
 	p.Variants = make([]ShopProductVariant, 0)
-	if len(variants) > 0 {
-		_ = json.Unmarshal(variants, &p.Variants)
+	if err := unmarshalJSON(variants, &p.Variants); err != nil {
+		return nil, fmt.Errorf("shop product %s: variants: %w", p.ID, err)
 	}
 	p.Roles = roles
 	p.FulfillmentMethods = fulfillment
@@ -288,7 +282,9 @@ func scanShopProduct(row rowScanner) (*ShopProduct, error) {
 		p.PerkRule = &perkRule.String
 	}
 	if len(perkConfig) > 0 && string(perkConfig) != "{}" {
-		_ = json.Unmarshal(perkConfig, &p.PerkConfig)
+		if err := json.Unmarshal(perkConfig, &p.PerkConfig); err != nil {
+			return nil, fmt.Errorf("shop product %s: perk_config: %w", p.ID, err)
+		}
 	}
 	if perkDays.Valid {
 		value := int(perkDays.Int64)
@@ -442,8 +438,8 @@ func scanPickupPoint(row rowScanner) (*ShopPickupPoint, error) {
 	if err := row.Scan(&p.ID, &title, &p.Address, &p.Hours, &p.IsActive); err != nil {
 		return nil, err
 	}
-	if len(title) > 0 {
-		_ = json.Unmarshal(title, &p.Title)
+	if err := unmarshalJSON(title, &p.Title); err != nil {
+		return nil, fmt.Errorf("pickup point %s: title: %w", p.ID, err)
 	}
 	return &p, nil
 }

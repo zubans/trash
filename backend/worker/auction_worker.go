@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"healthlogin/backend/metrics"
 	"healthlogin/backend/service"
 )
 
@@ -16,7 +15,7 @@ import (
 type AuctionWorker struct {
 	db           *sql.DB
 	orderService *service.OrderService
-	guard func(func() error) error
+	guard        Guard
 }
 
 // NewAuctionWorker создаёт новый AuctionWorker.
@@ -25,24 +24,13 @@ func NewAuctionWorker(db *sql.DB, orderService *service.OrderService) *AuctionWo
 }
 
 // Start периодически выполняет цикл воркера.
-func (w *AuctionWorker) Start(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			if err := metrics.TrackWorker("auction", func() error { return w.runGuarded(w.CheckExpiredAuctions) }); err != nil {
-				log.Printf("[AuctionWorker] Error checking expired auctions: %v", err)
-			}
-		}
-	}()
-	log.Printf("[AuctionWorker] Background worker started every %v", interval)
-}
-
-type expiredAuction struct {
-	ID uuid.UUID
+func (w *AuctionWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	return periodic{name: "AuctionWorker", metric: "auction", guard: w.guard}.
+		Start(ctx, interval, w.CheckExpiredAuctions)
 }
 
 // CheckExpiredAuctions выбирает и отменяет истёкшие аукционные заказы.
-func (w *AuctionWorker) CheckExpiredAuctions() error {
+func (w *AuctionWorker) CheckExpiredAuctions(ctx context.Context) error {
 	query := `
 		SELECT o.id
 		FROM orders o
@@ -51,23 +39,25 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 		  AND sn.is_auction = TRUE 
 		  AND o.created_at < now() - INTERVAL '7 days'`
 
-	rows, err := w.db.QueryContext(context.Background(), query)
+	rows, err := w.db.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
-	var list []expiredAuction
+	var list []uuid.UUID
 	for rows.Next() {
-		var a expiredAuction
-		err := rows.Scan(&a.ID)
-		if err != nil {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
 			return err
 		}
-		list = append(list, a)
+		list = append(list, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 
-	for _, a := range list {
+	for _, id := range list {
 		// Один правильный путь отмены, под блокировкой строки, вместо собственного
 		// сырого SQL этого воркера, который зачислял заказчику, ни разу не списав
 		// с эскроу, и оставлял hold_amount на месте.
@@ -77,25 +67,14 @@ func (w *AuctionWorker) CheckExpiredAuctions() error {
 		// Заявка, дошедшая до ASSIGNED между сканом выше и этой строкой, уже
 		// забрана и больше не истёкшее дело — она принадлежит выигравшему её
 		// исполнителю.
-		err := w.orderService.CancelUnclaimedAuction(context.Background(), a.ID)
-		if err != nil {
-			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", a.ID, err)
+		if err := w.orderService.CancelUnclaimedAuction(ctx, id); err != nil {
+			log.Printf("[AuctionWorker] Failed to cancel auction %s: %v", id, err)
 		} else {
-			log.Printf("[AuctionWorker] Canceled expired auction %s.", a.ID)
+			log.Printf("[AuctionWorker] Canceled expired auction %s.", id)
 		}
 	}
 
 	return nil
-}
-
-// guard выполняет один тик под advisory-блокировкой задачи, когда подключён
-// Leader, чтобы вторая реплика пропустила тик, а не продублировала его. Без
-// него выполняется напрямую — так и делают однопроцессный деплой и тесты.
-func (w *AuctionWorker) runGuarded(job func() error) error {
-	if w.guard == nil {
-		return job()
-	}
-	return w.guard(job)
 }
 
 // WithLeader заставляет этот воркер выполняться не более одного раза среди всех процессов.

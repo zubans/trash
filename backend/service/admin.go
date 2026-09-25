@@ -324,6 +324,11 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	if !s.knownRole(ctx, role) {
 		return fmt.Errorf("роль не найдена: %s", role)
 	}
+	if s.privilegedRole(ctx, role) {
+		if err := requireAdminActor(ctx, s.userRepo, adminID); err != nil {
+			return err
+		}
+	}
 
 	current, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -366,6 +371,19 @@ var systemRoles = map[string]struct{}{
 // knownRole сообщает, есть ли такая роль в справочнике. Набор допустимых ролей
 // больше не зашит в код: администратор заводит их на странице ролей, и
 // назначение обязано следовать за справочником, а не за константами.
+// privilegedRole — роль, которую назначает только администратор: сам ADMIN и
+// любая роль с правом roles.*, потому что её носитель раздаёт права дальше.
+func (s *AdminService) privilegedRole(ctx context.Context, role string) bool {
+	if role == repository.RoleAdmin {
+		return true
+	}
+	if s.roleRepo == nil {
+		return false
+	}
+	found, err := s.roleRepo.Get(ctx, role)
+	return err == nil && managesRoles(found.Permissions)
+}
+
 func (s *AdminService) knownRole(ctx context.Context, role string) bool {
 	if s.roleRepo == nil {
 		_, ok := systemRoles[role]
@@ -387,6 +405,7 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 	// Нормализуем: убираем дубли и проверяем.
 	seen := map[string]struct{}{}
 	clean := make([]string, 0, len(roles))
+	privileged := false
 	for _, role := range roles {
 		if !s.knownRole(ctx, role) {
 			return fmt.Errorf("роль не найдена: %s", role)
@@ -396,9 +415,15 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 		}
 		seen[role] = struct{}{}
 		clean = append(clean, role)
+		privileged = privileged || s.privilegedRole(ctx, role)
 	}
 	if len(clean) == 0 {
 		return errors.New("у пользователя должна быть хотя бы одна роль")
+	}
+	if privileged {
+		if err := requireAdminActor(ctx, s.userRepo, adminID); err != nil {
+			return err
+		}
 	}
 
 	current, err := s.userRepo.FindByID(ctx, userID)

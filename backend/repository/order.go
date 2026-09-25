@@ -140,7 +140,9 @@ type OrderRepository interface {
 	// FindAllByExecutor возвращает заказы исполнителя, сначала недавно
 	// завершённые, не более limit (см. DefaultHistoryPageSize).
 	FindAllByExecutor(ctx context.Context, executorID uuid.UUID, limit int) ([]Order, error)
-	FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]Order, error)
+	// FindByCustomer возвращает заказы заказчика, сначала недавно завершённые,
+	// не более limit (см. DefaultHistoryPageSize) — как и FindAllByExecutor.
+	FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]Order, error)
 	GetPendingOrders(ctx context.Context) ([]*Order, error)
 	// GetOrdersMissingCoordinates возвращает заказы в поиске, у которых есть адрес,
 	// но нет координат подачи, чтобы фоновая задача могла их геокодировать.
@@ -226,33 +228,19 @@ const orderInsertColumns = `
     comment, created_at, assigned_at, deadline_at, completed_at, canceled_at
 `
 
-func scanOrderRow(row *sql.Row) (Order, error) {
+// scanOrder читает заказ из orderColumns; extra — приёмники колонок, которые
+// вызывающий дописал после них (телефоны из JOIN в админских списках).
+func scanOrder(row rowScanner, extra ...interface{}) (Order, error) {
 	var o Order
 	var symbolID uuid.NullUUID
-	err := row.Scan(
+	dest := []interface{}{
 		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
 		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
 		&o.PickupLat, &o.PickupLon, &o.Comment, &o.CreatedAt,
 		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
 		&o.ExecutedAt, &o.ExecutedAtDevice, &o.PhotoRequired, &symbolID, &o.ProofKey,
-	)
-	if symbolID.Valid {
-		id := symbolID.UUID
-		o.WatermarkSymbolID = &id
 	}
-	return o, err
-}
-
-func scanOrderRows(rows *sql.Rows) (Order, error) {
-	var o Order
-	var symbolID uuid.NullUUID
-	err := rows.Scan(
-		&o.ID, &o.CustomerID, &o.ExecutorID, &o.ServiceVariantID, &o.IsUrgent, &o.IsAsap, &o.Status,
-		&o.HoldAmount, &o.FinalAmount, &o.IsDowngraded, &o.PhotoURL, &o.Address,
-		&o.PickupLat, &o.PickupLon, &o.Comment, &o.CreatedAt,
-		&o.AssignedAt, &o.DeadlineAt, &o.CompletedAt, &o.CanceledAt,
-		&o.ExecutedAt, &o.ExecutedAtDevice, &o.PhotoRequired, &symbolID, &o.ProofKey,
-	)
+	err := row.Scan(append(dest, extra...)...)
 	if symbolID.Valid {
 		id := symbolID.UUID
 		o.WatermarkSymbolID = &id
@@ -261,7 +249,7 @@ func scanOrderRows(rows *sql.Rows) (Order, error) {
 }
 
 func (r *orderRepo) Create(ctx context.Context, q Querier, order *Order) error {
-	_, err := r.exec(ctx, q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`INSERT INTO orders (`+orderInsertColumns+`)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		order.ID, order.CustomerID, order.ExecutorID, order.ServiceVariantID, order.IsUrgent, order.IsAsap,
@@ -276,7 +264,7 @@ func (r *orderRepo) FindByID(ctx context.Context, id uuid.UUID) (*Order, error) 
 	row := r.db.QueryRowContext(ctx,
 		`SELECT `+orderColumns+` FROM orders o WHERE o.id = $1`, id,
 	)
-	o, err := scanOrderRow(row)
+	o, err := scanOrder(row)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +287,7 @@ func (r *orderRepo) FindAssignedByExecutor(ctx context.Context, executorID uuid.
 
 	orders := []Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +308,7 @@ func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID,
 
 	orders := []Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -329,10 +317,10 @@ func (r *orderRepo) FindAllByExecutor(ctx context.Context, executorID uuid.UUID,
 	return orders, rows.Err()
 }
 
-func (r *orderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID) ([]Order, error) {
+func (r *orderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID, limit int) ([]Order, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC`,
-		customerID,
+		`SELECT `+orderColumns+` FROM orders o WHERE o.customer_id = $1 ORDER BY COALESCE(o.completed_at, o.canceled_at, o.created_at) DESC LIMIT $2`,
+		customerID, historyLimit(limit),
 	)
 	if err != nil {
 		return nil, err
@@ -341,7 +329,7 @@ func (r *orderRepo) FindByCustomer(ctx context.Context, customerID uuid.UUID) ([
 
 	orders := []Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -362,7 +350,7 @@ func (r *orderRepo) GetPendingOrders(ctx context.Context) ([]*Order, error) {
 
 	orders := []*Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -392,7 +380,7 @@ func (r *orderRepo) GetOrdersMissingCoordinates(ctx context.Context, limit int) 
 
 	orders := []*Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -434,7 +422,7 @@ func (r *orderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radi
 
 	result := []*Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -448,52 +436,43 @@ func (r *orderRepo) FindNearbyOrders(ctx context.Context, lat, lon float64, radi
 	return result, rows.Err()
 }
 
-// exec выбирает Querier: открытую транзакцию вызывающего, если она передана, и
-// пул в противном случае. Каждый переход состояния ниже охраняется в SQL и
-// сообщает ErrConflict, когда охрана не совпала, поэтому обновление вхолостую
-// никогда не будет принято за успех.
-func (r *orderRepo) exec(ctx context.Context, q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
+// Каждый переход состояния ниже охраняется в SQL и сообщает ErrConflict, когда
+// охрана не совпала, поэтому обновление вхолостую никогда не будет принято за успех.
 func (r *orderRepo) Assign(ctx context.Context, q Querier, orderID, executorID uuid.UUID) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now() WHERE id = $3 AND status = $4 AND executor_id IS NULL`,
 		executorID, OrderStatusAssigned, orderID, OrderStatusSearching,
 	)
 }
 
 func (r *orderRepo) Execute(ctx context.Context, q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET status = $1, executed_at = now() WHERE id = $2 AND status = $3`,
 		OrderStatusExecuted, orderID, OrderStatusAssigned,
 	)
 }
 
 func (r *orderRepo) SetExecutedAtDevice(ctx context.Context, q Querier, orderID uuid.UUID, at time.Time) error {
-	_, err := r.exec(ctx, q).ExecContext(ctx, `UPDATE orders SET executed_at_device = $2 WHERE id = $1`, orderID, at)
+	_, err := exec(r.db, q).ExecContext(ctx, `UPDATE orders SET executed_at_device = $2 WHERE id = $1`, orderID, at)
 	return err
 }
 
 func (r *orderRepo) ReturnToWork(ctx context.Context, q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET status = $1, executed_at = NULL, executed_at_device = NULL WHERE id = $2 AND status = $3`,
 		OrderStatusAssigned, orderID, OrderStatusExecuted,
 	)
 }
 
 func (r *orderRepo) MarkDisputed(ctx context.Context, q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET status = $1 WHERE id = $2 AND status = $3`,
 		OrderStatusDisputed, orderID, OrderStatusExecuted,
 	)
 }
 
 func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, finalAmount money.Amount, isDowngraded bool) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET status = $1, final_amount = $2, is_downgraded = $3,
 		    is_urgent = CASE WHEN $3 THEN FALSE ELSE is_urgent END,
 		    is_asap = CASE WHEN $3 THEN FALSE ELSE is_asap END,
@@ -504,7 +483,7 @@ func (r *orderRepo) Confirm(ctx context.Context, q Querier, orderID uuid.UUID, f
 }
 
 func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.UUID, percent float64, level int, perkID *uuid.UUID) error {
-	_, err := r.exec(ctx, q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE orders SET commission_percent = $2, commission_level = $3, commission_perk_id = $4 WHERE id = $1`,
 		orderID, percent, level, perkID)
 	return err
@@ -516,14 +495,14 @@ func (r *orderRepo) SetCommission(ctx context.Context, q Querier, orderID uuid.U
 // вернуть деньги дважды. DISPUTED отменяется признанием исполнителя и решением
 // арбитра в пользу заказчика.
 func (r *orderRepo) Cancel(ctx context.Context, q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET status = $1, canceled_at = now() WHERE id = $2 AND status IN ($3, $4, $5, $6)`,
 		OrderStatusCanceled, orderID, OrderStatusSearching, OrderStatusAssigned, OrderStatusExecuted, OrderStatusDisputed,
 	)
 }
 
 func (r *orderRepo) Unassign(ctx context.Context, q Querier, orderID uuid.UUID) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET status = $1, executor_id = NULL, assigned_at = NULL WHERE id = $2 AND status = $3`,
 		OrderStatusSearching, orderID, OrderStatusAssigned,
 	)
@@ -533,7 +512,7 @@ func (r *orderRepo) Unassign(ctx context.Context, q Querier, orderID uuid.UUID) 
 // оператором. Используется, когда заказчик принимает ставку аукциона, где цена
 // известна только в этот момент.
 func (r *orderRepo) AssignWithHold(ctx context.Context, q Querier, orderID, executorID uuid.UUID, holdAmount money.Amount) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET executor_id = $1, status = $2, assigned_at = now(),
 		    hold_amount = $3, final_amount = $3
 		 WHERE id = $4 AND status = $5 AND executor_id IS NULL`,
@@ -545,8 +524,8 @@ func (r *orderRepo) AssignWithHold(ctx context.Context, q Querier, orderID, exec
 // параллельные запросы подтверждения/отмены сериализовались, а не увидели оба
 // одно и то же состояние до перехода.
 func (r *orderRepo) LockForUpdate(ctx context.Context, q Querier, orderID uuid.UUID) (*Order, error) {
-	row := r.exec(ctx, q).QueryRowContext(ctx, `SELECT `+orderColumns+` FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID)
-	o, err := scanOrderRow(row)
+	row := exec(r.db, q).QueryRowContext(ctx, `SELECT `+orderColumns+` FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID)
+	o, err := scanOrder(row)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +536,7 @@ func (r *orderRepo) LockForUpdate(ctx context.Context, q Querier, orderID uuid.U
 // держать в согласии с каждым возвратом, иначе выплата в момент подтверждения
 // считается по устаревшему удержанию.
 func (r *orderRepo) SetHoldAmount(ctx context.Context, q Querier, orderID uuid.UUID, holdAmount money.Amount) error {
-	return execExpectingOne(ctx, r.exec(ctx, q),
+	return execExpectingOne(ctx, exec(r.db, q),
 		`UPDATE orders SET hold_amount = $1 WHERE id = $2`,
 		holdAmount, orderID,
 	)
@@ -576,9 +555,10 @@ func (r *orderRepo) GetExecutorAssignedOrders(ctx context.Context, executorID uu
 	return result, nil
 }
 
-// GetCustomerOrders возвращает заказы, созданные заказчиком.
+// GetCustomerOrders возвращает заказы, созданные заказчиком, — страницу
+// размера по умолчанию, см. DefaultHistoryPageSize.
 func (r *orderRepo) GetCustomerOrders(ctx context.Context, customerID uuid.UUID) ([]*Order, error) {
-	orders, err := r.FindByCustomer(ctx, customerID)
+	orders, err := r.FindByCustomer(ctx, customerID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +583,7 @@ func (r *orderRepo) FindOpenByCustomer(ctx context.Context, customerID uuid.UUID
 
 	orders := []*Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -628,7 +608,7 @@ func (r *orderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*Order, er
 
 	orders := []*Order{}
 	for rows.Next() {
-		o, err := scanOrderRows(rows)
+		o, err := scanOrder(rows)
 		if err != nil {
 			return nil, err
 		}

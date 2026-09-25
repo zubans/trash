@@ -128,16 +128,9 @@ func NewPenaltyRepository(db *sql.DB) PenaltyRepository {
 	return &penaltyRepo{db: db}
 }
 
-func (r *penaltyRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *penaltyRepo) ApplySoftBan(ctx context.Context, q Querier, userID uuid.UUID, by *uuid.UUID, reason string) error {
 	var id uuid.UUID
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         WITH banned AS (
             UPDATE users SET status = 'SOFT_BANNED'
             WHERE id = $1
@@ -159,7 +152,7 @@ func (r *penaltyRepo) LiftSoftBan(ctx context.Context, q Querier, userID uuid.UU
 	// Строки флагов может и не быть, поэтому снят ли бан, считается по
 	// обновлённой строке пользователя, а не по флагам.
 	var lifted int
-	if err := r.exec(q).QueryRowContext(ctx, `
+	if err := exec(r.db, q).QueryRowContext(ctx, `
         WITH lifted AS (
             UPDATE users SET status = 'ACTIVE'
             WHERE id = $1 AND status = 'SOFT_BANNED'
@@ -184,7 +177,7 @@ func (r *penaltyRepo) GetFlags(ctx context.Context, q Querier, userID uuid.UUID)
 	flags := &PenaltyFlags{UserID: userID}
 	var by uuid.NullUUID
 	var reason sql.NullString
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         SELECT had_silent_block_at, soft_banned_at, soft_banned_by, soft_ban_reason
         FROM user_penalty_flags WHERE user_id = $1
     `, userID).Scan(&flags.HadSilentBlockAt, &flags.SoftBannedAt, &by, &reason)
@@ -204,7 +197,7 @@ func (r *penaltyRepo) GetFlags(ctx context.Context, q Querier, userID uuid.UUID)
 const penaltyPointColumns = `id, user_id, role, order_id, dispute_id, assigned_by, reason,
     created_at, revoked_at, revoked_by, expired_at`
 
-func scanPenaltyPoint(row interface{ Scan(...interface{}) error }) (*PenaltyPoint, error) {
+func scanPenaltyPoint(row rowScanner) (*PenaltyPoint, error) {
 	var p PenaltyPoint
 	var orderID, disputeID, assignedBy, revokedBy uuid.NullUUID
 	if err := row.Scan(&p.ID, &p.UserID, &p.Role, &orderID, &disputeID, &assignedBy, &p.Reason,
@@ -227,7 +220,7 @@ func nullableUUID(v uuid.NullUUID) *uuid.UUID {
 }
 
 func (r *penaltyRepo) AddPoint(ctx context.Context, q Querier, p *PenaltyPoint) error {
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         INSERT INTO penalty_points (user_id, role, order_id, dispute_id, assigned_by, reason)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, created_at
@@ -240,7 +233,7 @@ func (r *penaltyRepo) AddPoint(ctx context.Context, q Querier, p *PenaltyPoint) 
 }
 
 func (r *penaltyRepo) RevokePoint(ctx context.Context, q Querier, pointID, revokedBy uuid.UUID) (*PenaltyPoint, error) {
-	p, err := scanPenaltyPoint(r.exec(q).QueryRowContext(ctx, `
+	p, err := scanPenaltyPoint(exec(r.db, q).QueryRowContext(ctx, `
         UPDATE penalty_points SET revoked_at = now(), revoked_by = $2
         WHERE id = $1 AND revoked_at IS NULL AND expired_at IS NULL
         RETURNING `+penaltyPointColumns, pointID, revokedBy))
@@ -248,7 +241,7 @@ func (r *penaltyRepo) RevokePoint(ctx context.Context, q Querier, pointID, revok
 		return p, err
 	}
 	var exists bool
-	if err := r.exec(q).QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM penalty_points WHERE id = $1)`, pointID).Scan(&exists); err != nil {
+	if err := exec(r.db, q).QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM penalty_points WHERE id = $1)`, pointID).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if exists {
@@ -258,7 +251,7 @@ func (r *penaltyRepo) RevokePoint(ctx context.Context, q Querier, pointID, revok
 }
 
 func (r *penaltyRepo) ListPoints(ctx context.Context, q Querier, userID uuid.UUID) ([]PenaltyPoint, error) {
-	rows, err := r.exec(q).QueryContext(ctx,
+	rows, err := exec(r.db, q).QueryContext(ctx,
 		`SELECT `+penaltyPointColumns+` FROM penalty_points WHERE user_id = $1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -277,7 +270,7 @@ func (r *penaltyRepo) ListPoints(ctx context.Context, q Querier, userID uuid.UUI
 
 func (r *penaltyRepo) CountLivePoints(ctx context.Context, q Querier, userID uuid.UUID, role string) (LivePoints, error) {
 	var live LivePoints
-	err := r.exec(q).QueryRowContext(ctx, `
+	err := exec(r.db, q).QueryRowContext(ctx, `
         SELECT count(*), max(created_at) FROM penalty_points
         WHERE user_id = $1 AND role = $2 AND revoked_at IS NULL AND expired_at IS NULL
     `, userID, role).Scan(&live.Count, &live.Last)
@@ -287,7 +280,7 @@ func (r *penaltyRepo) CountLivePoints(ctx context.Context, q Querier, userID uui
 const penaltyStatusColumns = `user_id, role, active_points, photo_required_until,
     silent_block_started_at, silent_block_ends_at, updated_at`
 
-func scanPenaltyStatus(row interface{ Scan(...interface{}) error }) (*PenaltyStatus, error) {
+func scanPenaltyStatus(row rowScanner) (*PenaltyStatus, error) {
 	var st PenaltyStatus
 	if err := row.Scan(&st.UserID, &st.Role, &st.ActivePoints, &st.PhotoRequiredUntil,
 		&st.SilentBlockStartedAt, &st.SilentBlockEndsAt, &st.UpdatedAt); err != nil {
@@ -297,19 +290,19 @@ func scanPenaltyStatus(row interface{ Scan(...interface{}) error }) (*PenaltySta
 }
 
 func (r *penaltyRepo) LockStatus(ctx context.Context, q Querier, userID uuid.UUID, role string) (*PenaltyStatus, error) {
-	if _, err := r.exec(q).ExecContext(ctx, `
+	if _, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO user_penalty_status (user_id, role) VALUES ($1, $2)
         ON CONFLICT (user_id, role) DO NOTHING
     `, userID, role); err != nil {
 		return nil, err
 	}
-	return scanPenaltyStatus(r.exec(q).QueryRowContext(ctx,
+	return scanPenaltyStatus(exec(r.db, q).QueryRowContext(ctx,
 		`SELECT `+penaltyStatusColumns+` FROM user_penalty_status WHERE user_id = $1 AND role = $2 FOR UPDATE`,
 		userID, role))
 }
 
 func (r *penaltyRepo) SaveStatus(ctx context.Context, q Querier, st *PenaltyStatus) error {
-	return execExpectingOne(ctx, r.exec(q), `
+	return execExpectingOne(ctx, exec(r.db, q), `
         UPDATE user_penalty_status
         SET active_points = $3, photo_required_until = $4,
             silent_block_started_at = $5, silent_block_ends_at = $6, updated_at = now()
@@ -318,7 +311,7 @@ func (r *penaltyRepo) SaveStatus(ctx context.Context, q Querier, st *PenaltyStat
 }
 
 func (r *penaltyRepo) ListStatuses(ctx context.Context, q Querier, userID uuid.UUID) ([]PenaltyStatus, error) {
-	rows, err := r.exec(q).QueryContext(ctx,
+	rows, err := exec(r.db, q).QueryContext(ctx,
 		`SELECT `+penaltyStatusColumns+` FROM user_penalty_status WHERE user_id = $1 ORDER BY role`, userID)
 	if err != nil {
 		return nil, err
@@ -336,7 +329,7 @@ func (r *penaltyRepo) ListStatuses(ctx context.Context, q Querier, userID uuid.U
 }
 
 func (r *penaltyRepo) MarkSilentBlockLifted(ctx context.Context, q Querier, userID uuid.UUID, at time.Time) error {
-	_, err := r.exec(q).ExecContext(ctx, `
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO user_penalty_flags (user_id, had_silent_block_at, updated_at)
         VALUES ($1, $2, now())
         ON CONFLICT (user_id) DO UPDATE SET had_silent_block_at = EXCLUDED.had_silent_block_at, updated_at = now()
@@ -345,13 +338,13 @@ func (r *penaltyRepo) MarkSilentBlockLifted(ctx context.Context, q Querier, user
 }
 
 func (r *penaltyRepo) ClearSilentBlockFlag(ctx context.Context, q Querier, userID uuid.UUID) error {
-	_, err := r.exec(q).ExecContext(ctx,
+	_, err := exec(r.db, q).ExecContext(ctx,
 		`UPDATE user_penalty_flags SET had_silent_block_at = NULL, updated_at = now() WHERE user_id = $1`, userID)
 	return err
 }
 
 func (r *penaltyRepo) ExpirePoints(ctx context.Context, q Querier, userID uuid.UUID, role string, at time.Time) (int, error) {
-	res, err := r.exec(q).ExecContext(ctx, `
+	res, err := exec(r.db, q).ExecContext(ctx, `
         UPDATE penalty_points SET expired_at = $3
         WHERE user_id = $1 AND role = $2 AND revoked_at IS NULL AND expired_at IS NULL
     `, userID, role, at)
@@ -363,7 +356,7 @@ func (r *penaltyRepo) ExpirePoints(ctx context.Context, q Querier, userID uuid.U
 }
 
 func (r *penaltyRepo) rolesFrom(ctx context.Context, q Querier, query string, args ...interface{}) ([]RoleRef, error) {
-	rows, err := r.exec(q).QueryContext(ctx, query, args...)
+	rows, err := exec(r.db, q).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +393,7 @@ func (r *penaltyRepo) RolesWithExpiredSilentBlock(ctx context.Context, at time.T
 }
 
 func (r *penaltyRepo) Status(ctx context.Context, q Querier, userID uuid.UUID, role string) (*PenaltyStatus, error) {
-	st, err := scanPenaltyStatus(r.exec(q).QueryRowContext(ctx,
+	st, err := scanPenaltyStatus(exec(r.db, q).QueryRowContext(ctx,
 		`SELECT `+penaltyStatusColumns+` FROM user_penalty_status WHERE user_id = $1 AND role = $2`, userID, role))
 	if errors.Is(err, sql.ErrNoRows) {
 		return &PenaltyStatus{UserID: userID, Role: role}, nil

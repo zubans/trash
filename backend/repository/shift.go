@@ -38,7 +38,6 @@ type ShiftRepository interface {
 	GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*Shift, error)
 	GetActiveShifts(ctx context.Context) ([]*Shift, error)
 	End(ctx context.Context, shiftID uuid.UUID) error
-	Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error
 
 	// EarlyEnd завершает смену раньше запланированного конца, записывает сумму
 	// штрафа и помечает смену как PENALIZED.
@@ -61,17 +60,9 @@ func NewShiftRepository(db *sql.DB) ShiftRepository {
 	return &shiftRepo{db: db}
 }
 
-func scanShiftRow(row *sql.Row) (Shift, error) {
+func scanShift(row rowScanner) (Shift, error) {
 	var s Shift
 	err := row.Scan(
-		&s.ID, &s.ExecutorID, &s.DurationHours, &s.StartedAt, &s.PlannedEndAt, &s.ActualEndAt, &s.Status, &s.FineAmount,
-	)
-	return s, err
-}
-
-func scanShiftRows(rows *sql.Rows) (Shift, error) {
-	var s Shift
-	err := rows.Scan(
 		&s.ID, &s.ExecutorID, &s.DurationHours, &s.StartedAt, &s.PlannedEndAt, &s.ActualEndAt, &s.Status, &s.FineAmount,
 	)
 	return s, err
@@ -93,7 +84,7 @@ func (r *shiftRepo) findActiveByExecutor(ctx context.Context, executorID uuid.UU
 		 FROM shifts WHERE executor_id = $1 AND status = $2`,
 		executorID, ShiftStatusActive,
 	)
-	s, err := scanShiftRow(row)
+	s, err := scanShift(row)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +101,7 @@ func (r *shiftRepo) GetShiftByID(ctx context.Context, shiftID uuid.UUID) (*Shift
 		 FROM shifts WHERE id = $1`,
 		shiftID,
 	)
-	s, err := scanShiftRow(row)
+	s, err := scanShift(row)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +121,7 @@ func (r *shiftRepo) GetActiveShifts(ctx context.Context) ([]*Shift, error) {
 
 	var shifts []*Shift
 	for rows.Next() {
-		s, err := scanShiftRows(rows)
+		s, err := scanShift(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -143,14 +134,6 @@ func (r *shiftRepo) End(ctx context.Context, shiftID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE shifts SET status = $1, actual_end_at = now() WHERE id = $2`,
 		ShiftStatusCompleted, shiftID,
-	)
-	return err
-}
-
-func (r *shiftRepo) Penalize(ctx context.Context, shiftID uuid.UUID, fine money.Amount) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE shifts SET status = $1, fine_amount = fine_amount + $2 WHERE id = $3`,
-		ShiftStatusPenalized, fine, shiftID,
 	)
 	return err
 }
@@ -175,7 +158,7 @@ func (r *shiftRepo) GetLastShiftByExecutor(ctx context.Context, executorID uuid.
 		 LIMIT 1`,
 		executorID,
 	)
-	s, err := scanShiftRow(row)
+	s, err := scanShift(row)
 	if err != nil {
 		return nil, err
 	}

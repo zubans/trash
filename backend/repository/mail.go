@@ -144,13 +144,6 @@ func NewMailRepository(db *sql.DB) MailRepository {
 	return &mailRepo{db: db}
 }
 
-func (r *mailRepo) exec(q Querier) Querier {
-	if q == nil {
-		return r.db
-	}
-	return q
-}
-
 func (r *mailRepo) Send(ctx context.Context, q Querier, mail *Mail) error {
 	if mail.ID == uuid.Nil {
 		mail.ID = uuid.New()
@@ -167,7 +160,7 @@ func (r *mailRepo) Send(ctx context.Context, q Querier, mail *Mail) error {
 		id := mail.ID
 		mail.ThreadID = &id
 	}
-	return r.exec(q).QueryRowContext(ctx, `
+	return exec(r.db, q).QueryRowContext(ctx, `
         INSERT INTO user_mail (id, user_id, kind, subject, body, ref_type, ref_id, sender_id, direction, thread_id, read_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING created_at
@@ -311,11 +304,7 @@ const mailColumns = `m.id, m.user_id, m.kind, m.subject, m.body, m.ref_type, m.r
        m.sender_id, m.direction, m.thread_id, m.created_at, m.read_at, m.admin_read_at,
        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', s.last_name, s.first_name)), ''), '') AS sender_name`
 
-type scanner interface {
-	Scan(dest ...interface{}) error
-}
-
-func scanMail(row scanner) (*Mail, error) {
+func scanMail(row rowScanner) (*Mail, error) {
 	var m Mail
 	if err := row.Scan(&m.ID, &m.UserID, &m.Kind, &m.Subject, &m.Body, &m.RefType, &m.RefID,
 		&m.SenderID, &m.Direction, &m.ThreadID, &m.CreatedAt, &m.ReadAt, &m.AdminReadAt,

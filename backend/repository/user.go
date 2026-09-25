@@ -5,10 +5,11 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
-	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"healthlogin/backend/money"
 )
@@ -113,20 +114,12 @@ func (u *User) HasRole(role string) bool {
 	return u.Role == role
 }
 
-// CustomerProfile хранит данные профиля, специфичные для заказчика.
-type CustomerProfile struct {
-	UserID   uuid.UUID `json:"user_id"`
-	FullName string    `json:"full_name"`
-	DeviceOS string    `json:"device_os,omitempty"`
-	DeviceID string    `json:"device_id,omitempty"`
-	DeviceIP string    `json:"device_ip,omitempty"`
-}
-
 // UserRepository описывает операции хранения пользователей.
 type UserRepository interface {
 	FindByPhone(ctx context.Context, phone string) (*User, error)
+	// FindByEmail ищет без учёта регистра: адрес хранится в нижнем регистре
+	// (миграция 066), а ввод приводится к нему здесь же.
 	FindByEmail(ctx context.Context, email string) (*User, error)
-	FindByEmailVerificationToken(ctx context.Context, token string) (*User, error)
 	Create(ctx context.Context, user *User) error
 	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
 	// FindByIDs загружает набор пользователей с их ролями двумя запросами, а не
@@ -138,8 +131,6 @@ type UserRepository interface {
 	FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
-	// ListUserRoles возвращает все роли пользователя (из user_roles).
-	ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error)
 	// SetUserRoles заменяет набор ролей пользователя заданным и держит users.role
 	// (основную роль) указывающей на одну из них.
 	SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error
@@ -147,13 +138,13 @@ type UserRepository interface {
 	// UpdateVerifiedTx — та же запись внутри транзакции вызывающего, для тех, кто
 	// обязан закоммитить её вместе с доменным событием.
 	UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error
-	UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error
 	CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error
-	GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error)
 	VerifyEmailToken(ctx context.Context, token string) (*User, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, newHashedPassword string) error
 	SetPasswordResetCode(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error
 	ResetPasswordWithCode(ctx context.Context, email, code, newHashedPassword string) (*User, error)
+	// UpdateUserEmail записывает новый адрес как ожидающий подтверждения и
+	// возвращает полную запись пользователя.
 	UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error)
 	UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error
 	UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate time.Time) error
@@ -169,112 +160,78 @@ func New(db *sql.DB) UserRepository {
 	return &repo{db: db}
 }
 
+// userColumns — полный набор колонок пользователя в порядке, который читает
+// scanUser. Таблица обязана идти под псевдонимом u. Последняя колонка — все
+// роли из user_roles одним массивом: так любой FindBy* обходится одним
+// обращением к базе, а не двумя.
+//
+// Пять рукописных списков, которые здесь были, разошлись: одни читали
+// pending_email и согласие на ПД, другие нет, и пользователь, загруженный по
+// телефону, отличался от загруженного по id. Теперь список один.
+const userColumns = `u.id, u.role, u.phone, COALESCE(u.email, ''), COALESCE(u.last_name, ''),
+	COALESCE(u.first_name, ''), COALESCE(u.patronymic, ''), u.birth_date, COALESCE(u.pending_email, ''),
+	u.email_verified, u.is_verified, COALESCE(u.email_verification_token, ''),
+	COALESCE(u.password_reset_code, ''), u.password_reset_expires_at, u.password, u.balance, u.status,
+	u.created_at, u.is_checked, u.pd_consent_version, u.pd_consent_at,
+	COALESCE((SELECT array_agg(ur.role ORDER BY ur.role) FROM user_roles ur WHERE ur.user_id = u.id), '{}')`
+
+// scanUser читает пользователя из userColumns. Пользователь без строк в
+// user_roles (появившийся до наполнения в миграции 039) получает набор из
+// одной основной роли, чтобы HasRole отвечал по ней.
+func scanUser(row rowScanner) (*User, error) {
+	var u User
+	var resetExp, birthDate sql.NullTime
+	var roles []string
+	if err := row.Scan(&u.ID, &u.Role, &u.Phone, &u.Email, &u.LastName, &u.FirstName, &u.Patronymic,
+		&birthDate, &u.PendingEmail, &u.EmailVerified, &u.Verified, &u.EmailVerificationToken,
+		&u.PasswordResetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt,
+		&u.Checked, &u.PDConsentVersion, &u.PDConsentAt, pq.Array(&roles)); err != nil {
+		return nil, err
+	}
+	if resetExp.Valid {
+		u.PasswordResetExpiresAt = &resetExp.Time
+	}
+	if birthDate.Valid {
+		u.BirthDate = &birthDate.Time
+	}
+	if len(roles) == 0 && u.Role != "" {
+		roles = []string{u.Role}
+	}
+	u.Roles = roles
+	return &u, nil
+}
+
+// FindByPhone ищет по точному номеру. Номера хранятся в канонической форме
+// (миграция 026), и сервис приводит ввод к ней до вызова, поэтому здесь ровно
+// одно условие по уникальному индексу — без REGEXP_REPLACE по всей таблице.
 func (r *repo) FindByPhone(ctx context.Context, phone string) (*User, error) {
-	var u User
-	var email, token, resetCode sql.NullString
-	var resetExp, birthDate sql.NullTime
-	cleanDigits := regexp.MustCompile(`[^0-9]`).ReplaceAllString(phone, "")
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at
-		 FROM users
-		 WHERE phone = $1
-		    OR ($2 != '' AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $2)
-		 ORDER BY created_at ASC LIMIT 1`,
-		phone,
-		cleanDigits,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	u.Email = email.String
-	u.EmailVerificationToken = token.String
-	u.PasswordResetCode = resetCode.String
-	if resetExp.Valid {
-		u.PasswordResetExpiresAt = &resetExp.Time
-	}
-	if birthDate.Valid {
-		u.BirthDate = &birthDate.Time
-	}
-	r.attachRoles(ctx, &u)
-	return &u, nil
+	return scanUser(r.db.QueryRowContext(ctx, findByPhoneSQL, phone))
 }
 
+const findByPhoneSQL = `SELECT ` + userColumns + ` FROM users u WHERE u.phone = $1`
+
+// normalizeEmail — то, что хранится в users.email: без пробелов по краям и в
+// нижнем регистре.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// FindByEmail ищет по LOWER(email): это выражение уникального индекса
+// (миграция 066). Условие email <> ” повторяет предикат частичного индекса —
+// без него планировщик не вправе им воспользоваться.
 func (r *repo) FindByEmail(ctx context.Context, email string) (*User, error) {
-	var u User
-	var em, token, resetCode sql.NullString
-	var resetExp, birthDate sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE LOWER(email) = LOWER($1)`,
-		email,
-	).Scan(&u.ID, &u.Role, &u.Phone, &em, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	u.Email = em.String
-	u.EmailVerificationToken = token.String
-	u.PasswordResetCode = resetCode.String
-	if resetExp.Valid {
-		u.PasswordResetExpiresAt = &resetExp.Time
-	}
-	if birthDate.Valid {
-		u.BirthDate = &birthDate.Time
-	}
-	r.attachRoles(ctx, &u)
-	return &u, nil
+	return scanUser(r.db.QueryRowContext(ctx, findByEmailSQL, normalizeEmail(email)))
 }
 
-func (r *repo) FindByEmailVerificationToken(ctx context.Context, token string) (*User, error) {
-	var u User
-	var email, tok, resetCode sql.NullString
-	var resetExp, birthDate sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at FROM users WHERE email_verification_token = $1`,
-		token,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &u.EmailVerified, &u.Verified, &tok, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	u.Email = email.String
-	u.EmailVerificationToken = tok.String
-	u.PasswordResetCode = resetCode.String
-	if resetExp.Valid {
-		u.PasswordResetExpiresAt = &resetExp.Time
-	}
-	if birthDate.Valid {
-		u.BirthDate = &birthDate.Time
-	}
-	return &u, nil
-}
+const findByEmailSQL = `SELECT ` + userColumns + ` FROM users u WHERE LOWER(u.email) = $1 AND u.email <> ''`
 
 func (r *repo) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
-	var u User
-	var email, pendingEmail, token, resetCode sql.NullString
-	var resetExp, birthDate sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at, is_checked, pd_consent_version, pd_consent_at FROM users WHERE id = $1`,
-		id,
-	).Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt, &u.Checked, &u.PDConsentVersion, &u.PDConsentAt)
-	if err != nil {
-		return nil, err
-	}
-	u.Email = email.String
-	u.PendingEmail = pendingEmail.String
-	u.EmailVerificationToken = token.String
-	u.PasswordResetCode = resetCode.String
-	if resetExp.Valid {
-		u.PasswordResetExpiresAt = &resetExp.Time
-	}
-	if birthDate.Valid {
-		u.BirthDate = &birthDate.Time
-	}
-	r.attachRoles(ctx, &u)
-	return &u, nil
+	return scanUser(r.db.QueryRowContext(ctx,
+		`SELECT `+userColumns+` FROM users u WHERE u.id = $1`, id))
 }
 
 // FindByIDs загружает нескольких пользователей разом. Почему — см. интерфейс.
-//
-// Список колонок намеренно тот же, что читает FindByID: вызывающие используют
-// их взаимозаменяемо, и пакетный вариант, вернувший более скудного
+// Колонки те же, что у FindByID: пакетный вариант, вернувший более скудного
 // пользователя, заставил бы предикат допуска вести себя по-разному в
 // зависимости от того, каким путём загрузили его вход.
 func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error) {
@@ -285,8 +242,7 @@ func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*U
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, role, phone, COALESCE(email, ''), COALESCE(last_name, ''), COALESCE(first_name, ''), COALESCE(patronymic, ''), birth_date, COALESCE(pending_email, ''), email_verified, is_verified, COALESCE(email_verification_token, ''), COALESCE(password_reset_code, ''), password_reset_expires_at, password, balance, status, created_at, is_checked, pd_consent_version, pd_consent_at
-		 FROM users WHERE id IN (`+placeholders+`)`,
+		`SELECT `+userColumns+` FROM users u WHERE u.id IN (`+placeholders+`)`,
 		args...,
 	)
 	if err != nil {
@@ -295,151 +251,51 @@ func (r *repo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*U
 	defer rows.Close()
 
 	for rows.Next() {
-		var u User
-		var email, pendingEmail, token, resetCode sql.NullString
-		var resetExp, birthDate sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Role, &u.Phone, &email, &u.LastName, &u.FirstName, &u.Patronymic, &birthDate, &pendingEmail, &u.EmailVerified, &u.Verified, &token, &resetCode, &resetExp, &u.Password, &u.Balance, &u.Status, &u.CreatedAt, &u.Checked, &u.PDConsentVersion, &u.PDConsentAt); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		u.Email = email.String
-		u.PendingEmail = pendingEmail.String
-		u.EmailVerificationToken = token.String
-		u.PasswordResetCode = resetCode.String
-		if resetExp.Valid {
-			u.PasswordResetExpiresAt = &resetExp.Time
-		}
-		if birthDate.Valid {
-			u.BirthDate = &birthDate.Time
-		}
-		result[u.ID] = &u
+		result[u.ID] = u
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	if err := r.attachRolesBatch(ctx, result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// attachRolesBatch заполняет Roles для каждого загруженного пользователя одним
-// запросом, применяя тот же откат к основной роли, что и attachRoles для одного.
-func (r *repo) attachRolesBatch(ctx context.Context, users map[uuid.UUID]*User) error {
-	if len(users) == 0 {
-		return nil
-	}
-	ids := make([]uuid.UUID, 0, len(users))
-	for id := range users {
-		ids = append(ids, id)
-	}
-	placeholders, args := idList(ids)
-
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT user_id, role FROM user_roles WHERE user_id IN (`+placeholders+`) ORDER BY role`,
-		args...,
-	)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var uid uuid.UUID
-		var role string
-		if err := rows.Scan(&uid, &role); err != nil {
-			return err
-		}
-		if u, ok := users[uid]; ok {
-			u.Roles = append(u.Roles, role)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// Тот же откат, что и на пути одного пользователя: пользователь без строки в
-	// user_roles (появившийся до наполнения в миграции 039) всё равно держит основную роль.
-	for _, u := range users {
-		if len(u.Roles) == 0 && u.Role != "" {
-			u.Roles = []string{u.Role}
-		}
-	}
-	return nil
-}
-
-// attachRoles загружает полный набор ролей пользователя в u.Roles. Он
-// откатывается к основной роли, чтобы у пользователя старше наполнения user_roles был рабочий набор.
-func (r *repo) attachRoles(ctx context.Context, u *User) {
-	roles, err := r.ListUserRoles(ctx, u.ID)
-	if err != nil || len(roles) == 0 {
-		if u.Role != "" {
-			u.Roles = []string{u.Role}
-		}
-		return
-	}
-	u.Roles = roles
-}
-
-func (r *repo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT role FROM user_roles WHERE user_id = $1 ORDER BY role`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var roles []string
-	for rows.Next() {
-		var role string
-		if err := rows.Scan(&role); err != nil {
-			return nil, err
-		}
-		roles = append(roles, role)
-	}
-	return roles, rows.Err()
+	return result, rows.Err()
 }
 
 // SetUserRoles атомарно заменяет роли пользователя и перенаправляет users.role
 // на одну из оставшихся ролей, когда текущей основной больше нет.
 func (r *repo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = $1`, id); err != nil {
-		return err
-	}
-	for _, role := range roles {
-		if role == "" {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, role); err != nil {
+	return runInTx(ctx, r.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = $1`, id); err != nil {
 			return err
 		}
-	}
-	// Держим основную роль согласованной: если её убрали, берём первую из
-	// нового набора, чтобы дашборд по умолчанию всё ещё разрешался.
-	if len(roles) > 0 {
+		clean := make([]string, 0, len(roles))
+		for _, role := range roles {
+			if role != "" {
+				clean = append(clean, role)
+			}
+		}
+		if len(clean) == 0 {
+			return nil
+		}
+		// Одним оператором на весь набор, а не по строке на роль.
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO user_roles (user_id, role) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+			id, pq.Array(clean)); err != nil {
+			return err
+		}
+		// Держим основную роль согласованной: если её убрали, берём первую из
+		// нового набора, чтобы дашборд по умолчанию всё ещё разрешался.
 		var current string
 		if err := tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id = $1`, id).Scan(&current); err != nil {
 			return err
 		}
-		stillPresent := false
-		for _, role := range roles {
+		for _, role := range clean {
 			if role == current {
-				stillPresent = true
-				break
+				return nil
 			}
 		}
-		if !stillPresent {
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET role = $1 WHERE id = $2`, roles[0], id); err != nil {
-				return err
-			}
-		}
-	}
-	return tx.Commit()
+		_, err := tx.ExecContext(ctx, `UPDATE users SET role = $1 WHERE id = $2`, clean[0], id)
+		return err
+	})
 }
 
 func (r *repo) Create(ctx context.Context, user *User) error {
@@ -451,7 +307,7 @@ func (r *repo) Create(ctx context.Context, user *User) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO users (id, role, phone, email, last_name, first_name, patronymic, birth_date, pending_email, email_verified, is_verified, email_verification_token, email_token_expires_at, password, balance, status, created_at, pd_consent_version, pd_consent_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-		id, user.Role, user.Phone, user.Email, user.LastName, user.FirstName, user.Patronymic, user.BirthDate, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(), user.PDConsentVersion, user.PDConsentAt,
+		id, user.Role, user.Phone, normalizeEmail(user.Email), user.LastName, user.FirstName, user.Patronymic, user.BirthDate, user.PendingEmail, user.EmailVerified, user.Verified, user.EmailVerificationToken, user.EmailTokenExpiresAt, user.Password, user.Balance, user.Status, time.Now(), user.PDConsentVersion, user.PDConsentAt,
 	)
 	if err != nil {
 		return err
@@ -537,8 +393,8 @@ func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashed
 	)
 	err = tx.QueryRowContext(ctx,
 		`SELECT id, password_reset_code, password_reset_expires_at, COALESCE(password_reset_attempts, 0)
-		 FROM users WHERE LOWER(email) = LOWER($1) FOR UPDATE`,
-		email,
+		 FROM users WHERE LOWER(email) = $1 AND email <> '' FOR UPDATE`,
+		normalizeEmail(email),
 	).Scan(&userID, &storedCode, &expiresAt, &attempts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -617,16 +473,7 @@ func (r *repo) UpdateVerified(ctx context.Context, id uuid.UUID, verified bool) 
 // событие без флага — ровно тот разрыв, который outbox и существует
 // предотвращать.
 func (r *repo) UpdateVerifiedTx(ctx context.Context, q Querier, id uuid.UUID, verified bool) error {
-	exec := Querier(r.db)
-	if q != nil {
-		exec = q
-	}
-	_, err := exec.ExecContext(ctx, `UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
-	return err
-}
-
-func (r *repo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET balance = $1 WHERE id = $2`, balance, id)
+	_, err := exec(r.db, q).ExecContext(ctx, `UPDATE users SET is_verified = $1 WHERE id = $2`, verified, id)
 	return err
 }
 
@@ -640,51 +487,27 @@ func (r *repo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, full
 	return err
 }
 
-func (r *repo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*CustomerProfile, error) {
-	var p CustomerProfile
-	var devOS, devID, devIP sql.NullString
-	err := r.db.QueryRowContext(ctx,
-		`SELECT user_id, full_name, device_os, device_id, device_ip FROM customer_profiles WHERE user_id = $1`,
-		userID,
-	).Scan(&p.UserID, &p.FullName, &devOS, &devID, &devIP)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return &CustomerProfile{UserID: userID}, nil
-		}
-		return nil, err
-	}
-	p.DeviceOS = devOS.String
-	p.DeviceID = devID.String
-	p.DeviceIP = devIP.String
-	return &p, nil
-}
-
 // UpdateUserEmail записывает запрошенный адрес как ожидающий и отправляет
 // пользователю ссылку подтверждения. Текущий адрес остаётся на месте, пока
 // новый не подтверждён: запись сразу в email означала, что неподтверждённый
 // адрес немедленно становился адресом учётки, а это позволяло занять адрес,
 // который его настоящий владелец ещё не зарегистрировал, и роняло рабочий адрес
 // пользователя, сделавшего опечатку.
+//
+// Адрес пишется в нижнем регистре: после подтверждения он станет users.email,
+// а тот уникален по LOWER(email).
 func (r *repo) UpdateUserEmail(ctx context.Context, userID uuid.UUID, email, verificationToken string, expiresAt time.Time) (*User, error) {
-	row := r.db.QueryRowContext(ctx,
+	var id uuid.UUID
+	if err := r.db.QueryRowContext(ctx,
 		`UPDATE users
 		 SET pending_email = $1, email_verification_token = $2, email_token_expires_at = $3
 		 WHERE id = $4
-		 RETURNING id, role, phone, COALESCE(email, ''), COALESCE(pending_email, ''), email_verified, email_verification_token, balance, status, created_at`,
-		email, verificationToken, expiresAt, userID,
-	)
-	var u User
-	var emailStr, pendingStr string
-	err := row.Scan(
-		&u.ID, &u.Role, &u.Phone, &emailStr, &pendingStr, &u.EmailVerified,
-		&u.EmailVerificationToken, &u.Balance, &u.Status, &u.CreatedAt,
-	)
-	if err != nil {
+		 RETURNING id`,
+		normalizeEmail(email), verificationToken, expiresAt, userID,
+	).Scan(&id); err != nil {
 		return nil, err
 	}
-	u.Email = emailStr
-	u.PendingEmail = pendingStr
-	return &u, nil
+	return r.FindByID(ctx, id)
 }
 
 func (r *repo) UpdateUserName(ctx context.Context, userID uuid.UUID, lastName, firstName, patronymic string) error {

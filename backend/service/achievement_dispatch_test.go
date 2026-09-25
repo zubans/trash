@@ -293,7 +293,7 @@ func newDispatchHarness(t *testing.T, stats repository.ExecutorStats, maxPointsP
 
 	engine := achievement.New(achievement.DefaultLimits)
 	// Скрипт нарочно простейший: тест проверяет ядро, а не логику ачивки.
-	if err := engine.Compile("test_award", "achievement.star", []byte(`
+	if err := compileAchievement(engine, "test_award", "achievement.star", []byte(`
 MANIFEST = {
     "title": "Тестовая ачивка",
     "audience": "EXECUTOR",
@@ -511,7 +511,7 @@ func TestMissingGiftDoesNotBlockTheGrant(t *testing.T) {
 	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
 	// Ачивка, просящая подарок, которого нет в каталоге.
 	engine := achievement.New(achievement.DefaultLimits)
-	if err := engine.Compile("test_award", "achievement.star", []byte(`
+	if err := compileAchievement(engine, "test_award", "achievement.star", []byte(`
 MANIFEST = {
     "title": "С подарком",
     "audience": "EXECUTOR",
@@ -663,7 +663,7 @@ func TestManualGrantRefusesDisabledAchievement(t *testing.T) {
 func engineRefusingEverything(t *testing.T) *achievement.Engine {
 	t.Helper()
 	engine := achievement.New(achievement.DefaultLimits)
-	if err := engine.Compile("test_award", "achievement.star", []byte(`
+	if err := compileAchievement(engine, "test_award", "achievement.star", []byte(`
 MANIFEST = {
     "title": "Тестовая ачивка",
     "description": "Условие, которое не выполняется никогда.",
@@ -774,7 +774,7 @@ func TestBonusGiftPaysCatalogAmount(t *testing.T) {
 
 	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 1}, "500")
 	engine := achievement.New(achievement.DefaultLimits)
-	if err := engine.Compile("test_award", "achievement.star", []byte(`
+	if err := compileAchievement(engine, "test_award", "achievement.star", []byte(`
 MANIFEST = {
     "title": "С бонусом",
     "audience": "EXECUTOR",
@@ -821,4 +821,10 @@ def check(f):
 	if !strings.Contains(body, want.String()) {
 		t.Errorf("gift mail body %q, want it to name %s", body, want)
 	}
+}
+
+// compileAchievement регистрирует однофайловую ачивку: тестам хватает одного
+// файла, а загрузчик и админ-панель всегда идут через CompileFiles.
+func compileAchievement(e *achievement.Engine, code, filename string, src []byte) error {
+	return e.CompileFiles(code, []achievement.SourceFile{{Name: filename, Src: src}})
 }

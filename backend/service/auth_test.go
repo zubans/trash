@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -113,22 +112,8 @@ func (m *mockRepo) UpdateRole(ctx context.Context, id uuid.UUID, role string) er
 	return sql.ErrNoRows
 }
 
-func (m *mockRepo) UpdateBalance(ctx context.Context, id uuid.UUID, balance money.Amount) error {
-	for _, u := range m.users {
-		if u.ID == id {
-			u.Balance = balance
-			return nil
-		}
-	}
-	return sql.ErrNoRows
-}
-
 func (m *mockRepo) CreateCustomerProfile(ctx context.Context, userID uuid.UUID, fullName string) error {
 	return nil
-}
-
-func (m *mockRepo) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (*repository.CustomerProfile, error) {
-	return &repository.CustomerProfile{UserID: userID}, nil
 }
 
 func (m *mockRepo) FindByEmail(ctx context.Context, email string) (*repository.User, error) {
@@ -137,15 +122,6 @@ func (m *mockRepo) FindByEmail(ctx context.Context, email string) (*repository.U
 	}
 	for _, u := range m.users {
 		if strings.EqualFold(u.Email, email) {
-			return u, nil
-		}
-	}
-	return nil, sql.ErrNoRows
-}
-
-func (m *mockRepo) FindByEmailVerificationToken(ctx context.Context, token string) (*repository.User, error) {
-	for _, u := range m.users {
-		if u.EmailVerificationToken == token {
 			return u, nil
 		}
 	}
@@ -699,10 +675,6 @@ func TestUndeliveredResetCodeIsCleared(t *testing.T) {
 	if repo.lastCode != "" {
 		t.Errorf("an undeliverable code must not stay stored, found %q", repo.lastCode)
 	}
-}
-
-func (m *mockRepo) ListUserRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
-	return nil, nil
 }
 
 func (m *mockRepo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error {

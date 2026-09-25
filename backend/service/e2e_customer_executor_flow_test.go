@@ -136,7 +136,7 @@ func TestE2E_CustomerExecutorFlow(t *testing.T) {
 	}
 
 	// Пополняем баланс заказчика, чтобы удержание прошло
-	_ = userRepo.UpdateBalance(ctx, customer.ID, money.FromRubles(5000))
+	_ = transactionRepo.UpdateBalance(ctx, nil, customer.ID, money.FromRubles(5000))
 	_ = userRepo.UpdateVerified(ctx, customer.ID, true)
 
 	// 2. Заказчик создаёт заказ со своим адресом
@@ -408,7 +408,7 @@ func TestE2E_MatchingDoesNotAssignAcrossTheCountry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("customer registration failed: %v", err)
 	}
-	if err := userRepo.UpdateBalance(ctx, customer.ID, money.FromRubles(5000)); err != nil {
+	if err := transactionRepo.UpdateBalance(ctx, nil, customer.ID, money.FromRubles(5000)); err != nil {
 		t.Fatalf("failed to fund customer: %v", err)
 	}
 	if err := userRepo.UpdateVerified(ctx, customer.ID, true); err != nil {
