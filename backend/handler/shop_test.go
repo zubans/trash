@@ -35,8 +35,7 @@ func uploadRequest(t *testing.T, name string, body []byte) *http.Request {
 // рядом с изображениями не ляжет. Настоящее изображение получает имя от
 // сервера и отдаётся своим маршрутом как картинка.
 func TestShopImageUploadAcceptsOnlyImages(t *testing.T) {
-	t.Setenv("UPLOADS_DIR", t.TempDir())
-	h := NewShopHandler(nil, nil, nil, nil, nil)
+	h := NewShopHandler(nil, nil, nil, nil, nil, t.TempDir())
 
 	rec := httptest.NewRecorder()
 	h.AdminUploadImage(rec, uploadRequest(t, "photo.jpg", []byte("<html><script>alert(1)</script></html>")))

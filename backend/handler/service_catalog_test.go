@@ -15,6 +15,7 @@ import (
 
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
+	"healthlogin/backend/service"
 )
 
 // mockCatalogRepo — каталог услуг в памяти с той же семантикой удаления, что и
@@ -155,6 +156,16 @@ func (m *mockCatalogRepo) GetRootCategories(ctx context.Context, filter reposito
 	return out, nil
 }
 
+func (m *mockCatalogRepo) ListAll(ctx context.Context, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
+	out := []*repository.ServiceNode{}
+	for _, n := range m.nodes {
+		if m.matches(n, filter) {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
 func (m *mockCatalogRepo) GetChildren(ctx context.Context, parentID uuid.UUID, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
 	out := []*repository.ServiceNode{}
 	for _, n := range m.nodes {
@@ -224,6 +235,15 @@ func (m *mockCatalogRepo) IsDescendantOf(ctx context.Context, ancestor, descenda
 	return false, nil
 }
 
+// newCatalogHandler собирает обработчик поверх сервисов каталога — той же
+// парой, что и main.
+func newCatalogHandler(repo repository.ServiceCatalogRepository, behaviors *service.Behaviors) *ServiceCatalogHandler {
+	return NewServiceCatalogHandler(
+		service.NewServiceCatalog(repo).WithBehaviors(behaviors),
+		service.NewServiceCatalogAdmin(repo, behaviors),
+	)
+}
+
 // catalogTestEnv подключает обработчик к роутеру, чтобы URL-параметры
 // разрешались так же, как в main.
 type catalogTestEnv struct {
@@ -235,7 +255,7 @@ type catalogTestEnv struct {
 
 func newCatalogTestEnv() *catalogTestEnv {
 	repo := newMockCatalogRepo()
-	h := NewServiceCatalogHandler(repo)
+	h := newCatalogHandler(repo, nil)
 
 	r := chi.NewRouter()
 	r.Get("/admin/service-nodes", h.AdminListNodes)
@@ -520,5 +540,56 @@ func TestAdminUpdateNode_ParentCycleIsRejectedAsBadRequest(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Тело запроса — форма, а не строка узла: id, время создания и списания из
+// тела игнорируются, узел получает их от сервера.
+func TestAdminCreateNode_IgnoresServerManagedFields(t *testing.T) {
+	env := newCatalogTestEnv()
+	env.router.Post("/admin/service-nodes", newCatalogHandler(env.repo, nil).AdminCreateNode)
+
+	forged := uuid.New()
+	rec := env.do(t, http.MethodPost, "/admin/service-nodes", map[string]interface{}{
+		"id":         forged.String(),
+		"code":       "forged_node",
+		"node_type":  "CATEGORY",
+		"name":       map[string]string{"ru": "Подделка"},
+		"created_at": "2000-01-01T00:00:00Z",
+		"updated_at": "2000-01-01T00:00:00Z",
+		"deleted_at": "2000-01-01T00:00:00Z",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var node repository.ServiceNode
+	if err := json.Unmarshal(rec.Body.Bytes(), &node); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if node.ID == forged || node.ID == uuid.Nil {
+		t.Errorf("id came from the body: %s", node.ID)
+	}
+	if node.DeletedAt != nil {
+		t.Error("deleted_at came from the body")
+	}
+	if node.CreatedAt.Year() == 2000 {
+		t.Error("created_at came from the body")
+	}
+	if _, ok := env.repo.nodes[forged]; ok {
+		t.Error("the forged id reached the repository")
+	}
+
+	// И на правке: списание через тело невозможно.
+	rec = env.do(t, http.MethodPut, "/admin/service-nodes/"+env.variant.ID.String(), map[string]interface{}{
+		"name":       map[string]string{"ru": "Утренний выгул"},
+		"base_price": 150,
+		"is_active":  true,
+		"deleted_at": "2000-01-01T00:00:00Z",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if stored := env.repo.nodes[env.variant.ID]; stored.IsDeleted() {
+		t.Error("deleted_at from the update body archived the node")
 	}
 }

@@ -25,9 +25,8 @@ func NewDisputeHandler(disputes *service.DisputeService) *DisputeHandler {
 // OpenDispute обслуживает POST /customer/orders/{id}/dispute: заказчик
 // заявляет, что исполненный заказ не выполнен. Тело — {"claim": "..."}.
 func (h *DisputeHandler) OpenDispute(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -51,17 +50,14 @@ func (h *DisputeHandler) OpenDispute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(dispute)
+	writeJSON(w, http.StatusCreated, dispute)
 }
 
 // ConcedeDispute обслуживает POST /executor/orders/{id}/dispute/concede:
 // исполнитель признаёт, что оспоренный заказ не выполнен.
 func (h *DisputeHandler) ConcedeDispute(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -90,7 +86,7 @@ func (h *DisputeHandler) ListDisputes(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, disputes)
+	writeJSON(w, http.StatusOK, disputes)
 }
 
 // DisputeEvidence обслуживает GET /admin/disputes/{id}/evidence — карточку
@@ -106,7 +102,7 @@ func (h *DisputeHandler) DisputeEvidence(w http.ResponseWriter, r *http.Request)
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, evidence)
+	writeJSON(w, http.StatusOK, evidence)
 }
 
 // ResolveDispute обслуживает POST /admin/disputes/{id}/resolve.
@@ -117,9 +113,8 @@ func (h *DisputeHandler) ResolveDispute(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid dispute id", http.StatusBadRequest)
 		return
 	}
-	arbiter := userFromContext(r)
-	if arbiter == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	arbiter, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -142,5 +137,22 @@ func (h *DisputeHandler) ResolveDispute(w http.ResponseWriter, r *http.Request) 
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, dispute)
+	writeJSON(w, http.StatusOK, dispute)
+}
+
+// RegisterCustomerRoutes — открытие спора заказчиком.
+func (h *DisputeHandler) RegisterCustomerRoutes(r chi.Router) {
+	r.Post("/customer/orders/{id}/dispute", h.OpenDispute)
+}
+
+// RegisterExecutorRoutes — признание спора исполнителем.
+func (h *DisputeHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Post("/executor/orders/{id}/dispute/concede", h.ConcedeDispute)
+}
+
+// RegisterAdminRoutes — арбитраж.
+func (h *DisputeHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("disputes.view")).Get("/admin/disputes", h.ListDisputes)
+	r.With(can("disputes.view")).Get("/admin/disputes/{id}/evidence", h.DisputeEvidence)
+	r.With(can("disputes.edit")).Post("/admin/disputes/{id}/resolve", h.ResolveDispute)
 }

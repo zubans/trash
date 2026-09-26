@@ -108,8 +108,8 @@ type MailRepository interface {
 	Broadcast(ctx context.Context, mail *Mail, userIDs []uuid.UUID) (int, error)
 	// RecipientsByRole перечисляет получателей рассылки по роли.
 	RecipientsByRole(ctx context.Context, role string) ([]uuid.UUID, error)
-	// ListForUser возвращает ящик, свежие письма первыми.
-	ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*Mail, error)
+	// ListForUser возвращает страницу ящика, свежие письма первыми.
+	ListForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Mail, error)
 	UnreadCount(ctx context.Context, userID uuid.UUID) (int, error)
 	MarkRead(ctx context.Context, id, userID uuid.UUID) error
 	MarkAllRead(ctx context.Context, userID uuid.UUID) error
@@ -126,11 +126,14 @@ type MailRepository interface {
 	Reply(ctx context.Context, mail *Mail) error
 	// ListDialogs перечисляет переписки для администратора: по одной строке на
 	// собеседника, свежие первыми.
-	ListDialogs(ctx context.Context, onlyUnanswered bool, limit int) ([]*MailDialog, error)
+	ListDialogs(ctx context.Context, onlyUnanswered bool, limit, offset int) ([]*MailDialog, error)
 	// ListDirectForUser отдаёт всю адресную переписку с одним пользователем.
-	ListDirectForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*Mail, error)
+	ListDirectForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Mail, error)
 	// MarkThreadReadByAdmin гасит счётчик непрочитанного у администрации.
 	MarkThreadReadByAdmin(ctx context.Context, threadID uuid.UUID) error
+	// MarkThreadsReadByAdmin — то же для нескольких веток одним оператором:
+	// открытая переписка с человеком гасит все его ветки разом.
+	MarkThreadsReadByAdmin(ctx context.Context, threadIDs []uuid.UUID) error
 	// AdminUnreadCount — сколько ответов ждёт разбора. Значок в меню админки.
 	AdminUnreadCount(ctx context.Context) (int, error)
 }
@@ -214,9 +217,12 @@ func (r *mailRepo) RecipientsByRole(ctx context.Context, role string) ([]uuid.UU
 	return ids, rows.Err()
 }
 
-func (r *mailRepo) ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*Mail, error) {
+func (r *mailRepo) ListForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Mail, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	// Лента показывает корни веток, а не каждое письмо: переписка из десяти
 	// реплик — одна строка в ящике, а не десять одинаковых тем подряд. Поэтому
@@ -239,8 +245,8 @@ func (r *mailRepo) ListForUser(ctx context.Context, userID uuid.UUID, limit int)
         WHERE m.user_id = $1 AND m.deleted_at IS NULL
           AND (m.thread_id IS NULL OR m.thread_id = m.id)
         ORDER BY last_at DESC
-        LIMIT $2
-    `, userID, limit)
+        LIMIT $2 OFFSET $3
+    `, userID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -360,9 +366,12 @@ func (r *mailRepo) Reply(ctx context.Context, mail *Mail) error {
 	return r.Send(ctx, nil, mail)
 }
 
-func (r *mailRepo) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*Mail, error) {
+func (r *mailRepo) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Mail, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	// Удалённые письма администратор видит. Мягкое удаление убирает переписку из
 	// ящика её владельца, а не из истории обращений: иначе смахнув карточку,
@@ -373,7 +382,7 @@ func (r *mailRepo) ListDirectForUser(ctx context.Context, userID uuid.UUID, limi
         LEFT JOIN users s ON s.id = m.sender_id
         WHERE m.user_id = $1 AND m.kind = $2
         ORDER BY m.created_at
-        LIMIT $3`, userID, MailKindDirect, limit)
+        LIMIT $3 OFFSET $4`, userID, MailKindDirect, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -390,9 +399,12 @@ func (r *mailRepo) ListDirectForUser(ctx context.Context, userID uuid.UUID, limi
 	return out, rows.Err()
 }
 
-func (r *mailRepo) ListDialogs(ctx context.Context, onlyUnanswered bool, limit int) ([]*MailDialog, error) {
+func (r *mailRepo) ListDialogs(ctx context.Context, onlyUnanswered bool, limit, offset int) ([]*MailDialog, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	// Одна строка на собеседника: администратор открывает список, чтобы увидеть,
 	// кому он не ответил, а не чтобы пролистать все письма. Последнее письмо
@@ -422,7 +434,7 @@ func (r *mailRepo) ListDialogs(ctx context.Context, onlyUnanswered bool, limit i
         JOIN users u ON u.id = d.user_id
         WHERE d.rn = 1 AND ($2 = false OR agg.unread > 0)
         ORDER BY d.created_at DESC
-        LIMIT $3`, MailKindDirect, onlyUnanswered, limit)
+        LIMIT $3 OFFSET $4`, MailKindDirect, onlyUnanswered, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +457,16 @@ func (r *mailRepo) MarkThreadReadByAdmin(ctx context.Context, threadID uuid.UUID
 	_, err := r.db.ExecContext(ctx, `
         UPDATE user_mail SET admin_read_at = now()
         WHERE thread_id = $1 AND direction = 'OUT' AND admin_read_at IS NULL`, threadID)
+	return err
+}
+
+func (r *mailRepo) MarkThreadsReadByAdmin(ctx context.Context, threadIDs []uuid.UUID) error {
+	if len(threadIDs) == 0 {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `
+        UPDATE user_mail SET admin_read_at = now()
+        WHERE thread_id = ANY($1) AND direction = 'OUT' AND admin_read_at IS NULL`, pq.Array(threadIDs))
 	return err
 }
 

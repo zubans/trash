@@ -60,10 +60,18 @@ func (m *mockUserRepository) FindByIDs(ctx context.Context, ids []uuid.UUID) (ma
 	return found, nil
 }
 
-func (m *mockUserRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+func (m *mockUserRepository) UpdateStatus(ctx context.Context, q repository.Querier, id uuid.UUID, status string) error {
 	if u, ok := m.users[id]; ok {
 		u.Status = status
 	}
+	return nil
+}
+
+func (m *mockUserRepository) SetChecked(ctx context.Context, q repository.Querier, id uuid.UUID, checked bool, by uuid.UUID) error {
+	return nil
+}
+
+func (m *mockUserRepository) SetPDConsent(ctx context.Context, q repository.Querier, id uuid.UUID, version int) error {
 	return nil
 }
 

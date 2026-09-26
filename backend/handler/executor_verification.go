@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // ExecutorVerificationHandler обслуживает заявку исполнителя на верификацию.
@@ -20,9 +22,8 @@ func NewExecutorVerificationHandler(verification *service.ExecutorVerificationSe
 
 // GetStatus обслуживает GET /executor/verification.
 func (h *ExecutorVerificationHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	status, err := h.verification.Status(r.Context(), user.ID)
@@ -30,17 +31,15 @@ func (h *ExecutorVerificationHandler) GetStatus(w http.ResponseWriter, r *http.R
 		writeDomainError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	writeJSON(w, http.StatusOK, status)
 }
 
 // Request обслуживает POST /executor/verification: дозаполняет недостающие
 // данные и размещает заказ на верификацию. Если чего-то не хватает, отвечает
 // 422 со списком полей в missing.
 func (h *ExecutorVerificationHandler) Request(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -72,9 +71,7 @@ func (h *ExecutorVerificationHandler) Request(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		var missing *service.VerificationDataMissingError
 		if errors.As(err, &missing) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
 				"error":   err.Error(),
 				"missing": missing.Fields,
 			})
@@ -84,16 +81,13 @@ func (h *ExecutorVerificationHandler) Request(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(order)
+	writeJSON(w, http.StatusCreated, order)
 }
 
 // Cancel обслуживает POST /executor/verification/cancel.
 func (h *ExecutorVerificationHandler) Cancel(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	if err := h.verification.Cancel(r.Context(), user.ID); err != nil {
@@ -101,4 +95,12 @@ func (h *ExecutorVerificationHandler) Cancel(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// RegisterExecutorRoutes — заявка на собственную верификацию: заказ на услугу
+// верификации, который берёт модератор.
+func (h *ExecutorVerificationHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Get("/executor/verification", h.GetStatus)
+	r.Post("/executor/verification", h.Request)
+	r.Post("/executor/verification/cancel", h.Cancel)
 }

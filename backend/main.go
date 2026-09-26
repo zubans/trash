@@ -11,9 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chiMiddleware "github.com/go-chi/chi/v5/middleware"
-
 	_ "net/http/pprof"
 
 	"healthlogin/backend/achievement"
@@ -141,7 +138,7 @@ func main() {
 		WithIncidents(incidentRepo)
 	// Штрафные баллы: журнал и свёрнутое состояние ролей. Транзакции берёт у
 	// реестра — баллы по спору начисляются в одной транзакции с деньгами.
-	penaltyService := service.NewPenaltyService(penaltyRepo, settingsRepo, ledger)
+	penaltyService := service.NewPenaltyService(penaltyRepo, userRepo, settingsRepo, ledger)
 
 	// Скрипты поведений несут правила услуг, чьи условия не укладываются во флаги
 	// каталога (см. doc/service_behaviors.md). Первыми загружаются копии,
@@ -301,10 +298,11 @@ func main() {
 	// Диспетчер — потребитель outbox; синхронный поток отправок по заказу
 	// (данные на проверку, паспорт заказчика) — отдельный OrderSubmissions,
 	// которому диспетчер подключён как обработчик уже опубликованного события.
-	behaviorDispatcher := service.NewBehaviorDispatcher(
-		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
-		settingsRepo, ledger, serviceBehaviors, orderService,
-	).WithSubmissions(submissionRepo)
+	behaviorDispatcher := service.NewBehaviorDispatcher(service.BehaviorDispatcherDeps{
+		Events: eventRepo, Orders: orderRepo, Users: userRepo, Catalog: catalogRepo,
+		Claims: serviceClaimRepo, Chat: chatRepo, Settings: settingsRepo, Ledger: ledger,
+		Behaviors: serviceBehaviors, OrderLifecycle: orderService,
+	}).WithSubmissions(submissionRepo)
 	passportRepo := repository.NewPassportRepository(db)
 	orderSubmissions := service.NewOrderSubmissions(orderRepo, userRepo, catalogRepo, submissionRepo,
 		eventRepo, ledger, serviceBehaviors, behaviorDispatcher).
@@ -374,10 +372,11 @@ func main() {
 	// Ачивки читают тот же outbox, что и поведения, но со своим курсором.
 	// Интервал длиннее: значок вполне может появиться минутой позже, а каждый
 	// тик читает агрегаты по каждому субъекту события.
-	achievementDispatcher := service.NewAchievementDispatcher(
-		eventRepo, orderRepo, userRepo, achievementRepo, executorStatsRepo,
-		giftRepo, mailRepo, incidentRepo, ledger, levels, achievementEngine,
-	)
+	achievementDispatcher := service.NewAchievementDispatcher(service.AchievementDispatcherDeps{
+		Events: eventRepo, Orders: orderRepo, Users: userRepo, Achievements: achievementRepo,
+		Stats: executorStatsRepo, Gifts: giftRepo, Mail: mailRepo, Incidents: incidentRepo,
+		Ledger: ledger, Levels: levels, Engine: achievementEngine,
+	})
 	achievementWorker := worker.NewAchievementWorker(achievementDispatcher).
 		WithScriptSync(achievementScripts).
 		WithLeader(leader, "achievement_dispatch")
@@ -420,335 +419,77 @@ func main() {
 		Start(ctx, 24*time.Hour))
 
 	// Middleware
-	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret).
+	// Кэш пользователя в middleware: AUTH_CACHE_TTL_SEC=0 выключает его.
+	authMiddleware := middleware.NewAuthMiddleware(userRepo, authService, jwtSecret, authCacheTTLFromEnv()).
 		WithPermissions(permissions)
 
+	// Каталоги, файлы и почта. Пути к загрузкам и релизам читаются здесь один
+	// раз и передаются в обработчики: на пути запроса окружение не читается.
+	uploadsDir := getEnv("UPLOADS_DIR", "uploads")
+	releasesDir := getEnv("RELEASES_DIR", "releases")
+	serviceCatalog := service.NewServiceCatalog(catalogRepo).
+		WithBehaviors(serviceBehaviors).
+		WithPenalties(penaltyService)
+	serviceCatalogAdmin := service.NewServiceCatalogAdmin(catalogRepo, serviceBehaviors)
+	appReleases := service.NewAppReleases(appReleaseRepo, releasesDir, getEnv("RELEASES_BASE_URL", ""))
+	mailService := service.NewMail(mailRepo, userRepo)
+	// Геймификация глазами экранов: каталог ачивок, склад подарков, инциденты.
+	// Выдача остаётся у диспетчера.
+	achievementCatalog := service.NewAchievementCatalog(achievementRepo, executorStatsRepo, levels, achievementEngine, achievementScripts)
+	giftCatalog := service.NewGiftCatalog(giftRepo).WithShop(shopOrders)
+	moneyIncidents := service.NewMoneyIncidents(incidentRepo)
+
 	// Обработчики
-	ph := handler.NewPublicHandler(authService).WithPermissions(permissions).WithPassports(passportService)
-	pah := handler.NewPassportHandler(passportService)
-	ah := handler.NewAdminHandler(adminService)
-	prh := handler.NewProfileHandler(profileService)
-	wh := handler.NewWalletHandler(walletService)
-	rolh := handler.NewRoleHandler(roleService)
-	oh := handler.NewOrderHandler(orderService)
-	evh := handler.NewExecutorVerificationHandler(service.NewExecutorVerificationService(
-		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService, ledger))
-	sh := handler.NewShiftHandler(shiftService)
-	bh := handler.NewBidHandler(bidService, orderService)
-	ch := handler.NewChatHandler(chatService).WithShopLinks(shopOrders.ShopOrderLinks)
-	shh := handler.NewShopHandler(shop, shopCatalog, shopOrders, perkGrants, perkRules)
-	gh := handler.NewGeoHandler(addressSuggester)
-	sch := handler.NewServiceCatalogHandler(catalogRepo).WithPenalties(penaltyService).WithBehaviors(serviceBehaviors)
-	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
-	rh := handler.NewReviewHandler(reviewService)
-	egh := handler.NewExecutorGeoHandler(executorGeoService)
-	bhh := handler.NewBehaviorHandler(orderSubmissions, submissionRepo)
-	dh := handler.NewDisputeHandler(disputeService)
-	pnh := handler.NewPenaltyHandler(penaltyService)
-	pph := photoproof.NewHandler(photoProofService, handler.CallerID)
-	mh := handler.NewMailHandler(mailRepo, userRepo)
-	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
-		WithScripts(achievementScripts).
-		WithDispatcher(achievementDispatcher).
-		WithShop(shopOrders)
-
-	// Ограничители частоты для эндпоинтов, которые есть смысл перебирать.
-	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
-	passwordResetLimiter := middleware.NewRateLimiter(5, 15*time.Minute)
-	registerLimiter := middleware.NewRateLimiter(5, time.Hour)
-	geoLimiter := middleware.NewRateLimiter(30, time.Minute)
-	// Обновление сессии ограничивается отдельно и щедрее входа: это не подбор
-	// учётных данных, а обмен уже выданного токена, и ключ здесь — адрес
-	// клиента. За NAT мобильного оператора под одним адресом сидят сотни
-	// приложений, и общий с /login лимит в 10 запросов в минуту отказывал бы им
-	// в обновлении, то есть выбрасывал бы их из аккаунта.
-	refreshLimiter := middleware.NewRateLimiter(120, time.Minute)
-	// Покупка идемпотентна по request_id, но каждая попытка держит блокировку
-	// товара: частые повторы с одного адреса ограничиваются.
-	shopPurchaseLimiter := middleware.NewRateLimiter(30, time.Minute)
-
-	r := chi.NewRouter()
-	// StripQueryToken выполняется до логгера, чтобы учётные данные, переданные
-	// параметром запроса, никогда не попадали в лог доступа.
-	r.Use(middleware.StripQueryToken)
-	r.Use(corsMiddleware(origins))
-	r.Use(middleware.SecurityHeaders)
-	r.Use(chiMiddleware.Recoverer)
-	// Внутри Recoverer, чтобы паника считалась той самой 500, которую клиент
-	// действительно получил, а не пропадала из счётчиков запросов целиком.
-	r.Use(metrics.Middleware)
-	r.Use(chiMiddleware.Logger)
-	r.Use(middleware.MaxBodyBytes(1 << 20))
-
-	// registerAPIRoutes навешивает каждый обработчик на переданный chi.Router. Он
-	// монтируется под /api/*, а пока включён LEGACY_ROOT_ROUTES — ещё и в корне,
-	// для мобильных сборок, появившихся раньше префикса /api. Оба монтирования
-	// несут одни и те же middleware аутентификации и авторизации.
-	registerAPIRoutes := func(r chi.Router) {
-		r.Get("/health", ph.HealthHandler)
-		r.With(registerLimiter.Middleware).Post("/register", ph.RegisterHandler)
-		r.With(loginLimiter.Middleware).Post("/login", ph.LoginHandler)
-		// Обновление намеренно без аутентификации: к моменту, когда клиенту это нужно,
-		// access-токен уже истёк. Учётными данными служит refresh-токен, поэтому
-		// эндпоинт ограничен по частоте, как и прочие эндпоинты с учётными данными.
-		r.With(refreshLimiter.Middleware).Post("/auth/refresh", ph.RefreshHandler)
-		r.Get("/auth/verify-email", ph.VerifyEmailHandler)
-		r.With(passwordResetLimiter.Middleware).Post("/auth/forgot-password", ph.ForgotPasswordHandler)
-		r.With(passwordResetLimiter.Middleware).Post("/auth/reset-password", ph.ResetPasswordHandler)
-		// Провайдер адресов — платный общий внешний сервис: неограниченный анонимный
-		// доступ к нему жжёт квоту и замедляет ввод адреса для всех.
-		r.With(geoLimiter.Middleware).Get("/geo/geocode", gh.Geocode)
-		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
-		r.With(geoLimiter.Middleware).Get("/geo/suggest", gh.Suggest)
-		r.Get("/settings", prh.GetPublicSettingsHandler)
-		// OptionalAuth, чтобы каталог мог прятать услуги «только для верифицированных»
-		// от неверифицированных заказчиков, оставаясь доступным анонимным посетителям.
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.OptionalAuth)
-			r.Get("/service-categories", sch.ListRootCategories)
-			r.Get("/service-categories/{id}/children", sch.ListChildren)
-			r.Get("/service-categories/{id}/variants", sch.ListCategoryVariants)
-			r.Get("/service-variants", sch.ListVariants)
-			r.Get("/service-variants/{id}", sch.GetVariant)
-		})
-		r.Get("/app/version", arh.GetVersionHandler)
-		r.Get("/users/{id}/reviews", rh.GetUserReviews)
-		r.Get("/users/{id}/rating", rh.GetUserRating)
-
-		// Аутентифицированные маршруты заказчика. ADMIN включён, чтобы поддержка могла
-		// действовать от имени заказчика из админ-панели.
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.RequireAuth)
-			r.Use(middleware.RequireRole("CUSTOMER", "ADMIN"))
-			r.Post("/customer/orders", oh.CreateOrder)
-			r.Post("/customer/orders/construction", bh.CreateConstructionOrderHandler)
-			r.Post("/customer/orders/{id}/confirm", oh.ConfirmOrder)
-			r.Post("/customer/orders/{id}/dispute", dh.OpenDispute)
-			r.Post("/customer/orders/{id}/tip", oh.TipOrder)
-			r.Post("/customer/orders/{id}/cancel", oh.CancelOrder)
-			r.Get("/customer/orders", oh.ListCustomerOrders)
-			r.Post("/customer/bids/{id}/accept", bh.AcceptBidHandler)
-			r.Get("/customer/orders/{id}/bids", bh.GetBidsHandler)
-		})
-
-		// Аутентифицированные общие маршруты (заказчик + исполнитель + админ)
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.RequireAuth)
-			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
-			r.Get("/auth/me", ph.MeHandler)
-			r.Get("/me/penalty-status", pnh.MyPenaltyStatus)
-			r.Get("/user/profile", prh.GetProfileHandler)
-			// Оба пути возвращают собственный профиль вызывающего. /customer/profile
-			// оставлен здесь, а не в группе заказчика, потому что приложение
-			// исполнителя тоже его вызывает.
-			r.Get("/customer/profile", prh.GetProfileHandler)
-			// Исполнителям тоже нужны пополнения: штрафы могут увести баланс в минус.
-			r.Post("/customer/finances/topup", wh.CreateTopUpRequestHandler)
-			r.Post("/user/email", ph.UpdateEmailHandler)
-			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
-			r.With(passwordResetLimiter.Middleware).Post("/user/change-password", ph.ChangePasswordHandler)
-			r.Post("/user/address", prh.AddAddressHandler)
-			r.Post("/user/address/default", prh.SetDefaultAddressHandler)
-			r.Delete("/user/address/{id}", prh.DeleteAddressHandler)
-			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
-			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
-			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)
-			r.Delete("/chats/{order_id}/messages/{message_id}", ch.DeleteMessageHandler)
-			r.Post("/chats/{order_id}/upload", ch.UploadAttachmentHandler)
-			r.Post("/chats/{order_id}/read", ch.MarkReadHandler)
-			r.Get("/chats/unread-summary", ch.GetUnreadSummaryHandler)
-			// Внутренняя почта: сюда приходят выданные ачивки, купоны на
-			// подарки, акции и новости. Она есть у всех ролей, потому что
-			// новость адресуется человеку, а не его роли в заказе.
-			mh.RegisterUserRoutes(r)
-			r.Get("/chats/{order_id}/ws", ch.WebSocketHandler)
-			r.Get("/support/chat", ch.GetUserSupportChatHandler)
-			r.Get("/support/chats/{chat_id}/messages", ch.GetSupportMessagesHandler)
-			r.Post("/support/chats/{chat_id}/messages", ch.SendSupportMessageHandler)
-			r.Post("/support/chats/{chat_id}/upload", ch.UploadSupportAttachmentHandler)
-			r.Post("/orders/{id}/reviews", rh.CreateReview)
-			r.Get("/orders/{id}/reviews/mine", rh.GetOrderReview)
-			r.Post("/finances/withdrawals", wh.CreateWithdrawalRequestHandler)
-			r.Post("/logout", ph.LogoutHandler)
-			// Магазин: витрина и покупка открыты любой роли — какие товары
-			// кому видны, решают роли на самом товаре.
-			shh.RegisterUserRoutes(r, shopPurchaseLimiter.Middleware)
-			pah.RegisterUserRoutes(r)
-			// Купоны: и подарки ачивок, и купленное в магазине. У заказчика
-			// ачивок нет, но купоны на купленные вещи есть.
-			r.Get("/user/gifts", ach.GetGifts)
-			r.Post("/user/gifts/{id}/reveal", ach.RevealGift)
-		})
-
-		// Аутентифицированные маршруты исполнителя
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.RequireAuth)
-			r.Use(middleware.RequireRole("EXECUTOR", "MODERATOR", "ADMIN"))
-			r.Post("/executor/shifts", sh.StartShift)
-			r.Post("/executor/shifts/end", sh.EndShift)
-			r.Post("/executor/shifts/early-end", sh.EarlyEndShift)
-			r.Post("/executor/shifts/location", sh.RecordLocation)
-			r.Post("/executor/set-location", egh.SetLocation)
-			// Возобновляет автоматическое позиционирование после ручного выбора.
-			r.Post("/executor/follow-device", egh.FollowDevice)
-			r.Get("/executor/location", egh.GetLocation)
-			r.Get("/executor/map-orders", egh.GetMapOrders)
-			r.Get("/executor/shifts/active", sh.GetActiveShiftHandler)
-			r.Get("/executor/history", sh.GetExecutorHistoryHandler)
-			r.Get("/executor/orders/assigned", oh.ListAssignedOrders)
-			r.Get("/executor/orders/available", bh.GetAvailableConstructionOrdersHandler)
-			r.Get("/executor/orders/nearby", oh.NearbyOrders)
-			r.Post("/executor/orders/{id}/accept", oh.AcceptOrder)
-			r.Post("/executor/orders/{id}/execute", oh.ExecuteOrder)
-			r.Post("/executor/orders/{id}/reject", oh.RejectOrder)
-			r.Post("/executor/orders/{id}/dispute/concede", dh.ConcedeDispute)
-			pph.RegisterExecutorRoutes(r)
-			// Данные, которые исполнитель отправляет на проверку по скриптовой услуге, —
-			// проверка личности в заказе верификации.
-			r.Post("/executor/orders/{id}/submission", bhh.SubmitOrderData)
-			r.Post("/executor/orders/{id}/bids", bh.CreateBidHandler)
-			// Заявка на собственную верификацию — заказ на услугу верификации,
-			// который берёт модератор.
-			r.Get("/executor/verification", evh.GetStatus)
-			r.Post("/executor/verification", evh.Request)
-			r.Post("/executor/verification/cancel", evh.Cancel)
-			// Геймификация: значки, уровень со ставкой комиссии и подарки.
-			// Уровень со ставкой и очередью привилегий — GET /me/perks в общей группе.
-			r.Get("/executor/achievements", ach.GetAchievements)
-			r.Get("/executor/gifts", ach.GetGifts)
-			r.Post("/executor/gifts/{id}/reveal", ach.RevealGift)
-		})
-
-		// Аутентифицированные маршруты админа.
-		//
-		// Группу открывает не роль ADMIN, а наличие хоть одного права в разделах
-		// панели: роль «финансист» с одной галочкой «сверка» обязана дойти до
-		// своей страницы. Что именно ей там можно, решает право на каждом
-		// маршруте — раздел плюс действие, из каталога service/permission.go.
-		// Администратор проходит любую из этих проверок: он суперпользователь, и
-		// снятая где-то галочка не должна уметь запереть его снаружи панели.
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware.RequireAuth)
-			r.Use(authMiddleware.RequireAdminPanel)
-			can := authMiddleware.RequirePermission
-
-			r.With(can("shifts.view")).Get("/admin/geo-alerts", egh.GetGeoAlerts)
-			r.With(can("users.view")).Get("/admin/users", ah.GetUsersHandler)
-			r.With(can("users.edit")).Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
-			r.With(can("users.edit")).Post("/admin/users/{id}/verified", ah.UpdateUserVerifiedHandler)
-			// Роль пользователя меняется на его карточке, но это раздача прав,
-			// поэтому охраняется правом на роли, а не правом на пользователей.
-			r.With(can("roles.edit")).Post("/admin/users/{id}/role", ah.UpdateUserRoleHandler)
-			r.With(can("roles.edit")).Post("/admin/users/{id}/roles", ah.UpdateUserRolesHandler)
-			r.With(can("users.edit")).Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
-			r.With(can("users.edit")).Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
-			r.With(can("users.edit")).Post("/admin/users/{id}/birth-date", ah.UpdateUserBirthDateHandler)
-			// Прямое зачисление с карточки — движение денег, а не правка карточки:
-			// охраняется тем же правом, что одобрение заявок на пополнение.
-			r.With(can("topups.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
-			// Истории с карточки пользователя. Охраняются правом на тот раздел,
-			// который они показывают, а не правом на пользователей: кто не допущен
-			// к журналу проводок, не должен читать его и здесь.
-			r.With(can("transactions.view")).Get("/admin/users/{id}/transactions", ah.GetUserTransactionsHandler)
-			r.With(can("orders.view")).Get("/admin/users/{id}/orders", ah.GetUserOrdersHandler)
-
-			// Роли и права.
-			r.Get("/admin/permissions", rolh.GetPermissionCatalog)
-			r.With(can("roles.view")).Get("/admin/roles", rolh.ListRoles)
-			r.With(can("roles.create")).Post("/admin/roles", rolh.CreateRole)
-			r.With(can("roles.edit")).Put("/admin/roles/{code}", rolh.UpdateRole)
-			r.With(can("roles.delete")).Delete("/admin/roles/{code}", rolh.DeleteRole)
-			r.With(can("roles.view")).Get("/admin/roles/{code}/users", rolh.ListRoleUsers)
-			r.With(can("roles.edit")).Post("/admin/roles/{code}/users", rolh.AssignRole)
-			r.With(can("roles.edit")).Delete("/admin/roles/{code}/users/{user_id}", rolh.UnassignRole)
-
-			r.With(can("topups.view")).Get("/admin/finances/topups", ah.GetTopUpRequestsHandler)
-			r.With(can("topups.edit")).Post("/admin/finances/topups/{id}/approve", ah.ApproveTopUpRequestsHandler)
-			r.With(can("topups.edit")).Post("/admin/finances/topups/{id}/reject", ah.RejectTopUpRequestsHandler)
-			r.With(can("withdrawals.view")).Get("/admin/finances/withdrawals", ah.GetWithdrawalRequestsHandler)
-			r.With(can("withdrawals.edit")).Post("/admin/finances/withdrawals/{id}/approve", ah.ApproveWithdrawalRequestsHandler)
-			r.With(can("withdrawals.edit")).Post("/admin/finances/withdrawals/{id}/reject", ah.RejectWithdrawalRequestsHandler)
-			r.With(can("commission.view")).Get("/admin/finances/commission", ah.GetCommissionHandler)
-			r.With(can("commission.edit")).Post("/admin/finances/commission/payout", ah.PayoutCommissionHandler)
-			r.With(can("transactions.view")).Get("/admin/transactions", ah.GetTransactionsHandler)
-			r.With(can("reconciliation.view")).Get("/admin/finances/reconciliation", ah.GetReconciliationHandler)
-			r.With(can("settings.view")).Get("/admin/settings", ah.GetSettingsHandler)
-			r.With(can("settings.edit")).Post("/admin/settings", ah.UpdateSettingsHandler)
-			r.With(can("support_chats.view")).Get("/admin/support/chats", ch.GetAdminSupportChatListHandler)
-			r.With(can("support_chats.view")).Get("/admin/support/unread-summary", ch.GetAdminSupportUnreadSummaryHandler)
-			r.With(can("support_chats.edit")).Post("/admin/support/chats/{chat_id}/ban", ch.BanSupportChatHandler)
-			r.With(can("support_chats.edit")).Post("/admin/support/chats/{chat_id}/unban", ch.UnbanSupportChatHandler)
-			r.With(can("shifts.view")).Get("/admin/shifts/active", ah.GetActiveShiftsHandler)
-			r.With(can("orders.view")).Get("/admin/orders", ah.GetOrdersHandler)
-			r.With(can("orders.edit")).Post("/admin/orders/{id}/return-to-work", oh.ReturnToWork)
-			r.With(can("escalations.view")).Get("/admin/escalations", bhh.ListEscalations)
-			r.With(can("escalations.edit")).Post("/admin/escalations/{id}/resolve", bhh.ResolveEscalation)
-			r.With(can("users.view")).Get("/admin/users/{id}/penalties", pnh.AdminUserPenalties)
-			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/reset-silent-flag", pnh.AdminResetSilentBlockFlag)
-			r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/{point_id}/revoke", pnh.AdminRevokePoint)
-			r.With(can("disputes.view")).Get("/admin/disputes", dh.ListDisputes)
-			r.With(can("disputes.view")).Get("/admin/disputes/{id}/evidence", dh.DisputeEvidence)
-			r.With(can("disputes.edit")).Post("/admin/disputes/{id}/resolve", dh.ResolveDispute)
-			r.With(can("service_catalog.view")).Get("/admin/service-behaviors", sch.AdminListBehaviors)
-			r.With(can("service_catalog.view")).Get("/admin/service-nodes", sch.AdminListNodes)
-			r.With(can("service_catalog.view")).Get("/admin/service-nodes/{id}", sch.AdminGetNode)
-			r.With(can("service_catalog.create")).Post("/admin/service-nodes", sch.AdminCreateNode)
-			r.With(can("service_catalog.edit")).Put("/admin/service-nodes/{id}", sch.AdminUpdateNode)
-			r.With(can("service_catalog.delete")).Delete("/admin/service-nodes/{id}", sch.AdminDeleteNode)
-			r.With(can("service_catalog.edit")).Post("/admin/service-nodes/{id}/restore", sch.AdminRestoreNode)
-			r.With(can("releases.create")).Post("/admin/app-releases", arh.UploadReleaseHandler)
-			r.With(can("broadcasts.create")).Post("/admin/broadcast-email", ah.SendBroadcastEmailHandler)
-			r.With(can("achievements.view")).Get("/admin/achievements", ach.AdminListAchievements)
-			r.With(can("achievements.create")).Post("/admin/achievements", ach.AdminCreateAchievement)
-			r.With(can("achievements.edit")).Put("/admin/achievements/{code}", ach.AdminUpdateAchievement)
-			r.With(can("achievements.delete")).Delete("/admin/achievements/{code}", ach.AdminDeleteAchievement)
-			r.With(can("achievements.edit")).Post("/admin/achievements/{code}/restore", ach.AdminRestoreAchievement)
-			r.With(can("achievements.delete")).Post("/admin/achievements/grants/{id}/revoke", ach.AdminRevokeAchievement)
-			r.With(can("achievements.view")).Get("/admin/users/{id}/achievements", ach.AdminUserAchievements)
-			r.With(can("achievements.edit")).Post("/admin/users/{id}/stats/recalculate", ach.AdminRecalculateStats)
-			// Пересчёт — правка: он ничего не придумывает, а доводит выданное до
-			// того, что и так следует из правил. Выдача вручную — создание: она
-			// правило обходит.
-			r.With(can("achievements.edit")).Post("/admin/users/{id}/achievements/recheck", ach.AdminRecheckUserAchievements)
-			r.With(can("achievements.create")).Post("/admin/users/{id}/achievements/{code}", ach.AdminGrantAchievement)
-			r.With(can("gifts.view")).Get("/admin/gifts", ach.AdminListGifts)
-			r.With(can("gifts.edit")).Put("/admin/gifts/{code}", ach.AdminSaveGift)
-			r.With(can("gifts.create")).Post("/admin/gifts/{code}/codes", ach.AdminAddGiftCodes)
-			r.With(can("gifts.edit")).Post("/admin/gifts/coupons/{coupon}/redeem", ach.AdminRedeemCoupon)
-			mh.RegisterAdminRoutes(r, can)
-			pph.RegisterAdminRoutes(r, can)
-			r.With(can("incidents.view")).Get("/admin/finances/incidents", ach.AdminListIncidents)
-			r.With(can("incidents.edit")).Post("/admin/finances/incidents/{id}/resolve", ach.AdminResolveIncident)
-			shh.RegisterAdminRoutes(r, can)
-			pah.RegisterAdminRoutes(r, can)
-		})
+	handlers := appHandlers{
+		public:   handler.NewPublicHandler(authService).WithPermissions(permissions).WithPassports(passportService),
+		passport: handler.NewPassportHandler(passportService),
+		admin:    handler.NewAdminHandler(adminService),
+		profile:  handler.NewProfileHandler(profileService),
+		wallet:   handler.NewWalletHandler(walletService),
+		roles:    handler.NewRoleHandler(roleService),
+		orders:   handler.NewOrderHandler(orderService),
+		executorVerification: handler.NewExecutorVerificationHandler(service.NewExecutorVerificationService(
+			userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService, ledger)),
+		shifts:         handler.NewShiftHandler(shiftService),
+		bids:           handler.NewBidHandler(bidService, orderService),
+		chat:           handler.NewChatHandler(chatService, uploadsDir).WithShopLinks(shopOrders.ShopOrderLinks),
+		shop:           handler.NewShopHandler(shop, shopCatalog, shopOrders, perkGrants, perkRules, uploadsDir),
+		geo:            handler.NewGeoHandler(addressSuggester),
+		serviceCatalog: handler.NewServiceCatalogHandler(serviceCatalog, serviceCatalogAdmin),
+		appReleases:    handler.NewAppReleaseHandler(appReleases),
+		reviews:        handler.NewReviewHandler(reviewService),
+		executorGeo:    handler.NewExecutorGeoHandler(executorGeoService),
+		behavior:       handler.NewBehaviorHandler(orderSubmissions),
+		disputes:       handler.NewDisputeHandler(disputeService),
+		penalties:      handler.NewPenaltyHandler(penaltyService),
+		photoProof:     photoproof.NewHandler(photoProofService, handler.CallerID),
+		mail:           handler.NewMailHandler(mailService),
+		achievements:   handler.NewAchievementHandler(achievementCatalog, giftCatalog, moneyIncidents, achievementDispatcher),
 	}
-
-	// Основное монтирование: /api/* (веб через nginx + пересобранное мобильное приложение).
-	r.Route("/api", registerAPIRoutes)
 
 	// Легаси-монтирование: тот же API в корне, для установленных APK, появившихся
 	// раньше префикса /api. По умолчанию выключено — снаружи до этих путей всё
 	// равно не дотянуться: nginx проксирует только /api/, /health, /releases/ и
 	// /uploads/, а обычный HTTP-порт, с которым они общались, больше не
 	// публикуется. Ставьте LEGACY_ROOT_ROUTES=1 только если старого клиента снова пустили в сеть.
-	if getEnv("LEGACY_ROOT_ROUTES", "0") == "1" {
+	legacyRoot := getEnv("LEGACY_ROOT_ROUTES", "0") == "1"
+	if legacyRoot {
 		log.Println("LEGACY_ROOT_ROUTES enabled: the API is also served without the /api prefix, doubling the exposed surface.")
-		registerAPIRoutes(r)
 	}
-
-	// APK релизов публичны по замыслу. Загруженные вложения чата — нет:
-	// их отдаёт аутентифицированный обработчик, проверяющий, что вызывающий
-	// участвует в переписке, которой принадлежит файл.
-	r.Get("/releases/*", http.StripPrefix("/releases/", http.FileServer(http.Dir(getEnv("RELEASES_DIR", "releases")))).ServeHTTP)
-	// Изображения витрины публичны, в отличие от вложений чата: у них свой
-	// маршрут, отдающий только файлы, которые сервер назвал сам.
-	r.Get("/uploads/shop/{name}", shh.ServeImage)
-	r.Get("/api/uploads/shop/{name}", shh.ServeImage)
-	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware.RequireAuth)
-		r.Get("/uploads/*", ch.ServeAttachmentHandler)
-		r.Get("/api/uploads/*", ch.ServeAttachmentHandler)
+	r := newRouter(handlers, routerConfig{
+		auth:         authMiddleware,
+		allowsOrigin: origins.Allows,
+		limits: limiters{
+			login:         middleware.NewRateLimiter(10, time.Minute),
+			passwordReset: middleware.NewRateLimiter(5, 15*time.Minute),
+			register:      middleware.NewRateLimiter(5, time.Hour),
+			geo:           middleware.NewRateLimiter(30, time.Minute),
+			refresh:       middleware.NewRateLimiter(120, time.Minute),
+			shopPurchase:  middleware.NewRateLimiter(30, time.Minute),
+		},
+		releasesDir:  releasesDir,
+		legacyRoot:   legacyRoot,
+		maxBodyBytes: 1 << 20,
 	})
 
 	// Цель сбора для Prometheus. Привязана только к сети compose: nginx её не
@@ -865,28 +606,6 @@ func configurePool(db *sql.DB) {
 	log.Printf("[db] pool limited to %d open connections", maxOpen)
 }
 
-// corsMiddleware отвечает на CORS по тому же набору источников, что и
-// проверка Origin у WebSocket чата: оба получают один origins.
-func corsMiddleware(origins *service.AllowedOrigins) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-			if origins.Allows(origin) {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Vary", "Origin")
-			}
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // smtpConfigFromEnv собирает параметры SMTP из окружения. Пустой SMTP_HOST
 // означает «почты нет»: письма отказывают, а не уходят в никуда.
 func smtpConfigFromEnv() service.SmtpConfig {
@@ -902,6 +621,18 @@ func smtpConfigFromEnv() service.SmtpConfig {
 
 // getEnv — dbconn.Env: один ридер окружения на все бинарники.
 func getEnv(key, fallback string) string { return dbconn.Env(key, fallback) }
+
+// authCacheTTLFromEnv читает AUTH_CACHE_TTL_SEC (по умолчанию 5 с). Ноль —
+// допустимое значение, выключающее кэш, поэтому не getEnvInt.
+func authCacheTTLFromEnv() time.Duration {
+	if v := os.Getenv("AUTH_CACHE_TTL_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+		log.Printf("[config] AUTH_CACHE_TTL_SEC=%q is not a non-negative integer, using 5", v)
+	}
+	return 5 * time.Second
+}
 
 // getEnvInt читает положительную целочисленную настройку, откатываясь к
 // умолчанию, если она не задана или не разбирается. Кривое значение забирает

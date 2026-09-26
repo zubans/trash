@@ -76,7 +76,7 @@ func (m *mockRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUI
 	return found, nil
 }
 
-func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+func (m *mockRepo) UpdateStatus(ctx context.Context, q repository.Querier, id uuid.UUID, status string) error {
 	for _, u := range m.users {
 		if u.ID == id {
 			u.Status = status
@@ -84,6 +84,14 @@ func (m *mockRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string
 		}
 	}
 	return sql.ErrNoRows
+}
+
+func (m *mockRepo) SetChecked(ctx context.Context, q repository.Querier, id uuid.UUID, checked bool, by uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRepo) SetPDConsent(ctx context.Context, q repository.Querier, id uuid.UUID, version int) error {
+	return nil
 }
 
 func (m *mockRepo) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {
@@ -692,9 +700,9 @@ func TestUserChangesBirthDateOnlyBeforeVerification(t *testing.T) {
 	}
 }
 
-// tokenRepo подменяет ответ VerifyEmailToken: и старый текст репозитория, и
-// его сентинел обязаны стать одной ошибкой сервиса, на которую обработчик
-// смотрит через errors.Is.
+// tokenRepo подменяет ответ VerifyEmailToken: сентинел репозитория обязан
+// стать ошибкой сервиса, на которую обработчик смотрит через errors.Is, а
+// сбой базы — остаться сбоем.
 type tokenRepo struct {
 	*mockRepo
 	err error
@@ -709,10 +717,8 @@ func TestVerifyEmailMapsRepositoryErrorsToSentinels(t *testing.T) {
 		repoErr error
 		want    error
 	}{
-		"legacy text":      {errors.New("verification_token_expired"), ErrVerificationTokenExpired},
 		"expired sentinel": {repository.ErrVerificationTokenExpired, ErrVerificationTokenExpired},
 		"invalid sentinel": {repository.ErrVerificationTokenInvalid, ErrVerificationTokenInvalid},
-		"legacy invalid":   {errors.New("invalid or expired verification token (valid 60m)"), ErrVerificationTokenInvalid},
 		"database failure": {errors.New("connection reset"), nil},
 	} {
 		t.Run(name, func(t *testing.T) {

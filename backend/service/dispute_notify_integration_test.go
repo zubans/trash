@@ -27,7 +27,7 @@ func (f *fakeEmailSender) SendEmail(to, subject, body string) error {
 
 func mailbox(t *testing.T, f *disputeFixture, userID uuid.UUID) []*repository.Mail {
 	t.Helper()
-	mails, err := repository.NewMailRepository(f.db).ListForUser(context.Background(), userID, 50)
+	mails, err := repository.NewMailRepository(f.db).ListForUser(context.Background(), userID, 50, 0)
 	if err != nil {
 		t.Fatalf("mailbox: %v", err)
 	}

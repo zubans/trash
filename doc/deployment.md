@@ -59,6 +59,8 @@ make monitoring-up
 | `ACCEPT_RADIUS_KM` | Радиус (в км), в пределах которого исполнитель может взять заказ в работу | `0.5` (500 м) |
 | `UPLOADS_DIR` | Директория монтирования persistent volume для хранения изображений и файлов чата | `/app/uploads` |
 | `RELEASES_DIR` | Директория для хранения релизных APK файлов | `releases` |
+| `AUTH_CACHE_TTL_SEC` | Срок кэша пользователя в middleware аутентификации, секунд; `0` выключает кэш. Читается один раз в `main.go` | `5` |
+| `LEGACY_ROOT_ROUTES` | `1` — API монтируется ещё и в корне, без префикса `/api` (для старых APK) | `0` |
 | `SMTP_HOST` | Хост внутреннего почтового сервера (Maddy), к которому подключается backend | `mailserver` |
 | `SMTP_PORT` | Порт подключения SMTP Submission к Maddy | `587` |
 | `SMTP_USER` | Логин backend во внутреннем Maddy | `system@moya-usluga.ru` |

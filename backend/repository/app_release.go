@@ -29,6 +29,9 @@ type AppReleaseRepository interface {
 	GetNextVersionCode(ctx context.Context, platform string) (int, error)
 	CreateRelease(ctx context.Context, release *AppRelease) error
 	DeactivateOldReleases(ctx context.Context, platform string, excludeID uuid.UUID) error
+	// Publish записывает релиз и снимает активность с прежних релизов платформы
+	// одной транзакцией: два активных релиза или новый неактивный невозможны.
+	Publish(ctx context.Context, release *AppRelease) error
 }
 
 type appReleaseRepo struct {
@@ -99,6 +102,10 @@ func (r *appReleaseRepo) GetNextVersionCode(ctx context.Context, platform string
 }
 
 func (r *appReleaseRepo) CreateRelease(ctx context.Context, release *AppRelease) error {
+	return r.createRelease(ctx, r.db, release)
+}
+
+func (r *appReleaseRepo) createRelease(ctx context.Context, q Querier, release *AppRelease) error {
 	if release.ID == uuid.Nil {
 		release.ID = uuid.New()
 	}
@@ -108,7 +115,7 @@ func (r *appReleaseRepo) CreateRelease(ctx context.Context, release *AppRelease)
 	query := `
 		INSERT INTO mobile_app_releases (id, platform, version_name, version_code, file_name, file_path, release_notes, is_active, force_update, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := q.ExecContext(ctx, query,
 		release.ID, release.Platform, release.VersionName, release.VersionCode,
 		release.FileName, release.FilePath, release.ReleaseNotes, release.IsActive,
 		release.ForceUpdate, release.CreatedAt,
@@ -117,9 +124,22 @@ func (r *appReleaseRepo) CreateRelease(ctx context.Context, release *AppRelease)
 }
 
 func (r *appReleaseRepo) DeactivateOldReleases(ctx context.Context, platform string, excludeID uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx,
+	return r.deactivateOldReleases(ctx, r.db, platform, excludeID)
+}
+
+func (r *appReleaseRepo) deactivateOldReleases(ctx context.Context, q Querier, platform string, excludeID uuid.UUID) error {
+	_, err := q.ExecContext(ctx,
 		`UPDATE mobile_app_releases SET is_active = FALSE WHERE platform = $1 AND id <> $2`,
 		platform, excludeID,
 	)
 	return err
+}
+
+func (r *appReleaseRepo) Publish(ctx context.Context, release *AppRelease) error {
+	return runInTx(ctx, r.db, func(tx *sql.Tx) error {
+		if err := r.createRelease(ctx, tx, release); err != nil {
+			return err
+		}
+		return r.deactivateOldReleases(ctx, tx, release.Platform, release.ID)
+	})
 }

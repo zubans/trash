@@ -69,10 +69,10 @@ type MoneyIncidentRepository interface {
 	// вызывается внутри той же транзакции, что и зажатое движение: инцидент не
 	// должен закоммититься без него, а движение — без инцидента.
 	Record(ctx context.Context, q Querier, incident *MoneyIncident) error
-	// ListOpen возвращает неразобранные инциденты, свежие первыми.
-	ListOpen(ctx context.Context, limit int) ([]*MoneyIncident, error)
-	// List возвращает все инциденты, включая разобранные.
-	List(ctx context.Context, limit int) ([]*MoneyIncident, error)
+	// ListOpen возвращает страницу неразобранных инцидентов, свежие первыми.
+	ListOpen(ctx context.Context, limit, offset int) ([]*MoneyIncident, error)
+	// List возвращает страницу всех инцидентов, включая разобранные.
+	List(ctx context.Context, limit, offset int) ([]*MoneyIncident, error)
 	// Resolve закрывает инцидент разбором администратора.
 	Resolve(ctx context.Context, id, adminID uuid.UUID, resolution string) error
 	// CountOpen — число неразобранных. Его публикует датчик, на который повешен
@@ -122,17 +122,20 @@ func amountPtr(a *money.Amount) interface{} {
 	return int64(*a)
 }
 
-func (r *moneyIncidentRepo) ListOpen(ctx context.Context, limit int) ([]*MoneyIncident, error) {
-	return r.list(ctx, limit, true)
+func (r *moneyIncidentRepo) ListOpen(ctx context.Context, limit, offset int) ([]*MoneyIncident, error) {
+	return r.list(ctx, limit, offset, true)
 }
 
-func (r *moneyIncidentRepo) List(ctx context.Context, limit int) ([]*MoneyIncident, error) {
-	return r.list(ctx, limit, false)
+func (r *moneyIncidentRepo) List(ctx context.Context, limit, offset int) ([]*MoneyIncident, error) {
+	return r.list(ctx, limit, offset, false)
 }
 
-func (r *moneyIncidentRepo) list(ctx context.Context, limit int, openOnly bool) ([]*MoneyIncident, error) {
+func (r *moneyIncidentRepo) list(ctx context.Context, limit, offset int, openOnly bool) ([]*MoneyIncident, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	query := `
         SELECT id, kind, severity, order_id, user_id, expected, actual, applied,
@@ -141,9 +144,9 @@ func (r *moneyIncidentRepo) list(ctx context.Context, limit int, openOnly bool) 
 	if openOnly {
 		query += ` WHERE resolved_at IS NULL`
 	}
-	query += ` ORDER BY created_at DESC LIMIT $1`
+	query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.QueryContext(ctx, query, limit)
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}

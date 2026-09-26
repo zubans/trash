@@ -25,7 +25,7 @@ func newScriptTestEnv(t *testing.T) (*catalogTestEnv, *service.Behaviors) {
 
 	engine := behavior.New(behavior.DefaultLimits)
 	behaviors := service.NewBehaviors(engine, nil).WithCatalog(env.repo)
-	h := NewServiceCatalogHandler(env.repo).WithBehaviors(behaviors)
+	h := newCatalogHandler(env.repo, behaviors)
 
 	r := chi.NewRouter()
 	r.Get("/admin/service-behaviors", h.AdminListBehaviors)
@@ -178,7 +178,7 @@ func TestOrdinaryCatalogDoesNotTouchTheBehaviorStores(t *testing.T) {
 	claims := &countingClaims{}
 	behaviors = service.NewBehaviors(behaviors.Engine(), claims).WithCatalog(env.repo)
 
-	h := NewServiceCatalogHandler(env.repo).WithBehaviors(behaviors)
+	h := newCatalogHandler(env.repo, behaviors)
 	r := chi.NewRouter()
 	r.Get("/service-variants", h.ListVariants)
 	env.router = r

@@ -144,7 +144,7 @@ func TestWebSocketHandler_ConnectionOutlivesRequestContext(t *testing.T) {
 	customerID := uuid.New()
 	order := &repository.Order{ID: uuid.New(), CustomerID: customerID, Status: "ASSIGNED"}
 	chatRepo := &fakeChatRepo{}
-	h := NewChatHandler(service.NewChatService(chatRepo, &fakeOrderRepo{order: order}))
+	h := NewChatHandler(service.NewChatService(chatRepo, &fakeOrderRepo{order: order}), t.TempDir())
 	user := &repository.User{ID: customerID, Role: repository.RoleCustomer}
 
 	// Контекст запроса, каким его видел обработчик: тест дождётся его отмены,
@@ -197,7 +197,7 @@ func TestWebSocketHandler_ConnectionOutlivesRequestContext(t *testing.T) {
 }
 
 func newSupportChatHandler(repo *fakeChatRepo) *ChatHandler {
-	return NewChatHandler(service.NewChatService(repo, &fakeOrderRepo{}))
+	return NewChatHandler(service.NewChatService(repo, &fakeOrderRepo{}), "")
 }
 
 // supportRequest собирает запрос к маршруту чата поддержки от имени user.

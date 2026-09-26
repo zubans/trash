@@ -15,7 +15,7 @@ import (
 )
 
 func newIntegrationPenaltyService(db *sql.DB, srv *OrderService) *PenaltyService {
-	return NewPenaltyService(repository.NewPenaltyRepository(db), srv.settingsRepo, srv.ledger)
+	return NewPenaltyService(repository.NewPenaltyRepository(db), repository.New(db), srv.settingsRepo, srv.ledger)
 }
 
 func (f *disputeFixture) cleanupPenalties(t *testing.T) {

@@ -55,7 +55,7 @@ func assignedOrder(t *testing.T, srv *OrderService, db *sql.DB, customerID, vari
 
 func TestPhotoProofRequirementIntegration(t *testing.T) {
 	db := openTestDB(t)
-	penalties := NewPenaltyService(repository.NewPenaltyRepository(db), repository.NewSettingsRepository(db), nil)
+	penalties := NewPenaltyService(repository.NewPenaltyRepository(db), repository.New(db), repository.NewSettingsRepository(db), nil)
 	proof := photoproof.NewService(photoproof.NewSymbolRepository(db))
 	srv := newIntegrationOrderService(db).WithPenalties(penalties).WithPhotoProof(proof)
 	ctx := context.Background()

@@ -1,168 +1,88 @@
 package handler
 
 import (
-	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strconv"
-	"strings"
 
-	"github.com/google/uuid"
+	"github.com/go-chi/chi/v5"
 
-	"healthlogin/backend/repository"
+	"healthlogin/backend/middleware"
+	"healthlogin/backend/service"
+	"healthlogin/backend/upload"
 )
 
 // AppReleaseHandler обслуживает HTTP-эндпоинты релизов мобильного приложения.
 type AppReleaseHandler struct {
-	releaseRepo repository.AppReleaseRepository
-	releasesDir string
-	baseURL     string
+	releases *service.AppReleases
 }
 
 // NewAppReleaseHandler создаёт AppReleaseHandler.
-func NewAppReleaseHandler(releaseRepo repository.AppReleaseRepository, releasesDir, baseURL string) *AppReleaseHandler {
-	if releasesDir == "" {
-		releasesDir = "releases"
-	}
-	return &AppReleaseHandler{releaseRepo: releaseRepo, releasesDir: releasesDir, baseURL: baseURL}
+func NewAppReleaseHandler(releases *service.AppReleases) *AppReleaseHandler {
+	return &AppReleaseHandler{releases: releases}
 }
 
-// GetVersionHandler обслуживает GET /app/version.
+// RegisterPublicRoutes — проверка версии приложением.
+func (h *AppReleaseHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Get("/app/version", h.GetVersionHandler)
+}
+
+// RegisterAdminRoutes — публикация релиза.
+func (h *AppReleaseHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("releases.create")).Post("/admin/app-releases", h.UploadReleaseHandler)
+}
+
+// GetVersionHandler обслуживает GET /app/version?platform=.
 func (h *AppReleaseHandler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
-	platform := r.URL.Query().Get("platform")
-	if platform == "" {
-		http.Error(w, "platform is required", http.StatusBadRequest)
-		return
-	}
-
-	release, err := h.releaseRepo.GetActiveRelease(r.Context(), platform)
+	info, err := h.releases.Version(r.Context(), r.URL.Query().Get("platform"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Нет платформы — 400 с текстом, как и раньше; нет релиза — 404.
+		writeCatalogError(w, err)
 		return
 	}
-	if release == nil {
-		http.Error(w, "no active release found", http.StatusNotFound)
-		return
-	}
-
-	downloadURL := release.FilePath
-	if h.baseURL != "" {
-		downloadURL = h.baseURL + release.FilePath
-	}
-
-	writeJSON(w, map[string]interface{}{
-		"version_name":  release.VersionName,
-		"version_code":  release.VersionCode,
-		"download_url":  downloadURL,
-		"force_update":  release.ForceUpdate,
-		"release_notes": release.ReleaseNotes,
-	})
+	writeJSON(w, http.StatusOK, info)
 }
-
-// allowedPlatforms ограничивает каталожную часть сохраняемого пути.
-var allowedPlatforms = map[string]bool{"android": true}
-
-// versionNamePattern не даёт версии управлять именем файла: без него «../../..»
-// в platform или version_name записывал загруженный файл куда угодно в
-// файловой системе.
-var versionNamePattern = regexp.MustCompile(`^[0-9A-Za-z._\-]{1,64}$`)
 
 // maxReleaseBytes ограничивает размер загружаемого APK.
 const maxReleaseBytes = 300 << 20
 
-// UploadReleaseHandler обслуживает POST /admin/app-releases.
+// apkTypes — APK есть zip; ничего другого под именем релиза не сохраняется.
+var apkTypes = map[string]string{"application/zip": ".apk"}
+
+// UploadReleaseHandler обслуживает POST /admin/app-releases (multipart:
+// platform, version_name, version_code, release_notes, force_update, apk).
 func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.Request) {
+	// Потолок ставится до первого чтения формы: имя файла зависит от версии,
+	// поэтому поля читаются раньше файла, а форма разбирается один раз.
 	r.Body = http.MaxBytesReader(w, r.Body, maxReleaseBytes)
-	platform := r.FormValue("platform")
-	versionName := r.FormValue("version_name")
 	versionCode, err := strconv.Atoi(r.FormValue("version_code"))
 	if err != nil {
 		http.Error(w, "invalid version_code", http.StatusBadRequest)
 		return
 	}
-	releaseNotes := r.FormValue("release_notes")
-	forceUpdate := r.FormValue("force_update") == "true"
-
-	if !allowedPlatforms[platform] {
-		http.Error(w, "unsupported platform", http.StatusBadRequest)
-		return
-	}
-	if !versionNamePattern.MatchString(versionName) {
-		http.Error(w, "invalid version_name", http.StatusBadRequest)
-		return
-	}
-	if versionCode <= 0 {
-		http.Error(w, "invalid version_code", http.StatusBadRequest)
-		return
-	}
-
-	file, _, err := r.FormFile("apk")
-	if err != nil {
-		http.Error(w, "apk file required", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	fileName := fmt.Sprintf("app-release-%s-%d.apk", versionName, versionCode)
-	filePath := filepath.Join("releases", platform, fileName)
-	fullPath := filepath.Join(h.releasesDir, filePath)
-
-	// Эшелонированная защита: разрешённый путь обязан остаться внутри корня релизов.
-	base, err := filepath.Abs(h.releasesDir)
-	if err != nil {
-		http.Error(w, "invalid releases directory", http.StatusInternalServerError)
-		return
-	}
-	abs, err := filepath.Abs(fullPath)
-	if err != nil {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-	if rel, err := filepath.Rel(base, abs); err != nil || strings.HasPrefix(rel, "..") {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	out, err := os.Create(fullPath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, file); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	release := &repository.AppRelease{
-		ID:           uuid.New(),
-		Platform:     platform,
-		VersionName:  versionName,
+	form := service.ReleaseForm{
+		Platform:     r.FormValue("platform"),
+		VersionName:  r.FormValue("version_name"),
 		VersionCode:  versionCode,
-		FileName:     fileName,
-		FilePath:     "/" + filepath.ToSlash(filePath),
-		ReleaseNotes: releaseNotes,
-		ForceUpdate:  forceUpdate,
-		IsActive:     true,
+		ReleaseNotes: r.FormValue("release_notes"),
+		ForceUpdate:  r.FormValue("force_update") == "true",
 	}
-
-	if err := h.releaseRepo.CreateRelease(r.Context(), release); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	dir, name, err := h.releases.Target(form)
+	if err != nil {
+		writeCatalogError(w, err)
 		return
 	}
-
-	// Держим по одному активному релизу на платформу.
-	_ = h.releaseRepo.DeactivateOldReleases(r.Context(), platform, release.ID)
-
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, release)
+	saved, err := upload.Save(w, r, upload.Options{
+		Field: "apk", Dir: dir, Name: name,
+		Accept: upload.ByContent(apkTypes, "apk file required"),
+	})
+	if err != nil {
+		writeUploadError(w, err, "apk file required")
+		return
+	}
+	release, err := h.releases.Publish(r.Context(), adminID(middleware.UserFrom(r)), form, saved.Path)
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, release)
 }

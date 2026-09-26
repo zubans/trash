@@ -101,6 +101,9 @@ type GiftRepository interface {
 	AddCodes(ctx context.Context, giftCode string, secrets []string) (int, error)
 	// CountFreeCodes сообщает остаток пула — для админского экрана.
 	CountFreeCodes(ctx context.Context, giftCode string) (int, error)
+	// CountFreeCodesByGift — остатки всех пулов одним запросом, по коду
+	// подарка. Список подарков не должен стоить запроса на каждый сертификат.
+	CountFreeCodesByGift(ctx context.Context) (map[string]int, error)
 
 	// Issue выдаёт подарок в транзакции вызывающего: занимает код или единицу
 	// склада и создаёт купон. Возвращает ErrGiftUnavailable, когда брать нечего.
@@ -267,6 +270,25 @@ func (r *giftRepo) CountFreeCodes(ctx context.Context, giftCode string) (int, er
 	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM gift_codes WHERE gift_code = $1 AND issued_to IS NULL`, giftCode).Scan(&count)
 	return count, err
+}
+
+func (r *giftRepo) CountFreeCodesByGift(ctx context.Context) (map[string]int, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT gift_code, COUNT(*) FROM gift_codes WHERE issued_to IS NULL GROUP BY gift_code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var code string
+		var count int
+		if err := rows.Scan(&code, &count); err != nil {
+			return nil, err
+		}
+		out[code] = count
+	}
+	return out, rows.Err()
 }
 
 func (r *giftRepo) Issue(ctx context.Context, q Querier, gift *Gift, userID uuid.UUID, achievementID *uuid.UUID) (*UserGift, error) {

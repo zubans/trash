@@ -474,6 +474,9 @@ func (m *mockCatalogRepo) GetRootCategories(ctx context.Context, filter reposito
 func (m *mockCatalogRepo) GetChildren(ctx context.Context, parentID uuid.UUID, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
+func (m *mockCatalogRepo) ListAll(ctx context.Context, filter repository.ServiceNodeFilter) ([]*repository.ServiceNode, error) {
+	return nil, nil
+}
 func (m *mockCatalogRepo) GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*repository.ServiceNode, error) {
 	return nil, nil
 }
@@ -609,7 +612,15 @@ func (m *mockUserRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid
 	}
 	return found, nil
 }
-func (m *mockUserRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+func (m *mockUserRepo) UpdateStatus(ctx context.Context, q repository.Querier, id uuid.UUID, status string) error {
+	return nil
+}
+
+func (m *mockUserRepo) SetChecked(ctx context.Context, q repository.Querier, id uuid.UUID, checked bool, by uuid.UUID) error {
+	return nil
+}
+
+func (m *mockUserRepo) SetPDConsent(ctx context.Context, q repository.Querier, id uuid.UUID, version int) error {
 	return nil
 }
 func (m *mockUserRepo) UpdateVerified(ctx context.Context, q repository.Querier, id uuid.UUID, verified bool) error {

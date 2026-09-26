@@ -18,12 +18,14 @@ func userStatus(t *testing.T, db *sql.DB, id interface{}) string {
 	return status
 }
 
-// Мягкий бан ставится вместе с причиной и снимается вместе с ней; флаг прошлой
-// тихой блокировки снятие не трогает.
+// Мягкий бан — два шага в одной транзакции вызывающего: статус ставит
+// UserRepository.UpdateStatus, причину пишет ApplySoftBan. Снятие симметрично;
+// флаг прошлой тихой блокировки оно не трогает.
 func TestPenaltyRepository_SoftBan(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
 	repo := repository.NewPenaltyRepository(db)
+	users := repository.New(db)
 	ctx := context.Background()
 
 	userID := createTestUser(t, db, "EXECUTOR")
@@ -33,6 +35,9 @@ func TestPenaltyRepository_SoftBan(t *testing.T) {
 		t.Fatalf("seed flags: %v", err)
 	}
 
+	if err := users.UpdateStatus(ctx, nil, userID, repository.UserStatusSoftBanned); err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	if err := repo.ApplySoftBan(ctx, nil, userID, &adminID, "обход правил"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -47,6 +52,9 @@ func TestPenaltyRepository_SoftBan(t *testing.T) {
 		t.Fatalf("soft ban not recorded: %+v", flags)
 	}
 
+	if err := users.UpdateStatus(ctx, nil, userID, repository.UserStatusActive); err != nil {
+		t.Fatalf("status: %v", err)
+	}
 	if err := repo.LiftSoftBan(ctx, nil, userID); err != nil {
 		t.Fatalf("lift: %v", err)
 	}
@@ -60,18 +68,15 @@ func TestPenaltyRepository_SoftBan(t *testing.T) {
 	if flags.HadSilentBlockAt == nil {
 		t.Fatal("lift cleared the past silent block flag")
 	}
-
-	// Второе снятие — не в том состоянии.
-	if err := repo.LiftSoftBan(ctx, nil, userID); !errors.Is(err, repository.ErrConflict) {
-		t.Fatalf("lift of an active user: %v, want ErrConflict", err)
-	}
 }
 
-// Бан, поставленный системой, — без автора; строка флагов заводится сама.
+// Системный бан (by == nil) пишется и без строки флагов; статус несуществующего
+// пользователя не ставится — UpdateStatus отвечает ErrNotFound.
 func TestPenaltyRepository_SystemSoftBanWithoutFlagsRow(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
 	repo := repository.NewPenaltyRepository(db)
+	users := repository.New(db)
 	ctx := context.Background()
 
 	userID := createTestUser(t, db, "CUSTOMER")
@@ -90,7 +95,7 @@ func TestPenaltyRepository_SystemSoftBanWithoutFlagsRow(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM users WHERE id = $1`, missing); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := repo.ApplySoftBan(ctx, nil, missing, nil, "x"); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("apply to a missing user: %v, want sql.ErrNoRows", err)
+	if err := users.UpdateStatus(ctx, nil, missing, repository.UserStatusSoftBanned); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("status of a missing user: %v, want ErrNotFound", err)
 	}
 }

@@ -30,7 +30,7 @@ func (h *ProfileHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"currency":                 settings["currency"],
 		"shift_early_exit_penalty": settings["shift_early_exit_penalty"],
 		"executor_location_send_interval_seconds": settings["executor_location_send_interval_seconds"],
@@ -44,7 +44,7 @@ func (h *ProfileHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http
 
 // GetProfileHandler возвращает профиль аутентифицированного пользователя, включая адрес заказчика.
 func (h *ProfileHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireActor(w, r)
+	user, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -53,7 +53,7 @@ func (h *ProfileHandler) GetProfileHandler(w http.ResponseWriter, r *http.Reques
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, profile)
+	writeJSON(w, http.StatusOK, profile)
 }
 
 // writeAddresses отдаёт список сохранённых адресов в том виде, какого ждёт
@@ -68,12 +68,12 @@ func writeAddresses(w http.ResponseWriter, addresses []repository.Address, err e
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"addresses": addresses})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"addresses": addresses})
 }
 
 // AddAddressHandler сохраняет адрес подачи для аутентифицированного заказчика.
 func (h *ProfileHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireActor(w, r)
+	user, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -88,7 +88,7 @@ func (h *ProfileHandler) AddAddressHandler(w http.ResponseWriter, r *http.Reques
 // DeleteAddressHandler удаляет один из сохранённых адресов вызывающего. Клиент
 // адресует его по id или по номеру строки; что именно пришло, разбирает сервис.
 func (h *ProfileHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireActor(w, r)
+	user, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -98,7 +98,7 @@ func (h *ProfileHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Req
 
 // SetDefaultAddressHandler отмечает, с какого сохранённого адреса начинаются новые заказы.
 func (h *ProfileHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireActor(w, r)
+	user, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -165,11 +165,19 @@ func (r addressRequest) toAddress() service.Address {
 	}
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+// RegisterPublicRoutes — публичные настройки.
+func (h *ProfileHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Get("/settings", h.GetPublicSettingsHandler)
+}
+
+// RegisterUserRoutes — собственный профиль и адреса.
+func (h *ProfileHandler) RegisterUserRoutes(r chi.Router) {
+	r.Get("/user/profile", h.GetProfileHandler)
+	// Оба пути возвращают собственный профиль вызывающего. /customer/profile
+	// оставлен здесь, а не в группе заказчика, потому что приложение
+	// исполнителя тоже его вызывает.
+	r.Get("/customer/profile", h.GetProfileHandler)
+	r.Post("/user/address", h.AddAddressHandler)
+	r.Post("/user/address/default", h.SetDefaultAddressHandler)
+	r.Delete("/user/address/{id}", h.DeleteAddressHandler)
 }

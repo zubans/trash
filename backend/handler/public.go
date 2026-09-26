@@ -11,6 +11,8 @@ import (
 	"healthlogin/backend/metrics"
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // PublicHandler хранит публичные HTTP-обработчики (health, регистрация, вход).
@@ -89,22 +91,12 @@ type RegisterResponse struct {
 
 // HealthHandler возвращает состояние здоровья сервиса.
 func (h *PublicHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	resp := map[string]string{"status": "ok"}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // RegisterHandler создаёт новую учётную запись.
 func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -161,20 +153,11 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 			resp.PassportSaved = true
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // LoginHandler аутентифицирует пользователя и возвращает JWT.
 func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	// Только POST: учётные данные не должны путешествовать в URL, а вход через
-	// GET к тому же тривиально запускается с чужого сайта.
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -205,9 +188,8 @@ func (h *PublicHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 // writeTokenPair отдаёт пару токенов. Ответы с учётными данными не должны
 // кэшироваться ничем по дороге.
 func writeTokenPair(w http.ResponseWriter, pair *service.TokenPair) {
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(AuthResponse{
+	writeJSON(w, http.StatusOK, AuthResponse{
 		Token:        pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresAt:    pair.ExpiresAt.UTC().Format(time.RFC3339),
@@ -262,19 +244,17 @@ func (h *PublicHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	if err := h.authService.Logout(r.Context(), tokenStr, strings.TrimSpace(req.RefreshToken)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "logged out successfully"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out successfully"})
 }
 
 // MeHandler возвращает данные текущего аутентифицированного пользователя.
 func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -288,8 +268,7 @@ func (h *PublicHandler) MeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":            user.ID,
 		"permissions":   permissions,
 		"phone":         user.Phone,
@@ -330,17 +309,13 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrVerificationTokenExpired):
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"error":     "Срок действия ссылки истек (60 минут). Пожалуйста, запросите изменение почты заново.",
 				"code":      "TOKEN_EXPIRED",
 				"can_retry": true,
 			})
 		case errors.Is(err, service.ErrValidation):
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 		default:
 			// Сбой базы — не «неверная ссылка»: 500 без внутреннего текста.
 			log.Printf("[auth] verify email: %v", err)
@@ -349,8 +324,7 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Email успешно подтверждён!",
 		"email":   user.Email,
 	})
@@ -368,17 +342,14 @@ func (h *PublicHandler) ForgotPasswordHandler(w http.ResponseWriter, r *http.Req
 
 	if err := h.authService.RequestPasswordReset(r.Context(), req.Email); err != nil {
 		metrics.AuthEvent("password_reset_request", "denied")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
+		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": err.Error(),
 		})
 		return
 	}
 
 	metrics.AuthEvent("password_reset_request", "ok")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Код восстановления отправлен на ваш Email",
 	})
 }
@@ -397,22 +368,21 @@ func (h *PublicHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Requ
 
 	if err := h.authService.ResetPassword(r.Context(), req.Email, req.Code, req.NewPassword); err != nil {
 		metrics.AuthEvent("password_reset", "denied")
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		// Неверный код и негодный пароль — ErrValidation (422), сбой — 500 без текста.
+		writeDomainError(w, err)
 		return
 	}
 	metrics.AuthEvent("password_reset", "ok")
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Password reset successfully. You can now login with your new password.",
 	})
 }
 
 // UpdateEmailHandler меняет адрес почты пользователя и запускает письмо подтверждения.
 func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -426,14 +396,13 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 
 	updatedUser, err := h.authService.UpdateUserEmail(r.Context(), user.ID, req.Email)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
 	// Адрес меняется только после перехода по ссылке из письма, поэтому ответ
 	// сообщает, что операция ожидает подтверждения, а не что она выполнена.
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":        "ok",
 		"email":         updatedUser.Email,
 		"pending_email": updatedUser.PendingEmail,
@@ -443,9 +412,8 @@ func (h *PublicHandler) UpdateEmailHandler(w http.ResponseWriter, r *http.Reques
 
 // ChangePasswordHandler заменяет пароль вызывающего.
 func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -460,7 +428,7 @@ func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Req
 
 	pair, err := h.authService.ChangePassword(r.Context(), user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -470,9 +438,8 @@ func (h *PublicHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Req
 
 // UpdateBirthDateHandler обновляет дату рождения пользователя.
 func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -485,19 +452,48 @@ func (h *PublicHandler) UpdateBirthDateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	updatedUser, err := h.authService.UpdateUserBirthDate(r.Context(), user.ID, req.BirthDate)
-	if errors.Is(err, service.ErrBirthDateLocked) {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		// ErrBirthDateLocked — класс ErrForbidden (403), негодная дата — 422.
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":     "ok",
 		"birth_date": updatedUser.BirthDateString(),
 		"age":        updatedUser.GetAge(),
 	})
+}
+
+// AuthLimiters — ограничители частоты для эндпоинтов с учётными данными,
+// которые есть смысл перебирать. Собираются в composition root.
+type AuthLimiters struct {
+	Register      func(http.Handler) http.Handler
+	Login         func(http.Handler) http.Handler
+	Refresh       func(http.Handler) http.Handler
+	PasswordReset func(http.Handler) http.Handler
+}
+
+// RegisterPublicRoutes — вход, регистрация и восстановление доступа.
+func (h *PublicHandler) RegisterPublicRoutes(r chi.Router, limits AuthLimiters) {
+	r.Get("/health", h.HealthHandler)
+	r.With(limits.Register).Post("/register", h.RegisterHandler)
+	r.With(limits.Login).Post("/login", h.LoginHandler)
+	// Обновление намеренно без аутентификации: к моменту, когда клиенту это нужно,
+	// access-токен уже истёк. Учётными данными служит refresh-токен, поэтому
+	// эндпоинт ограничен по частоте, как и прочие эндпоинты с учётными данными.
+	r.With(limits.Refresh).Post("/auth/refresh", h.RefreshHandler)
+	r.Get("/auth/verify-email", h.VerifyEmailHandler)
+	r.With(limits.PasswordReset).Post("/auth/forgot-password", h.ForgotPasswordHandler)
+	r.With(limits.PasswordReset).Post("/auth/reset-password", h.ResetPasswordHandler)
+}
+
+// RegisterUserRoutes — профиль сессии: кто я, смена почты, даты рождения и
+// пароля, выход. passwordReset — тот же ограничитель, что у восстановления.
+func (h *PublicHandler) RegisterUserRoutes(r chi.Router, passwordReset func(http.Handler) http.Handler) {
+	r.Get("/auth/me", h.MeHandler)
+	r.Post("/user/email", h.UpdateEmailHandler)
+	r.Post("/user/birth-date", h.UpdateBirthDateHandler)
+	r.With(passwordReset).Post("/user/change-password", h.ChangePasswordHandler)
+	r.Post("/logout", h.LogoutHandler)
 }

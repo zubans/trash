@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
 
@@ -68,6 +69,58 @@ func (s *ShopCatalog) AdminProduct(ctx context.Context, id uuid.UUID) (*reposito
 
 // SaveProduct проверяет и сохраняет товар. Новый — при нулевом id. Удаления
 // нет: товар с продажами только выключается, на него ссылаются покупки.
+// ShopProductForm — то, что админ-панель присылает при создании и правке
+// товара. Только редактируемые поля: id — в пути запроса, время создания и
+// правки, остаток и признак «в наличии» строка получает от сервера. Имена JSON
+// совпадают с полями товара, поэтому форма админ-панели не меняется.
+type ShopProductForm struct {
+	Kind               string                          `json:"kind"`
+	Category           string                          `json:"category"`
+	Title              map[string]interface{}          `json:"title"`
+	Description        map[string]interface{}          `json:"description"`
+	Images             []string                        `json:"images"`
+	Price              money.Amount                    `json:"price"`
+	CompareAtPrice     *money.Amount                   `json:"compare_at_price"`
+	Roles              []string                        `json:"roles"`
+	RequiresVerified   bool                            `json:"requires_verified"`
+	PerUserLimit       *int                            `json:"per_user_limit"`
+	MaxQtyPerOrder     int                             `json:"max_qty_per_order"`
+	GiftCode           *string                         `json:"gift_code"`
+	Variants           []repository.ShopProductVariant `json:"variants"`
+	FulfillmentMethods []string                        `json:"fulfillment_methods"`
+	PerkRule           *string                         `json:"perk_rule"`
+	PerkConfig         map[string]interface{}          `json:"perk_config"`
+	PerkDays           *int                            `json:"perk_days"`
+	MaxActivePerUser   *int                            `json:"max_active_per_user"`
+	SortOrder          int                             `json:"sort_order"`
+	IsActive           bool                            `json:"is_active"`
+}
+
+// Product собирает строку товара из формы. id — uuid.Nil для нового товара.
+func (f ShopProductForm) Product(id uuid.UUID) *repository.ShopProduct {
+	return &repository.ShopProduct{
+		ID: id, Kind: f.Kind, Category: f.Category, Title: f.Title, Description: f.Description,
+		Images: f.Images, Price: f.Price, CompareAtPrice: f.CompareAtPrice, Roles: f.Roles,
+		RequiresVerified: f.RequiresVerified, PerUserLimit: f.PerUserLimit, MaxQtyPerOrder: f.MaxQtyPerOrder,
+		GiftCode: f.GiftCode, Variants: f.Variants, FulfillmentMethods: f.FulfillmentMethods,
+		PerkRule: f.PerkRule, PerkConfig: f.PerkConfig, PerkDays: f.PerkDays, MaxActivePerUser: f.MaxActivePerUser,
+		SortOrder: f.SortOrder, IsActive: f.IsActive,
+	}
+}
+
+// ShopPickupPointForm — пункт выдачи из формы админ-панели.
+type ShopPickupPointForm struct {
+	Title    map[string]interface{} `json:"title"`
+	Address  string                 `json:"address"`
+	Hours    *string                `json:"hours"`
+	IsActive bool                   `json:"is_active"`
+}
+
+// Point собирает строку пункта выдачи из формы. id — uuid.Nil для нового.
+func (f ShopPickupPointForm) Point(id uuid.UUID) *repository.ShopPickupPoint {
+	return &repository.ShopPickupPoint{ID: id, Title: f.Title, Address: f.Address, Hours: f.Hours, IsActive: f.IsActive}
+}
+
 func (s *ShopCatalog) SaveProduct(ctx context.Context, adminID uuid.UUID, p *repository.ShopProduct) (*repository.ShopProduct, error) {
 	var previous *repository.ShopProduct
 	if p.ID != uuid.Nil {

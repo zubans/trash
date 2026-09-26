@@ -410,9 +410,10 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 
 	w.orderSvc = NewOrderService(w.orders, ledger, settings, w.users, &orderMockShiftRepo{}, nil, w.catalog, nil).
 		WithBehaviors(w.behaviors, w.claims, w.events)
-	w.dispatcher = NewBehaviorDispatcher(w.events, w.orders, w.users, w.catalog, w.claims, nil,
-		settings, ledger, w.behaviors, w.orderSvc).
-		WithSubmissions(w.submissions)
+	w.dispatcher = NewBehaviorDispatcher(BehaviorDispatcherDeps{
+		Events: w.events, Orders: w.orders, Users: w.users, Catalog: w.catalog, Claims: w.claims,
+		Settings: settings, Ledger: ledger, Behaviors: w.behaviors, OrderLifecycle: w.orderSvc,
+	}).WithSubmissions(w.submissions)
 	// Поток отправок — отдельный сервис; диспетчер подключён к нему как
 	// обработчик уже опубликованного события.
 	w.submit = NewOrderSubmissions(w.orders, w.users, w.catalog, w.submissions, w.events, ledger, w.behaviors, w.dispatcher).

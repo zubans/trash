@@ -321,8 +321,8 @@ func (m *mockAdminRepo) SetTopUpStatus(ctx context.Context, q repository.Querier
 	return nil
 }
 
-// mockPenaltyRepo — мягкий бан поверх mockRepo: статус меняется в той же карте
-// пользователей, причина запоминается рядом.
+// mockPenaltyRepo — флаги мягкого бана: причина и автор. Статус меняет сам
+// сервис через UserRepository, как и в проде.
 type mockPenaltyRepo struct {
 	repository.PenaltyRepository
 	users   *mockRepo
@@ -331,22 +331,16 @@ type mockPenaltyRepo struct {
 }
 
 func (m *mockPenaltyRepo) ApplySoftBan(ctx context.Context, q repository.Querier, userID uuid.UUID, by *uuid.UUID, reason string) error {
-	if err := m.users.UpdateStatus(ctx, userID, repository.UserStatusSoftBanned); err != nil {
-		return err
-	}
+	// Статус ставит сервис через UserRepository; здесь только причина.
 	m.reasons[userID] = reason
 	m.by[userID] = by
 	return nil
 }
 
 func (m *mockPenaltyRepo) LiftSoftBan(ctx context.Context, q repository.Querier, userID uuid.UUID) error {
-	u, err := m.users.FindByID(ctx, userID)
-	if err != nil || u.Status != repository.UserStatusSoftBanned {
-		return repository.ErrConflict
-	}
 	delete(m.reasons, userID)
 	delete(m.by, userID)
-	return m.users.UpdateStatus(ctx, userID, repository.UserStatusActive)
+	return nil
 }
 
 func (m *mockPenaltyRepo) GetFlags(ctx context.Context, q repository.Querier, userID uuid.UUID) (*repository.PenaltyFlags, error) {

@@ -778,9 +778,25 @@ POST /api/admin/users/{id}/achievements/{code}    выдать вручную, �
 POST /api/admin/users/{id}/stats/recalculate      пересчитать агрегаты по заказам
 GET  /api/admin/gifts, /api/admin/gifts/{code}/codes
 POST /api/admin/gifts/coupons/{coupon}/redeem     погасить купон при выдаче вещи
-GET  /api/admin/finances/incidents                открытые инциденты
+GET  /api/admin/finances/incidents?all=1&limit=&offset=   инциденты (по умолчанию открытые, страница 200)
 POST /api/admin/finances/incidents/{id}/resolve
+GET  /api/user/mail?limit=&offset=                ящик (страница 100)
+GET  /api/admin/mail/dialogs?unanswered=1&limit=&offset=   переписки (страница 200)
+GET  /api/admin/mail/users/{id}?limit=&offset=    переписка с человеком (страница 500)
 ```
+
+Обработчики здесь тонкие: правила — в `service.AchievementCatalog` (код,
+конфликт с поставляемой, обязательность скрипта, границы веса),
+`service.GiftCatalog` (роды подарков, сумма, аудит показа кода; остатки пулов
+одним запросом `CountFreeCodesByGift`), `service.MoneyIncidents` и
+`service.Mail` (кто кому может ответить, тема ответа, вид рассылки; отметка
+«прочитано администрацией» — одним оператором на все ветки). Ошибки ввода
+отдаются классом `ErrValidation` — `422` с текстом, конфликты — `409`, «не
+найдено» — `404`. Тела `PUT /admin/gifts/{code}` и `POST/PUT
+/admin/achievements` — формы (`GiftForm`, `AchievementForm`): имена полей те же,
+серверные поля (`code` подарка, `created_at`, `updated_at`, `deleted_at`) из
+тела игнорируются. Списки, у которых раньше был зашитый потолок, принимают
+`limit`/`offset`; потолок стал размером первой страницы.
 
 Фронтенд:
 

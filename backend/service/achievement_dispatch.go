@@ -49,20 +49,26 @@ type AchievementDispatcher struct {
 	outbox *outboxConsumer
 }
 
+// AchievementDispatcherDeps — зависимости диспетчера ачивок по именам.
+type AchievementDispatcherDeps struct {
+	Events       repository.EventRepository
+	Orders       repository.OrderRepository
+	Users        repository.UserRepository
+	Achievements repository.AchievementRepository
+	Stats        repository.ExecutorStatsRepository
+	Gifts        repository.GiftRepository
+	Mail         repository.MailRepository
+	Incidents    repository.MoneyIncidentRepository
+	Ledger       *Ledger
+	Levels       *Levels
+	Engine       *achievement.Engine
+}
+
 // NewAchievementDispatcher собирает диспетчер.
-func NewAchievementDispatcher(
-	events repository.EventRepository,
-	orders repository.OrderRepository,
-	users repository.UserRepository,
-	achievements repository.AchievementRepository,
-	stats repository.ExecutorStatsRepository,
-	gifts repository.GiftRepository,
-	mail repository.MailRepository,
-	incidents repository.MoneyIncidentRepository,
-	ledger *Ledger,
-	levels *Levels,
-	engine *achievement.Engine,
-) *AchievementDispatcher {
+func NewAchievementDispatcher(deps AchievementDispatcherDeps) *AchievementDispatcher {
+	events, orders, users, achievements := deps.Events, deps.Orders, deps.Users, deps.Achievements
+	stats, gifts, mail, incidents := deps.Stats, deps.Gifts, deps.Mail, deps.Incidents
+	ledger, levels, engine := deps.Ledger, deps.Levels, deps.Engine
 	d := &AchievementDispatcher{
 		events: events, load: subjectLoader{orders: orders, users: users}, achievements: achievements,
 		stats: stats, gifts: gifts, mail: mail, incidents: incidents,

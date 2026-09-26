@@ -27,9 +27,8 @@ func NewBidHandler(bidService *service.BidService, orderService *service.OrderSe
 
 // CreateConstructionOrderHandler создаёт аукцион на вывоз строительного мусора.
 func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -51,16 +50,13 @@ func (h *BidHandler) CreateConstructionOrderHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(order)
+	writeJSON(w, http.StatusCreated, order)
 }
 
 // CreateBidHandler позволяет исполнителям делать ставки по строительным заказам.
 func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -84,16 +80,13 @@ func (h *BidHandler) CreateBidHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(bid)
+	writeJSON(w, http.StatusCreated, bid)
 }
 
 // AcceptBidHandler позволяет заказчикам принять конкретную ставку.
 func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -108,16 +101,13 @@ func (h *BidHandler) AcceptBidHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "bid accepted successfully"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "bid accepted successfully"})
 }
 
 // GetBidsHandler перечисляет все ставки по конкретному строительному заказу.
 func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -132,14 +122,13 @@ func (h *BidHandler) GetBidsHandler(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, bids)
+	writeJSON(w, http.StatusOK, bids)
 }
 
 // GetAvailableConstructionOrdersHandler перечисляет открытые строительные заказы для исполнителей.
 func (h *BidHandler) GetAvailableConstructionOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -148,5 +137,18 @@ func (h *BidHandler) GetAvailableConstructionOrdersHandler(w http.ResponseWriter
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, orders)
+	writeJSON(w, http.StatusOK, orders)
+}
+
+// RegisterCustomerRoutes — аукционные заказы заказчика.
+func (h *BidHandler) RegisterCustomerRoutes(r chi.Router) {
+	r.Post("/customer/orders/construction", h.CreateConstructionOrderHandler)
+	r.Post("/customer/bids/{id}/accept", h.AcceptBidHandler)
+	r.Get("/customer/orders/{id}/bids", h.GetBidsHandler)
+}
+
+// RegisterExecutorRoutes — ставки исполнителя.
+func (h *BidHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Get("/executor/orders/available", h.GetAvailableConstructionOrdersHandler)
+	r.Post("/executor/orders/{id}/bids", h.CreateBidHandler)
 }

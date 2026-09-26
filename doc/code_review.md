@@ -14,11 +14,18 @@ backend/
 │   └── geo.go      # address suggestions (DaData) and geocoding proxy
 ├── service/        # Business logic
 ├── repository/     # Database access
-├── middleware/     # Auth and role middleware
+├── middleware/     # Auth, roles, CORS, rate limiting
+├── upload/         # Multipart file intake shared by chat, shop and releases
 ├── worker/         # Background workers
 ├── migrations/     # SQL schema migrations
-└── main.go         # Wiring and server startup
+├── router.go       # Route table: every handler registers its own routes (Register*Routes)
+└── main.go         # Wiring (composition root) and server startup
 ```
+
+Таблица маршрутов зафиксирована в `testdata/routes.txt`: `TestRouteTableMatchesSnapshot`
+сравнивает метод, путь и число middleware каждого маршрута с этим снимком, а
+`TestLegacyRootRoutesMirrorAPI` проверяет, что с `LEGACY_ROOT_ROUTES` у каждого
+`/api/X` есть двойник `X`.
 
 ## Recent Refactoring
 

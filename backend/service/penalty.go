@@ -45,13 +45,17 @@ type TxRunner interface {
 type PenaltyService struct {
 	repo     repository.PenaltyRepository
 	settings repository.SettingsRepository
-	tx       TxRunner
-	now      func() time.Time
+	// users меняет статус учётки при рецидиве: таблицу users пишет только
+	// UserRepository, репозиторий штрафов ведёт лишь флаги.
+	users repository.UserRepository
+	tx    TxRunner
+	now   func() time.Time
 }
 
 // NewPenaltyService создаёт PenaltyService.
-func NewPenaltyService(repo repository.PenaltyRepository, settings repository.SettingsRepository, tx TxRunner) *PenaltyService {
-	return &PenaltyService{repo: repo, settings: settings, tx: tx, now: time.Now}
+func NewPenaltyService(repo repository.PenaltyRepository, users repository.UserRepository,
+	settings repository.SettingsRepository, tx TxRunner) *PenaltyService {
+	return &PenaltyService{repo: repo, users: users, settings: settings, tx: tx, now: time.Now}
 }
 
 // PenaltyAward — за что и кому начисляется балл.
@@ -424,10 +428,16 @@ func (s *PenaltyService) softBanOnRelapseTx(ctx context.Context, tx *sql.Tx, use
 	if flags.HadSilentBlockAt == nil || flags.SoftBannedAt != nil {
 		return nil
 	}
-	if err := s.repo.ApplySoftBan(ctx, tx, userID, nil, softBanRelapseReason); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	if s.users == nil {
+		return ErrNotConfigured
+	}
+	if err := s.users.UpdateStatus(ctx, tx, userID, repository.UserStatusSoftBanned); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil
 		}
+		return err
+	}
+	if err := s.repo.ApplySoftBan(ctx, tx, userID, nil, softBanRelapseReason); err != nil {
 		return err
 	}
 	log.Printf("[AUDIT] user %s soft-banned: penalty point after a lifted silent block", userID)

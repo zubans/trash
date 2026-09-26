@@ -237,7 +237,7 @@ func (m *dispatchMail) Broadcast(ctx context.Context, mail *repository.Mail, use
 func (m *dispatchMail) RecipientsByRole(ctx context.Context, role string) ([]uuid.UUID, error) {
 	return nil, nil
 }
-func (m *dispatchMail) ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Mail, error) {
+func (m *dispatchMail) ListForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Mail, error) {
 	return nil, nil
 }
 func (m *dispatchMail) UnreadCount(ctx context.Context, userID uuid.UUID) (int, error) { return 0, nil }
@@ -253,11 +253,14 @@ func (m *dispatchMail) Thread(ctx context.Context, threadID uuid.UUID) ([]*repos
 	return nil, nil
 }
 func (m *dispatchMail) Reply(ctx context.Context, mail *repository.Mail) error { return nil }
-func (m *dispatchMail) ListDialogs(ctx context.Context, onlyUnanswered bool, limit int) ([]*repository.MailDialog, error) {
+func (m *dispatchMail) ListDialogs(ctx context.Context, onlyUnanswered bool, limit, offset int) ([]*repository.MailDialog, error) {
 	return nil, nil
 }
-func (m *dispatchMail) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Mail, error) {
+func (m *dispatchMail) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Mail, error) {
 	return nil, nil
+}
+func (m *dispatchMail) MarkThreadsReadByAdmin(ctx context.Context, threadIDs []uuid.UUID) error {
+	return nil
 }
 func (m *dispatchMail) MarkThreadReadByAdmin(ctx context.Context, threadID uuid.UUID) error {
 	return nil
@@ -333,12 +336,12 @@ def check(f):
 	}
 	orders.orders = append(orders.orders, order)
 
-	dispatcher := NewAchievementDispatcher(
-		events, orders, newMockUserRepo(), achievements, &dispatchStats{stats: stats},
-		&emptyGifts{}, mail, incidents,
-		NewLedger(&mockTransactionRepo{}, newMockAccounts()),
-		NewLevels(achievements, settings), engine,
-	)
+	dispatcher := NewAchievementDispatcher(AchievementDispatcherDeps{
+		Events: events, Orders: orders, Users: newMockUserRepo(), Achievements: achievements,
+		Stats: &dispatchStats{stats: stats}, Gifts: &emptyGifts{}, Mail: mail, Incidents: incidents,
+		Ledger: NewLedger(&mockTransactionRepo{}, newMockAccounts()),
+		Levels: NewLevels(achievements, settings), Engine: engine,
+	})
 
 	return &dispatchHarness{
 		dispatcher: dispatcher, events: events, achievements: achievements,

@@ -129,7 +129,17 @@ type UserRepository interface {
 	// Несуществующие id просто отсутствуют в результате — отсутствующий
 	// пользователь для фильтрующего список вызывающего нормальный исход, а не ошибка.
 	FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*User, error)
-	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	// UpdateStatus меняет статус учётки. Принимает Querier: мягкий бан пишется
+	// в одной транзакции с его причиной в user_penalty_flags. Нет такого
+	// пользователя — ErrNotFound.
+	UpdateStatus(ctx context.Context, q Querier, id uuid.UUID, status string) error
+	// SetChecked ставит или снимает «проверенный» вместе с тем, кто и когда это
+	// сделал, и закрывает заявку на проверку. Единственный писатель этих колонок:
+	// раньше их правил репозиторий паспортов.
+	SetChecked(ctx context.Context, q Querier, id uuid.UUID, checked bool, by uuid.UUID) error
+	// SetPDConsent записывает принятую редакцию согласия на обработку
+	// персональных данных.
+	SetPDConsent(ctx context.Context, q Querier, id uuid.UUID, version int) error
 	// SetUserRoles заменяет набор ролей пользователя заданным и держит users.role
 	// (основную роль) указывающей на одну из них.
 	SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) error
@@ -363,9 +373,9 @@ func (r *repo) VerifyEmailToken(ctx context.Context, token string) (*User, error
 				token,
 			).Scan(&isExpired)
 			if errExp == nil && isExpired {
-				return nil, errors.New("verification_token_expired")
+				return nil, ErrVerificationTokenExpired
 			}
-			return nil, errors.New("invalid or expired verification token (valid 60m)")
+			return nil, ErrVerificationTokenInvalid
 		}
 		return nil, err
 	}
@@ -417,7 +427,7 @@ func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashed
 	).Scan(&userID, &storedCode, &expiresAt, &attempts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("неверный или истекший код сброса")
+			return nil, ErrResetCodeInvalid
 		}
 		return nil, err
 	}
@@ -431,7 +441,7 @@ func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashed
 	}
 
 	if !storedCode.Valid || storedCode.String == "" || !expiresAt.Valid || expiresAt.Time.Before(time.Now()) {
-		return nil, errors.New("неверный или истекший код сброса")
+		return nil, ErrResetCodeInvalid
 	}
 
 	if attempts >= maxResetAttempts {
@@ -441,7 +451,7 @@ func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashed
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return nil, errors.New("превышено число попыток, запросите новый код")
+		return nil, ErrResetCodeAttemptsExceeded
 	}
 
 	if subtle.ConstantTimeCompare([]byte(storedCode.String), []byte(code)) != 1 {
@@ -451,7 +461,7 @@ func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashed
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return nil, errors.New("неверный или истекший код сброса")
+		return nil, ErrResetCodeInvalid
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -468,9 +478,32 @@ func (r *repo) ResetPasswordWithCode(ctx context.Context, email, code, newHashed
 	return r.FindByID(ctx, userID)
 }
 
-func (r *repo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET status = $1 WHERE id = $2`, status, id)
-	return err
+func (r *repo) UpdateStatus(ctx context.Context, q Querier, id uuid.UUID, status string) error {
+	res, err := exec(r.db, q).ExecContext(ctx, `UPDATE users SET status = $1 WHERE id = $2`, status, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *repo) SetChecked(ctx context.Context, q Querier, id uuid.UUID, checked bool, by uuid.UUID) error {
+	// Решение закрывает заявку в обе стороны: и отметка, и отказ снимают её с
+	// очереди модерации.
+	query := `UPDATE users SET is_checked = TRUE, checked_at = now(), checked_by = $2, check_requested_at = NULL WHERE id = $1`
+	args := []interface{}{id, by}
+	if !checked {
+		query = `UPDATE users SET is_checked = FALSE, checked_at = NULL, checked_by = NULL, check_requested_at = NULL WHERE id = $1`
+		args = args[:1]
+	}
+	return execExpectingOne(ctx, exec(r.db, q), query, args...)
+}
+
+func (r *repo) SetPDConsent(ctx context.Context, q Querier, id uuid.UUID, version int) error {
+	return execExpectingOne(ctx, exec(r.db, q),
+		`UPDATE users SET pd_consent_version = $2, pd_consent_at = now() WHERE id = $1`, id, version)
 }
 
 // UpdateVerified выставляет флаг внутри транзакции вызывающего. Такой нужен

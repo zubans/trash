@@ -24,13 +24,6 @@ type AdminUserRepository interface {
 	CountAdmins(ctx context.Context) (int, error)
 }
 
-// AdminRepository — прежнее имя AdminUserRepository. Оставлено, потому что на
-// него ссылается RoleService (service/role.go); новый код пишет
-// AdminUserRepository. Заявки на пополнение и вывод живут в PayoutRepository,
-// журнал проводок — в TransactionJournalRepository, список заказов — в
-// AdminOrderRepository, активные смены — в ShiftMonitorRepository.
-type AdminRepository = AdminUserRepository
-
 type adminUserRepo struct {
 	db *sql.DB
 }

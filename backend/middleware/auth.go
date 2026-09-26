@@ -3,8 +3,6 @@ package middleware
 import (
 	"context"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +21,6 @@ const (
 	UserKey contextKey = "user"
 	// TokenKey хранит сырую строку JWT-токена в контексте запроса.
 	TokenKey contextKey = "token"
-	// RoleKey хранит строку роли пользователя в контексте запроса.
-	RoleKey contextKey = "role"
 )
 
 // SessionChecker сообщает, занесён ли access-токен в чёрный список. Ему
@@ -51,7 +47,7 @@ type AuthMiddleware struct {
 	// входа пользователя кэшированная строка может отставать на TTL, поэтому
 	// только что изменённая роль или верификация (и поля профиля вроде баланса)
 	// вступают в силу в пределах TTL, а не мгновенно. TTL держится заметно ниже
-	// интервала опроса клиента, чтобы окно было крошечным; AUTH_CACHE_TTL_SEC=0 выключает кэш.
+	// интервала опроса клиента, чтобы окно было крошечным; нулевой TTL выключает кэш.
 	userCacheTTL time.Duration
 	userCache    sync.Map // userID -> cachedUser
 
@@ -66,16 +62,17 @@ type cachedUser struct {
 	expires time.Time
 }
 
-// NewAuthMiddleware создаёт AuthMiddleware.
-func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionChecker, jwtSecret string) *AuthMiddleware {
-	if jwtSecret == "" {
-		jwtSecret = "dev-secret-change-me"
-	}
+// NewAuthMiddleware создаёт AuthMiddleware. Секрет обязателен: main фаталит
+// без JWT_SECRET раньше, чем дойдёт сюда, и запасного секрета в коде нет.
+// userCacheTTL — срок кэша пользователя; 0 выключает кэш. Значение приходит из
+// composition root, а не читается из окружения здесь: middleware не знает,
+// откуда берётся конфигурация.
+func NewAuthMiddleware(userRepo repository.UserRepository, sessions SessionChecker, jwtSecret string, userCacheTTL time.Duration) *AuthMiddleware {
 	m := &AuthMiddleware{
 		userRepo:     userRepo,
 		sessions:     sessions,
 		secret:       []byte(jwtSecret),
-		userCacheTTL: authCacheTTL(),
+		userCacheTTL: userCacheTTL,
 	}
 	if m.userCacheTTL > 0 {
 		go m.collectUserCache()
@@ -101,17 +98,6 @@ func (m *AuthMiddleware) collectUserCache() {
 			return true
 		})
 	}
-}
-
-// authCacheTTL читает AUTH_CACHE_TTL_SEC (по умолчанию 5 с). Установите 0,
-// чтобы выключить кэш и читать пользователя заново на каждом запросе.
-func authCacheTTL() time.Duration {
-	if v := os.Getenv("AUTH_CACHE_TTL_SEC"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			return time.Duration(n) * time.Second
-		}
-	}
-	return 5 * time.Second
 }
 
 // loadUser возвращает пользователя по id, по возможности из кэша с коротким
@@ -245,15 +231,14 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Авторизация всегда следует роли, сохранённой в базе, и никогда — роли,
-		// зафиксированной в токене: понижение или бан должны вступать в силу
-		// немедленно, а не по истечении токена.
-		role := user.Role
+		// Авторизация всегда следует ролям, сохранённым в базе, и никогда —
+		// утверждениям токена: понижение или бан должны вступать в силу
+		// немедленно, а не по истечении токена. В контекст кладётся сам
+		// пользователь; роли читают из него.
 
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, UserKey, user)
 		ctx = context.WithValue(ctx, TokenKey, tokenStr)
-		ctx = context.WithValue(ctx, RoleKey, role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -313,7 +298,6 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, UserKey, user)
 		ctx = context.WithValue(ctx, TokenKey, tokenStr)
-		ctx = context.WithValue(ctx, RoleKey, user.Role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

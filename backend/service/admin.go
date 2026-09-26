@@ -186,6 +186,15 @@ func notConfigured(what string) error {
 }
 
 // findUser читает пользователя, переводя «нет строки» в ErrUserNotFound.
+// inTx выполняет fn в транзакции реестра; без реестра (тесты без базы) — на
+// пуле соединений, где Querier равен nil.
+func (s *AdminService) inTx(ctx context.Context, fn func(repository.Querier) error) error {
+	if s.ledger == nil {
+		return fn(nil)
+	}
+	return s.ledger.RunInTx(ctx, func(tx *sql.Tx) error { return fn(tx) })
+}
+
 func (s *AdminService) findUser(ctx context.Context, userID uuid.UUID) (*repository.User, error) {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -276,14 +285,18 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uui
 
 	switch {
 	case status == repository.UserStatusSoftBanned && s.penalties != nil:
-		// Статус и причина пишутся вместе. Сессии не завершаются: мягкий бан
+		// Статус и причина пишутся в одной транзакции: статус без причины или
+		// причина без статуса невозможны. Сессии не завершаются: мягкий бан
 		// пускает в приложение, а RequireAuth закроет всё лишнее со следующего
 		// запроса после истечения кэша пользователя.
-		if err := s.penalties.ApplySoftBan(ctx, nil, userID, &adminID, strings.TrimSpace(reason)); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrUserNotFound
+		err := s.inTx(ctx, func(q repository.Querier) error {
+			if err := s.userRepo.UpdateStatus(ctx, q, userID, status); err != nil {
+				return err
 			}
-			return err
+			return s.penalties.ApplySoftBan(ctx, q, userID, &adminID, strings.TrimSpace(reason))
+		})
+		if err != nil {
+			return userNotFound(err)
 		}
 	case status == repository.UserStatusActive && s.penalties != nil:
 		user, err := s.findUser(ctx, userID)
@@ -292,17 +305,23 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uui
 		}
 		if user.Status == repository.UserStatusSoftBanned {
 			// Снятие мягкого бана заодно стирает его причину.
-			if err := s.penalties.LiftSoftBan(ctx, nil, userID); err != nil {
-				return err
+			err := s.inTx(ctx, func(q repository.Querier) error {
+				if err := s.userRepo.UpdateStatus(ctx, q, userID, status); err != nil {
+					return err
+				}
+				return s.penalties.LiftSoftBan(ctx, q, userID)
+			})
+			if err != nil {
+				return userNotFound(err)
 			}
 			break
 		}
-		if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
-			return err
+		if err := s.userRepo.UpdateStatus(ctx, nil, userID, status); err != nil {
+			return userNotFound(err)
 		}
 	default:
-		if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
-			return err
+		if err := s.userRepo.UpdateStatus(ctx, nil, userID, status); err != nil {
+			return userNotFound(err)
 		}
 	}
 
@@ -374,7 +393,7 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	if err != nil {
 		return err
 	}
-	if current.Role == repository.RoleAdmin && role != repository.RoleAdmin {
+	if current.HasRole(repository.RoleAdmin) && role != repository.RoleAdmin {
 		if err := s.guardLastAdmin(ctx, userID, adminID); err != nil {
 			return err
 		}

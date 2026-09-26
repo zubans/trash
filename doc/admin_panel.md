@@ -157,6 +157,11 @@ Content-Type: application/json
   создаёт собственную копию скрипта у этой услуги.
 - **`GET /api/admin/service-behaviors`** — библиотека поведений с полным текстом
   скриптов; из неё и берутся шаблоны.
+- Тело `POST/PUT /api/admin/service-nodes` — форма узла: те же имена полей,
+  но `id`, `created_at`, `updated_at`, `deleted_at` из тела игнорируются.
+  Правила узла и родителя — в `service.ServiceCatalogAdmin`; ошибки ввода
+  отвечают `400` с текстом, конфликты — `409`, «нет узла» — `404`. Дерево
+  `GET /api/admin/service-nodes` читается одним запросом.
 - **Перенос узла.** `PUT /api/admin/service-nodes/{id}` принимает `parent_id`
   вместе с остальными полями, поэтому обычная правка (цена, название) всегда
   шлёт и родителя. Отклоняется только настоящий цикл — попытка увести узел под
@@ -265,4 +270,6 @@ Content-Type: application/json
 - **`GET /api/admin/support/chats`** — получение списка всех пользовательских диалогов с нечитанными сообщениями, ФИО, телефоном и ролью.
 - **`GET /api/support/chats/{chat_id}/messages`** — история диалога с клиентом.
 - **`POST /api/support/chats/{chat_id}/messages`** — отправка текстового ответа сотрудника поддержки.
-- **`POST /api/support/chats/{chat_id}/upload`** — загрузка медиа и вложений.
+- **`POST /api/support/chats/{chat_id}/upload`** — загрузка медиа и вложений
+  (общий приём файлов `backend/upload`, файлы в `UPLOADS_DIR/support/`; см.
+  [`chat.md`](./chat.md)).

@@ -1,13 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
+	"github.com/go-chi/chi/v5"
 
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -15,13 +13,24 @@ import (
 // сверх обычного потока заказа: отправку данных на проверку исполнителем и
 // разбор администратором случаев, переданных поведением.
 type BehaviorHandler struct {
-	orderData   *service.OrderSubmissions
-	submissions repository.SubmissionRepository
+	orderData *service.OrderSubmissions
 }
 
 // NewBehaviorHandler создаёт BehaviorHandler.
-func NewBehaviorHandler(orderData *service.OrderSubmissions, submissions repository.SubmissionRepository) *BehaviorHandler {
-	return &BehaviorHandler{orderData: orderData, submissions: submissions}
+func NewBehaviorHandler(orderData *service.OrderSubmissions) *BehaviorHandler {
+	return &BehaviorHandler{orderData: orderData}
+}
+
+// RegisterExecutorRoutes — данные, которые исполнитель отправляет на проверку
+// по скриптовой услуге, — проверка личности в заказе верификации.
+func (h *BehaviorHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Post("/executor/orders/{id}/submission", h.SubmitOrderData)
+}
+
+// RegisterAdminRoutes — разбор случаев, переданных поведением.
+func (h *BehaviorHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("escalations.view")).Get("/admin/escalations", h.ListEscalations)
+	r.With(can("escalations.edit")).Post("/admin/escalations/{id}/resolve", h.ResolveEscalation)
 }
 
 // SubmitOrderData обслуживает POST /executor/orders/{id}/submission.
@@ -30,23 +39,18 @@ func NewBehaviorHandler(orderData *service.OrderSubmissions, submissions reposit
 // сравнивают, остаются на сервере: этот эндпоинт отвечает «совпало ли», но
 // никогда «как должно было быть», поэтому неверная догадка ничему не учит.
 func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request) {
-	orderID, err := parseUUIDParam(r, "id")
-	if err != nil {
-		http.Error(w, "invalid order id", http.StatusBadRequest)
+	orderID, ok := parseIDParam(w, r, "id", "order id")
+	if !ok {
 		return
 	}
-	executor := userFromContext(r)
-	if executor == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	executor, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
-
 	var fields map[string]string
-	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &fields) {
 		return
 	}
-
 	result, err := h.orderData.SubmitOrderData(r.Context(), orderID, executor.ID, fields)
 	if err != nil {
 		switch {
@@ -54,9 +58,7 @@ func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		case errors.Is(err, service.ErrPassportRequired):
 			// Код, а не текст: приложение по нему досылает паспорт из очереди.
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "passport_required", "message": err.Error()})
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "passport_required", "message": err.Error()})
 		default:
 			// По классу: нет заказа — 404, не тот исполнитель или заказ не в
 			// работе — 409, эскалирован — 409, сбой — 500 без текста.
@@ -64,43 +66,32 @@ func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	writeJSON(w, result)
+	writeJSON(w, http.StatusOK, result)
 }
 
-// ListEscalations обслуживает GET /admin/escalations. По умолчанию открытые
-// случаи; попытки отправки идут вместе с ними, потому что сравнить прочитанное
-// модератором в документе с учётной записью — вся задача того экрана.
+// ListEscalations обслуживает GET /admin/escalations?status=.
 func (h *BehaviorHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
-	status := r.URL.Query().Get("status")
-	escalations, err := h.submissions.ListEscalations(r.Context(), status, 0)
+	escalations, err := h.orderData.ListEscalations(r.Context(), r.URL.Query().Get("status"), 0)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, escalations)
+	writeJSON(w, http.StatusOK, escalations)
 }
 
-// ResolveEscalation обслуживает POST /admin/escalations/{id}/resolve. Он
-// закрывает случай и только: верифицировать заказчика или отменить заказ —
-// собственные решения администратора со своими эндпоинтами.
+// ResolveEscalation обслуживает POST /admin/escalations/{id}/resolve.
 func (h *BehaviorHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request) {
-	id, err := parseUUIDParam(r, "id")
-	if err != nil {
-		http.Error(w, "invalid escalation id", http.StatusBadRequest)
+	id, ok := parseIDParam(w, r, "id", "escalation id")
+	if !ok {
 		return
 	}
-	admin := userFromContext(r)
-	adminID := uuid.Nil
-	if admin != nil {
-		adminID = admin.ID
-	}
-	if err := h.submissions.ResolveEscalation(r.Context(), id, adminID); err != nil {
-		if errors.Is(err, repository.ErrEscalationNotFound) {
-			http.Error(w, "escalation not found or already resolved", http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, map[string]string{"message": "escalation resolved"})
+	if err := h.orderData.ResolveEscalation(r.Context(), admin.ID, id); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "escalation resolved"})
 }

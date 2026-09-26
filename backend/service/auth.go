@@ -96,10 +96,10 @@ var weakPasswords = map[string]bool{
 // одного символа, что делало (неограниченный) эндпоинт входа тривиальным.
 func validatePassword(password string) error {
 	if len([]rune(password)) < minPasswordLength {
-		return fmt.Errorf("пароль должен быть не короче %d символов", minPasswordLength)
+		return validationError(fmt.Sprintf("пароль должен быть не короче %d символов", minPasswordLength))
 	}
 	if weakPasswords[strings.ToLower(password)] {
-		return errors.New("этот пароль слишком простой, выберите другой")
+		return validationError("этот пароль слишком простой, выберите другой")
 	}
 	return nil
 }
@@ -116,18 +116,18 @@ const maxHumanAge = 120
 func parseBirthDate(birthDate string) (time.Time, error) {
 	birthDate = strings.TrimSpace(birthDate)
 	if birthDate == "" {
-		return time.Time{}, errors.New("укажите дату рождения")
+		return time.Time{}, validationError("укажите дату рождения")
 	}
 	t, err := time.Parse("2006-01-02", birthDate)
 	if err != nil {
-		return time.Time{}, errors.New("неверный формат даты рождения, ожидается ГГГГ-ММ-ДД")
+		return time.Time{}, validationError("неверный формат даты рождения, ожидается ГГГГ-ММ-ДД")
 	}
 	now := time.Now()
 	if t.After(now) {
-		return time.Time{}, errors.New("дата рождения не может быть в будущем")
+		return time.Time{}, validationError("дата рождения не может быть в будущем")
 	}
 	if t.Before(now.AddDate(-maxHumanAge, 0, 0)) {
-		return time.Time{}, fmt.Errorf("дата рождения не может быть раньше, чем %d лет назад", maxHumanAge)
+		return time.Time{}, validationError(fmt.Sprintf("дата рождения не может быть раньше, чем %d лет назад", maxHumanAge))
 	}
 	return t, nil
 }
@@ -417,11 +417,9 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repositor
 	switch {
 	case err == nil:
 		return user, nil
-	case errors.Is(err, repository.ErrVerificationTokenExpired) || err.Error() == "verification_token_expired":
-		// Текст «verification_token_expired» ещё отдаёт старый код репозитория;
-		// после его перевода на сентинел останется только errors.Is.
+	case errors.Is(err, repository.ErrVerificationTokenExpired):
 		return nil, ErrVerificationTokenExpired
-	case errors.Is(err, repository.ErrNotFound) || strings.HasPrefix(err.Error(), "invalid or expired verification token"):
+	case errors.Is(err, repository.ErrNotFound):
 		return nil, ErrVerificationTokenInvalid
 	}
 	return nil, err
@@ -431,7 +429,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repositor
 func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) error {
 	email = normalizeEmail(email)
 	if email == "" {
-		return errors.New("укажите Email")
+		return validationError("укажите Email")
 	}
 	user, err := s.repo.FindByEmail(ctx, email)
 	if err != nil || user == nil {
@@ -484,7 +482,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 	email = normalizeEmail(email)
 	code = strings.TrimSpace(code)
 	if email == "" || code == "" || newPassword == "" {
-		return errors.New("укажите Email, код и новый пароль")
+		return validationError("укажите Email, код и новый пароль")
 	}
 	if err := validatePassword(newPassword); err != nil {
 		return err
@@ -496,6 +494,10 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 	}
 
 	_, err = s.repo.ResetPasswordWithCode(ctx, email, code, string(hash))
+	if errors.Is(err, repository.ErrResetCodeInvalid) || errors.Is(err, repository.ErrResetCodeAttemptsExceeded) {
+		// Неверный код — ответ человеку, а не сбой: класс валидации, текст как есть.
+		return validationError(err.Error())
+	}
 	return err
 }
 
@@ -506,21 +508,21 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 // поэтому единственным способом сменить пароль был поток восстановления.
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) (*TokenPair, error) {
 	if oldPassword == "" || newPassword == "" {
-		return nil, errors.New("укажите текущий и новый пароль")
+		return nil, validationError("укажите текущий и новый пароль")
 	}
 	if err := validatePassword(newPassword); err != nil {
 		return nil, err
 	}
 	if oldPassword == newPassword {
-		return nil, errors.New("новый пароль совпадает с текущим")
+		return nil, validationError("новый пароль совпадает с текущим")
 	}
 
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
-		return nil, errors.New("user not found")
+		return nil, userNotFound(err)
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
-		return nil, errors.New("текущий пароль неверен")
+		return nil, validationError("текущий пароль неверен")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -543,7 +545,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, newEmail string) (*repository.User, error) {
 	newEmail = normalizeEmail(newEmail)
 	if newEmail == "" || !emailRegex.MatchString(newEmail) {
-		return nil, errors.New("a valid email is required")
+		return nil, validationError("a valid email is required")
 	}
 
 	currentUser, err := s.repo.FindByID(ctx, userID)
@@ -555,7 +557,7 @@ func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, new
 	if err == nil && existingUser != nil && existingUser.ID != userID {
 		log.Printf("[SECURITY NOTICE] User with phone %s (ID: %s) attempted to attach email %s which is already bound to user with phone %s (ID: %s)",
 			currentUser.Phone, currentUser.ID, newEmail, existingUser.Phone, existingUser.ID)
-		return nil, errors.New("что-то пошло не так")
+		return nil, validationError("что-то пошло не так")
 	}
 
 	verificationToken := uuid.New().String()
@@ -579,7 +581,7 @@ func (s *AuthService) UpdateUserEmail(ctx context.Context, userID uuid.UUID, new
 // ErrBirthDateLocked — дату рождения подтверждённого аккаунта пользователь
 // сам не меняет: модератор сверил её с паспортом, и правка задним числом
 // обесценила бы проверку. Исправить её может только администратор.
-var ErrBirthDateLocked = errors.New("дату рождения подтверждённого аккаунта может изменить только администратор")
+var ErrBirthDateLocked = forbiddenError("дату рождения подтверждённого аккаунта может изменить только администратор")
 
 // UpdateUserBirthDate обновляет дату рождения пользователя. Самому пользователю
 // это доступно только до верификации.

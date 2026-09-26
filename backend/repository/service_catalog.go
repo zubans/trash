@@ -251,6 +251,10 @@ type ServiceCatalogRepository interface {
 	// Навигация по дереву
 	GetRootCategories(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error)
 	GetChildren(ctx context.Context, parentID uuid.UUID, filter ServiceNodeFilter) ([]*ServiceNode, error)
+	// ListAll — весь каталог одним запросом, в порядке показа (sort_order, имя).
+	// Дерево собирается из него в памяти: раньше админский экран делал запрос
+	// на детей каждого узла.
+	ListAll(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error)
 	GetDescendants(ctx context.Context, ancestorID uuid.UUID, maxDepth *int) ([]*ServiceNode, error)
 	GetVariantPath(ctx context.Context, variantID uuid.UUID) ([]*ServiceNode, error)
 
@@ -612,6 +616,12 @@ func (r *serviceCatalogRepo) GetNodeByCode(ctx context.Context, code string) (*S
 
 func (r *serviceCatalogRepo) GetRootCategories(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error) {
 	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE parent_id IS NULL" +
+		filter.where("") + " ORDER BY sort_order, name->>'ru'"
+	return r.queryNodes(ctx, query)
+}
+
+func (r *serviceCatalogRepo) ListAll(ctx context.Context, filter ServiceNodeFilter) ([]*ServiceNode, error) {
+	query := "SELECT " + serviceNodeColumns + " FROM service_nodes WHERE TRUE" +
 		filter.where("") + " ORDER BY sort_order, name->>'ru'"
 	return r.queryNodes(ctx, query)
 }

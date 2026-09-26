@@ -5,6 +5,8 @@ import (
 
 	"healthlogin/backend/money"
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // WalletHandler обслуживает заявки пользователя на пополнение и вывод
@@ -25,7 +27,7 @@ type amountRequest struct {
 
 // CreateTopUpRequestHandler создаёт заявку на пополнение баланса.
 func (h *WalletHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireActor(w, r)
+	user, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -38,14 +40,12 @@ func (h *WalletHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http
 		writeDomainError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, created)
+	writeJSON(w, http.StatusCreated, created)
 }
 
 // CreateWithdrawalRequestHandler создаёт заявку на вывод для аутентифицированного пользователя.
 func (h *WalletHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireActor(w, r)
+	user, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -58,7 +58,12 @@ func (h *WalletHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r 
 		writeDomainError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, created)
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// RegisterUserRoutes — заявки на пополнение и вывод. Исполнителям тоже
+// нужны пополнения: штрафы могут увести баланс в минус.
+func (h *WalletHandler) RegisterUserRoutes(r chi.Router) {
+	r.Post("/customer/finances/topup", h.CreateTopUpRequestHandler)
+	r.Post("/finances/withdrawals", h.CreateWithdrawalRequestHandler)
 }

@@ -23,9 +23,8 @@ func NewReviewHandler(reviewService *service.ReviewService) *ReviewHandler {
 }
 
 func (h *ReviewHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -48,15 +47,12 @@ func (h *ReviewHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(review)
+	writeJSON(w, http.StatusCreated, review)
 }
 
 func (h *ReviewHandler) GetOrderReview(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -73,12 +69,11 @@ func (h *ReviewHandler) GetOrderReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	if review == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{"has_reviewed": false})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"has_reviewed": false})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"has_reviewed": true, "review": review})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"has_reviewed": true, "review": review})
 }
 
 func (h *ReviewHandler) GetUserReviews(w http.ResponseWriter, r *http.Request) {
@@ -109,8 +104,7 @@ func (h *ReviewHandler) GetUserReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(reviews)
+	writeJSON(w, http.StatusOK, reviews)
 }
 
 func (h *ReviewHandler) GetUserRating(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +127,17 @@ func (h *ReviewHandler) GetUserRating(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rating)
+	writeJSON(w, http.StatusOK, rating)
+}
+
+// RegisterPublicRoutes — отзывы и рейтинг пользователя видны всем.
+func (h *ReviewHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Get("/users/{id}/reviews", h.GetUserReviews)
+	r.Get("/users/{id}/rating", h.GetUserRating)
+}
+
+// RegisterUserRoutes — отзыв по заказу от его участника.
+func (h *ReviewHandler) RegisterUserRoutes(r chi.Router) {
+	r.Post("/orders/{id}/reviews", h.CreateReview)
+	r.Get("/orders/{id}/reviews/mine", h.GetOrderReview)
 }

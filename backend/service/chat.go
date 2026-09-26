@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -436,7 +437,7 @@ func (s *ChatService) receiveMessage(ctx context.Context, client *ChatClient, ro
 func (s *ChatService) MarkMessagesAsRead(ctx context.Context, orderID, userID uuid.UUID) ([]uuid.UUID, error) {
 	chat, err := s.chatRepo.GetChatByOrderID(ctx, orderID)
 	if err != nil || chat == nil {
-		return nil, errors.New("chat room not found")
+		return nil, notFoundError("chat room not found")
 	}
 	updatedIDs, err := s.chatRepo.MarkMessagesAsRead(ctx, chat.ID, userID)
 	if err == nil && len(updatedIDs) > 0 {
@@ -482,7 +483,7 @@ func (s *ChatService) SendMessage(ctx context.Context, orderID, userID uuid.UUID
 	}
 
 	if len([]rune(text)) > maxMessageRunes {
-		return nil, errors.New("сообщение слишком длинное")
+		return nil, validationError("сообщение слишком длинное")
 	}
 
 	savedMsg, err := s.chatRepo.SaveMessage(ctx, chat.ID, userID, text)
@@ -619,10 +620,14 @@ func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *ht
 // EditMessage меняет текст сообщения, если оно принадлежит отправителю, и рассылает событие message_edited.
 func (s *ChatService) EditMessage(ctx context.Context, messageID, senderID, orderID uuid.UUID, newText string) (*repository.Message, error) {
 	if len([]rune(newText)) > maxMessageRunes {
-		return nil, errors.New("сообщение слишком длинное")
+		return nil, validationError("сообщение слишком длинное")
 	}
 
 	msg, err := s.chatRepo.UpdateMessage(ctx, messageID, senderID, newText)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Чужое или удалённое сообщение неотличимо от несуществующего.
+		return nil, notFoundError("message not found")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -649,6 +654,9 @@ func (s *ChatService) EditMessage(ctx context.Context, messageID, senderID, orde
 // DeleteMessage удаляет сообщение, если оно принадлежит отправителю, и рассылает событие message_deleted.
 func (s *ChatService) DeleteMessage(ctx context.Context, messageID, senderID, orderID uuid.UUID) error {
 	if err := s.chatRepo.DeleteMessage(ctx, messageID, senderID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return notFoundError("message not found")
+		}
 		return err
 	}
 
@@ -701,7 +709,7 @@ func (s *ChatService) GetOrCreateSupportChat(ctx context.Context, userID uuid.UU
 // превратить 403 в 500 при переименовании.
 var (
 	// ErrChatLocked сообщает, что переписка больше не принимает сообщений.
-	ErrChatLocked = errors.New("chat is locked (read-only)")
+	ErrChatLocked = stateError("chat is locked (read-only)")
 )
 
 // authorizeSupportChat пропускает владельца чата и администратора. Переписки
@@ -746,10 +754,10 @@ func (s *ChatService) SaveSupportMessage(ctx context.Context, chatID uuid.UUID, 
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, errors.New("text is required")
+		return nil, validationError("text is required")
 	}
 	if len([]rune(text)) > maxMessageRunes {
-		return nil, errors.New("сообщение слишком длинное")
+		return nil, validationError("сообщение слишком длинное")
 	}
 	msg, err := s.chatRepo.SaveSupportMessage(ctx, chatID, sender.ID, text)
 	if err != nil {

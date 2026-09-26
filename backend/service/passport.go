@@ -214,7 +214,7 @@ func (s *PassportService) ConsentRequired(ctx context.Context, user *repository.
 // AcceptConsent записывает согласие на текущую редакцию.
 func (s *PassportService) AcceptConsent(ctx context.Context, user *repository.User) error {
 	version := s.ConsentVersion(ctx)
-	if err := s.repo.AcceptPDConsent(ctx, user.ID, version); err != nil {
+	if err := s.users.SetPDConsent(ctx, nil, user.ID, version); err != nil {
 		return err
 	}
 	log.Printf("[AUDIT] user %s accepted personal data consent v%d", user.ID, version)
@@ -669,7 +669,7 @@ func (s *PassportService) AdminDelete(ctx context.Context, adminID, userID uuid.
 		if deleted, err = s.repo.Delete(ctx, tx, userID); err != nil {
 			return err
 		}
-		if err := s.repo.SetChecked(ctx, tx, userID, false, adminID); err != nil {
+		if err := s.users.SetChecked(ctx, tx, userID, false, adminID); err != nil {
 			return err
 		}
 		return s.repo.LogAccess(ctx, tx, userID, adminID, repository.PassportActionDelete)
@@ -710,7 +710,7 @@ func (s *PassportService) SetChecked(ctx context.Context, adminID, userID uuid.U
 			return err
 		}
 	}
-	if err := s.repo.SetChecked(ctx, nil, userID, checked, adminID); err != nil {
+	if err := s.users.SetChecked(ctx, nil, userID, checked, adminID); err != nil {
 		return err
 	}
 	log.Printf("[AUDIT] %s set checked of %s to %t: %s", adminID, userID, checked, reason)

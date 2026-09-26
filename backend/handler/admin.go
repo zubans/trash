@@ -8,7 +8,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
@@ -24,41 +23,6 @@ type AdminHandler struct {
 // NewAdminHandler создаёт новый AdminHandler.
 func NewAdminHandler(adminService *service.AdminService) *AdminHandler {
 	return &AdminHandler{adminService: adminService}
-}
-
-// requireActor берёт действующего администратора из контекста запроса; без
-// него отвечает 401 и сообщает false.
-func requireActor(w http.ResponseWriter, r *http.Request) (*repository.User, bool) {
-	user := middleware.UserFrom(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return nil, false
-	}
-	return user, true
-}
-
-// parseIDParam читает uuid из параметра маршрута; негодный — 400 с именем.
-func parseIDParam(w http.ResponseWriter, r *http.Request, name, what string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(chi.URLParam(r, name))
-	if err != nil {
-		http.Error(w, "invalid "+what, http.StatusBadRequest)
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
-// decodeBody читает JSON тела; негодный — 400.
-func decodeBody(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return false
-	}
-	return true
-}
-
-// writeMessage — ответ 200 с одной строкой message.
-func writeMessage(w http.ResponseWriter, message string) {
-	writeJSON(w, map[string]string{"message": message})
 }
 
 // GetUsersHandler отдаёт постраничный отфильтрованный список пользователей.
@@ -80,7 +44,7 @@ func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 		u.Password = ""
 	}
 
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"users": users,
 		"total": total,
 	})
@@ -92,7 +56,7 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	admin, ok := requireActor(w, r)
+	admin, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -119,7 +83,7 @@ func (h *AdminHandler) UpdateUserVerifiedHandler(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	admin, ok := requireActor(w, r)
+	admin, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -144,7 +108,7 @@ func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	admin, ok := requireActor(w, r)
+	admin, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -169,7 +133,7 @@ func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	admin, ok := requireActor(w, r)
+	admin, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -261,7 +225,7 @@ func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	adminUser, ok := requireActor(w, r)
+	adminUser, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -310,7 +274,7 @@ func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Re
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, reqs)
+	writeJSON(w, http.StatusOK, reqs)
 }
 
 // decideRequest — общий каркас одобрения/отклонения заявки: id из маршрута,
@@ -320,7 +284,7 @@ func decideRequest(w http.ResponseWriter, r *http.Request, decide func(reqID, ad
 	if !ok {
 		return
 	}
-	adminUser, ok := requireActor(w, r)
+	adminUser, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -353,7 +317,7 @@ func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *ht
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, reqs)
+	writeJSON(w, http.StatusOK, reqs)
 }
 
 // ApproveWithdrawalRequestsHandler одобряет заявку на вывод средств.
@@ -389,7 +353,7 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":                        report.OK(),
 		"summary":                   report.Summary(),
 		"users_checked":             report.UsersChecked,
@@ -410,14 +374,14 @@ func (h *AdminHandler) GetCommissionHandler(w http.ResponseWriter, r *http.Reque
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, commission)
+	writeJSON(w, http.StatusOK, commission)
 }
 
 // PayoutCommissionHandler выводит собранную комиссию из системы. Маршрут стоит
 // за правом commission.edit, поэтому вызывающий всегда аутентифицирован; именно
 // он из запроса и записывается против этой выплаты.
 func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Request) {
-	adminUser, ok := requireActor(w, r)
+	adminUser, ok := requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -434,7 +398,7 @@ func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Re
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, commission)
+	writeJSON(w, http.StatusOK, commission)
 }
 
 // GetUserTransactionsHandler отдаёт проводки одного пользователя — историю,
@@ -453,7 +417,7 @@ func (h *AdminHandler) GetUserTransactionsHandler(w http.ResponseWriter, r *http
 	if txs == nil {
 		txs = []*repository.Transaction{}
 	}
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"transactions": txs,
 		"total":        total,
 	})
@@ -475,7 +439,7 @@ func (h *AdminHandler) GetUserOrdersHandler(w http.ResponseWriter, r *http.Reque
 	if orders == nil {
 		orders = []*repository.AdminOrder{}
 	}
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"orders": orders,
 		"total":  total,
 	})
@@ -517,7 +481,7 @@ func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Req
 		resp["types"] = facets.Types
 		resp["periods"] = facets.Periods
 	}
-	writeJSON(w, resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // GetSettingsHandler отдаёт системные настройки.
@@ -527,7 +491,7 @@ func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, settings)
+	writeJSON(w, http.StatusOK, settings)
 }
 
 // UpdateSettingsHandler обновляет системные настройки.
@@ -579,7 +543,7 @@ func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Req
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, shifts)
+	writeJSON(w, http.StatusOK, shifts)
 }
 
 // GetOrdersHandler обслуживает GET /admin/orders: один список заказов с
@@ -624,7 +588,7 @@ func (h *AdminHandler) GetOrdersHandler(w http.ResponseWriter, r *http.Request) 
 		resp["services"] = facets.Services
 		resp["periods"] = facets.Periods
 	}
-	writeJSON(w, resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // SendBroadcastEmailHandler рассылает письмо выбранным получателям.
@@ -639,5 +603,45 @@ func (h *AdminHandler) SendBroadcastEmailHandler(w http.ResponseWriter, r *http.
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, res)
+	writeJSON(w, http.StatusOK, res)
+}
+
+// RegisterAdminRoutes — пользователи, деньги, настройки и мониторинг. Что
+// именно можно, решает право на каждом маршруте — раздел плюс действие из
+// каталога service/permission.go.
+func (h *AdminHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("users.view")).Get("/admin/users", h.GetUsersHandler)
+	r.With(can("users.edit")).Post("/admin/users/{id}/status", h.UpdateUserStatusHandler)
+	r.With(can("users.edit")).Post("/admin/users/{id}/verified", h.UpdateUserVerifiedHandler)
+	// Роль пользователя меняется на его карточке, но это раздача прав,
+	// поэтому охраняется правом на роли, а не правом на пользователей.
+	r.With(can("roles.edit")).Post("/admin/users/{id}/role", h.UpdateUserRoleHandler)
+	r.With(can("roles.edit")).Post("/admin/users/{id}/roles", h.UpdateUserRolesHandler)
+	r.With(can("users.edit")).Post("/admin/users/{id}/address", h.UpdateUserAddressHandler)
+	r.With(can("users.edit")).Post("/admin/users/{id}/name", h.UpdateUserNameHandler)
+	r.With(can("users.edit")).Post("/admin/users/{id}/birth-date", h.UpdateUserBirthDateHandler)
+	// Прямое зачисление с карточки — движение денег, а не правка карточки:
+	// охраняется тем же правом, что одобрение заявок на пополнение.
+	r.With(can("topups.edit")).Post("/admin/users/{id}/balance", h.TopUpUserBalanceHandler)
+	// Истории с карточки пользователя. Охраняются правом на тот раздел,
+	// который они показывают, а не правом на пользователей: кто не допущен
+	// к журналу проводок, не должен читать его и здесь.
+	r.With(can("transactions.view")).Get("/admin/users/{id}/transactions", h.GetUserTransactionsHandler)
+	r.With(can("orders.view")).Get("/admin/users/{id}/orders", h.GetUserOrdersHandler)
+
+	r.With(can("topups.view")).Get("/admin/finances/topups", h.GetTopUpRequestsHandler)
+	r.With(can("topups.edit")).Post("/admin/finances/topups/{id}/approve", h.ApproveTopUpRequestsHandler)
+	r.With(can("topups.edit")).Post("/admin/finances/topups/{id}/reject", h.RejectTopUpRequestsHandler)
+	r.With(can("withdrawals.view")).Get("/admin/finances/withdrawals", h.GetWithdrawalRequestsHandler)
+	r.With(can("withdrawals.edit")).Post("/admin/finances/withdrawals/{id}/approve", h.ApproveWithdrawalRequestsHandler)
+	r.With(can("withdrawals.edit")).Post("/admin/finances/withdrawals/{id}/reject", h.RejectWithdrawalRequestsHandler)
+	r.With(can("commission.view")).Get("/admin/finances/commission", h.GetCommissionHandler)
+	r.With(can("commission.edit")).Post("/admin/finances/commission/payout", h.PayoutCommissionHandler)
+	r.With(can("transactions.view")).Get("/admin/transactions", h.GetTransactionsHandler)
+	r.With(can("reconciliation.view")).Get("/admin/finances/reconciliation", h.GetReconciliationHandler)
+	r.With(can("settings.view")).Get("/admin/settings", h.GetSettingsHandler)
+	r.With(can("settings.edit")).Post("/admin/settings", h.UpdateSettingsHandler)
+	r.With(can("shifts.view")).Get("/admin/shifts/active", h.GetActiveShiftsHandler)
+	r.With(can("orders.view")).Get("/admin/orders", h.GetOrdersHandler)
+	r.With(can("broadcasts.create")).Post("/admin/broadcast-email", h.SendBroadcastEmailHandler)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -234,6 +235,35 @@ func (s *OrderSubmissions) SubmitOrderData(ctx context.Context, orderID, executo
 		Mismatched: mismatched,
 		Messages:   messages,
 	}, nil
+}
+
+// ListEscalations — случаи, переданные поведением администратору. По
+// умолчанию открытые; попытки отправки идут вместе с ними, потому что сравнить
+// прочитанное модератором в документе с учётной записью — вся задача того экрана.
+func (s *OrderSubmissions) ListEscalations(ctx context.Context, status string, limit int) ([]*repository.BehaviorEscalation, error) {
+	if s == nil || s.submissions == nil {
+		return []*repository.BehaviorEscalation{}, nil
+	}
+	return s.submissions.ListEscalations(ctx, status, limit)
+}
+
+// ErrEscalationNotFound — случая нет или он уже закрыт.
+var ErrEscalationNotFound = notFoundError("escalation not found or already resolved")
+
+// ResolveEscalation закрывает случай и только: верифицировать заказчика или
+// отменить заказ — собственные решения администратора со своими действиями.
+func (s *OrderSubmissions) ResolveEscalation(ctx context.Context, adminID, id uuid.UUID) error {
+	if s == nil || s.submissions == nil {
+		return ErrSubmissionNotSupported
+	}
+	if err := s.submissions.ResolveEscalation(ctx, id, adminID); err != nil {
+		if errors.Is(err, repository.ErrEscalationNotFound) {
+			return ErrEscalationNotFound
+		}
+		return err
+	}
+	log.Printf("[AUDIT] admin %s resolved escalation %s", adminID, id)
+	return nil
 }
 
 // requirePassport — паспорт заказчика с фото уже на сервере.

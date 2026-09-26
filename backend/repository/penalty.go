@@ -97,15 +97,14 @@ type PenaltyRepository interface {
 	// Пользователи без строки состояния в результате отсутствуют.
 	StatusesOf(ctx context.Context, q Querier, userIDs []uuid.UUID, role string) ([]PenaltyStatus, error)
 
-	// ApplySoftBan переводит пользователя в SOFT_BANNED и записывает, кто, когда
-	// и почему, одним оператором: статус без причины или причина без статуса
-	// невозможны. by == nil — бан поставила система. Для несуществующего
-	// пользователя — sql.ErrNoRows.
+	// ApplySoftBan записывает, кто, когда и почему поставил мягкий бан.
+	// by == nil — бан поставила система. Сам статус SOFT_BANNED ставит
+	// UserRepository.UpdateStatus; вызывающий делает оба шага в одной
+	// транзакции, чтобы статус без причины или причина без статуса были невозможны.
 	ApplySoftBan(ctx context.Context, q Querier, userID uuid.UUID, by *uuid.UUID, reason string) error
-	// LiftSoftBan переводит пользователя из SOFT_BANNED в ACTIVE и стирает
-	// причину бана. Флаг прошлой тихой блокировки не трогает: его снимает только
-	// отдельное решение администратора. Возвращает ErrConflict, если
-	// пользователь не в SOFT_BANNED.
+	// LiftSoftBan стирает причину мягкого бана. Флаг прошлой тихой блокировки
+	// не трогает: его снимает только отдельное решение администратора. Статус
+	// ACTIVE возвращает UserRepository.UpdateStatus в той же транзакции.
 	LiftSoftBan(ctx context.Context, q Querier, userID uuid.UUID) error
 	// GetFlags отдаёт флаги пользователя; для пользователя без строки — пустые.
 	GetFlags(ctx context.Context, q Querier, userID uuid.UUID) (*PenaltyFlags, error)
@@ -135,48 +134,29 @@ func NewPenaltyRepository(db *sql.DB) PenaltyRepository {
 }
 
 func (r *penaltyRepo) ApplySoftBan(ctx context.Context, q Querier, userID uuid.UUID, by *uuid.UUID, reason string) error {
-	var id uuid.UUID
-	err := exec(r.db, q).QueryRowContext(ctx, `
-        WITH banned AS (
-            UPDATE users SET status = 'SOFT_BANNED'
-            WHERE id = $1
-            RETURNING id
-        )
+	// Только флаги: статус учётки меняет UserRepository.UpdateStatus в той же
+	// транзакции вызывающего. Таблицу users пишет один репозиторий.
+	_, err := exec(r.db, q).ExecContext(ctx, `
         INSERT INTO user_penalty_flags (user_id, soft_banned_at, soft_banned_by, soft_ban_reason, updated_at)
-        SELECT id, now(), $2, $3, now() FROM banned
+        VALUES ($1, now(), $2, $3, now())
         ON CONFLICT (user_id) DO UPDATE SET
             soft_banned_at  = EXCLUDED.soft_banned_at,
             soft_banned_by  = EXCLUDED.soft_banned_by,
             soft_ban_reason = EXCLUDED.soft_ban_reason,
             updated_at      = now()
-        RETURNING user_id
-    `, userID, by, reason).Scan(&id)
+    `, userID, by, reason)
 	return err
 }
 
 func (r *penaltyRepo) LiftSoftBan(ctx context.Context, q Querier, userID uuid.UUID) error {
-	// Строки флагов может и не быть, поэтому снят ли бан, считается по
-	// обновлённой строке пользователя, а не по флагам.
-	var lifted int
-	if err := exec(r.db, q).QueryRowContext(ctx, `
-        WITH lifted AS (
-            UPDATE users SET status = 'ACTIVE'
-            WHERE id = $1 AND status = 'SOFT_BANNED'
-            RETURNING id
-        ), cleared AS (
-            UPDATE user_penalty_flags f
-            SET soft_banned_at = NULL, soft_banned_by = NULL, soft_ban_reason = NULL, updated_at = now()
-            FROM lifted
-            WHERE f.user_id = lifted.id
-        )
-        SELECT count(*) FROM lifted
-    `, userID).Scan(&lifted); err != nil {
-		return err
-	}
-	if lifted == 0 {
-		return ErrConflict
-	}
-	return nil
+	// Строки флагов может и не быть — тогда стирать нечего. Статус возвращает
+	// UserRepository.UpdateStatus, вызывающий делает это в одной транзакции.
+	_, err := exec(r.db, q).ExecContext(ctx, `
+        UPDATE user_penalty_flags
+        SET soft_banned_at = NULL, soft_banned_by = NULL, soft_ban_reason = NULL, updated_at = now()
+        WHERE user_id = $1
+    `, userID)
+	return err
 }
 
 func (r *penaltyRepo) GetFlags(ctx context.Context, q Querier, userID uuid.UUID) (*PenaltyFlags, error) {

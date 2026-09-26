@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -61,21 +60,11 @@ func (h *PassportHandler) RegisterAdminRoutes(r chi.Router, can func(string) fun
 func writePassportError(w http.ResponseWriter, err error) {
 	var pe *service.PassportError
 	if errors.As(err, &pe) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(pe.Status)
-		_ = json.NewEncoder(w).Encode(pe)
+		writeJSON(w, pe.Status, pe)
 		return
 	}
 	log.Printf("[passport] %v", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
-}
-
-func (h *PassportHandler) caller(w http.ResponseWriter, r *http.Request) *repository.User {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}
-	return user
 }
 
 func decodePassport(w http.ResponseWriter, r *http.Request) (service.PassportData, bool) {
@@ -121,17 +110,17 @@ func deviceTakenAt(r *http.Request) time.Time {
 // writeCaptureKey отдаёт ключ подписи снимка. Ключ не кешируется: он секрет.
 func writeCaptureKey(w http.ResponseWriter, id uuid.UUID, key []byte) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]string{"id": id.String(), "key": base64.StdEncoding.EncodeToString(key)})
+	writeJSON(w, http.StatusOK, map[string]string{"id": id.String(), "key": base64.StdEncoding.EncodeToString(key)})
 }
 
 func respondOK(w http.ResponseWriter) {
-	writeJSON(w, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // Mine обслуживает GET /me/passport — паспорт маской.
 func (h *PassportHandler) Mine(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	mask, err := h.passports.Mine(r.Context(), user)
@@ -139,14 +128,14 @@ func (h *PassportHandler) Mine(w http.ResponseWriter, r *http.Request) {
 		writePassportError(w, err)
 		return
 	}
-	writeJSON(w, mask)
+	writeJSON(w, http.StatusOK, mask)
 }
 
 // MineForEdit обслуживает GET /me/passport/data — свои данные целиком, чтобы
 // форма правки открылась заполненной.
 func (h *PassportHandler) MineForEdit(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	data, err := h.passports.MineForEdit(r.Context(), user)
@@ -155,13 +144,13 @@ func (h *PassportHandler) MineForEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, data)
+	writeJSON(w, http.StatusOK, data)
 }
 
 // SaveMine обслуживает PUT /me/passport.
 func (h *PassportHandler) SaveMine(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	data, ok := decodePassport(w, r)
@@ -177,8 +166,8 @@ func (h *PassportHandler) SaveMine(w http.ResponseWriter, r *http.Request) {
 
 // SaveMinePhoto обслуживает POST /me/passport/photo.
 func (h *PassportHandler) SaveMinePhoto(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	photo, ok := readPhoto(w, r)
@@ -194,8 +183,8 @@ func (h *PassportHandler) SaveMinePhoto(w http.ResponseWriter, r *http.Request) 
 
 // MinePhotoKey обслуживает GET /me/passport/photo/key.
 func (h *PassportHandler) MinePhotoKey(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, key, err := h.passports.MinePhotoKey(r.Context(), user)
@@ -208,8 +197,8 @@ func (h *PassportHandler) MinePhotoKey(w http.ResponseWriter, r *http.Request) {
 
 // VerificationPhotoKey обслуживает GET /executor/orders/{id}/passport/photo/key.
 func (h *PassportHandler) VerificationPhotoKey(w http.ResponseWriter, r *http.Request) {
-	executor := h.caller(w, r)
-	if executor == nil {
+	executor, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	orderID, err := parseUUIDParam(r, "id")
@@ -227,8 +216,8 @@ func (h *PassportHandler) VerificationPhotoKey(w http.ResponseWriter, r *http.Re
 
 // AcceptConsent обслуживает POST /me/pd-consent.
 func (h *PassportHandler) AcceptConsent(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	if err := h.passports.AcceptConsent(r.Context(), user); err != nil {
@@ -240,8 +229,8 @@ func (h *PassportHandler) AcceptConsent(w http.ResponseWriter, r *http.Request) 
 
 // SaveFromVerification обслуживает PUT /executor/orders/{id}/passport.
 func (h *PassportHandler) SaveFromVerification(w http.ResponseWriter, r *http.Request) {
-	executor := h.caller(w, r)
-	if executor == nil {
+	executor, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	orderID, err := parseUUIDParam(r, "id")
@@ -262,8 +251,8 @@ func (h *PassportHandler) SaveFromVerification(w http.ResponseWriter, r *http.Re
 
 // SavePhotoFromVerification обслуживает POST /executor/orders/{id}/passport/photo.
 func (h *PassportHandler) SavePhotoFromVerification(w http.ResponseWriter, r *http.Request) {
-	executor := h.caller(w, r)
-	if executor == nil {
+	executor, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	orderID, err := parseUUIDParam(r, "id")
@@ -294,7 +283,7 @@ func (h *PassportHandler) AdminStatus(w http.ResponseWriter, r *http.Request) {
 		writePassportError(w, err)
 		return
 	}
-	writeJSON(w, status)
+	writeJSON(w, http.StatusOK, status)
 }
 
 // AdminCheckRequests обслуживает GET /admin/check-requests.
@@ -305,13 +294,13 @@ func (h *PassportHandler) AdminCheckRequests(w http.ResponseWriter, r *http.Requ
 		writePassportError(w, err)
 		return
 	}
-	writeJSON(w, requests)
+	writeJSON(w, http.StatusOK, requests)
 }
 
 // AdminView обслуживает GET /admin/users/{id}/passport.
 func (h *PassportHandler) AdminView(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	userID, err := parseUUIDParam(r, "id")
@@ -325,14 +314,14 @@ func (h *PassportHandler) AdminView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, full)
+	writeJSON(w, http.StatusOK, full)
 }
 
 // AdminPhoto обслуживает GET /admin/users/{id}/passport/photo — фото
 // расшифровывается на лету и не кешируется.
 func (h *PassportHandler) AdminPhoto(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	userID, err := parseUUIDParam(r, "id")
@@ -353,8 +342,8 @@ func (h *PassportHandler) AdminPhoto(w http.ResponseWriter, r *http.Request) {
 
 // AdminSave обслуживает PUT /admin/users/{id}/passport.
 func (h *PassportHandler) AdminSave(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	userID, err := parseUUIDParam(r, "id")
@@ -375,8 +364,8 @@ func (h *PassportHandler) AdminSave(w http.ResponseWriter, r *http.Request) {
 
 // AdminSavePhoto обслуживает POST /admin/users/{id}/passport/photo.
 func (h *PassportHandler) AdminSavePhoto(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	userID, err := parseUUIDParam(r, "id")
@@ -397,8 +386,8 @@ func (h *PassportHandler) AdminSavePhoto(w http.ResponseWriter, r *http.Request)
 
 // AdminDelete обслуживает DELETE /admin/users/{id}/passport.
 func (h *PassportHandler) AdminDelete(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	userID, err := parseUUIDParam(r, "id")
@@ -415,8 +404,8 @@ func (h *PassportHandler) AdminDelete(w http.ResponseWriter, r *http.Request) {
 
 // AdminSetChecked обслуживает POST /admin/users/{id}/checked.
 func (h *PassportHandler) AdminSetChecked(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	userID, err := parseUUIDParam(r, "id")

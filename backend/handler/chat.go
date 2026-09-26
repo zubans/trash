@@ -3,9 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -17,9 +15,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"healthlogin/backend/middleware"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
+	"healthlogin/backend/upload"
 )
 
 // ChatHandler хранит зависимости эндпоинтов чат-комнат.
@@ -28,6 +26,11 @@ type ChatHandler struct {
 	// shopLinks размечает номера покупок в чате поддержки ссылками на их
 	// карточки — только для того, кто читает чужой чат, то есть поддержки.
 	shopLinks func(ctx context.Context, ownerID uuid.UUID, messages []*repository.Message) error
+	// uploadsDir — корень загрузок (UPLOADS_DIR). Вложения чата заказа лежат в
+	// chat/, чата поддержки — в support/; ссылка /uploads/<путь> ведёт к файлу
+	// относительно этого корня, поэтому старые вложения поддержки, лежавшие в
+	// корне, продолжают открываться.
+	uploadsDir string
 }
 
 // WithShopLinks подключает разметку номеров покупок в чате поддержки.
@@ -36,63 +39,72 @@ func (h *ChatHandler) WithShopLinks(links func(ctx context.Context, ownerID uuid
 	return h
 }
 
-// NewChatHandler создаёт новый ChatHandler.
-func NewChatHandler(chatService *service.ChatService) *ChatHandler {
-	return &ChatHandler{chatService: chatService}
+// NewChatHandler создаёт новый ChatHandler. uploadsDir приходит из
+// composition root, а не читается из окружения на каждый запрос.
+func NewChatHandler(chatService *service.ChatService, uploadsDir string) *ChatHandler {
+	if uploadsDir == "" {
+		uploadsDir = "uploads"
+	}
+	return &ChatHandler{chatService: chatService, uploadsDir: uploadsDir}
+}
+
+// RegisterUserRoutes — чат заказа и чат поддержки участника.
+func (h *ChatHandler) RegisterUserRoutes(r chi.Router) {
+	r.Get("/chats/{order_id}/messages", h.GetMessagesHandler)
+	r.Post("/chats/{order_id}/messages", h.SendMessageHandler)
+	r.Put("/chats/{order_id}/messages/{message_id}", h.EditMessageHandler)
+	r.Delete("/chats/{order_id}/messages/{message_id}", h.DeleteMessageHandler)
+	r.Post("/chats/{order_id}/upload", h.UploadAttachmentHandler)
+	r.Post("/chats/{order_id}/read", h.MarkReadHandler)
+	r.Get("/chats/unread-summary", h.GetUnreadSummaryHandler)
+	r.Get("/chats/{order_id}/ws", h.WebSocketHandler)
+	r.Get("/support/chat", h.GetUserSupportChatHandler)
+	r.Get("/support/chats/{chat_id}/messages", h.GetSupportMessagesHandler)
+	r.Post("/support/chats/{chat_id}/messages", h.SendSupportMessageHandler)
+	r.Post("/support/chats/{chat_id}/upload", h.UploadSupportAttachmentHandler)
+}
+
+// RegisterAdminRoutes — чаты поддержки в админ-панели. Кого сюда пускать,
+// решает право support_chats.* на маршруте, а не роль.
+func (h *ChatHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("support_chats.view")).Get("/admin/support/chats", h.GetAdminSupportChatListHandler)
+	r.With(can("support_chats.view")).Get("/admin/support/unread-summary", h.GetAdminSupportUnreadSummaryHandler)
+	r.With(can("support_chats.edit")).Post("/admin/support/chats/{chat_id}/ban", h.BanSupportChatHandler)
+	r.With(can("support_chats.edit")).Post("/admin/support/chats/{chat_id}/unban", h.UnbanSupportChatHandler)
+}
+
+// RegisterFileRoutes — раздача вложений участникам переписки. Вызывающий
+// подключает их под RequireAuth.
+func (h *ChatHandler) RegisterFileRoutes(r chi.Router) {
+	r.Get("/uploads/*", h.ServeAttachmentHandler)
 }
 
 // maxAttachmentBytes — жёсткий предел на один загружаемый файл.
 const maxAttachmentBytes = 25 << 20
 
-// allowedAttachmentExtensions — белый список: всё, что браузер мог бы выполнить
-// в источнике приложения (html, svg, js, ...), не должно храниться и отдаваться
-// обратно, иначе вложение превращается в хранимую XSS.
-var allowedAttachmentExtensions = map[string]bool{
-	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true, ".heic": true,
-	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true, ".txt": true, ".csv": true,
+// attachmentTypes — белый список: всё, что браузер мог бы выполнить в
+// источнике приложения (html, svg, js, ...), не должно храниться и отдаваться
+// обратно, иначе вложение превращается в хранимую XSS. Картинка обязана быть
+// картинкой по содержимому; документы — чем угодно, кроме активного содержимого.
+var attachmentTypes = map[string][]string{
+	".jpg": {"image/"}, ".jpeg": {"image/"}, ".png": {"image/"}, ".webp": {"image/"}, ".gif": {"image/"}, ".heic": nil,
+	".pdf": nil, ".doc": nil, ".docx": nil, ".xls": nil, ".xlsx": nil, ".txt": nil, ".csv": nil,
 }
 
-// uploadsBaseDir единообразно разрешает корень загрузок для любого пути загрузки.
-func uploadsBaseDir() string {
-	if dir := os.Getenv("UPLOADS_DIR"); dir != "" {
-		return dir
+// attachmentKind делит вложения на картинки и документы по типу содержимого.
+func attachmentKind(contentType string) string {
+	if strings.HasPrefix(contentType, "image/") {
+		return "image"
 	}
-	return "uploads"
-}
-
-// safeExtension проверяет присланное клиентом имя файла и возвращает
-// нормализованное расширение, под которым файл будет сохранён.
-func safeExtension(fileName string) (string, error) {
-	ext := strings.ToLower(filepath.Ext(fileName))
-	if ext == "" {
-		return "", errors.New("файл без расширения не поддерживается")
-	}
-	if !allowedAttachmentExtensions[ext] {
-		return "", errors.New("недопустимый тип файла")
-	}
-	return ext, nil
-}
-
-// writeChatError сопоставляет ошибки сервиса с кодами HTTP по тождеству ошибки,
-// а не по совпадению текста сообщения.
-func writeChatError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		http.Error(w, err.Error(), http.StatusForbidden)
-	case errors.Is(err, service.ErrChatLocked):
-		http.Error(w, err.Error(), http.StatusConflict)
-	default:
-		http.Error(w, err.Error(), http.StatusBadRequest)
-	}
+	return "document"
 }
 
 // ServeAttachmentHandler отдаёт загруженный файл только участнику переписки,
 // которой он принадлежит. Раньше вложения раздавал голый файловый сервер с
 // включённым листингом каталогов.
 func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -115,7 +127,7 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	base, err := filepath.Abs(uploadsBaseDir())
+	base, err := filepath.Abs(h.uploadsDir)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -173,9 +185,8 @@ func messageQueryFrom(r *http.Request) repository.MessageQuery {
 
 // GetMessagesHandler отдаёт историю сообщений.
 func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -188,21 +199,18 @@ func (h *ChatHandler) GetMessagesHandler(w http.ResponseWriter, r *http.Request)
 
 	messages, err := h.chatService.GetMessages(r.Context(), orderID, user.ID, messageQueryFrom(r))
 	if err != nil {
-		log.Printf("[GetMessagesHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
-		http.Error(w, err.Error(), http.StatusForbidden)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(messages)
+	writeJSON(w, http.StatusOK, messages)
 }
 
 // SendMessageHandler сохраняет и рассылает сообщение чата через REST (классический
 // запасной путь для клиентов, которые не умеют слать по WebSocket, например мобильных WebView).
 func (h *ChatHandler) SendMessageHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -228,21 +236,17 @@ func (h *ChatHandler) SendMessageHandler(w http.ResponseWriter, r *http.Request)
 
 	msg, err := h.chatService.SendMessage(r.Context(), orderID, user.ID, req.Text)
 	if err != nil {
-		log.Printf("[SendMessageHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
-		writeChatError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(msg)
+	writeJSON(w, http.StatusCreated, msg)
 }
 
 // WebSocketHandler апгрейдит запрос и обрабатывает цикл чата.
 func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	user, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -258,9 +262,8 @@ func (h *ChatHandler) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 // MarkReadHandler отмечает все сообщения чата прочитанными.
 func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -273,12 +276,11 @@ func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
 
 	updatedIDs, err := h.chatService.MarkMessagesAsRead(r.Context(), orderID, user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":      "ok",
 		"updated_ids": updatedIDs,
 	})
@@ -286,29 +288,26 @@ func (h *ChatHandler) MarkReadHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetUnreadSummaryHandler возвращает ID заказов с непрочитанным для аутентифицированного пользователя.
 func (h *ChatHandler) GetUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
 	orderIDs, err := h.chatService.GetUnreadOrderIDs(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"unread_order_ids": orderIDs,
 	})
 }
 
 // UploadAttachmentHandler обслуживает POST /api/chats/{order_id}/upload для файлов и фото.
 func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -319,78 +318,32 @@ func (h *ChatHandler) UploadAttachmentHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// MaxBytesReader ограничивает то, что реально доходит до диска; аргумент
-	// ParseMultipartForm задаёт лишь размер буфера в памяти, а остаток уходит во временные файлы.
-	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		http.Error(w, "file too large (max 25MB)", http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
+	saved, err := upload.Save(w, r, upload.Options{
+		Field: "file", MaxBytes: maxAttachmentBytes, Dir: filepath.Join(h.uploadsDir, "chat"),
+		Name:   fmt.Sprintf("%s_%d", uuid.New().String(), time.Now().Unix()),
+		Accept: upload.ByExtension(attachmentTypes),
+	})
 	if err != nil {
-		http.Error(w, "file is required", http.StatusBadRequest)
+		writeUploadError(w, err, "file is required")
 		return
 	}
-	defer file.Close()
-
-	ext, err := safeExtension(header.Filename)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
 	text := strings.TrimSpace(r.FormValue("text"))
+	fileURL := "/uploads/chat/" + saved.Name
 
-	uploadDir := filepath.Join(uploadsBaseDir(), "chat")
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
-		return
-	}
-
-	uniqueFileName := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
-	dstPath := filepath.Join(uploadDir, uniqueFileName)
-
-	dst, err := os.Create(dstPath)
+	msg, err := h.chatService.SendMessageWithAttachment(r.Context(), orderID, user.ID, text, fileURL,
+		saved.ClientName, attachmentKind(saved.ContentType), saved.Size)
 	if err != nil {
-		http.Error(w, "failed to save file", http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	fileSize, err := io.Copy(dst, file)
-	if err != nil {
-		http.Error(w, "failed to write file", http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	// Определяем категорию файла: изображение или документ
-	mimeType := header.Header.Get("Content-Type")
-	fileType := "document"
-	if strings.HasPrefix(mimeType, "image/") || strings.Contains(strings.ToLower(ext), ".jpg") || strings.Contains(strings.ToLower(ext), ".png") || strings.Contains(strings.ToLower(ext), ".webp") || strings.Contains(strings.ToLower(ext), ".jpeg") {
-		fileType = "image"
-	}
-
-	fileURL := fmt.Sprintf("/uploads/chat/%s", uniqueFileName)
-	fileName := header.Filename
-
-	msg, err := h.chatService.SendMessageWithAttachment(r.Context(), orderID, user.ID, text, fileURL, fileName, fileType, fileSize)
-	if err != nil {
-		log.Printf("[UploadAttachmentHandler] userID=%s orderID=%s error: %v", user.ID, orderID, err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(msg)
+	writeJSON(w, http.StatusCreated, msg)
 }
 
 // EditMessageHandler обслуживает PUT /api/chats/{order_id}/messages/{message_id}.
 func (h *ChatHandler) EditMessageHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -423,19 +376,17 @@ func (h *ChatHandler) EditMessageHandler(w http.ResponseWriter, r *http.Request)
 
 	msg, err := h.chatService.EditMessage(r.Context(), messageID, user.ID, orderID, req.Text)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msg)
+	writeJSON(w, http.StatusOK, msg)
 }
 
 // DeleteMessageHandler обслуживает DELETE /api/chats/{order_id}/messages/{message_id}.
 func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -454,7 +405,7 @@ func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.chatService.DeleteMessage(r.Context(), messageID, user.ID, orderID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -463,27 +414,24 @@ func (h *ChatHandler) DeleteMessageHandler(w http.ResponseWriter, r *http.Reques
 
 // GetUserSupportChatHandler возвращает или создаёт чат поддержки текущего пользователя.
 func (h *ChatHandler) GetUserSupportChatHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
 	chat, err := h.chatService.GetOrCreateSupportChat(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(chat)
+	writeJSON(w, http.StatusOK, chat)
 }
 
 // GetSupportMessagesHandler отдаёт сообщения поддержки.
 func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -497,7 +445,7 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 	q := messageQueryFrom(r)
 	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user, q)
 	if err != nil {
-		writeChatError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 	// Размечать нечего, когда страница пуста, — а опрос почти всегда возвращает
@@ -517,8 +465,7 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 		_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(messages)
+	writeJSON(w, http.StatusOK, messages)
 }
 
 // supportChatWritable отвечает, можно ли сейчас писать в чат поддержки, и сам
@@ -542,9 +489,8 @@ func (h *ChatHandler) supportChatWritable(w http.ResponseWriter, r *http.Request
 
 // SendSupportMessageHandler публикует текстовое сообщение в чат поддержки.
 func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -569,19 +515,17 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 
 	msg, err := h.chatService.SaveSupportMessage(r.Context(), chatID, user, req.Text)
 	if err != nil {
-		writeChatError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msg)
+	writeJSON(w, http.StatusOK, msg)
 }
 
 // UploadSupportAttachmentHandler загружает вложение для чата поддержки.
 func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok || user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -596,58 +540,25 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		http.Error(w, "file too large (max 25MB)", http.StatusBadRequest)
-		return
-	}
-	file, header, err := r.FormFile("file")
+	saved, err := upload.Save(w, r, upload.Options{
+		Field: "file", MaxBytes: maxAttachmentBytes, Dir: filepath.Join(h.uploadsDir, "support"),
+		Name:   fmt.Sprintf("support_%s_%d", chatID.String()[:8], time.Now().UnixNano()),
+		Accept: upload.ByExtension(attachmentTypes),
+	})
 	if err != nil {
-		http.Error(w, "invalid file", http.StatusBadRequest)
+		writeUploadError(w, err, "invalid file")
 		return
 	}
-	defer file.Close()
-
-	ext, err := safeExtension(header.Filename)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	fileName := fmt.Sprintf("support_%s_%d%s", chatID.String()[:8], time.Now().UnixNano(), ext)
-	uploadsDir := uploadsBaseDir()
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
-		return
-	}
-	dstPath := filepath.Join(uploadsDir, fileName)
-	dst, err := os.Create(dstPath)
-	if err != nil {
-		http.Error(w, "failed to save file", http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, "failed to write file", http.StatusInternalServerError)
-		return
-	}
-
-	fileURL := fmt.Sprintf("/uploads/%s", fileName)
-	fileType := "document"
-	mime := header.Header.Get("Content-Type")
-	if strings.HasPrefix(mime, "image/") {
-		fileType = "image"
-	}
-
+	fileURL := "/uploads/support/" + saved.Name
 	text := r.FormValue("text")
-	msg, err := h.chatService.SaveSupportMessageWithAttachment(r.Context(), chatID, user, text, fileURL, header.Filename, fileType, header.Size)
+	msg, err := h.chatService.SaveSupportMessageWithAttachment(r.Context(), chatID, user, text, fileURL,
+		saved.ClientName, attachmentKind(saved.ContentType), saved.Size)
 	if err != nil {
-		writeChatError(w, err)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msg)
+	writeJSON(w, http.StatusOK, msg)
 }
 
 // GetAdminSupportChatListHandler возвращает список чатов в стиле Telegram для
@@ -656,12 +567,11 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 func (h *ChatHandler) GetAdminSupportChatListHandler(w http.ResponseWriter, r *http.Request) {
 	list, err := h.chatService.GetAdminSupportChatList(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(list)
+	writeJSON(w, http.StatusOK, list)
 }
 
 // BanSupportChatHandler банит чат поддержки на указанный срок («10m», «1h», «forever»).
@@ -684,12 +594,11 @@ func (h *ChatHandler) BanSupportChatHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.chatService.BanSupportChat(r.Context(), chatID, req.Duration); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": true, "duration": req.Duration})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "success", "banned": true, "duration": req.Duration})
 }
 
 // UnbanSupportChatHandler снимает бан с чата поддержки.
@@ -702,12 +611,11 @@ func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := h.chatService.UnbanSupportChat(r.Context(), chatID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "banned": false})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "success", "banned": false})
 }
 
 // GetAdminSupportUnreadSummaryHandler возвращает общее число непрочитанного для
@@ -715,10 +623,9 @@ func (h *ChatHandler) UnbanSupportChatHandler(w http.ResponseWriter, r *http.Req
 func (h *ChatHandler) GetAdminSupportUnreadSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	total, err := h.chatService.GetAdminSupportUnreadCount(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"unread_count": total})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"unread_count": total})
 }

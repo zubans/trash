@@ -869,7 +869,18 @@ WHERE sn.is_auction = TRUE
 | POST | `/admin/service-nodes/:id/restore` | Восстановить удалённый узел (возвращается выключенным) |
 
 `GET /admin/service-nodes` по умолчанию не отдаёт удалённые узлы; чтобы увидеть
-их в дереве, нужен параметр `?include_deleted=true`.
+их в дереве, нужен параметр `?include_deleted=true`. Дерево читается **одним
+запросом** (`ServiceCatalogRepository.ListAll`) и собирается в памяти
+(`service.ServiceCatalogAdmin.Tree`); раньше на каждый узел уходил запрос
+`GetChildren`.
+
+Тело `POST`/`PUT` — форма `service.ServiceNodeForm`, а не строка узла: имена
+полей JSON те же, но `id`, `created_at`, `updated_at` и `deleted_at` из тела
+игнорируются — их ставит сервер. Списать узел можно только через `DELETE`.
+
+Видимость публичного каталога (тихая блокировка заказчика, услуги «только для
+верифицированных», скриптовые узлы) решает `service.ServiceCatalog.VisibleTo`;
+обработчик каталога только разбирает запрос и отвечает по классу ошибки.
 
 Ответ `DELETE` содержит `{"message": ..., "soft": true, "had_orders": bool, "deleted_count": N}` —
 `had_orders` говорит админке, что за услугой осталась история заказов, а
@@ -877,6 +888,11 @@ WHERE sn.is_auction = TRUE
 Удаление **каскадное**: снимая категорию, гасим и всех её живых потомков.
 
 ### 5.10 Валидация в админских эндпоинтах
+
+Правила живут в `service.ServiceCatalogAdmin` (`validateNode`,
+`validateParent`) и отдаются классом `ErrValidation`; обработчик каталога
+отвечает на них `400` с текстом, как и прежде (формы админ-панели показывают
+текст как есть), на конфликты состояния — `409`, на «нет узла» — `404`.
 
 - `code` уникален, совпадает с `^[a-z0-9_]+$`.
 - `node_type` не меняется после создания.
@@ -955,62 +971,22 @@ type AppReleaseRepository interface {
 
 #### Логика загрузки APK
 
-`backend/handler/app_release.go`:
+`POST /admin/app-releases` (multipart: `platform`, `version_name`,
+`version_code`, `release_notes`, `force_update`, `apk`):
 
-```go
-func (h *AppReleaseHandler) UploadReleaseHandler(w http.ResponseWriter, r *http.Request) {
-    platform := r.FormValue("platform")
-    versionName := r.FormValue("version_name")
-    versionCode, _ := strconv.Atoi(r.FormValue("version_code"))
+1. `service.AppReleases.Target` проверяет форму (платформа из белого списка,
+   `version_name` по шаблону `^[0-9A-Za-z._\-]{1,64}$`, положительный
+   `version_code`) и вычисляет путь `RELEASES_DIR/releases/<platform>/app-release-<version>-<code>.apk`,
+   который обязан остаться внутри корня релизов.
+2. `upload.Save` пишет файл: потолок 300 МБ через `MaxBytesReader`, тип по
+   содержимому (APK — zip), запись во временный файл и переименование, так что
+   недописанный файл на диске не остаётся.
+3. `service.AppReleases.Publish` заводит строку и снимает активность с прежних
+   релизов платформы **одной транзакцией** (`AppReleaseRepository.Publish`);
+   если строку записать не удалось, файл удаляется.
 
-    file, header, err := r.FormFile("apk")
-    if err != nil {
-        http.Error(w, "apk file required", http.StatusBadRequest)
-        return
-    }
-    defer file.Close()
-
-    // Сохраняем файл в releases/<platform>/
-    fileName := fmt.Sprintf("app-release-%s-%d.apk", versionName, versionCode)
-    filePath := filepath.Join("releases", platform, fileName)
-    fullPath := filepath.Join(h.releasesDir, filePath)
-
-    if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    out, err := os.Create(fullPath)
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer out.Close()
-
-    if _, err := io.Copy(out, file); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    release := &repository.AppRelease{
-        ID:          uuid.New(),
-        Platform:    platform,
-        VersionName: versionName,
-        VersionCode: versionCode,
-        FileName:    fileName,
-        FilePath:    "/" + filepath.ToSlash(filePath),
-        IsActive:    true,
-    }
-
-    if err := h.releaseRepo.CreateRelease(release); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(release)
-}
-```
+Ошибки формы — `400` с текстом, ответ — `201` с релизом. `RELEASES_DIR`
+читается один раз в `main.go` и передаётся сервису и раздаче `/releases/*`.
 
 > **Примечание:** публичный endpoint `/app/version` не должен требовать авторизации, чтобы приложение могло проверять версию до входа в систему.
 

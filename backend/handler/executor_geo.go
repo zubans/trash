@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"healthlogin/backend/middleware"
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type ExecutorGeoHandler struct {
@@ -17,9 +20,8 @@ func NewExecutorGeoHandler(geoService *service.ExecutorGeoService) *ExecutorGeoH
 }
 
 func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -35,13 +37,11 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	status := http.StatusOK
 	if !resp.Success {
-		w.WriteHeader(http.StatusTooManyRequests)
-	} else {
-		w.WriteHeader(http.StatusOK)
+		status = http.StatusTooManyRequests
 	}
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, status, resp)
 }
 
 // FollowDevice возвращает рабочий якорь под управление устройства, в позицию,
@@ -49,9 +49,8 @@ func (h *ExecutorGeoHandler) SetLocation(w http.ResponseWriter, r *http.Request)
 // только она возобновляет автоматическое позиционирование после того, как
 // исполнитель поставил свою метку вручную.
 func (h *ExecutorGeoHandler) FollowDevice(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -70,15 +69,12 @@ func (h *ExecutorGeoHandler) FollowDevice(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -90,14 +86,12 @@ func (h *ExecutorGeoHandler) GetLocation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -109,15 +103,14 @@ func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	writeJSON(w, http.StatusOK, orders)
 }
 
 // GetGeoAlerts обслуживает GET /admin/geo-alerts. Кого сюда пускать, решает
 // право shifts.view на маршруте, а не роль: модератор с этим правом видит
 // аномалии так же, как администратор.
 func (h *ExecutorGeoHandler) GetGeoAlerts(w http.ResponseWriter, r *http.Request) {
-	if userFromContext(r) == nil {
+	if middleware.UserFrom(r) == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -135,6 +128,19 @@ func (h *ExecutorGeoHandler) GetGeoAlerts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(alerts)
+	writeJSON(w, http.StatusOK, alerts)
+}
+
+// RegisterExecutorRoutes — рабочая позиция исполнителя и карта заказов.
+func (h *ExecutorGeoHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Post("/executor/set-location", h.SetLocation)
+	// Возобновляет автоматическое позиционирование после ручного выбора.
+	r.Post("/executor/follow-device", h.FollowDevice)
+	r.Get("/executor/location", h.GetLocation)
+	r.Get("/executor/map-orders", h.GetMapOrders)
+}
+
+// RegisterAdminRoutes — гео-тревоги.
+func (h *ExecutorGeoHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("shifts.view")).Get("/admin/geo-alerts", h.GetGeoAlerts)
 }

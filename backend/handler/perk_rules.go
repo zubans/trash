@@ -45,7 +45,7 @@ func (h *ShopHandler) AdminPerkRules(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, rules)
+	writeJSON(w, http.StatusOK, rules)
 }
 
 // AdminCheckPerkRule обслуживает POST /admin/shop/perk-rules/check: компилирует
@@ -63,7 +63,7 @@ func (h *ShopHandler) AdminCheckPerkRule(w http.ResponseWriter, r *http.Request)
 		perkRuleError(w, err, grid)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"grid": grid, "defaults": defaults})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"grid": grid, "defaults": defaults})
 }
 
 // AdminCreatePerkRule обслуживает POST /admin/shop/perk-rules.
@@ -77,8 +77,8 @@ func (h *ShopHandler) AdminUpdatePerkRule(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ShopHandler) savePerkRule(w http.ResponseWriter, r *http.Request, code string, create bool) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	var req service.SavePerkRuleRequest
@@ -94,5 +94,5 @@ func (h *ShopHandler) savePerkRule(w http.ResponseWriter, r *http.Request, code 
 		perkRuleError(w, err, grid)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"rule": view, "grid": grid})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"rule": view, "grid": grid})
 }

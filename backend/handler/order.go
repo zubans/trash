@@ -13,7 +13,6 @@ import (
 
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/money"
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -27,19 +26,10 @@ func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
 	return &OrderHandler{orderService: orderService}
 }
 
-func userFromContext(r *http.Request) *repository.User {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		return nil
-	}
-	return user
-}
-
 // CreateOrder обслуживает POST /customer/orders.
 func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -59,16 +49,13 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(order)
+	writeJSON(w, http.StatusCreated, order)
 }
 
 // CancelOrder обслуживает POST /customer/orders/{id}/cancel.
 func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -88,9 +75,8 @@ func (h *OrderHandler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 
 // ConfirmOrder обслуживает POST /customer/orders/{id}/confirm.
 func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -112,9 +98,8 @@ func (h *OrderHandler) ConfirmOrder(w http.ResponseWriter, r *http.Request) {
 // исполнителю завершённого заказа; сумма приходит в рублях и списывается с
 // баланса заказчика.
 func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -142,9 +127,8 @@ func (h *OrderHandler) TipOrder(w http.ResponseWriter, r *http.Request) {
 
 // AcceptOrder обслуживает POST /executor/orders/{id}/accept.
 func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -164,9 +148,8 @@ func (h *OrderHandler) AcceptOrder(w http.ResponseWriter, r *http.Request) {
 
 // RejectOrder обслуживает POST /executor/orders/{id}/reject.
 func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -186,9 +169,8 @@ func (h *OrderHandler) RejectOrder(w http.ResponseWriter, r *http.Request) {
 
 // ExecuteOrder обслуживает POST /executor/orders/{id}/execute.
 func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -220,9 +202,8 @@ func (h *OrderHandler) ExecuteOrder(w http.ResponseWriter, r *http.Request) {
 
 // ListAssignedOrders обслуживает GET /executor/orders/assigned.
 func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -231,14 +212,13 @@ func (h *OrderHandler) ListAssignedOrders(w http.ResponseWriter, r *http.Request
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, orders)
+	writeJSON(w, http.StatusOK, orders)
 }
 
 // ListCustomerOrders обслуживает GET /customer/orders.
 func (h *OrderHandler) ListCustomerOrders(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -247,7 +227,7 @@ func (h *OrderHandler) ListCustomerOrders(w http.ResponseWriter, r *http.Request
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, orders)
+	writeJSON(w, http.StatusOK, orders)
 }
 
 // NearbyOrders обслуживает GET /executor/orders/nearby?lat=...&lon=...
@@ -258,9 +238,8 @@ func (h *OrderHandler) ListCustomerOrders(w http.ResponseWriter, r *http.Request
 // приводит к тому же ответу, что у свежего клиента. Координаты из запроса тоже
 // лишь запасной вариант: сервис берёт сохранённую рабочую позицию.
 func (h *OrderHandler) NearbyOrders(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -275,7 +254,7 @@ func (h *OrderHandler) NearbyOrders(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, orders)
+	writeJSON(w, http.StatusOK, orders)
 }
 
 func parseCoords(r *http.Request) (float64, float64, error) {
@@ -292,9 +271,8 @@ func parseCoords(r *http.Request) (float64, float64, error) {
 // ReturnToWork обслуживает POST /admin/orders/{id}/return-to-work: заказ на
 // проверке возвращается исполнителю в работу.
 func (h *OrderHandler) ReturnToWork(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	orderID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -313,8 +291,31 @@ func (h *OrderHandler) ReturnToWork(w http.ResponseWriter, r *http.Request) {
 // для модулей, которые не должны знать про ключи контекста middleware, —
 // например photoproof: единственное, что им нужно о пришедшем, это id.
 func CallerID(r *http.Request) uuid.UUID {
-	if user := userFromContext(r); user != nil {
+	if user := middleware.UserFrom(r); user != nil {
 		return user.ID
 	}
 	return uuid.Nil
+}
+
+// RegisterCustomerRoutes — заказы заказчика.
+func (h *OrderHandler) RegisterCustomerRoutes(r chi.Router) {
+	r.Post("/customer/orders", h.CreateOrder)
+	r.Post("/customer/orders/{id}/confirm", h.ConfirmOrder)
+	r.Post("/customer/orders/{id}/tip", h.TipOrder)
+	r.Post("/customer/orders/{id}/cancel", h.CancelOrder)
+	r.Get("/customer/orders", h.ListCustomerOrders)
+}
+
+// RegisterExecutorRoutes — заказы исполнителя.
+func (h *OrderHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Get("/executor/orders/assigned", h.ListAssignedOrders)
+	r.Get("/executor/orders/nearby", h.NearbyOrders)
+	r.Post("/executor/orders/{id}/accept", h.AcceptOrder)
+	r.Post("/executor/orders/{id}/execute", h.ExecuteOrder)
+	r.Post("/executor/orders/{id}/reject", h.RejectOrder)
+}
+
+// RegisterAdminRoutes — возврат заказа в работу.
+func (h *OrderHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("orders.edit")).Post("/admin/orders/{id}/return-to-work", h.ReturnToWork)
 }

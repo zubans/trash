@@ -56,7 +56,7 @@ var roleCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,31}$`)
 type RoleService struct {
 	roles       repository.RoleRepository
 	users       repository.UserRepository
-	admins      repository.AdminRepository
+	admins      repository.AdminUserRepository
 	permissions *Permissions
 	sessions    SessionRevoker
 }
@@ -65,7 +65,7 @@ type RoleService struct {
 func NewRoleService(
 	roles repository.RoleRepository,
 	users repository.UserRepository,
-	admins repository.AdminRepository,
+	admins repository.AdminUserRepository,
 	permissions *Permissions,
 ) *RoleService {
 	return &RoleService{roles: roles, users: users, admins: admins, permissions: permissions}
@@ -112,10 +112,10 @@ func (s *RoleService) Create(ctx context.Context, actorID uuid.UUID, code, name,
 	code = strings.ToUpper(strings.TrimSpace(code))
 	name = strings.TrimSpace(name)
 	if !roleCodePattern.MatchString(code) {
-		return nil, errors.New("код роли: заглавные латинские буквы, цифры и подчёркивание, от 2 до 32 символов")
+		return nil, validationError("код роли: заглавные латинские буквы, цифры и подчёркивание, от 2 до 32 символов")
 	}
 	if name == "" {
-		return nil, errors.New("название роли обязательно")
+		return nil, validationError("название роли обязательно")
 	}
 	clean, err := cleanPermissions(permissions)
 	if err != nil {
@@ -143,7 +143,7 @@ func (s *RoleService) Update(ctx context.Context, actorID uuid.UUID, code, name,
 	code = strings.ToUpper(strings.TrimSpace(code))
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, errors.New("название роли обязательно")
+		return nil, validationError("название роли обязательно")
 	}
 	current, err := s.roles.Get(ctx, code)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *RoleService) AssignUser(ctx context.Context, actorID uuid.UUID, code st
 		}
 	}
 	if _, err := s.users.FindByID(ctx, userID); err != nil {
-		return errors.New("пользователь не найден")
+		return ErrUserNotFound
 	}
 	if err := s.roles.AssignUser(ctx, code, userID); err != nil {
 		return err
@@ -244,14 +244,14 @@ func (s *RoleService) UnassignUser(ctx context.Context, actorID uuid.UUID, code 
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == repository.RoleAdmin {
 		if userID == actorID {
-			return errors.New("нельзя снять роль администратора с самого себя")
+			return validationError("нельзя снять роль администратора с самого себя")
 		}
 		admins, err := s.admins.CountAdmins(ctx)
 		if err != nil {
 			return err
 		}
 		if admins <= 1 {
-			return errors.New("нельзя снять роль с последнего администратора")
+			return validationError("нельзя снять роль с последнего администратора")
 		}
 	}
 	if err := s.roles.UnassignUser(ctx, code, userID); err != nil {
@@ -309,7 +309,7 @@ func cleanPermissions(permissions []string) ([]string, error) {
 			continue
 		}
 		if !IsKnownPermission(code) {
-			return nil, fmt.Errorf("неизвестное право: %s", code)
+			return nil, validationError("неизвестное право: " + code)
 		}
 		if _, dup := seen[code]; dup {
 			continue

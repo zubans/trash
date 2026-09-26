@@ -1,10 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // PenaltyHandler обслуживает штрафные баллы: карточку пользователя в админке и
@@ -23,9 +24,8 @@ func NewPenaltyHandler(penalties *service.PenaltyService) *PenaltyHandler {
 // Отдаёт период фото-подтверждения по ролям и мягкий бан. Тихая блокировка
 // здесь не упоминается: она на то и тихая.
 func (h *PenaltyHandler) MyPenaltyStatus(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	view, err := h.penalties.ViewFor(r.Context(), user.ID)
@@ -33,7 +33,7 @@ func (h *PenaltyHandler) MyPenaltyStatus(w http.ResponseWriter, r *http.Request)
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, view)
+	writeJSON(w, http.StatusOK, view)
 }
 
 // AdminUserPenalties обслуживает GET /admin/users/{id}/penalties.
@@ -48,7 +48,7 @@ func (h *PenaltyHandler) AdminUserPenalties(w http.ResponseWriter, r *http.Reque
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, view)
+	writeJSON(w, http.StatusOK, view)
 }
 
 // AdminRevokePoint обслуживает POST /admin/users/{id}/penalties/{point_id}/revoke.
@@ -63,9 +63,8 @@ func (h *PenaltyHandler) AdminRevokePoint(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid point id", http.StatusBadRequest)
 		return
 	}
-	admin := userFromContext(r)
-	if admin == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -74,7 +73,7 @@ func (h *PenaltyHandler) AdminRevokePoint(w http.ResponseWriter, r *http.Request
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, point)
+	writeJSON(w, http.StatusOK, point)
 }
 
 // AdminResetSilentBlockFlag обслуживает
@@ -86,14 +85,25 @@ func (h *PenaltyHandler) AdminResetSilentBlockFlag(w http.ResponseWriter, r *htt
 		http.Error(w, "invalid user id", http.StatusBadRequest)
 		return
 	}
-	admin := userFromContext(r)
-	if admin == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	if err := h.penalties.ResetSilentBlockFlag(r.Context(), userID, admin.ID); err != nil {
 		writeDomainError(w, err)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"message": "flag cleared"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "flag cleared"})
+}
+
+// RegisterUserRoutes — собственный статус штрафов.
+func (h *PenaltyHandler) RegisterUserRoutes(r chi.Router) {
+	r.Get("/me/penalty-status", h.MyPenaltyStatus)
+}
+
+// RegisterAdminRoutes — штрафные баллы на карточке пользователя.
+func (h *PenaltyHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(http.Handler) http.Handler) {
+	r.With(can("users.view")).Get("/admin/users/{id}/penalties", h.AdminUserPenalties)
+	r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/reset-silent-flag", h.AdminResetSilentBlockFlag)
+	r.With(can("penalties.edit")).Post("/admin/users/{id}/penalties/{point_id}/revoke", h.AdminRevokePoint)
 }

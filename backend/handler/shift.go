@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // StartShiftRequest содержит полезную нагрузку для начала смены.
@@ -30,9 +32,8 @@ func NewShiftHandler(shiftService *service.ShiftService) *ShiftHandler {
 
 // StartShift обслуживает POST /executor/shifts.
 func (h *ShiftHandler) StartShift(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -48,17 +49,14 @@ func (h *ShiftHandler) StartShift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(shift)
+	writeJSON(w, http.StatusCreated, shift)
 }
 
 // EndShift обслуживает POST /executor/shifts/end. Завершение раньше срока
 // штрафуется так же, как через /early-end: у смены один путь выхода.
 func (h *ShiftHandler) EndShift(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -74,9 +72,8 @@ func (h *ShiftHandler) EndShift(w http.ResponseWriter, r *http.Request) {
 // активную смену раньше запланированного времени, списывает штраф и отдаёт
 // закрытую смену.
 func (h *ShiftHandler) EarlyEndShift(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -85,14 +82,13 @@ func (h *ShiftHandler) EarlyEndShift(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, shift)
+	writeJSON(w, http.StatusOK, shift)
 }
 
 // RecordLocation обслуживает POST /executor/shifts/location.
 func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -111,16 +107,13 @@ func (h *ShiftHandler) RecordLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"stored": stored})
+	writeJSON(w, http.StatusOK, map[string]bool{"stored": stored})
 }
 
 // GetActiveShiftHandler обслуживает GET /executor/shifts/active.
 func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -129,14 +122,13 @@ func (h *ShiftHandler) GetActiveShiftHandler(w http.ResponseWriter, r *http.Requ
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, shift)
+	writeJSON(w, http.StatusOK, shift)
 }
 
 // GetExecutorHistoryHandler обслуживает GET /executor/history.
 func (h *ShiftHandler) GetExecutorHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 
@@ -145,5 +137,15 @@ func (h *ShiftHandler) GetExecutorHistoryHandler(w http.ResponseWriter, r *http.
 		writeDomainError(w, err)
 		return
 	}
-	writeJSON(w, history)
+	writeJSON(w, http.StatusOK, history)
+}
+
+// RegisterExecutorRoutes — смены исполнителя и его история.
+func (h *ShiftHandler) RegisterExecutorRoutes(r chi.Router) {
+	r.Post("/executor/shifts", h.StartShift)
+	r.Post("/executor/shifts/end", h.EndShift)
+	r.Post("/executor/shifts/early-end", h.EarlyEndShift)
+	r.Post("/executor/shifts/location", h.RecordLocation)
+	r.Get("/executor/shifts/active", h.GetActiveShiftHandler)
+	r.Get("/executor/history", h.GetExecutorHistoryHandler)
 }

@@ -78,9 +78,6 @@ type mailApp struct {
 
 func startMailApp(t *testing.T, db *sql.DB) *mailApp {
 	t.Helper()
-	// Без кэша пользователя в middleware: тест меняет роли на лету и хочет видеть
-	// их со следующего же запроса, а не через TTL.
-	t.Setenv("AUTH_CACHE_TTL_SEC", "0")
 
 	const secret = "mail-e2e-secret"
 	users := repository.New(db)
@@ -90,10 +87,12 @@ func startMailApp(t *testing.T, db *sql.DB) *mailApp {
 	auth := service.NewAuthServiceWithSecret(users, secret, nil, nil).
 		WithSessionStorage(repository.NewRefreshTokenRepository(db), repository.NewTokenRepository(db))
 	permissions := service.NewPermissions(roles)
-	authMiddleware := middleware.NewAuthMiddleware(users, auth, secret).WithPermissions(permissions)
+	// Без кэша пользователя в middleware: тест меняет роли на лету и хочет видеть
+	// их со следующего же запроса, а не через TTL.
+	authMiddleware := middleware.NewAuthMiddleware(users, auth, secret, 0).WithPermissions(permissions)
 
 	ph := handler.NewPublicHandler(auth).WithPermissions(permissions)
-	mh := handler.NewMailHandler(mail, users)
+	mh := handler.NewMailHandler(service.NewMail(mail, users))
 
 	r := chi.NewRouter()
 	r.Route("/api", func(r chi.Router) {
@@ -471,9 +470,10 @@ func TestE2E_MailAccessRules(t *testing.T) {
 	})
 
 	t.Run("пустой ответ и новое письмо без темы отвергаются", func(t *testing.T) {
-		customer.must(http.StatusBadRequest, http.MethodPost, "/user/mail/"+id+"/reply",
+		// Ошибка ввода — класс ErrValidation, 422 по общему правилу writeDomainError.
+		customer.must(http.StatusUnprocessableEntity, http.MethodPost, "/user/mail/"+id+"/reply",
 			map[string]string{"body": "   "}, nil)
-		admin.must(http.StatusBadRequest, http.MethodPost, "/admin/mail/users/"+customer.user.ID.String(),
+		admin.must(http.StatusUnprocessableEntity, http.MethodPost, "/admin/mail/users/"+customer.user.ID.String(),
 			map[string]string{"body": "без темы"}, nil)
 		admin.must(http.StatusNotFound, http.MethodPost, "/admin/mail/users/"+uuid.NewString(),
 			map[string]string{"subject": "Кому-то", "body": "некому"}, nil)

@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
+	"healthlogin/backend/upload"
 )
 
 // maxShopImageBytes — потолок одного изображения товара.
@@ -43,13 +43,27 @@ type ShopHandler struct {
 	orders  *service.ShopOrders
 	grants  *service.PerkGrants
 	rules   *service.PerkRules
+	// uploadsDir — корень загрузок (UPLOADS_DIR); изображения витрины лежат в
+	// подкаталоге shop. Приходит из composition root, а не читается из
+	// окружения на каждый запрос.
+	uploadsDir string
 }
 
 // NewShopHandler создаёт ShopHandler. Четыре сервиса — по разделам прав:
 // витрина и покупка, каталог, обработка покупок с выручкой, выдача привилегий.
 func NewShopHandler(shop *service.Shop, catalog *service.ShopCatalog, orders *service.ShopOrders,
-	grants *service.PerkGrants, rules *service.PerkRules) *ShopHandler {
-	return &ShopHandler{shop: shop, catalog: catalog, orders: orders, grants: grants, rules: rules}
+	grants *service.PerkGrants, rules *service.PerkRules, uploadsDir string) *ShopHandler {
+	if uploadsDir == "" {
+		uploadsDir = "uploads"
+	}
+	return &ShopHandler{shop: shop, catalog: catalog, orders: orders, grants: grants, rules: rules, uploadsDir: uploadsDir}
+}
+
+// RegisterFileRoutes — публичная раздача изображений витрины. Вызывается и в
+// корне, и под /api: изображение видно по обоим адресам независимо от
+// LEGACY_ROOT_ROUTES.
+func (h *ShopHandler) RegisterFileRoutes(r chi.Router) {
+	r.Get("/uploads/shop/{name}", h.ServeImage)
 }
 
 // RegisterUserRoutes подключает маршруты покупателя. purchase — ограничитель
@@ -103,21 +117,11 @@ func (h *ShopHandler) RegisterAdminRoutes(r chi.Router, can func(string) func(ht
 func writeShopError(w http.ResponseWriter, err error) {
 	var shopErr *service.ShopError
 	if errors.As(err, &shopErr) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(shopErr.Status)
-		_ = json.NewEncoder(w).Encode(shopErr)
+		writeJSON(w, shopErr.Status, shopErr)
 		return
 	}
 	log.Printf("[shop] %v", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
-}
-
-func (h *ShopHandler) caller(w http.ResponseWriter, r *http.Request) *repository.User {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}
-	return user
 }
 
 func (h *ShopHandler) idParam(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
@@ -131,8 +135,8 @@ func (h *ShopHandler) idParam(w http.ResponseWriter, r *http.Request) (uuid.UUID
 
 // Storefront обслуживает GET /shop/products.
 func (h *ShopHandler) Storefront(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	out, err := h.shop.Storefront(r.Context(), user, r.URL.Query().Get("category"))
@@ -140,13 +144,13 @@ func (h *ShopHandler) Storefront(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, out)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Product обслуживает GET /shop/products/{id}.
 func (h *ShopHandler) Product(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, ok := h.idParam(w, r)
@@ -158,7 +162,7 @@ func (h *ShopHandler) Product(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, card)
+	writeJSON(w, http.StatusOK, card)
 }
 
 // PickupPoints обслуживает GET /shop/pickup-points.
@@ -168,13 +172,13 @@ func (h *ShopHandler) PickupPoints(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, points)
+	writeJSON(w, http.StatusOK, points)
 }
 
 // Purchase обслуживает POST /shop/orders.
 func (h *ShopHandler) Purchase(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	var req service.PurchaseRequest
@@ -187,13 +191,13 @@ func (h *ShopHandler) Purchase(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, order)
+	writeJSON(w, http.StatusOK, order)
 }
 
 // MyOrders обслуживает GET /shop/orders.
 func (h *ShopHandler) MyOrders(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	orders, err := h.shop.MyOrders(r.Context(), user)
@@ -201,13 +205,13 @@ func (h *ShopHandler) MyOrders(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, orders)
+	writeJSON(w, http.StatusOK, orders)
 }
 
 // MyOrder обслуживает GET /shop/orders/{id}.
 func (h *ShopHandler) MyOrder(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, ok := h.idParam(w, r)
@@ -219,13 +223,13 @@ func (h *ShopHandler) MyOrder(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, order)
+	writeJSON(w, http.StatusOK, order)
 }
 
 // MyPerks обслуживает GET /me/perks.
 func (h *ShopHandler) MyPerks(w http.ResponseWriter, r *http.Request) {
-	user := h.caller(w, r)
-	if user == nil {
+	user, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	perks, err := h.shop.MyPerks(r.Context(), user)
@@ -233,7 +237,7 @@ func (h *ShopHandler) MyPerks(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, perks)
+	writeJSON(w, http.StatusOK, perks)
 }
 
 // ServeImage обслуживает GET /uploads/shop/{name}.
@@ -248,7 +252,7 @@ func (h *ShopHandler) ServeImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	full := filepath.Join(uploadsBaseDir(), "shop", name)
+	full := filepath.Join(h.uploadsDir, "shop", name)
 	if info, err := os.Stat(full); err != nil || info.IsDir() {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -270,66 +274,28 @@ func (h *ShopHandler) ServeImage(w http.ResponseWriter, r *http.Request) {
 }
 
 // AdminUploadImage обслуживает POST /admin/shop/images: только изображения,
-// имя файла даёт сервер.
+// имя файла даёт сервер. Тип определяется по содержимому, а не по имени и
+// заголовку клиента: «картинка.jpg» с HTML внутри не должна лечь рядом с
+// изображениями.
 func (h *ShopHandler) AdminUploadImage(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxShopImageBytes+(64<<10))
-	if err := r.ParseMultipartForm(maxShopImageBytes); err != nil {
+	saved, err := upload.Save(w, r, upload.Options{
+		Field: "file", MaxBytes: maxShopImageBytes + (64 << 10), Dir: filepath.Join(h.uploadsDir, "shop"),
+		Accept: upload.ByContent(shopImageTypes, "Только JPEG, PNG, WebP или GIF"),
+	})
+	switch {
+	case errors.Is(err, upload.ErrTooLarge):
 		writeShopError(w, &service.ShopError{Status: http.StatusBadRequest, Code: service.ShopErrValidation,
 			Message: "Файл больше 10 МБ", Fields: map[string]string{"images": "Файл больше 10 МБ"}})
 		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "file is required", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	// Тип определяется по содержимому, а не по имени и заголовку клиента:
-	// «картинка.jpg» с HTML внутри не должна лечь рядом с изображениями.
-	head := make([]byte, 512)
-	n, _ := io.ReadFull(file, head)
-	ext, ok := shopImageTypes[http.DetectContentType(head[:n])]
-	if !ok {
+	case errors.Is(err, upload.ErrUnsupported):
 		writeShopError(w, &service.ShopError{Status: http.StatusBadRequest, Code: service.ShopErrValidation,
 			Message: "Только JPEG, PNG, WebP или GIF", Fields: map[string]string{"images": "Только JPEG, PNG, WebP или GIF"}})
 		return
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		http.Error(w, "cannot read file", http.StatusBadRequest)
+	case err != nil:
+		writeUploadError(w, err, "file is required")
 		return
 	}
-
-	dir := filepath.Join(uploadsBaseDir(), "shop")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		writeShopError(w, err)
-		return
-	}
-	name := uuid.New().String() + ext
-	if err := saveShopImage(filepath.Join(dir, name), file); err != nil {
-		writeShopError(w, err)
-		return
-	}
-	writeJSON(w, map[string]string{"url": service.ShopImagePrefix + name})
-}
-
-// saveShopImage пишет файл целиком или не оставляет ничего: недописанный файл
-// удаляется, иначе на витрину попала бы обрезанная картинка.
-func saveShopImage(path string, src io.Reader) error {
-	dst, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
-		os.Remove(path)
-		return err
-	}
-	if err := dst.Close(); err != nil {
-		os.Remove(path)
-		return err
-	}
-	return nil
+	writeJSON(w, http.StatusOK, map[string]string{"url": service.ShopImagePrefix + saved.Name})
 }
 
 // AdminProducts обслуживает GET /admin/shop/products.
@@ -339,7 +305,7 @@ func (h *ShopHandler) AdminProducts(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, products)
+	writeJSON(w, http.StatusOK, products)
 }
 
 // AdminProduct обслуживает GET /admin/shop/products/{id}.
@@ -353,26 +319,26 @@ func (h *ShopHandler) AdminProduct(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, product)
+	writeJSON(w, http.StatusOK, product)
 }
 
 func (h *ShopHandler) saveProduct(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
-	var product repository.ShopProduct
-	if err := json.NewDecoder(r.Body).Decode(&product); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	// Тело — форма, а не строка товара: id берётся из пути, время создания и
+	// остаток клиент прислать не может.
+	var form service.ShopProductForm
+	if !decodeBody(w, r, &form) {
 		return
 	}
-	product.ID = id
-	saved, err := h.catalog.SaveProduct(r.Context(), admin.ID, &product)
+	saved, err := h.catalog.SaveProduct(r.Context(), admin.ID, form.Product(id))
 	if err != nil {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, saved)
+	writeJSON(w, http.StatusOK, saved)
 }
 
 // AdminCreateProduct обслуживает POST /admin/shop/products.
@@ -396,26 +362,24 @@ func (h *ShopHandler) AdminPickupPoints(w http.ResponseWriter, r *http.Request) 
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, points)
+	writeJSON(w, http.StatusOK, points)
 }
 
 func (h *ShopHandler) savePickupPoint(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
-	var point repository.ShopPickupPoint
-	if err := json.NewDecoder(r.Body).Decode(&point); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	var form service.ShopPickupPointForm
+	if !decodeBody(w, r, &form) {
 		return
 	}
-	point.ID = id
-	saved, err := h.catalog.SavePickupPoint(r.Context(), admin.ID, &point)
+	saved, err := h.catalog.SavePickupPoint(r.Context(), admin.ID, form.Point(id))
 	if err != nil {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, saved)
+	writeJSON(w, http.StatusOK, saved)
 }
 
 // AdminCreatePickupPoint обслуживает POST /admin/shop/pickup-points.
@@ -456,7 +420,7 @@ func (h *ShopHandler) AdminOrders(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"orders": orders, "total": total})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"orders": orders, "total": total})
 }
 
 func parseDay(value string) (time.Time, bool) {
@@ -474,7 +438,7 @@ func (h *ShopHandler) AdminOrdersCount(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, map[string]int{"paid": paid})
+	writeJSON(w, http.StatusOK, map[string]int{"paid": paid})
 }
 
 // AdminOrder обслуживает GET /admin/shop/orders/{id}.
@@ -488,7 +452,7 @@ func (h *ShopHandler) AdminOrder(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, order)
+	writeJSON(w, http.StatusOK, order)
 }
 
 // AdminRefundQuote обслуживает GET /admin/shop/orders/{id}/refund-quote.
@@ -502,13 +466,13 @@ func (h *ShopHandler) AdminRefundQuote(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, quote)
+	writeJSON(w, http.StatusOK, quote)
 }
 
 // AdminSetStatus обслуживает POST /admin/shop/orders/{id}/status.
 func (h *ShopHandler) AdminSetStatus(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, ok := h.idParam(w, r)
@@ -528,13 +492,13 @@ func (h *ShopHandler) AdminSetStatus(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, order)
+	writeJSON(w, http.StatusOK, order)
 }
 
 // AdminCancel обслуживает POST /admin/shop/orders/{id}/cancel.
 func (h *ShopHandler) AdminCancel(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, ok := h.idParam(w, r)
@@ -551,7 +515,7 @@ func (h *ShopHandler) AdminCancel(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, order)
+	writeJSON(w, http.StatusOK, order)
 }
 
 // AdminUserShop обслуживает GET /admin/users/{id}/shop — покупки и привилегии
@@ -566,13 +530,13 @@ func (h *ShopHandler) AdminUserShop(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, history)
+	writeJSON(w, http.StatusOK, history)
 }
 
 // AdminGrantPerk обслуживает POST /admin/users/{id}/perks.
 func (h *ShopHandler) AdminGrantPerk(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, ok := h.idParam(w, r)
@@ -589,13 +553,13 @@ func (h *ShopHandler) AdminGrantPerk(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, perk)
+	writeJSON(w, http.StatusOK, perk)
 }
 
 // AdminRevokePerk обслуживает DELETE /admin/perks/{id}.
 func (h *ShopHandler) AdminRevokePerk(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id, ok := h.idParam(w, r)
@@ -607,7 +571,7 @@ func (h *ShopHandler) AdminRevokePerk(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, perk)
+	writeJSON(w, http.StatusOK, perk)
 }
 
 // AdminRevenue обслуживает GET /admin/finances/shop?from=&to=. По умолчанию —
@@ -627,13 +591,13 @@ func (h *ShopHandler) AdminRevenue(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, revenue)
+	writeJSON(w, http.StatusOK, revenue)
 }
 
 // AdminPayout обслуживает POST /admin/finances/shop/payout.
 func (h *ShopHandler) AdminPayout(w http.ResponseWriter, r *http.Request) {
-	admin := h.caller(w, r)
-	if admin == nil {
+	admin, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -648,5 +612,5 @@ func (h *ShopHandler) AdminPayout(w http.ResponseWriter, r *http.Request) {
 		writeShopError(w, err)
 		return
 	}
-	writeJSON(w, map[string]money.Amount{"balance": balance})
+	writeJSON(w, http.StatusOK, map[string]money.Amount{"balance": balance})
 }

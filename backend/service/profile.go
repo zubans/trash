@@ -104,14 +104,6 @@ func (s *ProfileService) requireAddresses() error {
 	return nil
 }
 
-// ListAddresses возвращает сохранённые адреса подачи пользователя.
-func (s *ProfileService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]repository.Address, error) {
-	if err := s.requireAddresses(); err != nil {
-		return nil, err
-	}
-	return s.addresses.List(ctx, userID)
-}
-
 // AddAddress сохраняет новый адрес подачи.
 func (s *ProfileService) AddAddress(ctx context.Context, userID uuid.UUID, address Address) ([]repository.Address, error) {
 	if err := s.requireAddresses(); err != nil {

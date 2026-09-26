@@ -29,7 +29,8 @@ flowchart TD
 
 ### 2.1 Эндпоинты
 
-- **`GET /api/app/version?platform=android`** — получение информации о последней доступной версии приложения.
+- **`GET /api/app/version?platform=android`** — получение информации о последней доступной версии приложения (`404`, если активного релиза нет; `400` без `platform`).
+- **`POST /api/admin/app-releases`** (право `releases.create`, multipart с полем `apk`) — публикация релиза: `service.AppReleases` проверяет форму, `upload.Save` кладёт файл в `RELEASES_DIR/releases/<platform>/`, строка релиза и снятие активности с прежних релизов платформы записываются одной транзакцией; при сбое записи файл удаляется. Подробнее — [`refactoring_service_catalog.md`](./refactoring_service_catalog.md), §5.11.
 
 ### 2.2 Формат ответа сервера (`200 OK`)
 

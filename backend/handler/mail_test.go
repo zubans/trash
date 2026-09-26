@@ -15,6 +15,7 @@ import (
 
 	"healthlogin/backend/middleware"
 	"healthlogin/backend/repository"
+	"healthlogin/backend/service"
 )
 
 // fakeMail — ящик в памяти. Он ведёт себя как настоящий в том, что важно для
@@ -52,7 +53,7 @@ func (f *fakeMail) RecipientsByRole(ctx context.Context, role string) ([]uuid.UU
 	return nil, nil
 }
 
-func (f *fakeMail) ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Mail, error) {
+func (f *fakeMail) ListForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Mail, error) {
 	out := make([]*repository.Mail, 0)
 	for _, m := range f.letters {
 		if m.UserID == userID {
@@ -128,11 +129,11 @@ func (f *fakeMail) Reply(ctx context.Context, mail *repository.Mail) error {
 	return f.Send(ctx, nil, mail)
 }
 
-func (f *fakeMail) ListDialogs(ctx context.Context, onlyUnanswered bool, limit int) ([]*repository.MailDialog, error) {
+func (f *fakeMail) ListDialogs(ctx context.Context, onlyUnanswered bool, limit, offset int) ([]*repository.MailDialog, error) {
 	return nil, nil
 }
 
-func (f *fakeMail) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*repository.Mail, error) {
+func (f *fakeMail) ListDirectForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Mail, error) {
 	out := make([]*repository.Mail, 0)
 	for _, m := range f.letters {
 		if m.UserID == userID && m.Kind == repository.MailKindDirect {
@@ -148,6 +149,15 @@ func (f *fakeMail) MarkThreadReadByAdmin(ctx context.Context, threadID uuid.UUID
 		if m.ThreadID != nil && *m.ThreadID == threadID &&
 			m.Direction == repository.MailDirectionOut && m.AdminReadAt == nil {
 			m.AdminReadAt = &now
+		}
+	}
+	return nil
+}
+
+func (f *fakeMail) MarkThreadsReadByAdmin(ctx context.Context, threadIDs []uuid.UUID) error {
+	for _, id := range threadIDs {
+		if err := f.MarkThreadReadByAdmin(ctx, id); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -190,7 +200,7 @@ func mailHarness() (*MailHandler, *fakeMail, *repository.User, *repository.User)
 		addresses: map[uuid.UUID]string{},
 	}
 	mail := &fakeMail{}
-	return NewMailHandler(mail, users), mail, admin, user
+	return NewMailHandler(service.NewMail(mail, users)), mail, admin, user
 }
 
 // Письмо администратора и ответ на него — одна ветка, и обе стороны видят её
@@ -316,20 +326,22 @@ func TestThreadOfAnotherUserIsNotFound(t *testing.T) {
 }
 
 // Новое письмо без темы не отправляется: по теме письмо узнают в ящике.
+// Ошибка ввода — класс ErrValidation, то есть 422 по общему правилу
+// writeDomainError (раньше обработчик отвечал 400 своим текстом).
 func TestAdminMailRequiresSubjectAndBody(t *testing.T) {
 	h, _, admin, user := mailHarness()
 
 	rec := httptest.NewRecorder()
 	h.AdminSendMail(rec, mailRequest(http.MethodPost, "/admin/mail/users/x",
 		map[string]string{"body": "без темы"}, admin, map[string]string{"id": user.ID.String()}))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("ожидался 400 без темы, получено %d", rec.Code)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("ожидался 422 без темы, получено %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
 	h.AdminSendMail(rec, mailRequest(http.MethodPost, "/admin/mail/users/x",
 		map[string]string{"subject": "Тема", "body": "   "}, admin, map[string]string{"id": user.ID.String()}))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("ожидался 400 на пустой текст, получено %d", rec.Code)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("ожидался 422 на пустой текст, получено %d", rec.Code)
 	}
 }

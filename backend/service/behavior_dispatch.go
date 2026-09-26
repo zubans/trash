@@ -55,21 +55,29 @@ type BehaviorDispatcher struct {
 	outbox *outboxConsumer
 }
 
-// NewBehaviorDispatcher собирает диспетчер. Ему нужен сервис заказов, потому что
-// завершение и отмена заказа обязаны идти ровно тем же кодом, каким идёт
-// собственное подтверждение заказчика.
-func NewBehaviorDispatcher(
-	events repository.EventRepository,
-	orders repository.OrderRepository,
-	users repository.UserRepository,
-	catalog repository.ServiceCatalogRepository,
-	claims repository.ServiceClaimRepository,
-	chat repository.ChatRepository,
-	settings repository.SettingsRepository,
-	ledger *Ledger,
-	behaviors *Behaviors,
-	orderSvc OrderLifecycle,
-) *BehaviorDispatcher {
+// BehaviorDispatcherDeps — зависимости диспетчера поведений по именам: десять
+// позиционных параметров одного типа (репозиторий) в composition root
+// путались местами молча.
+type BehaviorDispatcherDeps struct {
+	Events    repository.EventRepository
+	Orders    repository.OrderRepository
+	Users     repository.UserRepository
+	Catalog   repository.ServiceCatalogRepository
+	Claims    repository.ServiceClaimRepository
+	Chat      repository.ChatRepository
+	Settings  repository.SettingsRepository
+	Ledger    *Ledger
+	Behaviors *Behaviors
+	// Orders — сервис заказов: завершение и отмена заказа обязаны идти ровно
+	// тем же кодом, каким идёт собственное подтверждение заказчика.
+	OrderLifecycle OrderLifecycle
+}
+
+// NewBehaviorDispatcher собирает диспетчер.
+func NewBehaviorDispatcher(deps BehaviorDispatcherDeps) *BehaviorDispatcher {
+	events, orders, users, catalog := deps.Events, deps.Orders, deps.Users, deps.Catalog
+	claims, chat, settings, ledger := deps.Claims, deps.Chat, deps.Settings, deps.Ledger
+	behaviors, orderSvc := deps.Behaviors, deps.OrderLifecycle
 	d := &BehaviorDispatcher{
 		events: events, load: subjectLoader{orders: orders, users: users}, catalog: catalog,
 		claims: claims, chat: chat, settings: settings, ledger: ledger,

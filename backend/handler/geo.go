@@ -1,12 +1,13 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"healthlogin/backend/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // GeoHandler открывает эндпоинты геокодирования.
@@ -35,8 +36,7 @@ func (h *GeoHandler) Geocode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 // Autocomplete обслуживает GET /geo/autocomplete?q=query.
@@ -56,8 +56,7 @@ func (h *GeoHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(suggestions)
+	writeJSON(w, http.StatusOK, suggestions)
 }
 
 // Suggest обслуживает GET /geo/suggest?q=query&count=7 и возвращает адреса с
@@ -85,8 +84,7 @@ func (h *GeoHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 		suggestions = []service.Address{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(suggestions)
+	writeJSON(w, http.StatusOK, suggestions)
 }
 
 // writeGeoError отделяет «эта установка не умеет подсказывать адреса» от «этот
@@ -101,4 +99,13 @@ func writeGeoError(w http.ResponseWriter, err error) {
 	default:
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 	}
+}
+
+// RegisterPublicRoutes — подсказки адресов. Провайдер адресов — платный
+// общий внешний сервис: неограниченный анонимный доступ к нему жжёт квоту и
+// замедляет ввод адреса для всех, поэтому все три маршрута под ограничителем.
+func (h *GeoHandler) RegisterPublicRoutes(r chi.Router, limit func(http.Handler) http.Handler) {
+	r.With(limit).Get("/geo/geocode", h.Geocode)
+	r.With(limit).Get("/geo/autocomplete", h.Autocomplete)
+	r.With(limit).Get("/geo/suggest", h.Suggest)
 }

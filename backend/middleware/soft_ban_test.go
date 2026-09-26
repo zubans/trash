@@ -50,8 +50,7 @@ func signedToken(t *testing.T, userID uuid.UUID) string {
 // softBanRouter повторяет устройство main.go: те же маршруты под /api и в
 // корне, RequireAuth на группе, вложения — отдельной группой на корневом роутере.
 func softBanRouter(t *testing.T, users *stubUsers) http.Handler {
-	t.Setenv("AUTH_CACHE_TTL_SEC", "0")
-	auth := NewAuthMiddleware(users, nil, softBanTestSecret)
+	auth := NewAuthMiddleware(users, nil, softBanTestSecret, 0)
 	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 
 	register := func(r chi.Router) {

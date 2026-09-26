@@ -287,10 +287,10 @@ func (r *recordingIncidents) Record(ctx context.Context, q repository.Querier, i
 	return nil
 }
 
-func (r *recordingIncidents) ListOpen(ctx context.Context, limit int) ([]*repository.MoneyIncident, error) {
+func (r *recordingIncidents) ListOpen(ctx context.Context, limit, offset int) ([]*repository.MoneyIncident, error) {
 	return nil, nil
 }
-func (r *recordingIncidents) List(ctx context.Context, limit int) ([]*repository.MoneyIncident, error) {
+func (r *recordingIncidents) List(ctx context.Context, limit, offset int) ([]*repository.MoneyIncident, error) {
 	return nil, nil
 }
 func (r *recordingIncidents) Resolve(ctx context.Context, id, adminID uuid.UUID, resolution string) error {
