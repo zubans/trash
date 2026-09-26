@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,6 +121,77 @@ func KnownTransactionTypes() []TransactionType {
 	return types
 }
 
+// Transaction представляет запись финансового журнала.
+type Transaction struct {
+	ID        uuid.UUID    `json:"id"`
+	UserID    uuid.UUID    `json:"user_id"`
+	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
+	OrderID   *uuid.UUID   `json:"order_id,omitempty"`
+	Type      string       `json:"type"`
+	Amount    money.Amount `json:"amount"`
+	// Counterparty — системный счёт по другую сторону этой проводки.
+	// Пусто в строках, записанных до появления системных счетов.
+	Counterparty string `json:"counterparty,omitempty"`
+	// ShopOrderID — покупка магазина, которой принадлежит проводка. Пусто у
+	// проводок заказов: order_id занят ими, а оплату и возвраты покупки иначе
+	// не найти.
+	ShopOrderID *uuid.UUID `json:"shop_order_id,omitempty"`
+	AdminID     *uuid.UUID `json:"admin_id,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	// Direction — как этот тип двигает баланс пользователя: +1, -1 или 0.
+	// Берётся из ledgerSigns, чтобы клиент не выводил соглашение о знаках
+	// заново: суммы в таблице все положительные, направление живёт в типе.
+	Direction int `json:"direction"`
+}
+
+// TransactionsFilter описывает одну страницу журнала проводок. Как и фильтр
+// завершённых заказов, всё сужение идёт в SQL, поэтому страница, счётчик и
+// выгрузка описывают один и тот же набор.
+type TransactionsFilter struct {
+	// Search — телефон (нестрого, по цифрам) либо полный uuid проводки, заказа
+	// или админа (точно). Строка, которая ни то ни другое, ничему не соответствует
+	// по id и сравнивается только с телефоном.
+	Search string
+	Type   string // точный тип проводки
+	Period string // YYYY-MM по created_at
+	Sort   string // один из transactionSorts; всё прочее откатывается к умолчанию
+	Desc   bool
+	Page   PageRequest
+}
+
+// TransactionFacets — значения, которые предлагают фильтры журнала. Считаются
+// по всей таблице, а не по текущей странице.
+type TransactionFacets struct {
+	Types   []string `json:"types"`
+	Periods []string `json:"periods"`
+}
+
+// transactionSorts — белый список того, что может дойти до ORDER BY.
+var transactionSorts = map[string]string{
+	"created_at": "t.created_at",
+	"amount":     "t.amount",
+	"type":       "t.type",
+	"user":       "u.phone",
+}
+
+// TransactionJournalRepository — админское чтение журнала: страница с
+// фильтрами, значения для фильтров и история одного пользователя. Отделён от
+// TransactionRepository, которым двигает деньги Ledger: тот пишет, этот
+// только читает, и моки реестра не обязаны уметь листать журнал.
+type TransactionJournalRepository interface {
+	// GetTransactions — страница журнала. Общий счётчик считается только при
+	// f.Page.WithTotal.
+	GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error)
+	TransactionFacets(ctx context.Context) (TransactionFacets, error)
+	// GetUserTransactions — проводки одного пользователя, новые сверху.
+	//
+	// Отдельный метод, а не GetTransactions с поиском по телефону: поиск там
+	// нестрогий (LIKE по цифрам), поэтому «792» подтянул бы чужие проводки, а
+	// на карточке пользователя показывать чужие деньги нельзя. Здесь отбор идёт
+	// по user_id.
+	GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, int, error)
+}
+
 // TransactionRepository описывает операции хранения финансовых транзакций и баланса.
 type TransactionRepository interface {
 	GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error)
@@ -151,6 +224,11 @@ func NewTransactionRepository(db *sql.DB) TransactionRepository {
 	return &transactionRepo{db: db}
 }
 
+// NewTransactionJournal создаёт читающую сторону журнала поверх того же хранилища.
+func NewTransactionJournal(db *sql.DB) TransactionJournalRepository {
+	return &transactionRepo{db: db}
+}
+
 func (r *transactionRepo) GetBalance(ctx context.Context, userID uuid.UUID) (money.Amount, error) {
 	var balance money.Amount
 	err := r.db.QueryRowContext(ctx, `SELECT balance FROM users WHERE id = $1`, userID).Scan(&balance)
@@ -160,6 +238,11 @@ func (r *transactionRepo) GetBalance(ctx context.Context, userID uuid.UUID) (mon
 	return balance, nil
 }
 
+// UpdateBalance и Debit — единственные писатели users.balance. Колонкой владеет
+// реестр (service.Ledger) через этот репозиторий, и оба оператора атомарны:
+// дельта применяется в самом UPDATE, а не читается и записывается заново,
+// поэтому их нельзя переложить на UserRepository без потери охраны. Абсолютной
+// записи баланса в кодовой базе нет и быть не должно.
 func (r *transactionRepo) UpdateBalance(ctx context.Context, tx *sql.Tx, userID uuid.UUID, delta money.Amount) error {
 	return execExpectingOne(ctx, r.querier(tx),
 		`UPDATE users SET balance = balance + $1 WHERE id = $2`, delta, userID)
@@ -271,4 +354,171 @@ func (r *transactionRepo) GetTransactionsByUserID(ctx context.Context, userID uu
 		result = append(result, t)
 	}
 	return result, rows.Err()
+}
+
+// GetTransactions — страница журнала с фильтрами. Идентификаторы ищутся точно,
+// по разобранному uuid; телефон — по цифрам. Счётчик считается только по
+// просьбе: COUNT(*) по всей выборке стоит не меньше самой страницы.
+func (r *transactionRepo) GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error) {
+	where := "WHERE 1=1"
+	var args []interface{}
+
+	if search := strings.TrimSpace(f.Search); search != "" {
+		var conds []string
+		if id, ok := searchUUID(search); ok {
+			args = append(args, id)
+			n := len(args)
+			conds = append(conds,
+				fmt.Sprintf("t.id = $%d", n),
+				fmt.Sprintf("t.order_id = $%d", n),
+				fmt.Sprintf("t.admin_id = $%d", n))
+		}
+		// Телефон хранится как +79997454656, а вводят его с маской, поэтому обе
+		// стороны приводятся к цифрам. Цифровое условие добавляется, только если
+		// в запросе есть цифры: иначе пустой шаблон совпал бы со всем.
+		if digits := digitsOnly(search); digits != "" {
+			args = append(args, "%"+digits+"%")
+			conds = append(conds, fmt.Sprintf(
+				"regexp_replace(u.phone, '[^0-9]', '', 'g') LIKE $%d", len(args)))
+		}
+		if len(conds) == 0 {
+			// Ни uuid, ни цифр: такой строке не соответствует ничего.
+			where += " AND FALSE"
+		} else {
+			where += " AND (" + strings.Join(conds, " OR ") + ")"
+		}
+	}
+
+	if txType := strings.TrimSpace(f.Type); txType != "" {
+		args = append(args, txType)
+		where += fmt.Sprintf(" AND t.type = $%d", len(args))
+	}
+
+	where, args = periodArgs(where, args, "t.created_at", f.Period)
+
+	from := `
+		FROM transactions t
+		JOIN users u ON t.user_id = u.id
+		` + where
+
+	var total int
+	if f.Page.WithTotal {
+		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) "+from, args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	sortExpr, ok := transactionSorts[f.Sort]
+	if !ok {
+		sortExpr = transactionSorts["created_at"]
+	}
+	direction := "ASC"
+	if f.Desc {
+		direction = "DESC"
+	}
+
+	limit, offset := clampPage(f.Page.Limit, f.Page.Offset)
+	args = append(args, limit, offset)
+	query := fmt.Sprintf(`
+		SELECT `+transactionColumns+`, u.phone
+		%s
+		ORDER BY %s %s NULLS LAST, t.created_at DESC
+		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	txs := make([]*Transaction, 0, limit)
+	for rows.Next() {
+		var phone string
+		tx, err := scanTransaction(rows, &phone)
+		if err != nil {
+			return nil, 0, err
+		}
+		tx.UserPhone = phone
+		txs = append(txs, tx)
+	}
+	return txs, total, rows.Err()
+}
+
+// TransactionFacets читает всю таблицу дважды (DISTINCT по типу и по месяцу),
+// поэтому вызывающий обязан кэшировать результат, а не спрашивать на каждой
+// странице: см. service.facetCache.
+func (r *transactionRepo) TransactionFacets(ctx context.Context) (TransactionFacets, error) {
+	facets := TransactionFacets{Types: []string{}, Periods: []string{}}
+
+	typeRows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT type FROM transactions ORDER BY type`)
+	if err != nil {
+		return facets, err
+	}
+	defer typeRows.Close()
+	for typeRows.Next() {
+		var t string
+		if err := typeRows.Scan(&t); err != nil {
+			return facets, err
+		}
+		facets.Types = append(facets.Types, t)
+	}
+	if err := typeRows.Err(); err != nil {
+		return facets, err
+	}
+
+	periodRows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT to_char(created_at, 'YYYY-MM') AS period
+		 FROM transactions
+		 ORDER BY period DESC`)
+	if err != nil {
+		return facets, err
+	}
+	defer periodRows.Close()
+	for periodRows.Next() {
+		var p string
+		if err := periodRows.Scan(&p); err != nil {
+			return facets, err
+		}
+		facets.Periods = append(facets.Periods, p)
+	}
+	return facets, periodRows.Err()
+}
+
+// GetUserTransactions отдаёт проводки одного пользователя. Отбор строгий, по
+// user_id: карточка пользователя показывает его деньги и только его. Счётчик
+// здесь считается всегда: выборка по индексу user_id, и карточка листает
+// страницы без первой.
+func (r *transactionRepo) GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, int, error) {
+	limit, offset = clampPage(limit, offset)
+
+	var total int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM transactions WHERE user_id = $1`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT `+transactionColumns+`, u.phone
+		FROM transactions t
+		JOIN users u ON t.user_id = u.id
+		WHERE t.user_id = $1
+		ORDER BY t.created_at DESC
+		LIMIT $2 OFFSET $3`, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	txs := make([]*Transaction, 0, limit)
+	for rows.Next() {
+		var phone string
+		tx, err := scanTransaction(rows, &phone)
+		if err != nil {
+			return nil, 0, err
+		}
+		tx.UserPhone = phone
+		txs = append(txs, tx)
+	}
+	return txs, total, rows.Err()
 }

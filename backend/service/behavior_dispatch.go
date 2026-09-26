@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,31 +39,20 @@ const ConfigVerifierRole = "verifier_role"
 // пользователя или записать несбалансированную пару проводок.
 type BehaviorDispatcher struct {
 	events      repository.EventRepository
-	orders      repository.OrderRepository
-	users       repository.UserRepository
+	load        subjectLoader
 	catalog     repository.ServiceCatalogRepository
 	claims      repository.ServiceClaimRepository
 	chat        repository.ChatRepository
 	settings    repository.SettingsRepository
 	submissions repository.SubmissionRepository
-	passports   repository.PassportRepository
 	ledger      *Ledger
 	behaviors   *Behaviors
 	orderSvc    OrderLifecycle
 
-	// batchSize ограничивает один тик; maxAttempts ограничивает жизнь одного
-	// события, чтобы постоянно падающее событие перестало занимать пачку, а не
-	// блокировало навсегда все события за собой.
-	batchSize   int
-	maxAttempts int
-
-	// Обработанные события хранятся как история столько времени и подметаются не
-	// чаще, чем purgeEvery. Окно намного длиннее любой переотправки, поэтому ключ
-	// идемпотентности не исчезает, пока его событие ещё может вернуться.
-	retention  time.Duration
-	purgeEvery time.Duration
-	mu         sync.Mutex
-	lastPurge  time.Time
+	// outbox — общий цикл потребителя; Tick и CountPending — его. Подрезка
+	// обработанной истории поручена этому потребителю: outbox один, и
+	// подметать его достаточно кому-то одному.
+	outbox *outboxConsumer
 }
 
 // NewBehaviorDispatcher собирает диспетчер. Ему нужен сервис заказов, потому что
@@ -82,21 +70,23 @@ func NewBehaviorDispatcher(
 	behaviors *Behaviors,
 	orderSvc OrderLifecycle,
 ) *BehaviorDispatcher {
-	return &BehaviorDispatcher{
-		events: events, orders: orders, users: users, catalog: catalog,
+	d := &BehaviorDispatcher{
+		events: events, load: subjectLoader{orders: orders, users: users}, catalog: catalog,
 		claims: claims, chat: chat, settings: settings, ledger: ledger,
 		behaviors: behaviors, orderSvc: orderSvc,
-		batchSize: 50, maxAttempts: 10,
-		retention: 30 * 24 * time.Hour, purgeEvery: time.Hour,
 	}
-}
-
-// WithPassports подключает паспорта: услуга с require_passport не примет
-// сверку, пока паспорт заказчика с фото не на сервере. Без хранилища такая
-// услуга сверку не принимает вовсе — закрыть заказ без документа хуже, чем не
-// закрыть.
-func (d *BehaviorDispatcher) WithPassports(passports repository.PassportRepository) *BehaviorDispatcher {
-	d.passports = passports
+	if events != nil && behaviors != nil {
+		d.outbox = &outboxConsumer{
+			events: events, consumer: repository.ConsumerBehaviors, tag: "behavior",
+			batchSize: 50, maxAttempts: 10,
+			handle: func(ctx context.Context, event *repository.DomainEvent) error {
+				_, err := d.dispatch(ctx, event)
+				return err
+			},
+			observe: metrics.BehaviorEvent,
+			purge:   &historyPurge{retention: 30 * 24 * time.Hour, every: time.Hour},
+		}
+	}
 	return d
 }
 
@@ -110,53 +100,33 @@ func (d *BehaviorDispatcher) WithSubmissions(submissions repository.SubmissionRe
 // Tick обрабатывает одну пачку ожидающих событий. Вызывается по таймеру воркером
 // поведений, под защитой лидера.
 func (d *BehaviorDispatcher) Tick(ctx context.Context) error {
-	if d == nil || d.events == nil || d.behaviors == nil {
+	if d == nil {
 		return nil
 	}
-	events, err := d.events.ClaimPending(ctx, repository.ConsumerBehaviors, d.batchSize, d.maxAttempts)
-	if err != nil {
-		return err
-	}
-	for _, event := range events {
-		if _, err := d.dispatch(ctx, event); err != nil {
-			metrics.BehaviorEvent(event.Type, "failed")
-			log.Printf("[behavior] event %s (%s) failed: %v", event.ID, event.Type, err)
-			// Намеренно оставлено необработанным: следующий тик повторит, вплоть до
-			// maxAttempts. Причина сохраняется, чтобы её можно было прочитать, не
-			// копаясь в логах.
-			_ = d.events.MarkFailed(ctx, repository.ConsumerBehaviors, event.ID, err.Error())
-			continue
-		}
-		metrics.BehaviorEvent(event.Type, "processed")
-		if err := d.events.MarkProcessed(ctx, repository.ConsumerBehaviors, event.ID); err != nil {
-			log.Printf("[behavior] event %s applied but not marked processed: %v", event.ID, err)
-		}
-	}
-	if pending, err := d.events.CountPending(ctx, repository.ConsumerBehaviors); err == nil {
-		metrics.SetBehaviorBacklog(pending)
-	}
-	d.purge(ctx)
-	return nil
+	return d.outbox.Tick(ctx)
 }
 
-// purge подрезает обработанную историю, не чаще раза в purgeEvery. Сбой
-// логируется, и больше ничего: медленно растущая таблица — не повод прекращать
-// диспетчеризацию.
-func (d *BehaviorDispatcher) purge(ctx context.Context) {
-	d.mu.Lock()
-	due := time.Since(d.lastPurge) >= d.purgeEvery
-	if due {
-		d.lastPurge = time.Now()
+// CountPending — очередь этого потребителя, для датчика.
+func (d *BehaviorDispatcher) CountPending(ctx context.Context) (int, error) {
+	if d == nil {
+		return 0, nil
 	}
-	d.mu.Unlock()
-	if !due {
-		return
+	return d.outbox.CountPending(ctx)
+}
+
+// Process обрабатывает одно уже опубликованное событие сразу, не дожидаясь
+// тика, и помечает исход в outbox так же, как тик. Нужен тому, кто стоит и
+// ждёт ответа поведения, — исполнителю, отправившему данные на проверку.
+// Возвращает сообщения, опубликованные поведениями.
+func (d *BehaviorDispatcher) Process(ctx context.Context, event *repository.DomainEvent) ([]string, error) {
+	if d == nil || d.outbox == nil {
+		return nil, ErrNotConfigured
 	}
-	if removed, err := d.events.PurgeProcessed(ctx, d.retention); err != nil {
-		log.Printf("[behavior] cannot trim processed events: %v", err)
-	} else if removed > 0 {
-		log.Printf("[behavior] trimmed %d processed events older than %s", removed, d.retention)
+	messages, err := d.dispatch(ctx, event)
+	if err := d.outbox.settle(ctx, event, err); err != nil {
+		return nil, err
 	}
+	return messages, nil
 }
 
 // target — один заказ, на который поведение может подействовать в ответ на событие.
@@ -210,16 +180,13 @@ func (d *BehaviorDispatcher) targets(ctx context.Context, event *repository.Doma
 	var orders []*repository.Order
 	switch event.SubjectType {
 	case repository.EventSubjectOrder:
-		order, err := d.orders.FindByID(ctx, event.SubjectID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil
-			}
+		order, err := d.load.order(ctx, event.SubjectID)
+		if err != nil || order == nil {
 			return nil, err
 		}
 		orders = []*repository.Order{order}
 	case repository.EventSubjectUser:
-		open, err := d.orders.FindOpenByCustomer(ctx, event.SubjectID)
+		open, err := d.load.orders.FindOpenByCustomer(ctx, event.SubjectID)
 		if err != nil {
 			return nil, err
 		}
@@ -249,15 +216,13 @@ func (d *BehaviorDispatcher) facts(ctx context.Context, event *repository.Domain
 		Variant: variantFacts(t.variant),
 		Config:  t.variant.BehaviorConfig,
 	}
-	if d.users != nil {
-		if customer, err := d.users.FindByID(ctx, t.order.CustomerID); err == nil {
-			facts.Customer = actorFacts(customer)
-			facts.User = facts.Customer
-		}
-		if t.order.ExecutorID != nil {
-			if executor, err := d.users.FindByID(ctx, *t.order.ExecutorID); err == nil {
-				facts.Viewer = actorFacts(executor)
-			}
+	if customer, err := d.load.user(ctx, t.order.CustomerID); err == nil && customer != nil {
+		facts.Customer = actorFacts(customer)
+		facts.User = facts.Customer
+	}
+	if t.order.ExecutorID != nil {
+		if executor, err := d.load.user(ctx, *t.order.ExecutorID); err == nil && executor != nil {
+			facts.Viewer = actorFacts(executor)
 		}
 	}
 	if d.claims != nil {
@@ -391,7 +356,7 @@ func (d *BehaviorDispatcher) applyOne(ctx context.Context, tx *sql.Tx, t target,
 		if err := d.requireModeratorExecutor(ctx, t); err != nil {
 			return err
 		}
-		if err := d.users.UpdateVerified(ctx, tx, subject, true); err != nil {
+		if err := d.load.users.UpdateVerified(ctx, tx, subject, true); err != nil {
 			return err
 		}
 		log.Printf("[AUDIT] behavior %s verified user %s through order %s", d.behaviors.Code(t.variant), subject, t.order.ID)
@@ -459,7 +424,7 @@ func (d *BehaviorDispatcher) requireModeratorExecutor(ctx context.Context, t tar
 	if *t.order.ExecutorID == t.order.CustomerID {
 		return fmt.Errorf("order %s was taken by its own customer", t.order.ID)
 	}
-	executor, err := d.users.FindByID(ctx, *t.order.ExecutorID)
+	executor, err := d.load.requireUser(ctx, *t.order.ExecutorID)
 	if err != nil {
 		return err
 	}

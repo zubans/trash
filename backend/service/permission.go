@@ -42,7 +42,7 @@ type PermissionSection struct {
 var permissionCatalog = []PermissionSection{
 	{Key: "users", Label: "Пользователи", Group: "Управление", Route: "/admin/users",
 		Actions: []string{ActionView, ActionEdit},
-		Hint:    "Правка — статус, верификация, роли, имя, адрес и пополнение баланса."},
+		Hint:    "Правка — статус, верификация, имя, адрес и дата рождения. Пополнение баланса — право «Пополнения», роли — «Роли и права»."},
 	{Key: "roles", Label: "Роли и права", Group: "Управление", Route: "/admin/roles",
 		Actions: []string{ActionView, ActionCreate, ActionEdit, ActionDelete},
 		Hint:    "Кто может заводить роли и раздавать права. Роль ADMIN, права этого раздела и роли с ними раздаёт только администратор."},
@@ -51,7 +51,7 @@ var permissionCatalog = []PermissionSection{
 		Hint:    "Правка — бан и разбан собеседника в чате поддержки."},
 	{Key: "topups", Label: "Пополнения", Group: "Управление", Route: "/admin/topups",
 		Actions: []string{ActionView, ActionEdit},
-		Hint:    "Правка — одобрение и отклонение заявок, то есть движение денег."},
+		Hint:    "Правка — одобрение и отклонение заявок и прямое зачисление с карточки пользователя, то есть движение денег."},
 	{Key: "withdrawals", Label: "Выводы", Group: "Управление", Route: "/admin/withdrawals",
 		Actions: []string{ActionView, ActionEdit},
 		Hint:    "Правка — одобрение и отклонение выплат."},

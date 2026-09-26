@@ -124,7 +124,7 @@ func TestExecutorVerificationCreatesAModeratorOrderWhenDataIsComplete(t *testing
 	if err := w.orderSvc.Accept(ctx, order.ID, w.moderator.ID); err != nil {
 		t.Fatalf("moderator accept: %v", err)
 	}
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.applicant)); err != nil {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.applicant)); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	if !w.applicant.Verified {

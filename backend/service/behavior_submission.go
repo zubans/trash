@@ -38,10 +38,14 @@ const (
 )
 
 // ErrSubmissionNotSupported сообщает, что эта услуга не принимает отправок.
-var ErrSubmissionNotSupported = errors.New("для этой услуги проверка данных не предусмотрена")
+var ErrSubmissionNotSupported = validationError("для этой услуги проверка данных не предусмотрена")
 
 // ErrSubmissionEscalated сообщает, что случай уже у администратора.
-var ErrSubmissionEscalated = errors.New("заказ передан на модерацию администратору")
+var ErrSubmissionEscalated = stateError("заказ передан на модерацию администратору")
+
+// ErrPassportNotAccepted — услуга заказа не объявила require_passport: паспорт
+// по ней не вносится.
+var ErrPassportNotAccepted = validationError("эта услуга не принимает паспорт")
 
 // SubmissionResult — то, что приложение исполнителя получает сразу.
 // Собственные эффекты поведения — предупреждение, эскалация, закрытие заказа —
@@ -56,36 +60,96 @@ type SubmissionResult struct {
 	Messages []string `json:"messages,omitempty"`
 }
 
+// eventProcessor обрабатывает одно событие сразу, не дожидаясь тика воркера.
+// Ему удовлетворяет *BehaviorDispatcher.
+type eventProcessor interface {
+	Process(ctx context.Context, event *repository.DomainEvent) ([]string, error)
+}
+
+// OrderSubmissions — синхронный поток данных по заказу: исполнитель отправляет
+// то, что прочитал в документе, или вносит паспорт заказчика, и ждёт ответа
+// здесь и сейчас. Диспетчер поведений при этом остаётся потребителем outbox:
+// сюда он подключён только как обработчик уже опубликованного события.
+type OrderSubmissions struct {
+	orders      repository.OrderRepository
+	users       repository.UserRepository
+	catalog     repository.ServiceCatalogRepository
+	submissions repository.SubmissionRepository
+	passports   repository.PassportRepository
+	events      repository.EventRepository
+	ledger      *Ledger
+	behaviors   *Behaviors
+	processor   eventProcessor
+}
+
+// NewOrderSubmissions собирает поток отправок. submissions может быть nil —
+// тогда ни одна услуга отправок не принимает.
+func NewOrderSubmissions(
+	orders repository.OrderRepository,
+	users repository.UserRepository,
+	catalog repository.ServiceCatalogRepository,
+	submissions repository.SubmissionRepository,
+	events repository.EventRepository,
+	ledger *Ledger,
+	behaviors *Behaviors,
+	processor eventProcessor,
+) *OrderSubmissions {
+	return &OrderSubmissions{
+		orders: orders, users: users, catalog: catalog, submissions: submissions,
+		events: events, ledger: ledger, behaviors: behaviors, processor: processor,
+	}
+}
+
+// WithPassports подключает паспорта: услуга с require_passport не примет
+// сверку, пока паспорт заказчика с фото не на сервере. Без хранилища такая
+// услуга сверку не принимает вовсе — закрыть заказ без документа хуже, чем не
+// закрыть.
+func (s *OrderSubmissions) WithPassports(passports repository.PassportRepository) *OrderSubmissions {
+	s.passports = passports
+	return s
+}
+
+// assignedOrderWithManifest — общий пролог обоих потоков: заказ существует,
+// назначен этому исполнителю, ещё в работе, и у его услуги есть объявление
+// поведения. found ложно, когда услуга не скриптовая: что это значит, решает
+// вызывающий.
+func (s *OrderSubmissions) assignedOrderWithManifest(ctx context.Context, orderID, executorID uuid.UUID) (*repository.Order, behavior.Manifest, bool, error) {
+	order, err := s.orders.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, behavior.Manifest{}, false, orderNotFound(err)
+	}
+	if order.ExecutorID == nil || *order.ExecutorID != executorID {
+		return nil, behavior.Manifest{}, false, ErrNotAssigned
+	}
+	if order.Status != repository.OrderStatusAssigned && order.Status != repository.OrderStatusExecuted {
+		return nil, behavior.Manifest{}, false, ErrOrderNotInProgress
+	}
+	variant, err := s.catalog.GetNodeByID(ctx, order.ServiceVariantID)
+	if err != nil {
+		return nil, behavior.Manifest{}, false, err
+	}
+	manifest, ok := s.behaviors.Manifest(variant)
+	return order, manifest, ok, nil
+}
+
 // SubmitOrderData записывает отправленное исполнителем по заказу, сравнивает с
 // записью заказчика и запускает поведение по результату.
-func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, executorID uuid.UUID, fields map[string]string) (*SubmissionResult, error) {
-	if d == nil || d.submissions == nil {
+func (s *OrderSubmissions) SubmitOrderData(ctx context.Context, orderID, executorID uuid.UUID, fields map[string]string) (*SubmissionResult, error) {
+	if s == nil || s.submissions == nil {
 		return nil, ErrSubmissionNotSupported
 	}
 
-	order, err := d.orders.FindByID(ctx, orderID)
-	if err != nil {
-		return nil, errors.New("order not found")
-	}
-	if order.ExecutorID == nil || *order.ExecutorID != executorID {
-		return nil, errors.New("order is not assigned to this executor")
-	}
-	if order.Status != repository.OrderStatusAssigned && order.Status != repository.OrderStatusExecuted {
-		return nil, errors.New("order is not in progress")
-	}
-
-	variant, err := d.catalog.GetNodeByID(ctx, order.ServiceVariantID)
+	order, manifest, ok, err := s.assignedOrderWithManifest(ctx, orderID, executorID)
 	if err != nil {
 		return nil, err
 	}
-	manifest, ok := d.behaviors.Manifest(variant)
 	if !ok || len(manifest.CheckFields) == 0 {
 		return nil, ErrSubmissionNotSupported
 	}
 
 	// Случай, уже находящийся у администратора, попыток больше не принимает: в
 	// этом и был смысл эскалации.
-	escalated, err := d.submissions.HasOpenEscalation(ctx, orderID)
+	escalated, err := s.submissions.HasOpenEscalation(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +157,12 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		return nil, ErrSubmissionEscalated
 	}
 
-	customer, err := d.users.FindByID(ctx, order.CustomerID)
+	customer, err := s.users.FindByID(ctx, order.CustomerID)
 	if err != nil {
-		return nil, errors.New("customer not found")
+		return nil, userNotFound(err)
 	}
 	if manifest.RequirePassport {
-		if err := d.requirePassport(ctx, customer.ID); err != nil {
+		if err := s.requirePassport(ctx, customer.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -126,8 +190,8 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 	// Попытка и порождаемое ею событие коммитятся вместе: попытка, которой
 	// поведение не видело, позволила бы исполнителю пробовать бесплатно, а
 	// событие без попытки за ним засчитало бы то, чего не было.
-	if err := d.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		if err := d.submissions.Record(ctx, tx, submission); err != nil {
+	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
+		if err := s.submissions.Record(ctx, tx, submission); err != nil {
 			return err
 		}
 		// Скрипту сообщается номер попытки в текущем круге, а не сквозной.
@@ -135,7 +199,7 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 		// модерации: в этом и смысл снятия — вернуть заказ исполнителю с полным
 		// набором попыток. Сквозной номер остаётся в строке, его читает
 		// администратор, разбирающий всю историю ввода.
-		roundAttempt, err := d.submissions.AttemptsSinceEscalation(ctx, tx, orderID)
+		roundAttempt, err := s.submissions.AttemptsSinceEscalation(ctx, tx, orderID)
 		if err != nil {
 			return err
 		}
@@ -145,7 +209,7 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 			"matches":    matches,
 			"mismatches": mismatched,
 		}
-		return d.events.Publish(ctx, tx, event)
+		return s.events.Publish(ctx, tx, event)
 	}); err != nil {
 		return nil, err
 	}
@@ -154,16 +218,12 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 	// заказчиком и ждёт ответа, совпало ли. Сбой не фатален — событие остаётся
 	// необработанным, и воркер его повторит, — но ответ тогда приходит поздно,
 	// поэтому о сбое сообщается.
-	messages, err := d.dispatch(ctx, event)
+	messages, err := s.processor.Process(ctx, event)
 	if err != nil {
-		_ = d.events.MarkFailed(ctx, repository.ConsumerBehaviors, event.ID, err.Error())
-		return nil, err
-	}
-	if err := d.events.MarkProcessed(ctx, repository.ConsumerBehaviors, event.ID); err != nil {
 		return nil, err
 	}
 
-	nowEscalated, err := d.submissions.HasOpenEscalation(ctx, orderID)
+	nowEscalated, err := s.submissions.HasOpenEscalation(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +237,11 @@ func (d *BehaviorDispatcher) SubmitOrderData(ctx context.Context, orderID, execu
 }
 
 // requirePassport — паспорт заказчика с фото уже на сервере.
-func (d *BehaviorDispatcher) requirePassport(ctx context.Context, customerID uuid.UUID) error {
-	if d.passports == nil {
+func (s *OrderSubmissions) requirePassport(ctx context.Context, customerID uuid.UUID) error {
+	if s.passports == nil {
 		return ErrPassportRequired
 	}
-	rec, err := d.passports.Get(ctx, nil, customerID)
+	rec, err := s.passports.Get(ctx, nil, customerID)
 	if errors.Is(err, repository.ErrPassportNotFound) || (err == nil && rec.PhotoPath == nil) {
 		return ErrPassportRequired
 	}
@@ -191,23 +251,13 @@ func (d *BehaviorDispatcher) requirePassport(ctx context.Context, customerID uui
 // PassportCustomer — заказчик заказа, по которому исполнитель вносит паспорт.
 // Вносить можно только по услуге с require_passport, только своему заказу и
 // только пока заказ в работе.
-func (d *BehaviorDispatcher) PassportCustomer(ctx context.Context, orderID, executorID uuid.UUID) (uuid.UUID, error) {
-	order, err := d.orders.FindByID(ctx, orderID)
-	if err != nil {
-		return uuid.Nil, errors.New("заказ не найден")
-	}
-	if order.ExecutorID == nil || *order.ExecutorID != executorID {
-		return uuid.Nil, errors.New("заказ назначен не вам")
-	}
-	if order.Status != repository.OrderStatusAssigned && order.Status != repository.OrderStatusExecuted {
-		return uuid.Nil, errors.New("заказ не в работе")
-	}
-	variant, err := d.catalog.GetNodeByID(ctx, order.ServiceVariantID)
+func (s *OrderSubmissions) PassportCustomer(ctx context.Context, orderID, executorID uuid.UUID) (uuid.UUID, error) {
+	order, manifest, ok, err := s.assignedOrderWithManifest(ctx, orderID, executorID)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if manifest, ok := d.behaviors.Manifest(variant); !ok || !manifest.RequirePassport {
-		return uuid.Nil, errors.New("эта услуга не принимает паспорт")
+	if !ok || !manifest.RequirePassport {
+		return uuid.Nil, ErrPassportNotAccepted
 	}
 	return order.CustomerID, nil
 }

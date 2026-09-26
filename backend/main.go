@@ -67,7 +67,14 @@ func main() {
 
 	// Репозитории
 	userRepo := repository.New(db)
-	adminRepo := repository.NewAdminRepository(db)
+	// Админские выборки по доменам: пользователи, заявки на деньги, журнал
+	// проводок, список заказов, активные смены. Один «репозиторий админа» на
+	// всё вынуждал каждый мок повторять все двадцать методов.
+	adminUserRepo := repository.NewAdminUserRepository(db)
+	payoutRepo := repository.NewPayoutRepository(db)
+	transactionJournal := repository.NewTransactionJournal(db)
+	adminOrderRepo := repository.NewAdminOrderRepository(db)
+	shiftMonitorRepo := repository.NewShiftMonitorRepository(db)
 	// Справочник ролей и их прав. На него опираются и назначение ролей, и охрана
 	// каждого админского маршрута.
 	roleRepo := repository.NewRoleRepository(db)
@@ -207,29 +214,24 @@ func main() {
 		// платежи. Ввод адреса отдаёт 503, пока ключ не задан.
 		log.Printf("[address] WARNING: DADATA_API_KEY is not set — address suggestions will return 503 and registration cannot complete")
 	}
-	mailer := service.NewSmtpMailSender()
-	// Паспорта шифруются ключом из окружения. Без ключа сервер стартует, а приём
-	// паспортов отвечает 503: хранить паспорт открытым нельзя даже временно.
-	passportCipher, err := passport.NewCipher(getEnv("PASSPORT_ENC_KEY", ""), getEnvInt("PASSPORT_KEY_VERSION", 1))
-	if err != nil {
-		log.Fatalf("[passport] %v", err)
-	}
-	if passportCipher == nil {
-		log.Println("[passport] WARNING: PASSPORT_ENC_KEY is not set, passports are not accepted")
-	}
-	passportRepo := repository.NewPassportRepository(db)
-	passportService := service.NewPassportService(passportRepo, userRepo, passportCipher,
-		getEnv("PASSPORTS_DIR", "passports"), settingsRepo).
-		WithMail(mailRepo).
-		WithPhotoCheck(photoproof.NewChecker())
+	// Почта наружу и доверенные источники браузера собираются здесь, из
+	// окружения: сервисы переменных не читают.
+	mailer := service.NewSmtpMailSender(smtpConfigFromEnv())
+	origins := service.NewAllowedOrigins(getEnv("CORS_ORIGIN", ""))
 	// AuthService владеет всем, что связано с сессиями: выдачей access-токенов,
 	// ротацией refresh-токенов и занесением отозванных access-токенов в чёрный список.
+	// Редакцию согласия на обработку персональных данных он читает из настроек
+	// напрямую: сервис паспортов собирается позже, после заказов.
 	authService := service.NewAuthServiceWithSecret(userRepo, jwtSecret, addressSuggester, mailer).
 		WithAddresses(addressRepo).
 		WithExecutorGeo(executorGeoRepo).
 		WithSessionStorage(refreshRepo, tokenRepo).
-		WithConsent(passportService.ConsentVersion)
-	adminService := service.NewAdminService(userRepo, adminRepo, settingsRepo, jwtSecret, mailer).
+		WithConsent(func(ctx context.Context) int { return service.PDConsentVersion(ctx, settingsRepo) })
+	adminService := service.NewAdminService(userRepo, adminUserRepo, settingsRepo, mailer).
+		WithPayouts(payoutRepo).
+		WithJournal(transactionJournal).
+		WithOrders(adminOrderRepo).
+		WithShifts(shiftMonitorRepo).
 		WithSessions(authService).
 		WithLedger(ledger).
 		WithAddresses(addressRepo).
@@ -237,10 +239,14 @@ func main() {
 		WithEvents(eventRepo).
 		WithRoles(roleRepo).
 		WithPenalties(penaltyRepo)
+	// Самообслуживание пользователя: профиль с адресами и собственные заявки
+	// на пополнение и вывод. Не админские операции — и не в AdminService.
+	profileService := service.NewProfileService(userRepo, addressRepo).WithSettings(settingsRepo)
+	walletService := service.NewWalletService(userRepo, payoutRepo, ledger)
 	// Права: что разрешено роли, отличной от ADMIN. Кэш карты «роль → права»
 	// сбрасывается тем же, что её меняет, — страницей ролей.
 	permissions := service.NewPermissions(roleRepo)
-	roleService := service.NewRoleService(roleRepo, userRepo, adminRepo, permissions).
+	roleService := service.NewRoleService(roleRepo, userRepo, adminUserRepo, permissions).
 		WithSessions(authService)
 	disputeNotifier := service.NewDisputeNotifier(mailRepo, userRepo, mailer)
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
@@ -276,16 +282,47 @@ func main() {
 	bidService := service.NewBidService(bidRepo, orderRepo, shiftRepo, ledger, userRepo, catalogRepo, chatRepo).
 		WithBehaviors(serviceBehaviors, eventRepo).
 		WithPenalties(penaltyService)
-	chatService := service.NewChatService(chatRepo, orderRepo)
+	chatService := service.NewChatService(chatRepo, orderRepo).WithOrigins(origins)
 	// Магазин платит тем же реестром и выдаёт вещи теми же подарками, что и
-	// ачивки: склад у них один.
-	shopService := service.NewShopService(shopRepo, shopOrderRepo, perkRepo, perkRules, giftRepo, ledger, levels, settingsRepo).
+	// ачивки: склад у них один. Четыре сервиса — по разделам прав: витрина и
+	// покупка, каталог, обработка покупок с выручкой, выдача привилегий.
+	shop := service.NewShop(shopRepo, shopOrderRepo, perkRepo, perkRules, giftRepo, ledger, levels, settingsRepo).
 		WithEvents(eventRepo).
-		WithMail(mailRepo).
-		WithRoles(roleRepo)
+		WithMail(mailRepo)
+	shopCatalog := service.NewShopCatalog(shopRepo, giftRepo, perkRules).WithRoles(roleRepo)
+	shopOrders := service.NewShopOrders(shopOrderRepo, giftRepo, perkRepo, ledger).WithMail(mailRepo)
+	perkGrants := service.NewPerkGrants(perkRepo, perkRules, ledger).WithMail(mailRepo)
 	reviewService := service.NewReviewService(reviewRepo, orderRepo).
 		WithTx(ledger).
 		WithExecutorStats(executorStatsRepo)
+
+	// Здесь доменные события доходят до своих поведений: заказ, закрывающий себя
+	// сам, когда его заказчик верифицирован, и идущее с этим вознаграждение.
+	// Диспетчер — потребитель outbox; синхронный поток отправок по заказу
+	// (данные на проверку, паспорт заказчика) — отдельный OrderSubmissions,
+	// которому диспетчер подключён как обработчик уже опубликованного события.
+	behaviorDispatcher := service.NewBehaviorDispatcher(
+		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
+		settingsRepo, ledger, serviceBehaviors, orderService,
+	).WithSubmissions(submissionRepo)
+	passportRepo := repository.NewPassportRepository(db)
+	orderSubmissions := service.NewOrderSubmissions(orderRepo, userRepo, catalogRepo, submissionRepo,
+		eventRepo, ledger, serviceBehaviors, behaviorDispatcher).
+		WithPassports(passportRepo)
+	// Паспорта шифруются ключом из окружения. Без ключа сервер стартует, а приём
+	// паспортов отвечает 503: хранить паспорт открытым нельзя даже временно.
+	passportCipher, err := passport.NewCipher(getEnv("PASSPORT_ENC_KEY", ""), getEnvInt("PASSPORT_KEY_VERSION", 1))
+	if err != nil {
+		log.Fatalf("[passport] %v", err)
+	}
+	if passportCipher == nil {
+		log.Println("[passport] WARNING: PASSPORT_ENC_KEY is not set, passports are not accepted")
+	}
+	passportService := service.NewPassportService(passportRepo, userRepo, passportCipher,
+		getEnv("PASSPORTS_DIR", "passports"), settingsRepo).
+		WithMail(mailRepo).
+		WithPhotoCheck(photoproof.NewChecker()).
+		WithVerification(orderSubmissions)
 
 	// Каждая периодическая задача ниже меняет состояние, которое должно измениться
 	// один раз: возврат, штраф, назначение. Защита лидером заставляет каждый тик
@@ -324,15 +361,8 @@ func main() {
 		WithLeader(leader, "shift_autoclose").
 		Start(ctx, 1*time.Minute))
 
-	// Здесь доменные события доходят до своих поведений: заказ, закрывающий себя
-	// сам, когда его заказчик верифицирован, и идущее с этим вознаграждение.
-	// Интервал короткий, потому что и того и другого кто-то ждёт.
-	behaviorDispatcher := service.NewBehaviorDispatcher(
-		eventRepo, orderRepo, userRepo, catalogRepo, serviceClaimRepo, chatRepo,
-		settingsRepo, ledger, serviceBehaviors, orderService,
-	).WithSubmissions(submissionRepo).
-		WithPassports(passportRepo)
-	passportService.WithVerification(behaviorDispatcher)
+	// Диспетчер поведений. Интервал короткий, потому что того, что он несёт,
+	// кто-то ждёт.
 	behaviorWorker := worker.NewBehaviorWorker(behaviorDispatcher).
 		WithLeader(leader, "behavior_dispatch").
 		WithScriptSync(serviceBehaviors)
@@ -356,10 +386,13 @@ func main() {
 	// этого в течение минуты — как и скрипты особых услуг.
 	workers.Add(achievementWorker.StartScriptSync(ctx, 1*time.Minute))
 
-	// Датчик открытых денежных инцидентов: на нём алерт, поэтому он читается из
-	// таблицы на каждом процессе и не зависит от тика ачивок.
+	// Датчики, читаемые из базы на каждом процессе: открытые денежные
+	// инциденты (на них алерт) и очереди обоих потребителей outbox. Из тика под
+	// блокировкой лидера они публиковались бы только на одной реплике.
 	workers.Add(worker.NewGaugeWorker().
 		WithIncidents(incidentRepo).
+		WithBehaviorBacklog(behaviorDispatcher).
+		WithAchievementBacklog(achievementDispatcher).
 		Start(ctx, 30*time.Second))
 
 	// Сроки штрафов — время, а не событие: баллы сгорают, а тихие блокировки
@@ -370,7 +403,7 @@ func main() {
 		Start(ctx, 1*time.Hour))
 
 	// Напоминание о конце привилегии магазина за три дня.
-	workers.Add(worker.NewPerkReminderWorker(shopService).
+	workers.Add(worker.NewPerkReminderWorker(perkGrants).
 		WithLeader(leader, "perk_reminder").
 		Start(ctx, 10*time.Minute))
 
@@ -394,20 +427,22 @@ func main() {
 	ph := handler.NewPublicHandler(authService).WithPermissions(permissions).WithPassports(passportService)
 	pah := handler.NewPassportHandler(passportService)
 	ah := handler.NewAdminHandler(adminService)
+	prh := handler.NewProfileHandler(profileService)
+	wh := handler.NewWalletHandler(walletService)
 	rolh := handler.NewRoleHandler(roleService)
 	oh := handler.NewOrderHandler(orderService)
 	evh := handler.NewExecutorVerificationHandler(service.NewExecutorVerificationService(
 		userRepo, addressRepo, catalogRepo, orderRepo, serviceBehaviors, orderService, ledger))
 	sh := handler.NewShiftHandler(shiftService)
 	bh := handler.NewBidHandler(bidService, orderService)
-	ch := handler.NewChatHandler(chatService).WithShopLinks(shopService.ShopOrderLinks)
-	shh := handler.NewShopHandler(shopService, perkRules)
+	ch := handler.NewChatHandler(chatService).WithShopLinks(shopOrders.ShopOrderLinks)
+	shh := handler.NewShopHandler(shop, shopCatalog, shopOrders, perkGrants, perkRules)
 	gh := handler.NewGeoHandler(addressSuggester)
 	sch := handler.NewServiceCatalogHandler(catalogRepo).WithPenalties(penaltyService).WithBehaviors(serviceBehaviors)
 	arh := handler.NewAppReleaseHandler(appReleaseRepo, getEnv("RELEASES_DIR", "releases"), getEnv("RELEASES_BASE_URL", ""))
 	rh := handler.NewReviewHandler(reviewService)
 	egh := handler.NewExecutorGeoHandler(executorGeoService)
-	bhh := handler.NewBehaviorHandler(behaviorDispatcher, submissionRepo)
+	bhh := handler.NewBehaviorHandler(orderSubmissions, submissionRepo)
 	dh := handler.NewDisputeHandler(disputeService)
 	pnh := handler.NewPenaltyHandler(penaltyService)
 	pph := photoproof.NewHandler(photoProofService, handler.CallerID)
@@ -415,7 +450,7 @@ func main() {
 	ach := handler.NewAchievementHandler(achievementRepo, giftRepo, executorStatsRepo, incidentRepo, levels, achievementEngine).
 		WithScripts(achievementScripts).
 		WithDispatcher(achievementDispatcher).
-		WithShop(shopService)
+		WithShop(shopOrders)
 
 	// Ограничители частоты для эндпоинтов, которые есть смысл перебирать.
 	loginLimiter := middleware.NewRateLimiter(10, time.Minute)
@@ -436,7 +471,7 @@ func main() {
 	// StripQueryToken выполняется до логгера, чтобы учётные данные, переданные
 	// параметром запроса, никогда не попадали в лог доступа.
 	r.Use(middleware.StripQueryToken)
-	r.Use(corsMiddleware)
+	r.Use(corsMiddleware(origins))
 	r.Use(middleware.SecurityHeaders)
 	r.Use(chiMiddleware.Recoverer)
 	// Внутри Recoverer, чтобы паника считалась той самой 500, которую клиент
@@ -465,7 +500,7 @@ func main() {
 		r.With(geoLimiter.Middleware).Get("/geo/geocode", gh.Geocode)
 		r.With(geoLimiter.Middleware).Get("/geo/autocomplete", gh.Autocomplete)
 		r.With(geoLimiter.Middleware).Get("/geo/suggest", gh.Suggest)
-		r.Get("/settings", ah.GetPublicSettingsHandler)
+		r.Get("/settings", prh.GetPublicSettingsHandler)
 		// OptionalAuth, чтобы каталог мог прятать услуги «только для верифицированных»
 		// от неверифицированных заказчиков, оставаясь доступным анонимным посетителям.
 		r.Group(func(r chi.Router) {
@@ -502,19 +537,19 @@ func main() {
 			r.Use(middleware.RequireRole("CUSTOMER", "EXECUTOR", "ADMIN"))
 			r.Get("/auth/me", ph.MeHandler)
 			r.Get("/me/penalty-status", pnh.MyPenaltyStatus)
-			r.Get("/user/profile", ah.GetProfileHandler)
+			r.Get("/user/profile", prh.GetProfileHandler)
 			// Оба пути возвращают собственный профиль вызывающего. /customer/profile
 			// оставлен здесь, а не в группе заказчика, потому что приложение
 			// исполнителя тоже его вызывает.
-			r.Get("/customer/profile", ah.GetProfileHandler)
+			r.Get("/customer/profile", prh.GetProfileHandler)
 			// Исполнителям тоже нужны пополнения: штрафы могут увести баланс в минус.
-			r.Post("/customer/finances/topup", ah.CreateTopUpRequestHandler)
+			r.Post("/customer/finances/topup", wh.CreateTopUpRequestHandler)
 			r.Post("/user/email", ph.UpdateEmailHandler)
 			r.Post("/user/birth-date", ph.UpdateBirthDateHandler)
 			r.With(passwordResetLimiter.Middleware).Post("/user/change-password", ph.ChangePasswordHandler)
-			r.Post("/user/address", ah.AddAddressHandler)
-			r.Post("/user/address/default", ah.SetDefaultAddressHandler)
-			r.Delete("/user/address/{id}", ah.DeleteAddressHandler)
+			r.Post("/user/address", prh.AddAddressHandler)
+			r.Post("/user/address/default", prh.SetDefaultAddressHandler)
+			r.Delete("/user/address/{id}", prh.DeleteAddressHandler)
 			r.Get("/chats/{order_id}/messages", ch.GetMessagesHandler)
 			r.Post("/chats/{order_id}/messages", ch.SendMessageHandler)
 			r.Put("/chats/{order_id}/messages/{message_id}", ch.EditMessageHandler)
@@ -533,7 +568,7 @@ func main() {
 			r.Post("/support/chats/{chat_id}/upload", ch.UploadSupportAttachmentHandler)
 			r.Post("/orders/{id}/reviews", rh.CreateReview)
 			r.Get("/orders/{id}/reviews/mine", rh.GetOrderReview)
-			r.Post("/finances/withdrawals", ah.CreateWithdrawalRequestHandler)
+			r.Post("/finances/withdrawals", wh.CreateWithdrawalRequestHandler)
 			r.Post("/logout", ph.LogoutHandler)
 			// Магазин: витрина и покупка открыты любой роли — какие товары
 			// кому видны, решают роли на самом товаре.
@@ -578,8 +613,8 @@ func main() {
 			r.Post("/executor/verification", evh.Request)
 			r.Post("/executor/verification/cancel", evh.Cancel)
 			// Геймификация: значки, уровень со ставкой комиссии и подарки.
+			// Уровень со ставкой и очередью привилегий — GET /me/perks в общей группе.
 			r.Get("/executor/achievements", ach.GetAchievements)
-			r.Get("/executor/level", ach.GetLevel)
 			r.Get("/executor/gifts", ach.GetGifts)
 			r.Post("/executor/gifts/{id}/reveal", ach.RevealGift)
 		})
@@ -608,7 +643,9 @@ func main() {
 			r.With(can("users.edit")).Post("/admin/users/{id}/address", ah.UpdateUserAddressHandler)
 			r.With(can("users.edit")).Post("/admin/users/{id}/name", ah.UpdateUserNameHandler)
 			r.With(can("users.edit")).Post("/admin/users/{id}/birth-date", ah.UpdateUserBirthDateHandler)
-			r.With(can("users.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
+			// Прямое зачисление с карточки — движение денег, а не правка карточки:
+			// охраняется тем же правом, что одобрение заявок на пополнение.
+			r.With(can("topups.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
 			// Истории с карточки пользователя. Охраняются правом на тот раздел,
 			// который они показывают, а не правом на пользователей: кто не допущен
 			// к журналу проводок, не должен читать его и здесь.
@@ -828,24 +865,39 @@ func configurePool(db *sql.DB) {
 	log.Printf("[db] pool limited to %d open connections", maxOpen)
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	// Общий с проверкой Origin у WebSocket, чтобы оба оставались согласованными.
-	allowedOrigins := service.AllowedOrigins()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if allowedOrigins[origin] {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// corsMiddleware отвечает на CORS по тому же набору источников, что и
+// проверка Origin у WebSocket чата: оба получают один origins.
+func corsMiddleware(origins *service.AllowedOrigins) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origins.Allows(origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// smtpConfigFromEnv собирает параметры SMTP из окружения. Пустой SMTP_HOST
+// означает «почты нет»: письма отказывают, а не уходят в никуда.
+func smtpConfigFromEnv() service.SmtpConfig {
+	return service.SmtpConfig{
+		Host:     getEnv("SMTP_HOST", ""),
+		Port:     getEnv("SMTP_PORT", "587"),
+		User:     getEnv("SMTP_USER", ""),
+		Password: getEnv("SMTP_PASSWORD", ""),
+		From:     getEnv("SMTP_FROM", "system@moya-usluga.ru"),
+		BaseURL:  getEnv("APP_BASE_URL", "https://moya-usluga.ru"),
+	}
 }
 
 // getEnv — dbconn.Env: один ридер окружения на все бинарники.

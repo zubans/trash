@@ -1,4 +1,5 @@
 import api from '../services/api'
+import type { ExecutorLevel } from './achievements'
 import type { UserGift } from './achievements'
 
 // Магазин: витрина, покупка, «мои покупки» и привилегии на комиссию
@@ -262,23 +263,28 @@ export async function getMyOrder(id: string): Promise<ShopOrder> {
   return response.data
 }
 
+// MyPerks — уровень со ставкой и очередь привилегий. Это и экран уровня
+// исполнителя: отдельного GET /executor/level больше нет.
 export interface MyPerks {
-  level: {
-    base_percent: number
-    level_percent: number
-    percent: number
-    perk_id?: string
-    perk_rule?: string
-    perk_title?: string
-    perk_expires_at?: string
-  }
+  level: ExecutorLevel
   queue: UserPerk[]
+}
+
+export const emptyLevel: ExecutorLevel = {
+  points: 0,
+  level: 0,
+  next_level_points: 0,
+  base_percent: 0,
+  discount_pp: 0,
+  percent: 0,
+  max_useful_level: 0,
+  level_percent: 0,
 }
 
 export async function getMyPerks(): Promise<MyPerks> {
   const response = await api.get('/me/perks')
   return {
-    level: response.data?.level || { base_percent: 0, level_percent: 0, percent: 0 },
+    level: { ...emptyLevel, ...(response.data?.level || {}) },
     queue: Array.isArray(response.data?.queue) ? response.data.queue : [],
   }
 }

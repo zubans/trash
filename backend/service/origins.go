@@ -2,44 +2,54 @@ package service
 
 import (
 	"net/http"
-	"os"
 	"strings"
-	"sync"
 )
 
-var (
-	originsOnce sync.Once
-	origins     map[string]bool
-)
-
-// AllowedOrigins возвращает набор браузерных источников, которым позволено
-// звать API и открывать WebSocket. CORS_ORIGIN может содержать список через запятую.
-func AllowedOrigins() map[string]bool {
-	originsOnce.Do(func() {
-		origins = map[string]bool{
-			"https://localhost":      true,
-			"https://localhost:443":  true,
-			"https://localhost:8443": true,
-			"http://localhost":       true,
-			"capacitor://localhost":  true,
-			"ionic://localhost":      true,
-		}
-		for _, o := range strings.Split(os.Getenv("CORS_ORIGIN"), ",") {
-			if o = strings.TrimSpace(o); o != "" {
-				origins[o] = true
-			}
-		}
-	})
-	return origins
+// AllowedOrigins — браузерные источники, которым позволено звать API и
+// открывать WebSocket. Собирается в composition root из CORS_ORIGIN: сервис
+// окружение не читает, и один и тот же набор получают CORS и проверка Origin у
+// сокета чата — им нельзя разойтись.
+type AllowedOrigins struct {
+	set map[string]bool
 }
 
-// IsAllowedOrigin сообщает, доверенный ли заголовок Origin у запроса.
+// NewAllowedOrigins собирает набор: встроенные источники локального клиента
+// плюс переданные списки через запятую (пустые элементы пропускаются).
+func NewAllowedOrigins(lists ...string) *AllowedOrigins {
+	set := map[string]bool{
+		"https://localhost":      true,
+		"https://localhost:443":  true,
+		"https://localhost:8443": true,
+		"http://localhost":       true,
+		"capacitor://localhost":  true,
+		"ionic://localhost":      true,
+	}
+	for _, list := range lists {
+		for _, o := range strings.Split(list, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				set[o] = true
+			}
+		}
+	}
+	return &AllowedOrigins{set: set}
+}
+
+// Allows сообщает, доверенный ли источник. nil-набор доверяет только
+// встроенным.
+func (o *AllowedOrigins) Allows(origin string) bool {
+	if o == nil {
+		return NewAllowedOrigins().set[origin]
+	}
+	return o.set[origin]
+}
+
+// AllowsRequest сообщает, доверенный ли заголовок Origin у запроса.
 // Отсутствующий Origin принимается, потому что нативные мобильные клиенты его
 // не шлют; браузеры шлют всегда — на это и опирается межсайтовая защита.
-func IsAllowedOrigin(r *http.Request) bool {
+func (o *AllowedOrigins) AllowsRequest(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
-	return AllowedOrigins()[origin]
+	return o.Allows(origin)
 }

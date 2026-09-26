@@ -20,7 +20,7 @@ func TestUserHistoryCoversBothRolesAndOnlyThisUser(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	repo := repository.NewAdminRepository(db)
+	repo := repository.NewAdminOrderRepository(db)
 
 	subject := createTestUser(t, db, "CUSTOMER")
 	other := createTestUser(t, db, "EXECUTOR")
@@ -100,7 +100,7 @@ func TestUserHistoryCoversBothRolesAndOnlyThisUser(t *testing.T) {
 		}
 	}
 
-	txs, txTotal, err := repo.GetUserTransactions(ctx, subject, 50, 0)
+	txs, txTotal, err := repository.NewTransactionJournal(db).GetUserTransactions(ctx, subject, 50, 0)
 	if err != nil {
 		t.Fatalf("GetUserTransactions: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestUserHistoryPagesAndClamps(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	repo := repository.NewAdminRepository(db)
+	repo := repository.NewTransactionJournal(db)
 	subject := createTestUser(t, db, "CUSTOMER")
 
 	for i := 0; i < 5; i++ {

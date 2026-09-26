@@ -69,8 +69,9 @@ const (
 )
 
 // ErrPassportRequired — сверку по услуге с require_passport нельзя принять,
-// пока паспорт заказчика с фото не на сервере.
-var ErrPassportRequired = errors.New("сначала отправьте паспорт заказчика с фото")
+// пока паспорт заказчика с фото не на сервере. Класс — ErrOrderState: заказ
+// ещё не готов к сверке.
+var ErrPassportRequired = stateError("сначала отправьте паспорт заказчика с фото")
 
 // PassportData — то, что записано в паспорте: серия, номер и дата выдачи, и
 // ничего больше (implementation_plan_delivery_passport.md §3.1). Лишнего о
@@ -159,8 +160,8 @@ type PassportService struct {
 	now     func() time.Time
 }
 
-// verificationOrders — то, что нужно паспорту от диспетчера поведений:
-// заказчик заказа, по которому исполнитель вносит паспорт.
+// verificationOrders — то, что нужно паспорту от потока отправок по заказу
+// (OrderSubmissions): заказчик заказа, по которому исполнитель вносит паспорт.
 type verificationOrders interface {
 	PassportCustomer(ctx context.Context, orderID, executorID uuid.UUID) (uuid.UUID, error)
 }
@@ -193,9 +194,16 @@ func (s *PassportService) WithVerification(orders verificationOrders) *PassportS
 	return s
 }
 
+// PDConsentVersion — текущая редакция согласия на обработку персональных
+// данных. Функция, а не метод: регистрация читает её до того, как собран
+// сервис паспортов, и не должна зависеть от него.
+func PDConsentVersion(ctx context.Context, settings repository.SettingsRepository) int {
+	return settingInt(ctx, settings, SettingPDConsentVersion, 1)
+}
+
 // ConsentVersion — текущая редакция согласия.
 func (s *PassportService) ConsentVersion(ctx context.Context) int {
-	return settingInt(ctx, s.settings, SettingPDConsentVersion, 1)
+	return PDConsentVersion(ctx, s.settings)
 }
 
 // ConsentRequired — пользователь не принимал текущую редакцию согласия.

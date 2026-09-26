@@ -107,9 +107,18 @@ func (s *BidService) CreateBid(ctx context.Context, orderID, executorID uuid.UUI
 	if order.CustomerID == executorID {
 		return nil, ruleError("нельзя делать ставки на собственный заказ")
 	}
+	// Ставки принимаются только по открытому заказу аукционной услуги. Раньше
+	// это проверял репозиторий своим запросом; правило площадки живёт здесь.
+	if order.Status != repository.OrderStatusSearching {
+		return nil, ErrOrderNotBiddable
+	}
 	if s.userRepo != nil && s.catalogRepo != nil {
-		if _, err := eligibilityFor(ctx, s.userRepo, s.catalogRepo, s.behaviors, s.penalties, executorID, order); err != nil {
+		variant, err := eligibilityFor(ctx, s.userRepo, s.catalogRepo, s.behaviors, s.penalties, executorID, order)
+		if err != nil {
 			return nil, err
+		}
+		if variant == nil || !variant.IsAuction {
+			return nil, ErrNotAuction
 		}
 	}
 

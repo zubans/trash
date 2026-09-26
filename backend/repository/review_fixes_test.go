@@ -567,7 +567,7 @@ func TestTransactionPeriodFilterAndScan(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
 	ctx := context.Background()
-	admin := repository.NewAdminRepository(db)
+	admin := repository.NewTransactionJournal(db)
 	txRepo := repository.NewTransactionRepository(db)
 
 	userID := createTestUser(t, db, "CUSTOMER")
@@ -588,7 +588,7 @@ func TestTransactionPeriodFilterAndScan(t *testing.T) {
 		period string
 		want   int
 	}{{"2020-03", 1}, {"2020-04", 0}, {"2020-3", 0}, {"", 1}} {
-		txs, total, err := admin.GetTransactions(ctx, repository.TransactionsFilter{Search: march.String(), Period: tc.period, Limit: 10})
+		txs, total, err := admin.GetTransactions(ctx, repository.TransactionsFilter{Search: march.String(), Period: tc.period, Page: repository.PageRequest{Limit: 10, WithTotal: true}})
 		if err != nil {
 			t.Fatalf("period %q: %v", tc.period, err)
 		}

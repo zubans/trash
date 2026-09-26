@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"strings"
 
 	"healthlogin/backend/achievement"
@@ -22,8 +20,9 @@ import (
 // поставляемой ачивки нельзя перехватить строкой в базе, а собственную нельзя
 // затереть новой сборкой.
 type Achievements struct {
-	engine *achievement.Engine
-	repo   repository.AchievementRepository
+	engine   *achievement.Engine
+	repo     repository.AchievementRepository
+	registry *scriptRegistry
 	// library — коды, занятые скриптами из бинарника. Снимок делается один раз,
 	// сразу после загрузки: содержимое каталога за время работы не меняется.
 	library map[string]struct{}
@@ -39,15 +38,18 @@ func NewAchievements(engine *achievement.Engine, repo repository.AchievementRepo
 	for _, m := range engine.Manifests() {
 		library[m.Code] = struct{}{}
 	}
-	return &Achievements{engine: engine, repo: repo, library: library}
-}
-
-// Engine отдаёт движок — диспетчеру и обработчикам, которые вызывают хуки.
-func (a *Achievements) Engine() *achievement.Engine {
-	if a == nil {
-		return nil
+	a := &Achievements{engine: engine, repo: repo, library: library}
+	codes := func() []string {
+		manifests := engine.Manifests()
+		out := make([]string, 0, len(manifests))
+		for _, m := range manifests {
+			out = append(out, m.Code)
+		}
+		return out
 	}
-	return a.engine
+	a.registry = newScriptRegistry("achievement", engine.CompileFiles, engine.Remove, codes,
+		func(code string) bool { return !a.IsLibrary(code) })
+	return a
 }
 
 // IsLibrary сообщает, поставляется ли ачивка с этим кодом со сборкой. Такую
@@ -59,19 +61,6 @@ func (a *Achievements) IsLibrary(code string) bool {
 	}
 	_, ok := a.library[code]
 	return ok
-}
-
-// LibraryCodes перечисляет поставляемые ачивки — админ-панель предлагает их как
-// стартовый шаблон для новой.
-func (a *Achievements) LibraryCodes() []string {
-	if a == nil {
-		return nil
-	}
-	codes := make([]string, 0, len(a.library))
-	for code := range a.library {
-		codes = append(codes, code)
-	}
-	return codes
 }
 
 // sources отдаёт собственный скрипт ачивки как файлы, которые компилирует
@@ -101,18 +90,14 @@ func (a *Achievements) Sync(row *repository.Achievement) error {
 	if a == nil || row == nil {
 		return nil
 	}
-	if !row.HasOwnScript() || row.DeletedAt != nil {
-		if !a.IsLibrary(row.Code) {
-			a.engine.Remove(row.Code)
-		}
-		return nil
-	}
-	return a.engine.CompileFiles(row.Code, sources(row))
+	present := row.HasOwnScript() && row.DeletedAt == nil
+	return a.registry.sync(row.Code, sources(row), present)
 }
 
-// SyncAll компилирует каждый собственный скрипт и убирает исчезнувшие. Он
-// выполняется при старте и по таймеру: правка на другой реплике или изменение,
-// сделанное прямо в базе, должны дойти и до этого процесса.
+// SyncAll компилирует изменившиеся собственные скрипты и убирает исчезнувшие.
+// Он выполняется при старте и по таймеру: правка на другой реплике или
+// изменение, сделанное прямо в базе, должны дойти и до этого процесса.
+// Неизменившийся скрипт не компилируется повторно.
 func (a *Achievements) SyncAll(ctx context.Context) error {
 	if a == nil || a.repo == nil {
 		return nil
@@ -121,32 +106,9 @@ func (a *Achievements) SyncAll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	live := make(map[string]struct{}, len(rows))
-	var failed []string
+	list := make([]scriptSource, 0, len(rows))
 	for _, row := range rows {
-		live[row.Code] = struct{}{}
-		if err := a.engine.CompileFiles(row.Code, sources(row)); err != nil {
-			// Сообщается, но не фатально, и намеренно не регистрируется:
-			// сломанная ачивка перестаёт выдаваться, а не выдаётся неправильно.
-			a.engine.Remove(row.Code)
-			failed = append(failed, row.Code)
-			log.Printf("[achievement] %s: %v", row.Code, err)
-		}
+		list = append(list, scriptSource{code: row.Code, label: row.Code, files: sources(row)})
 	}
-	// Удалённая ачивка должна исчезнуть и из движка, иначе она продолжит
-	// срабатывать на этом процессе до перезапуска. Поставляемые не трогаем: их
-	// скрипт живёт в бинарнике и базе не подчиняется.
-	for _, m := range a.engine.Manifests() {
-		if a.IsLibrary(m.Code) {
-			continue
-		}
-		if _, ok := live[m.Code]; !ok {
-			a.engine.Remove(m.Code)
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("achievement scripts failed to compile: %s", strings.Join(failed, ", "))
-	}
-	return nil
+	return a.registry.syncAll(list)
 }

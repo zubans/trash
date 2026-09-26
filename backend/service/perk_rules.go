@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -36,13 +37,34 @@ type PerkRules struct {
 	repo     repository.PerkRuleRepository
 	settings repository.SettingsRepository
 	shipped  map[string]bool
+
+	// preview — кэш разрешённых правил для карточки товара: код правила →
+	// ключ в движке и версия. Карточку смотрят часто, а правило меняется
+	// редко; Save сбрасывает запись своего кода, TTL страхует от правки на
+	// другой реплике. Покупка и сохранение товара кэшем не пользуются.
+	previewMu  sync.Mutex
+	preview    map[string]previewEntry
+	previewTTL time.Duration
+	now        func() time.Time
 }
+
+// previewEntry — разрешённое правило в кэше карточки.
+type previewEntry struct {
+	key       string
+	versionID *uuid.UUID
+	expires   time.Time
+}
+
+// previewTTL — сколько карточка товара может показывать правило, уже
+// изменённое на другой реплике.
+const previewTTL = 30 * time.Second
 
 // NewPerkRules компилирует поставляемые правила из fsys. Правило, которое не
 // компилируется, — ошибка сборки, а не повод стартовать без него: на нём
 // могут стоять купленные привилегии.
 func NewPerkRules(repo repository.PerkRuleRepository, settings repository.SettingsRepository, fsys fs.FS) (*PerkRules, error) {
-	r := &PerkRules{engine: perk.New(perk.DefaultLimits), repo: repo, settings: settings, shipped: map[string]bool{}}
+	r := &PerkRules{engine: perk.New(perk.DefaultLimits), repo: repo, settings: settings, shipped: map[string]bool{},
+		preview: map[string]previewEntry{}, previewTTL: previewTTL, now: time.Now}
 	codes, err := perk.ShippedCodes(fsys)
 	if err != nil {
 		return nil, err
@@ -154,18 +176,51 @@ func (r *PerkRules) Sellable(ctx context.Context, ruleCode string, override map[
 }
 
 // Preview считает ставку, которую дало бы правило с константами товара, — для
-// карточки «сейчас / с привилегией». Без прогона по сетке: его проходит
-// сохранение товара и покупка, а карточку смотрят часто.
+// карточки «сейчас / с привилегией». Без прогона по сетке и через кэш
+// разрешённых правил: сетку проходят сохранение товара и покупка, а карточку
+// смотрят часто.
 func (r *PerkRules) Preview(ctx context.Context, ruleCode string, override map[string]interface{}, base, levelPercent float64, level int) (float64, error) {
-	key, _, config, err := r.resolve(ctx, ruleCode, override)
+	key, err := r.previewKey(ctx, ruleCode)
 	if err != nil {
 		return 0, err
+	}
+	m, _ := r.engine.Manifest(key)
+	config, err := perk.Config(m.Defaults, override)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrInvalidPerk, err)
 	}
 	percent, err := r.engine.Rate(key, perk.Facts{Base: base, LevelPercent: levelPercent, Level: level, Config: config})
 	if err != nil {
 		return 0, err
 	}
 	return clampPercent(percent, base), nil
+}
+
+// previewKey — ключ правила в движке для карточки: из кэша, пока он свеж,
+// иначе разрешается заново и запоминается.
+func (r *PerkRules) previewKey(ctx context.Context, ruleCode string) (string, error) {
+	now := r.now()
+	r.previewMu.Lock()
+	entry, ok := r.preview[ruleCode]
+	r.previewMu.Unlock()
+	if ok && now.Before(entry.expires) && r.engine.Has(entry.key) {
+		return entry.key, nil
+	}
+	key, sellable, _, err := r.resolve(ctx, ruleCode, nil)
+	if err != nil {
+		return "", err
+	}
+	r.previewMu.Lock()
+	r.preview[ruleCode] = previewEntry{key: key, versionID: sellable.VersionID, expires: now.Add(r.previewTTL)}
+	r.previewMu.Unlock()
+	return key, nil
+}
+
+// forgetPreview сбрасывает кэш карточки для правила — после его правки.
+func (r *PerkRules) forgetPreview(ruleCode string) {
+	r.previewMu.Lock()
+	delete(r.preview, ruleCode)
+	r.previewMu.Unlock()
 }
 
 // resolve находит текущий текст правила и сливает константы товара с его
@@ -302,11 +357,12 @@ func (r *PerkRules) Save(ctx context.Context, adminID uuid.UUID, req SavePerkRul
 		return nil, nil, err
 	}
 	if create && existing != nil {
-		return nil, nil, shopErr(http.StatusConflict, ShopErrValidation, "Правило с таким кодом уже есть")
+		return nil, nil, conflictError("Правило с таким кодом уже есть")
 	}
 	if !create && existing == nil {
-		return nil, nil, shopNotFound()
+		return nil, nil, notFoundError("Правила с таким кодом нет")
 	}
+	defer r.forgetPreview(req.Code)
 	if existing != nil && existing.Origin == repository.PerkRuleShipped {
 		existing.IsActive = req.IsActive
 		if err := r.repo.Save(ctx, existing); err != nil {

@@ -23,9 +23,10 @@ import (
 // они безразличны, передают nil и получают ровно то поведение, какое сервис имел
 // до появления поведений.
 type Behaviors struct {
-	engine  *behavior.Engine
-	claims  repository.ServiceClaimRepository
-	catalog repository.ServiceCatalogRepository
+	engine   *behavior.Engine
+	claims   repository.ServiceClaimRepository
+	catalog  repository.ServiceCatalogRepository
+	registry *scriptRegistry
 }
 
 // NewBehaviors подключает движок к хранилищу claim'ов. claims может быть nil, и
@@ -35,7 +36,18 @@ func NewBehaviors(engine *behavior.Engine, claims repository.ServiceClaimReposit
 	if engine == nil {
 		return nil
 	}
-	return &Behaviors{engine: engine, claims: claims}
+	codes := func() []string {
+		manifests := engine.Manifests()
+		out := make([]string, 0, len(manifests))
+		for _, m := range manifests {
+			out = append(out, m.Code)
+		}
+		return out
+	}
+	// Реестр ведает только скриптами узлов: библиотечные поведения живут в
+	// бинарнике и базе не подчиняются.
+	registry := newScriptRegistry("behavior", engine.CompileFiles, engine.Remove, codes, behavior.IsNodeCode)
+	return &Behaviors{engine: engine, claims: claims, registry: registry}
 }
 
 // WithCatalog позволяет поведениям компилировать скрипты, хранящиеся на узлах
@@ -87,12 +99,8 @@ func (b *Behaviors) SyncNode(node *repository.ServiceNode) error {
 	if b == nil || node == nil {
 		return nil
 	}
-	code := behavior.NodeCode(node.ID.String())
-	if !node.HasOwnScript() || node.IsDeleted() {
-		b.engine.Remove(code)
-		return nil
-	}
-	return b.engine.CompileFiles(code, nodeSources(node))
+	present := node.HasOwnScript() && !node.IsDeleted()
+	return b.registry.sync(behavior.NodeCode(node.ID.String()), nodeSources(node), present)
 }
 
 // RemoveNode снимает регистрацию скрипта узла — для путей, где есть только его
@@ -101,12 +109,13 @@ func (b *Behaviors) RemoveNode(nodeID uuid.UUID) {
 	if b == nil {
 		return
 	}
-	b.engine.Remove(behavior.NodeCode(nodeID.String()))
+	_ = b.registry.sync(behavior.NodeCode(nodeID.String()), nil, false)
 }
 
-// SyncAll компилирует каждый скрипт узла в каталоге и убирает исчезнувшие. Он
-// выполняется при старте и по таймеру: правка другой реплики или изменение,
-// сделанное прямо в базе, должны дойти и до этого процесса.
+// SyncAll компилирует изменившиеся скрипты узлов каталога и убирает
+// исчезнувшие. Он выполняется при старте и по таймеру: правка другой реплики
+// или изменение, сделанное прямо в базе, должны дойти и до этого процесса.
+// Неизменившийся скрипт не компилируется повторно.
 func (b *Behaviors) SyncAll(ctx context.Context) error {
 	if b == nil || b.catalog == nil {
 		return nil
@@ -115,32 +124,14 @@ func (b *Behaviors) SyncAll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	live := make(map[string]struct{}, len(nodes))
-	var failed []string
+	list := make([]scriptSource, 0, len(nodes))
 	for _, node := range nodes {
-		code := behavior.NodeCode(node.ID.String())
-		live[code] = struct{}{}
-		if err := b.engine.CompileFiles(code, nodeSources(node)); err != nil {
-			// Сообщается, но не фатально, и намеренно не регистрируется: узел
-			// откатывается к «неизвестному поведению», чьи проверки закрыты.
-			b.engine.Remove(code)
-			failed = append(failed, node.Code)
-			log.Printf("[behavior] node %s (%s): %v", node.Code, node.ID, err)
-		}
+		list = append(list, scriptSource{
+			code: behavior.NodeCode(node.ID.String()), label: fmt.Sprintf("node %s (%s)", node.Code, node.ID),
+			files: nodeSources(node),
+		})
 	}
-	for _, m := range b.engine.Manifests() {
-		if !behavior.IsNodeCode(m.Code) {
-			continue
-		}
-		if _, ok := live[m.Code]; !ok {
-			b.engine.Remove(m.Code)
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("node scripts failed to compile: %s", strings.Join(failed, ", "))
-	}
-	return nil
+	return b.registry.syncAll(list)
 }
 
 // ErrBehaviorUnavailable — то, что получает вызывающий, когда скрипт, правящий
@@ -340,15 +331,15 @@ func (b *Behaviors) ClaimsFor(ctx context.Context, user *repository.User) map[uu
 }
 
 // translate превращает ответ скрипта в словарь ошибок слоя сервисов: отказ
-// сохраняет своё сообщение, всё прочее становится ErrBehaviorUnavailable и
-// логируется.
+// сохраняет своё сообщение и сам *behavior.DeniedError (errors.As) под классом
+// ErrRule, всё прочее становится ErrBehaviorUnavailable и логируется.
 func (b *Behaviors) translate(node *repository.ServiceNode, hook string, err error) error {
 	if err == nil {
 		return nil
 	}
 	var denied *behavior.DeniedError
 	if errors.As(err, &denied) {
-		return errors.New(denied.Message)
+		return &DomainError{Kind: ErrRule, Msg: denied.Message, Cause: denied}
 	}
 	b.report(node, hook, err)
 	return ErrBehaviorUnavailable

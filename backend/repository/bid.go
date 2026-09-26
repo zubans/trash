@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,31 +41,12 @@ func NewBidRepository(db *sql.DB) BidRepository {
 	return &bidRepo{db: db}
 }
 
+// CreateBid записывает ставку. Аукцион ли заказ и открыт ли он для ставок,
+// решает BidService: это правило площадки, а не хранения.
 func (r *bidRepo) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, offeredPrice money.Amount) (*Bid, error) {
-	// 1. Проверяем, что заказ — аукцион и в статусе SEARCHING
-	var isAuction bool
-	var status string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT sn.is_auction, o.status
-		FROM orders o
-		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.id = $1`, orderID).Scan(&isAuction, &status)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("order not found")
-		}
-		return nil, err
-	}
-	if !isAuction {
-		return nil, errors.New("cannot bid on non-auction orders")
-	}
-	if status != "SEARCHING" {
-		return nil, errors.New("order is not open for bidding")
-	}
-
-	// 2. Вставляем ставку. У одного исполнителя не больше одной ставки на заказ,
-	//    поэтому повторная отправка обновляет предложение, а не громоздит дубли
-	//    (уникальный индекс создан в миграции 024).
+	// Вставляем ставку. У одного исполнителя не больше одной ставки на заказ,
+	// поэтому повторная отправка обновляет предложение, а не громоздит дубли
+	// (уникальный индекс создан в миграции 024).
 	query := `
 		INSERT INTO bids (order_id, executor_id, offered_price, status, created_at)
 		VALUES ($1, $2, $3, 'PENDING', now())
@@ -75,7 +55,7 @@ func (r *bidRepo) CreateBid(ctx context.Context, orderID, executorID uuid.UUID, 
 		RETURNING id, order_id, executor_id, offered_price, status, created_at`
 
 	var b Bid
-	err = r.db.QueryRowContext(ctx, query, orderID, executorID, offeredPrice).Scan(
+	err := r.db.QueryRowContext(ctx, query, orderID, executorID, offeredPrice).Scan(
 		&b.ID, &b.OrderID, &b.ExecutorID, &b.OfferedPrice, &b.Status, &b.CreatedAt,
 	)
 	if err != nil {

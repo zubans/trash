@@ -76,7 +76,7 @@ func behaviorRefusal(err error, kind error) error {
 	if errors.Is(err, ErrBehaviorUnavailable) {
 		return err
 	}
-	return &DomainError{Kind: kind, Msg: err.Error()}
+	return &DomainError{Kind: kind, Msg: err.Error(), Cause: err}
 }
 
 // penaltyGate — тихая блокировка роли. Ему удовлетворяет *PenaltyService;

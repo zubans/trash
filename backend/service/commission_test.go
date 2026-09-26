@@ -141,8 +141,8 @@ func newCommissionAdmin(collected money.Amount) (*AdminService, *mockTransaction
 	accounts.balances[repository.AccountCommission] = collected
 	accounts.balances[repository.AccountDeposits] = collected.Neg()
 
-	srv := NewAdminService(newMockUserRepo(), &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)},
-		&mockSettingsRepo{settings: map[string]string{SettingOrderCommissionPercent: "15"}}, "secret", nil).
+	srv := newAdminTestService(newMockUserRepo(), &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)},
+		&mockSettingsRepo{settings: map[string]string{SettingOrderCommissionPercent: "15"}}).
 		WithLedger(NewLedger(txRepo, accounts))
 	return srv, txRepo, accounts
 }
@@ -189,7 +189,7 @@ func TestPayoutCommissionRefusesMoreThanCollected(t *testing.T) {
 // обязаны держаться там: доля свыше 100% выплачивала бы отрицательное вознаграждение.
 func TestUpdateSettingsBoundsTheCommissionRate(t *testing.T) {
 	settings := &mockSettingsRepo{settings: map[string]string{}}
-	srv := NewAdminService(newMockUserRepo(), &mockAdminRepo{}, settings, "secret", nil)
+	srv := newAdminTestService(newMockUserRepo(), &mockAdminRepo{}, settings)
 	ctx := context.Background()
 
 	for _, bad := range []string{"-1", "101", "abc"} {

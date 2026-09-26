@@ -48,7 +48,7 @@ func TestProportionalRefundAtTheBoundaries(t *testing.T) {
 // «offer_changed».
 func TestUpdateSettingsGuardsTheShopSettings(t *testing.T) {
 	settings := &mockSettingsRepo{settings: map[string]string{}}
-	srv := NewAdminService(newMockUserRepo(), &mockAdminRepo{}, settings, "secret", nil)
+	srv := newAdminTestService(newMockUserRepo(), &mockAdminRepo{}, settings)
 	ctx := context.Background()
 
 	for key, bad := range map[string][]string{

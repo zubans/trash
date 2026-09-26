@@ -120,3 +120,31 @@ func TestBidService_CreateBid(t *testing.T) {
 		t.Error("expected error placing bid on own order")
 	}
 }
+
+// Правило «ставки только по открытому аукциону» живёт в сервисе, а не в
+// репозитории: закрытый заказ и неаукционная услуга отказывают своими
+// сентинелами до записи.
+func TestBidService_CreateBidRequiresOpenAuction(t *testing.T) {
+	bidRepo := &mockBidRepo{}
+	shiftRepo := &mockShiftRepo{}
+	orderRepo := &mockOrderRepo{}
+	srv := NewBidService(bidRepo, orderRepo, shiftRepo, testLedger(), newMockUserRepo(), newMockCatalogRepo(), nil)
+	executorID := uuid.New()
+	_, _ = shiftRepo.StartShift(context.Background(), executorID, 1)
+
+	assigned := &repository.Order{ID: uuid.New(), CustomerID: uuid.New(),
+		ServiceVariantID: constructionVariantID, Status: repository.OrderStatusAssigned}
+	plain := &repository.Order{ID: uuid.New(), CustomerID: uuid.New(),
+		ServiceVariantID: standardVariantID, Status: repository.OrderStatusSearching}
+	orderRepo.orders = append(orderRepo.orders, assigned, plain)
+
+	if _, err := srv.CreateBid(context.Background(), assigned.ID, executorID, money.FromRubles(100)); !errors.Is(err, ErrOrderNotBiddable) {
+		t.Errorf("bid on an assigned order: %v, want ErrOrderNotBiddable", err)
+	}
+	if _, err := srv.CreateBid(context.Background(), plain.ID, executorID, money.FromRubles(100)); !errors.Is(err, ErrNotAuction) {
+		t.Errorf("bid on a non-auction order: %v, want ErrNotAuction", err)
+	}
+	if _, err := srv.CreateBid(context.Background(), uuid.New(), executorID, money.FromRubles(100)); !errors.Is(err, ErrOrderNotFound) {
+		t.Errorf("bid on a missing order: %v, want ErrOrderNotFound", err)
+	}
+}

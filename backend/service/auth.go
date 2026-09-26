@@ -45,7 +45,9 @@ type JWTClaims struct {
 // всем ключ подписи, и он не должен существовать даже как удобство.
 func NewAuthServiceWithSecret(repo repository.UserRepository, secret string, resolver AddressResolver, mailer MailSender) *AuthService {
 	if mailer == nil {
-		mailer = NewSmtpMailSender()
+		// Без транспорта письма не уходят и об этом говорится в логе; настоящий
+		// SMTP здесь не собирается: транспорт — решение composition root.
+		mailer = NoopMailSender{}
 	}
 	return &AuthService{repo: repo, resolver: resolver, mailer: mailer, secret: []byte(secret)}
 }
@@ -162,42 +164,56 @@ func normalizeEmail(email string) string {
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
-// Register создаёт нового пользователя с указанными телефоном, почтой, паролем, датой рождения, адресом подачи и ролью.
-func (s *AuthService) Register(ctx context.Context, phone, email, password, lastName, firstName, patronymic, birthDate, address, role string) (*repository.User, error) {
-	return s.RegisterWithCoordinates(ctx, phone, email, password, lastName, firstName, patronymic, birthDate, address, role, nil, nil)
-}
+// Ошибки регистрации и входа. Обработчик отвечает по классу: занятый телефон
+// или почта — 409, негодные данные — 400, неверные учётные данные — 401,
+// просроченная или неизвестная ссылка подтверждения — 400 со своим кодом.
+var (
+	// ErrPhoneTaken — телефон уже за другой учёткой.
+	ErrPhoneTaken = conflictError("user with this phone already exists")
+	// ErrEmailTaken — почта уже за другой учёткой.
+	ErrEmailTaken = conflictError("user with this email already exists")
+	// ErrInvalidCredentials — пара логин/пароль не подошла. Одна ошибка на
+	// «нет такой учётки» и «не тот пароль»: различать их наружу нельзя.
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	// ErrVerificationTokenExpired — ссылка подтверждения почты просрочена;
+	// клиент предлагает запросить новую.
+	ErrVerificationTokenExpired = errors.New("verification token expired")
+	// ErrVerificationTokenInvalid — ссылки подтверждения нет: использована,
+	// подделана или не выдавалась.
+	ErrVerificationTokenInvalid = validationError("invalid or expired verification token (valid 60m)")
+)
 
 // RegisterWithCoordinates создаёт нового пользователя с почтой, телефоном, паролем, датой рождения и адресом.
 func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email, password, lastName, firstName, patronymic, birthDate, address, role string, lat, lon *float64) (*repository.User, error) {
 	if phone == "" || password == "" {
-		return nil, errors.New("phone and password are required")
+		return nil, validationError("phone and password are required")
 	}
 	if err := validatePassword(password); err != nil {
-		return nil, err
+		return nil, validationError(err.Error())
 	}
 	phone = normalizePhone(phone)
 	lastName = strings.TrimSpace(lastName)
 	firstName = strings.TrimSpace(firstName)
 	patronymic = strings.TrimSpace(patronymic)
 	if lastName == "" || firstName == "" || patronymic == "" {
-		return nil, errors.New("last_name, first_name, and patronymic are required")
+		return nil, validationError("last_name, first_name, and patronymic are required")
 	}
 	// Дальше обязательно: проверки min_age по услугам читают GetAge(), а учётка без
 	// даты рождения читается как возраст 0 — молча недопущенная до любой услуги с
 	// возрастным ограничением.
 	parsedBirthDate, err := parseBirthDate(birthDate)
 	if err != nil {
-		return nil, err
+		return nil, validationError(err.Error())
 	}
 	email = normalizeEmail(email)
 	if email == "" || !emailRegex.MatchString(email) {
-		return nil, errors.New("a valid email is required")
+		return nil, validationError("a valid email is required")
 	}
 	if !validRegistrationRole(role) {
-		return nil, errors.New("invalid role: must be CUSTOMER or EXECUTOR")
+		return nil, validationError("invalid role: must be CUSTOMER or EXECUTOR")
 	}
 	if strings.TrimSpace(address) == "" {
-		return nil, errors.New("address is required")
+		return nil, validationError("address is required")
 	}
 
 	// Адрес проверяется на то, что он обязан содержать, — населённый пункт,
@@ -206,7 +222,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 	// человек, живущий в доме 12к1, вообще не мог зарегистрироваться.
 	parsedAddress := ParseAddressLine(address)
 	if err := parsedAddress.Validate(); err != nil {
-		return nil, err
+		return nil, validationError(err.Error())
 	}
 	normalizedAddress := parsedAddress.Compose()
 
@@ -215,7 +231,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		return nil, err
 	}
 	if existingPhone != nil {
-		return nil, errors.New("user with this phone already exists")
+		return nil, ErrPhoneTaken
 	}
 
 	existingEmail, err := s.repo.FindByEmail(ctx, email)
@@ -223,7 +239,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 		return nil, err
 	}
 	if existingEmail != nil {
-		return nil, errors.New("user with this email already exists")
+		return nil, ErrEmailTaken
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -313,7 +329,7 @@ func (s *AuthService) RegisterWithCoordinates(ctx context.Context, phone, email,
 // Authenticate проверяет пару телефон/пароль или почта/пароль и возвращает подходящего пользователя.
 func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password string) (*repository.User, error) {
 	if phoneOrEmail == "" || password == "" {
-		return nil, errors.New("phone and password are required")
+		return nil, ErrInvalidCredentials
 	}
 
 	input := strings.TrimSpace(phoneOrEmail)
@@ -331,11 +347,11 @@ func (s *AuthService) Authenticate(ctx context.Context, phoneOrEmail, password s
 	if err != nil || user == nil {
 		// Хешируем в любом случае, чтобы отсутствующую учётку нельзя было отличить по времени.
 		_, _ = bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		return nil, errors.New("invalid credentials")
+		return nil, ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return nil, errors.New("invalid credentials")
+		return nil, ErrInvalidCredentials
 	}
 
 	return user, nil
@@ -395,9 +411,20 @@ func (s *AuthService) ParseJWT(ctx context.Context, tokenStr string) (*JWTClaims
 // VerifyEmail подтверждает почту пользователя по токену.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*repository.User, error) {
 	if token == "" {
-		return nil, errors.New("token is required")
+		return nil, validationError("token is required")
 	}
-	return s.repo.VerifyEmailToken(ctx, token)
+	user, err := s.repo.VerifyEmailToken(ctx, token)
+	switch {
+	case err == nil:
+		return user, nil
+	case errors.Is(err, repository.ErrVerificationTokenExpired) || err.Error() == "verification_token_expired":
+		// Текст «verification_token_expired» ещё отдаёт старый код репозитория;
+		// после его перевода на сентинел останется только errors.Is.
+		return nil, ErrVerificationTokenExpired
+	case errors.Is(err, repository.ErrNotFound) || strings.HasPrefix(err.Error(), "invalid or expired verification token"):
+		return nil, ErrVerificationTokenInvalid
+	}
+	return nil, err
 }
 
 // RequestPasswordReset генерирует 6-значный код сброса пароля и отправляет его письмом.

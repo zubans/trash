@@ -11,7 +11,7 @@ import (
 func TestAdminService_UpdateSettings_PenaltyBounds(t *testing.T) {
 	newSvc := func() (*AdminService, *mockSettingsRepo) {
 		settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-		svc := NewAdminService(newMockRepo(), &mockAdminRepo{}, settingsRepo, "secret", nil)
+		svc := newAdminTestService(newMockRepo(), &mockAdminRepo{}, settingsRepo)
 		return svc, settingsRepo
 	}
 

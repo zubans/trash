@@ -130,11 +130,18 @@ func (h *PublicHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 	user, err := h.authService.RegisterWithCoordinates(r.Context(), req.Phone, req.Email, req.Password, req.LastName, req.FirstName, req.Patronymic, req.BirthDate, req.Address, req.Role, req.Lat, req.Lon)
 	if err != nil {
 		metrics.AuthEvent("register", "denied")
-		if err.Error() == "user with this phone already exists" || err.Error() == "user with this email already exists" {
+		// По классу, а не по тексту: занятый телефон или почта — 409, негодные
+		// данные формы — 400 с текстом, всё прочее — сбой, о котором клиенту
+		// знать нечего.
+		switch {
+		case errors.Is(err, service.ErrPhoneTaken), errors.Is(err, service.ErrEmailTaken):
 			http.Error(w, err.Error(), http.StatusConflict)
-			return
+		case errors.Is(err, service.ErrValidation):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			log.Printf("[auth] register: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	metrics.AuthEvent("register", "ok")
@@ -321,19 +328,24 @@ func (h *PublicHandler) VerifyEmailHandler(w http.ResponseWriter, r *http.Reques
 
 	user, err := h.authService.VerifyEmail(r.Context(), token)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		if err.Error() == "verification_token_expired" {
+		switch {
+		case errors.Is(err, service.ErrVerificationTokenExpired):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":     "Срок действия ссылки истек (60 минут). Пожалуйста, запросите изменение почты заново.",
 				"code":      "TOKEN_EXPIRED",
 				"can_retry": true,
 			})
-			return
+		case errors.Is(err, service.ErrValidation):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		default:
+			// Сбой базы — не «неверная ссылка»: 500 без внутреннего текста.
+			log.Printf("[auth] verify email: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
 		return
 	}
 

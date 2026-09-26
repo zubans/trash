@@ -35,8 +35,7 @@ import (
 //   - потолок одного денежного подарка.
 type AchievementDispatcher struct {
 	events       repository.EventRepository
-	orders       repository.OrderRepository
-	users        repository.UserRepository
+	load         subjectLoader
 	achievements repository.AchievementRepository
 	stats        repository.ExecutorStatsRepository
 	gifts        repository.GiftRepository
@@ -46,8 +45,8 @@ type AchievementDispatcher struct {
 	levels       *Levels
 	engine       *achievement.Engine
 
-	batchSize   int
-	maxAttempts int
+	// outbox — общий цикл потребителя; Tick и CountPending — его.
+	outbox *outboxConsumer
 }
 
 // NewAchievementDispatcher собирает диспетчер.
@@ -64,43 +63,39 @@ func NewAchievementDispatcher(
 	levels *Levels,
 	engine *achievement.Engine,
 ) *AchievementDispatcher {
-	return &AchievementDispatcher{
-		events: events, orders: orders, users: users, achievements: achievements,
+	d := &AchievementDispatcher{
+		events: events, load: subjectLoader{orders: orders, users: users}, achievements: achievements,
 		stats: stats, gifts: gifts, mail: mail, incidents: incidents,
 		ledger: ledger, levels: levels, engine: engine,
-		batchSize: 50, maxAttempts: 10,
 	}
+	if events != nil && engine != nil {
+		d.outbox = &outboxConsumer{
+			events: events, consumer: repository.ConsumerAchievements, tag: "achievement",
+			batchSize: 50, maxAttempts: 10,
+			// Выдачи, успевшие пройти до сбоя, защищены своими ключами и при
+			// повторе вторично не начислятся.
+			handle:  d.dispatch,
+			observe: metrics.AchievementEvent,
+		}
+	}
+	return d
 }
 
 // Tick обрабатывает одну пачку событий. Вызывается по таймеру воркером под
 // защитой лидера.
 func (d *AchievementDispatcher) Tick(ctx context.Context) error {
-	if d == nil || d.events == nil || d.engine == nil {
+	if d == nil {
 		return nil
 	}
-	events, err := d.events.ClaimPending(ctx, repository.ConsumerAchievements, d.batchSize, d.maxAttempts)
-	if err != nil {
-		return err
+	return d.outbox.Tick(ctx)
+}
+
+// CountPending — очередь этого потребителя, для датчика.
+func (d *AchievementDispatcher) CountPending(ctx context.Context) (int, error) {
+	if d == nil {
+		return 0, nil
 	}
-	for _, event := range events {
-		if err := d.dispatch(ctx, event); err != nil {
-			metrics.AchievementEvent(event.Type, "failed")
-			log.Printf("[achievement] event %s (%s) failed: %v", event.ID, event.Type, err)
-			// Намеренно оставлено необработанным: следующий тик повторит, вплоть
-			// до maxAttempts. Выдачи, успевшие пройти, защищены своими ключами и
-			// вторично не начислятся.
-			_ = d.events.MarkFailed(ctx, repository.ConsumerAchievements, event.ID, err.Error())
-			continue
-		}
-		metrics.AchievementEvent(event.Type, "processed")
-		if err := d.events.MarkProcessed(ctx, repository.ConsumerAchievements, event.ID); err != nil {
-			log.Printf("[achievement] event %s applied but not marked processed: %v", event.ID, err)
-		}
-	}
-	if pending, err := d.events.CountPending(ctx, repository.ConsumerAchievements); err == nil {
-		metrics.SetAchievementBacklog(pending)
-	}
-	return nil
+	return d.outbox.CountPending(ctx)
 }
 
 // subject — человек, о котором событие, и заказ, если он есть.
@@ -133,49 +128,77 @@ func (d *AchievementDispatcher) dispatch(ctx context.Context, event *repository.
 	now := time.Now()
 
 	for _, s := range subjects {
-		facts, err := d.facts(ctx, event, s, now)
-		if err != nil {
+		if _, err := d.runRules(ctx, rows, event, s, now); err != nil {
 			return err
-		}
-		for _, row := range rows {
-			manifest, ok := d.engine.Manifest(row.Code)
-			if !ok || !manifest.Handles(event.Type) || manifest.Audience != s.audience {
-				continue
-			}
-			// Окно акции проверяет ядро, а не скрипт: «когда ачивку можно
-			// заслужить» — свойство строки каталога, и скрипт не должен иметь
-			// возможности его обойти.
-			if !row.AvailableAt(now) {
-				continue
-			}
-			// Разовая ачивка, которая у человека уже есть, скрипту не
-			// показывается вовсе. Защита от второй выдачи и без того стоит в
-			// базе — уникальный ключ, — но она срабатывает после вызова хука и
-			// после открытия транзакции, а это работа на каждый заказ каждого
-			// исполнителя до конца времён.
-			if manifest.OncePerUser {
-				if _, has := facts.Granted[row.Code]; has {
-					continue
-				}
-			}
-			facts.Config = row.Config
-			grant, err := d.engine.Check(row.Code, facts)
-			if err != nil {
-				metrics.AchievementGrant(row.Code, "refused")
-				// Один сломанный скрипт не отменяет остальные ачивки этого
-				// события: он логируется и пропускается.
-				log.Printf("[achievement] %s: check failed: %v", row.Code, err)
-				continue
-			}
-			if grant == nil {
-				continue
-			}
-			if _, err := d.apply(ctx, &event.ID, s, row, manifest, grant, now); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
+}
+
+// runRules собирает факты субъекта и прогоняет по ним каждую действующую
+// ачивку, выдавая заслуженное. Один цикл и для события, и для пересчёта по
+// истории (RecheckUser): разойдясь, копия начала бы платить по другим
+// правилам. Возвращает коды выданных ачивок.
+//
+// eventID события пуст у пересчёта: тогда ключ идемпотентности outbox не
+// занимается, см. apply.
+func (d *AchievementDispatcher) runRules(ctx context.Context, rows []*repository.Achievement,
+	event *repository.DomainEvent, s subject, now time.Time) ([]string, error) {
+	// Факты собираются заново на каждый вызов: предыдущая выдача обязана быть
+	// видна следующей проверке — и чтобы не предложить разовую ачивку второй
+	// раз, и потому что правило вправе смотреть на уже выданное.
+	facts, err := d.facts(ctx, event, s, now)
+	if err != nil {
+		return nil, err
+	}
+	var eventID *uuid.UUID
+	if event.ID != uuid.Nil {
+		id := event.ID
+		eventID = &id
+	}
+	var granted []string
+	for _, row := range rows {
+		manifest, ok := d.engine.Manifest(row.Code)
+		if !ok || !manifest.Handles(event.Type) || manifest.Audience != s.audience {
+			continue
+		}
+		// Окно акции проверяет ядро, а не скрипт: «когда ачивку можно
+		// заслужить» — свойство строки каталога, и скрипт не должен иметь
+		// возможности его обойти.
+		if !row.AvailableAt(now) {
+			continue
+		}
+		// Разовая ачивка, которая у человека уже есть, скрипту не
+		// показывается вовсе. Защита от второй выдачи и без того стоит в
+		// базе — уникальный ключ, — но она срабатывает после вызова хука и
+		// после открытия транзакции, а это работа на каждый заказ каждого
+		// исполнителя до конца времён.
+		if manifest.OncePerUser {
+			if _, has := facts.Granted[row.Code]; has {
+				continue
+			}
+		}
+		facts.Config = row.Config
+		grant, err := d.engine.Check(row.Code, facts)
+		if err != nil {
+			metrics.AchievementGrant(row.Code, "refused")
+			// Один сломанный скрипт не отменяет остальные ачивки этого
+			// события: он логируется и пропускается.
+			log.Printf("[achievement] %s: check failed: %v", row.Code, err)
+			continue
+		}
+		if grant == nil {
+			continue
+		}
+		issued, err := d.apply(ctx, eventID, s, row, manifest, grant, now)
+		if err != nil {
+			return granted, err
+		}
+		if issued {
+			granted = append(granted, row.Code)
+		}
+	}
+	return granted, nil
 }
 
 // subjects отвечает на вопрос «кого это событие может наградить».
@@ -187,11 +210,8 @@ func (d *AchievementDispatcher) dispatch(ctx context.Context, event *repository.
 func (d *AchievementDispatcher) subjects(ctx context.Context, event *repository.DomainEvent) ([]subject, error) {
 	switch event.SubjectType {
 	case repository.EventSubjectOrder:
-		order, err := d.orders.FindByID(ctx, event.SubjectID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil
-			}
+		order, err := d.load.order(ctx, event.SubjectID)
+		if err != nil || order == nil {
 			return nil, err
 		}
 		eligible := d.eligible
@@ -202,11 +222,11 @@ func (d *AchievementDispatcher) subjects(ctx context.Context, event *repository.
 			log.Printf("[achievement] order %s is not eligible: %v", order.ID, err)
 			return nil, nil
 		}
-		customer, err := d.users.FindByID(ctx, order.CustomerID)
+		customer, err := d.load.requireUser(ctx, order.CustomerID)
 		if err != nil {
 			return nil, err
 		}
-		executor, err := d.users.FindByID(ctx, *order.ExecutorID)
+		executor, err := d.load.requireUser(ctx, *order.ExecutorID)
 		if err != nil {
 			return nil, err
 		}
@@ -216,11 +236,8 @@ func (d *AchievementDispatcher) subjects(ctx context.Context, event *repository.
 		}, nil
 
 	case repository.EventSubjectUser:
-		user, err := d.users.FindByID(ctx, event.SubjectID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil
-			}
+		user, err := d.load.user(ctx, event.SubjectID)
+		if err != nil || user == nil {
 			return nil, err
 		}
 		// Событие о человеке приходит обеим аудиториям: кем он был в этом
@@ -337,6 +354,11 @@ func (d *AchievementDispatcher) facts(ctx context.Context, event *repository.Dom
 	return facts, nil
 }
 
+// actorOf и orderFactsFor — факты для скриптов ачивок. У поведений услуг есть
+// свои (actorFacts, orderFacts в behavior.go), и это не копии: словари
+// разные. Ачивка видит дату регистрации и сумму, по которой заказ закрыли
+// (FinalAmount), плюс моменты назначения и завершения; поведение — возраст и
+// удержание (HoldAmount), потому что действует, пока заказ ещё не закрыт.
 func actorOf(u *repository.User) *achievement.Actor {
 	if u == nil {
 		return nil

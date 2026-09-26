@@ -186,10 +186,10 @@ func (r *roleRepo) Update(ctx context.Context, code, name, description string) e
 }
 
 // Delete снимает роль отовсюду одной транзакцией. Строки user_roles уходят
-// каскадом, но users.role — обычный текст без внешнего ключа, и оставленный там
-// код удалённой роли сделал бы пользователя носителем несуществующей роли.
-// Поэтому основная роль сначала переводится на любую из оставшихся у человека,
-// а если не осталось ни одной — на заказчика, роль по умолчанию при регистрации.
+// каскадом, но users.role ссылается на roles(code), и оставленный там код
+// удалённой роли уронил бы DELETE по внешнему ключу. Поэтому основная роль
+// сначала переводится на любую из оставшихся у человека (см.
+// reassignPrimaryRole в user.go — запись в users живёт там).
 func (r *roleRepo) Delete(ctx context.Context, code string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -200,12 +200,7 @@ func (r *roleRepo) Delete(ctx context.Context, code string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE role = $1`, code); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE users u
-		SET role = COALESCE(
-		    (SELECT ur.role FROM user_roles ur WHERE ur.user_id = u.id ORDER BY ur.role LIMIT 1),
-		    $2)
-		WHERE u.role = $1`, code, RoleCustomer); err != nil {
+	if err := reassignPrimaryRole(ctx, tx, code, nil); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM roles WHERE code = $1 AND is_system = false`, code)
@@ -338,12 +333,7 @@ func (r *roleRepo) UnassignUser(ctx context.Context, code string, userID uuid.UU
 		`DELETE FROM user_roles WHERE user_id = $1 AND role = $2`, userID, code); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE users u
-		SET role = COALESCE(
-		    (SELECT ur.role FROM user_roles ur WHERE ur.user_id = u.id ORDER BY ur.role LIMIT 1),
-		    $3)
-		WHERE u.id = $1 AND u.role = $2`, userID, code, RoleCustomer); err != nil {
+	if err := reassignPrimaryRole(ctx, tx, code, &userID); err != nil {
 		return err
 	}
 	return tx.Commit()

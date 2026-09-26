@@ -57,7 +57,7 @@ func (d *AchievementDispatcher) RecheckUser(ctx context.Context, userID uuid.UUI
 		return result, nil
 	}
 
-	user, err := d.users.FindByID(ctx, userID)
+	user, err := d.load.requireUser(ctx, userID)
 	if err != nil {
 		return result, err
 	}
@@ -65,7 +65,7 @@ func (d *AchievementDispatcher) RecheckUser(ctx context.Context, userID uuid.UUI
 	if err != nil {
 		return result, err
 	}
-	orders, err := d.orders.FindAllByExecutor(ctx, userID, recheckOrderLimit)
+	orders, err := d.load.orders.FindAllByExecutor(ctx, userID, recheckOrderLimit)
 	if err != nil {
 		return result, err
 	}
@@ -75,56 +75,42 @@ func (d *AchievementDispatcher) RecheckUser(ctx context.Context, userID uuid.UUI
 		return orderTime(&orders[i]).Before(orderTime(&orders[j]))
 	})
 
-	now := time.Now()
+	// Подходящие заказы отбираются заранее, а их заказчики читаются одним
+	// запросом: у постоянного заказчика сотня заказов, а не сто строк users.
+	var replay []*repository.Order
+	var customerIDs []uuid.UUID
+	seen := map[uuid.UUID]bool{}
 	for i := range orders {
 		order := &orders[i]
 		if err := d.eligible(ctx, order); err != nil {
 			continue
 		}
-		customer, err := d.users.FindByID(ctx, order.CustomerID)
-		if err != nil {
-			return result, err
+		replay = append(replay, order)
+		if !seen[order.CustomerID] {
+			seen[order.CustomerID] = true
+			customerIDs = append(customerIDs, order.CustomerID)
+		}
+	}
+	customers, err := d.load.usersByID(ctx, customerIDs)
+	if err != nil {
+		return result, err
+	}
+
+	now := time.Now()
+	event := &repository.DomainEvent{Type: repository.EventOrderConfirmed}
+	for _, order := range replay {
+		customer, ok := customers[order.CustomerID]
+		if !ok {
+			return result, ErrUserNotFound
 		}
 		s := subject{user: user, order: order, counterparty: customer, audience: achievement.AudienceExecutor}
 		result.OrdersReplayed++
-
-		// Факты собираются заново на каждый заказ: предыдущая итерация могла
-		// что-то выдать, а следующая обязана это видеть — и чтобы не предложить
-		// разовую ачивку второй раз, и потому что правило вправе смотреть на
-		// уже выданное.
-		facts, err := d.facts(ctx, &repository.DomainEvent{Type: repository.EventOrderConfirmed}, s, now)
+		// Тот же цикл, что и у события: факты, окно акции, разовость, хук,
+		// выдача. Пересчёт отличается от события только пустым id события.
+		granted, err := d.runRules(ctx, rows, event, s, now)
+		result.Granted = append(result.Granted, granted...)
 		if err != nil {
 			return result, err
-		}
-		for _, row := range rows {
-			manifest, ok := d.engine.Manifest(row.Code)
-			if !ok || !manifest.Handles(repository.EventOrderConfirmed) || manifest.Audience != s.audience {
-				continue
-			}
-			if !row.AvailableAt(now) {
-				continue
-			}
-			if manifest.OncePerUser {
-				if _, has := facts.Granted[row.Code]; has {
-					continue
-				}
-			}
-			facts.Config = row.Config
-			grant, err := d.engine.Check(row.Code, facts)
-			if err != nil {
-				log.Printf("[achievement] recheck %s: check failed: %v", row.Code, err)
-				continue
-			}
-			if grant == nil {
-				continue
-			}
-			issued, err := d.apply(ctx, nil, s, row, manifest, grant, now)
-			if err != nil {
-				return result, err
-			}
-			if issued {
-				result.Granted = append(result.Granted, row.Code)
-			}
 		}
 	}
 
@@ -170,7 +156,7 @@ func (d *AchievementDispatcher) GrantManually(ctx context.Context, userID uuid.U
 	if !ok {
 		return nil, ErrAchievementNotGrantable
 	}
-	user, err := d.users.FindByID(ctx, userID)
+	user, err := d.load.requireUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

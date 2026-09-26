@@ -296,17 +296,33 @@ func TestAcceptBidRejectsForeignCustomer(t *testing.T) {
 	}
 }
 
-// newWithdrawalTestService собирает AdminService с реестром, отслеживающим баланс.
-func newWithdrawalTestService() (*AdminService, *mockAdminRepo, *mockRepo, *mockTransactionRepo) {
+// withdrawalTestService — WalletService (создание заявки) и AdminService
+// (решение по ней) поверх одного реестра, отслеживающего баланс.
+type withdrawalTestService struct {
+	*WalletService
+	admin *AdminService
+}
+
+func (s withdrawalTestService) ApproveWithdrawalRequest(ctx context.Context, requestID, adminID uuid.UUID) error {
+	return s.admin.ApproveWithdrawalRequest(ctx, requestID, adminID)
+}
+
+func (s withdrawalTestService) RejectWithdrawalRequest(ctx context.Context, requestID, adminID uuid.UUID) error {
+	return s.admin.RejectWithdrawalRequest(ctx, requestID, adminID)
+}
+
+// newWithdrawalTestService собирает сервисы вывода с реестром, отслеживающим баланс.
+func newWithdrawalTestService() (withdrawalTestService, *mockAdminRepo, *mockRepo, *mockTransactionRepo) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{
 		requests:    make(map[uuid.UUID]*repository.TopUpRequest),
 		withdrawals: make(map[uuid.UUID]*repository.WithdrawalRequest),
 	}
 	txRepo := &mockTransactionRepo{}
-	svc := NewAdminService(userRepo, adminRepo, &mockSettingsRepo{settings: map[string]string{}}, "secret", nil).
-		WithLedger(NewLedger(txRepo, newMockAccounts()))
-	return svc, adminRepo, userRepo, txRepo
+	ledger := NewLedger(txRepo, newMockAccounts())
+	admin := newAdminTestService(userRepo, adminRepo, &mockSettingsRepo{settings: map[string]string{}}).
+		WithLedger(ledger)
+	return withdrawalTestService{WalletService: NewWalletService(userRepo, adminRepo, ledger), admin: admin}, adminRepo, userRepo, txRepo
 }
 
 // TestWithdrawalReservesFunds покрывает M-06: заявка раньше лишь смотрела на

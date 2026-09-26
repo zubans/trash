@@ -179,10 +179,10 @@ func TestPerkRuleCreateAndUpdateAreSeparate(t *testing.T) {
 	rules := newTestPerkRules(t, newFakePerkRules(), levelSettings("10", "500", "1"))
 	admin := uuid.New()
 
-	if _, _, err := rules.Save(ctx, admin, SavePerkRuleRequest{Code: ruleFree, Title: "x", Source: ownRule}, true); shopCode(err) != ShopErrValidation {
+	if _, _, err := rules.Save(ctx, admin, SavePerkRuleRequest{Code: ruleFree, Title: "x", Source: ownRule}, true); !errors.Is(err, repository.ErrConflict) {
 		t.Errorf("creating over a shipped rule: %v", err)
 	}
-	if _, _, err := rules.Save(ctx, admin, SavePerkRuleRequest{Code: "missing", Title: "x", Source: ownRule}, false); shopCode(err) != ShopErrNotFound {
+	if _, _, err := rules.Save(ctx, admin, SavePerkRuleRequest{Code: "missing", Title: "x", Source: ownRule}, false); !errors.Is(err, repository.ErrNotFound) {
 		t.Errorf("updating a missing rule: %v", err)
 	}
 	view, _, err := rules.Save(ctx, admin, SavePerkRuleRequest{Code: ruleFree, Source: "garbage", IsActive: false}, false)

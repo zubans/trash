@@ -91,10 +91,18 @@
 r.With(can("users.view")).Get("/admin/users", ah.GetUsersHandler)
 r.With(can("users.edit")).Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
 r.With(can("roles.edit")).Post("/admin/users/{id}/roles", ah.UpdateUserRolesHandler)
+r.With(can("topups.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
 ```
 
 Смена ролей пользователя охраняется правом `roles.edit`, а не `users.edit`: это
-раздача прав, а не правка карточки.
+раздача прав, а не правка карточки. Прямое зачисление на баланс с карточки —
+правом `topups.edit`, а не `users.edit`: это движение денег, то же самое, что
+одобрить заявку на пополнение. `users.edit` покрывает статус, верификацию, имя,
+дату рождения и адрес.
+
+Обработчик сам роль не проверяет: `GET /admin/geo-alerts` открыт правом
+`shifts.view`, и модератор с этим правом получает `200`, а не `403` за то, что
+он не `ADMIN`.
 
 **Фронтенд.** `GET /auth/me` возвращает поле `permissions` — объединение прав
 всех ролей пользователя. По нему `auth-store` строит геттер `can(permission)`,

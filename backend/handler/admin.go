@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -15,7 +14,9 @@ import (
 	"healthlogin/backend/service"
 )
 
-// AdminHandler хранит HTTP-обработчики административных операций.
+// AdminHandler хранит HTTP-обработчики административных операций. Ошибки
+// сервиса переводятся в коды через writeDomainError: по классу ошибки, а не по
+// тексту и не одним 400 на всё.
 type AdminHandler struct {
 	adminService *service.AdminService
 }
@@ -23,6 +24,41 @@ type AdminHandler struct {
 // NewAdminHandler создаёт новый AdminHandler.
 func NewAdminHandler(adminService *service.AdminService) *AdminHandler {
 	return &AdminHandler{adminService: adminService}
+}
+
+// requireActor берёт действующего администратора из контекста запроса; без
+// него отвечает 401 и сообщает false.
+func requireActor(w http.ResponseWriter, r *http.Request) (*repository.User, bool) {
+	user := middleware.UserFrom(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return nil, false
+	}
+	return user, true
+}
+
+// parseIDParam читает uuid из параметра маршрута; негодный — 400 с именем.
+func parseIDParam(w http.ResponseWriter, r *http.Request, name, what string) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, name))
+	if err != nil {
+		http.Error(w, "invalid "+what, http.StatusBadRequest)
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// decodeBody читает JSON тела; негодный — 400.
+func decodeBody(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// writeMessage — ответ 200 с одной строкой message.
+func writeMessage(w http.ResponseWriter, message string) {
+	writeJSON(w, map[string]string{"message": message})
 }
 
 // GetUsersHandler отдаёт постраничный отфильтрованный список пользователей.
@@ -35,7 +71,7 @@ func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 	users, total, err := h.adminService.GetUsers(r.Context(), page, limit, role, status, search)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
@@ -44,26 +80,20 @@ func (h *AdminHandler) GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 		u.Password = ""
 	}
 
-	resp := map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"users": users,
 		"total": total,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	})
 }
 
 // UpdateUserStatusHandler блокирует или разблокирует пользователя.
 func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
-
-	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	admin, ok := requireActor(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -72,158 +102,117 @@ func (h *AdminHandler) UpdateUserStatusHandler(w http.ResponseWriter, r *http.Re
 		// Reason — причина мягкого бана; для других статусов не используется.
 		Reason string `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.UpdateUserStatus(r.Context(), userID, admin.ID, req.Status, req.Reason); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "status updated successfully"})
+	writeMessage(w, "status updated successfully")
 }
 
 // UpdateUserVerifiedHandler ставит или снимает флаг ручной верификации пользователя.
 func (h *AdminHandler) UpdateUserVerifiedHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
-
-	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	admin, ok := requireActor(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	var req struct {
 		Verified bool `json:"verified"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.SetUserVerified(r.Context(), userID, admin.ID, req.Verified); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "verification updated successfully"})
+	writeMessage(w, "verification updated successfully")
 }
 
 // UpdateUserRoleHandler меняет роль пользователя.
 func (h *AdminHandler) UpdateUserRoleHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
-
-	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	admin, ok := requireActor(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	var req struct {
 		Role string `json:"role"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.UpdateUserRole(r.Context(), userID, admin.ID, req.Role); err != nil {
-		http.Error(w, err.Error(), roleChangeStatus(err))
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "role updated successfully"})
+	writeMessage(w, "role updated successfully")
 }
 
-// UpdateUserRolesHandler заменяет полный набор ролей пользователя
-// (мультироль). Только для админов.
-// roleChangeStatus — код ответа на отказ сменить роли: попытка назначить
-// ADMIN не администратором — 403, всё остальное — 400 с текстом службы.
-func roleChangeStatus(err error) int {
-	if errors.Is(err, service.ErrAdminRequired) {
-		return http.StatusForbidden
-	}
-	return http.StatusBadRequest
-}
-
+// UpdateUserRolesHandler заменяет полный набор ролей пользователя (мультироль).
 func (h *AdminHandler) UpdateUserRolesHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
-
-	admin, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	admin, ok := requireActor(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	var req struct {
 		Roles []string `json:"roles"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.UpdateUserRoles(r.Context(), userID, admin.ID, req.Roles); err != nil {
-		http.Error(w, err.Error(), roleChangeStatus(err))
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "roles updated successfully"})
+	writeMessage(w, "roles updated successfully")
 }
 
 // UpdateUserAddressHandler обновляет адрес подачи заказчика (только для админов).
 func (h *AdminHandler) UpdateUserAddressHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
 
 	var req struct {
 		Address string `json:"address"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.UpdateUserAddress(r.Context(), userID, req.Address); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "address updated successfully"})
+	writeMessage(w, "address updated successfully")
 }
 
 // UpdateUserNameHandler обновляет ФИО пользователя (только для админов).
 func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
 
@@ -232,77 +221,63 @@ func (h *AdminHandler) UpdateUserNameHandler(w http.ResponseWriter, r *http.Requ
 		FirstName  string `json:"first_name"`
 		Patronymic string `json:"patronymic"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.UpdateUserName(r.Context(), userID, req.LastName, req.FirstName, req.Patronymic); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "name updated successfully"})
+	writeMessage(w, "name updated successfully")
 }
 
 // UpdateUserBirthDateHandler исправляет дату рождения пользователя. Он отделён
 // от обработчика имени, чтобы отклонённая дата не откатывала принятое имя.
 func (h *AdminHandler) UpdateUserBirthDateHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
 
 	var req struct {
 		BirthDate string `json:"birth_date"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.UpdateUserBirthDate(r.Context(), userID, req.BirthDate); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "birth date updated successfully"})
+	writeMessage(w, "birth date updated successfully")
 }
 
 // TopUpUserBalanceHandler зачисляет средства прямо на баланс пользователя.
+// Маршрут стоит за правом topups.edit: это движение денег, а не правка карточки.
 func (h *AdminHandler) TopUpUserBalanceHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
-
-	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	adminUser, ok := requireActor(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	var req struct {
 		Amount money.Amount `json:"amount"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	if err := h.adminService.TopUpUserBalance(r.Context(), userID, adminUser.ID, req.Amount); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "balance topped up successfully"})
+	writeMessage(w, "balance topped up successfully")
 }
 
 // pageParams читает limit/offset из строки запроса. Оба необязательны; сервис
@@ -313,92 +288,61 @@ func pageParams(r *http.Request) (int, int) {
 	return limit, offset
 }
 
+// listExtras решает, что класть в ответ списка сверх самой страницы.
+//
+// Общий счётчик и значения фильтров (фасеты) нужны один раз — при первом
+// показе списка; дальше клиент листает и выгружает, держа их у себя. Поэтому
+// первая страница (offset = 0) несёт и total, и фасеты всегда, а остальные —
+// только по явной просьбе: total=1 и facets=1 в строке запроса. Раньше и
+// COUNT(*) по всей выборке, и два DISTINCT-прохода по таблице выполнялись на
+// каждой странице.
+func listExtras(r *http.Request, offset int) (withTotal, withFacets bool) {
+	q := r.URL.Query()
+	first := offset <= 0
+	return first || q.Get("total") == "1", first || q.Get("facets") == "1"
+}
+
 // GetTopUpRequestsHandler перечисляет ручные заявки на пополнение баланса.
 func (h *AdminHandler) GetTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
 	reqs, err := h.adminService.GetTopUpRequests(r.Context(), limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
+	writeJSON(w, reqs)
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(reqs)
+// decideRequest — общий каркас одобрения/отклонения заявки: id из маршрута,
+// админ из контекста, решение сервиса, сообщение.
+func decideRequest(w http.ResponseWriter, r *http.Request, decide func(reqID, adminID uuid.UUID) error, message string) {
+	reqID, ok := parseIDParam(w, r, "id", "request ID")
+	if !ok {
+		return
+	}
+	adminUser, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if err := decide(reqID, adminUser.ID); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeMessage(w, message)
 }
 
 // ApproveTopUpRequestsHandler одобряет заявку на пополнение баланса.
 func (h *AdminHandler) ApproveTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	reqID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid request ID", http.StatusBadRequest)
-		return
-	}
-
-	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	if err := h.adminService.ApproveTopUpRequest(r.Context(), reqID, adminUser.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "top-up request approved successfully"})
+	decideRequest(w, r, func(reqID, adminID uuid.UUID) error {
+		return h.adminService.ApproveTopUpRequest(r.Context(), reqID, adminID)
+	}, "top-up request approved successfully")
 }
 
 // RejectTopUpRequestsHandler отклоняет заявку на пополнение баланса.
 func (h *AdminHandler) RejectTopUpRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	reqID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid request ID", http.StatusBadRequest)
-		return
-	}
-
-	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	if err := h.adminService.RejectTopUpRequest(r.Context(), reqID, adminUser.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "top-up request rejected successfully"})
-}
-
-// CreateWithdrawalRequestHandler создаёт заявку на вывод для аутентифицированного пользователя.
-func (h *AdminHandler) CreateWithdrawalRequestHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var req struct {
-		Amount money.Amount `json:"amount"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	wReq, err := h.adminService.CreateWithdrawalRequest(r.Context(), user.ID, req.Amount)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(wReq)
+	decideRequest(w, r, func(reqID, adminID uuid.UUID) error {
+		return h.adminService.RejectTopUpRequest(r.Context(), reqID, adminID)
+	}, "top-up request rejected successfully")
 }
 
 // GetWithdrawalRequestsHandler перечисляет все ручные заявки на вывод средств.
@@ -406,60 +350,24 @@ func (h *AdminHandler) GetWithdrawalRequestsHandler(w http.ResponseWriter, r *ht
 	limit, offset := pageParams(r)
 	reqs, err := h.adminService.GetWithdrawalRequests(r.Context(), limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(reqs)
+	writeJSON(w, reqs)
 }
 
 // ApproveWithdrawalRequestsHandler одобряет заявку на вывод средств.
 func (h *AdminHandler) ApproveWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	reqID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid request ID", http.StatusBadRequest)
-		return
-	}
-
-	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	if err := h.adminService.ApproveWithdrawalRequest(r.Context(), reqID, adminUser.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request approved successfully"})
+	decideRequest(w, r, func(reqID, adminID uuid.UUID) error {
+		return h.adminService.ApproveWithdrawalRequest(r.Context(), reqID, adminID)
+	}, "withdrawal request approved successfully")
 }
 
 // RejectWithdrawalRequestsHandler отклоняет заявку на вывод средств.
 func (h *AdminHandler) RejectWithdrawalRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	reqID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "invalid request ID", http.StatusBadRequest)
-		return
-	}
-
-	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	if err := h.adminService.RejectWithdrawalRequest(r.Context(), reqID, adminUser.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "withdrawal request rejected successfully"})
+	decideRequest(w, r, func(reqID, adminID uuid.UUID) error {
+		return h.adminService.RejectWithdrawalRequest(r.Context(), reqID, adminID)
+	}, "withdrawal request rejected successfully")
 }
 
 // GetReconciliationHandler сообщает, сходятся ли ещё сохранённые балансы с
@@ -477,12 +385,11 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 
 	report, err := h.adminService.Reconcile(r.Context(), tolerance)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ok":                        report.OK(),
 		"summary":                   report.Summary(),
 		"users_checked":             report.UsersChecked,
@@ -500,62 +407,53 @@ func (h *AdminHandler) GetReconciliationHandler(w http.ResponseWriter, r *http.R
 func (h *AdminHandler) GetCommissionHandler(w http.ResponseWriter, r *http.Request) {
 	commission, err := h.adminService.GetCommission(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(commission)
+	writeJSON(w, commission)
 }
 
 // PayoutCommissionHandler выводит собранную комиссию из системы. Маршрут стоит
 // за правом commission.edit, поэтому вызывающий всегда аутентифицирован; именно
 // он из запроса и записывается против этой выплаты.
 func (h *AdminHandler) PayoutCommissionHandler(w http.ResponseWriter, r *http.Request) {
-	adminUser, ok := r.Context().Value(middleware.UserKey).(*repository.User)
+	adminUser, ok := requireActor(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	var req struct {
 		Amount money.Amount `json:"amount"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	commission, err := h.adminService.PayoutCommission(r.Context(), adminUser.ID, req.Amount)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(commission)
+	writeJSON(w, commission)
 }
 
-// GetTransactionsHandler отдаёт аудит-логи транзакций.
 // GetUserTransactionsHandler отдаёт проводки одного пользователя — историю,
 // которую открывают с его карточки.
 func (h *AdminHandler) GetUserTransactionsHandler(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
 	limit, offset := pageParams(r)
 	txs, total, err := h.adminService.GetUserTransactions(r.Context(), userID, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	if txs == nil {
 		txs = []*repository.Transaction{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"transactions": txs,
 		"total":        total,
 	})
@@ -564,29 +462,31 @@ func (h *AdminHandler) GetUserTransactionsHandler(w http.ResponseWriter, r *http
 // GetUserOrdersHandler отдаёт заказы пользователя в обеих ролях — историю,
 // которую открывают с его карточки.
 func (h *AdminHandler) GetUserOrdersHandler(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, ok := parseIDParam(w, r, "id", "user ID")
+	if !ok {
 		return
 	}
 	limit, offset := pageParams(r)
 	orders, total, err := h.adminService.GetUserOrders(r.Context(), userID, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	if orders == nil {
 		orders = []*repository.AdminOrder{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"orders": orders,
 		"total":  total,
 	})
 }
 
+// GetTransactionsHandler обслуживает GET /admin/transactions: страница журнала
+// проводок. total и фасеты (types, periods) — на первой странице и по
+// параметрам total=1 / facets=1, см. listExtras.
 func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
+	withTotal, withFacets := listExtras(r, offset)
 	q := r.URL.Query()
 	txs, total, err := h.adminService.GetTransactions(r.Context(), repository.TransactionsFilter{
 		Search: q.Get("search"),
@@ -594,63 +494,40 @@ func (h *AdminHandler) GetTransactionsHandler(w http.ResponseWriter, r *http.Req
 		Period: q.Get("period"),
 		Sort:   q.Get("sort"),
 		Desc:   q.Get("order") != "asc",
-		Limit:  limit,
-		Offset: offset,
+		Page:   repository.PageRequest{Limit: limit, Offset: offset, WithTotal: withTotal},
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
 	if txs == nil {
 		txs = []*repository.Transaction{}
 	}
 
-	facets, err := h.adminService.TransactionFacets(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	resp := map[string]interface{}{"transactions": txs}
+	if withTotal {
+		resp["total"] = total
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"transactions": txs,
-		"total":        total,
-		"types":        facets.Types,
-		"periods":      facets.Periods,
-	})
-}
-
-// GetPublicSettingsHandler возвращает публичные системные настройки (например, валюту).
-func (h *AdminHandler) GetPublicSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.adminService.GetSettings(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if withFacets {
+		facets, err := h.adminService.TransactionFacets(r.Context())
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+		resp["types"] = facets.Types
+		resp["periods"] = facets.Periods
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"currency":                 settings["currency"],
-		"shift_early_exit_penalty": settings["shift_early_exit_penalty"],
-		"executor_location_send_interval_seconds": settings["executor_location_send_interval_seconds"],
-		// Должны ли приложения исполнителей сообщать своё положение во время смены.
-		// Именно эти отчёты держат сохранённую позицию свежей для карты и
-		// автоматического подбора. Геозона, по которой это названо, исчезла; ключ
-		// сохранён, чтобы у существующих установок осталась их настройка.
-		"geofence_tracking_enabled": settings["geofence_tracking_enabled"],
-	})
+	writeJSON(w, resp)
 }
 
 // GetSettingsHandler отдаёт системные настройки.
 func (h *AdminHandler) GetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.adminService.GetSettings(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(settings)
+	writeJSON(w, settings)
 }
 
 // UpdateSettingsHandler обновляет системные настройки.
@@ -689,173 +566,30 @@ func (h *AdminHandler) UpdateSettingsHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.adminService.UpdateSettings(r.Context(), req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "settings updated successfully"})
-}
-
-// CreateTopUpRequestHandler создаёт заявку на пополнение баланса (эндпоинт заказчика).
-func (h *AdminHandler) CreateTopUpRequestHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var req struct {
-		Amount money.Amount `json:"amount"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	topupReq, err := h.adminService.CreateTopUpRequest(r.Context(), user.ID, req.Amount)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(topupReq)
-}
-
-// GetProfileHandler возвращает профиль аутентифицированного пользователя, включая адрес заказчика.
-func (h *AdminHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	profile, err := h.adminService.GetProfile(r.Context(), user.ID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(profile)
-}
-
-// writeAddresses отдаёт список сохранённых адресов в том виде, какого ждёт страница профиля.
-func writeAddresses(w http.ResponseWriter, addresses []repository.Address, err error) {
-	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrAddressLimitReached):
-			http.Error(w, "можно сохранить не более 2 адресов", http.StatusConflict)
-		case errors.Is(err, repository.ErrAddressNotFound):
-			http.Error(w, "адрес не найден", http.StatusNotFound)
-		default:
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"addresses": addresses})
-}
-
-// AddAddressHandler сохраняет адрес подачи для аутентифицированного заказчика.
-func (h *AdminHandler) AddAddressHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var req addressRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	addresses, err := h.adminService.AddAddress(r.Context(), user.ID, req.toAddress())
-	writeAddresses(w, addresses, err)
-}
-
-// DeleteAddressHandler удаляет один из сохранённых адресов вызывающего. Клиент
-// адресует его по id; позиционный индекс тоже принимается, потому что
-// установленное приложение присылает номер строки.
-func (h *AdminHandler) DeleteAddressHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	raw := chi.URLParam(r, "id")
-	addressID, err := uuid.Parse(raw)
-	if err != nil {
-		index, convErr := strconv.Atoi(raw)
-		if convErr != nil {
-			http.Error(w, "invalid address id", http.StatusBadRequest)
-			return
-		}
-		current, listErr := h.adminService.ListAddresses(r.Context(), user.ID)
-		if listErr != nil {
-			http.Error(w, listErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		if index < 0 || index >= len(current) {
-			http.Error(w, "адрес не найден", http.StatusNotFound)
-			return
-		}
-		addressID = current[index].ID
-	}
-
-	addresses, err := h.adminService.DeleteAddress(r.Context(), user.ID, addressID)
-	writeAddresses(w, addresses, err)
-}
-
-// SetDefaultAddressHandler отмечает, с какого сохранённого адреса начинаются новые заказы.
-func (h *AdminHandler) SetDefaultAddressHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(middleware.UserKey).(*repository.User)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var req struct {
-		ID      string `json:"id"`
-		Address string `json:"address"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	var (
-		addresses []repository.Address
-		err       error
-	)
-	if id, parseErr := uuid.Parse(req.ID); parseErr == nil {
-		addresses, err = h.adminService.SetDefaultAddress(r.Context(), user.ID, id)
-	} else {
-		addresses, err = h.adminService.SetDefaultAddressByValue(r.Context(), user.ID, req.Address)
-	}
-	writeAddresses(w, addresses, err)
+	writeMessage(w, "settings updated successfully")
 }
 
 // GetActiveShiftsHandler перечисляет все активные смены исполнителей.
 func (h *AdminHandler) GetActiveShiftsHandler(w http.ResponseWriter, r *http.Request) {
 	shifts, err := h.adminService.GetActiveShifts(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(shifts)
+	writeJSON(w, shifts)
 }
 
 // GetOrdersHandler обслуживает GET /admin/orders: один список заказов с
 // фильтром по группе статусов (status = active | review | completed |
-// canceled | all). Неизвестная группа читается как all.
+// canceled | all). Неизвестная группа читается как all. total и фасеты
+// (services, periods) — на первой странице и по параметрам total=1 /
+// facets=1, см. listExtras.
 func (h *AdminHandler) GetOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	limit, offset := pageParams(r)
+	withTotal, withFacets := listExtras(r, offset)
 	q := r.URL.Query()
 	statuses := repository.OrderStatusGroup(q.Get("status"))
 	orders, total, err := h.adminService.GetOrders(r.Context(), repository.OrdersFilter{
@@ -865,96 +599,45 @@ func (h *AdminHandler) GetOrdersHandler(w http.ResponseWriter, r *http.Request) 
 		Period:   q.Get("period"),
 		Sort:     q.Get("sort"),
 		Desc:     q.Get("order") != "asc",
-		Limit:    limit,
-		Offset:   offset,
+		Page:     repository.PageRequest{Limit: limit, Offset: offset, WithTotal: withTotal},
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDomainError(w, err)
 		return
 	}
-	// Фасеты едут вместе со страницей, чтобы выпадающие фильтры перечисляли все
-	// существующие услуги и месяцы группы, а не только попавшие на экран.
-	facets, err := h.adminService.OrderFacets(r.Context(), statuses)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if orders == nil {
+		orders = []*repository.AdminOrder{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"orders":   orders,
-		"total":    total,
-		"services": facets.Services,
-		"periods":  facets.Periods,
-	})
+	resp := map[string]interface{}{"orders": orders}
+	if withTotal {
+		resp["total"] = total
+	}
+	if withFacets {
+		// Фасеты перечисляют все существующие услуги и месяцы группы, а не
+		// только попавшие на экран.
+		facets, err := h.adminService.OrderFacets(r.Context(), statuses)
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+		resp["services"] = facets.Services
+		resp["periods"] = facets.Periods
+	}
+	writeJSON(w, resp)
 }
 
 // SendBroadcastEmailHandler рассылает письмо выбранным получателям.
 func (h *AdminHandler) SendBroadcastEmailHandler(w http.ResponseWriter, r *http.Request) {
 	var req service.BroadcastEmailRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
 	res, err := h.adminService.SendBroadcastEmail(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDomainError(w, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
-}
-
-// addressRequest принимает обе формы, которые может прислать клиент: одну
-// строку, которую до сих пор шлют установленные мобильные сборки, и части,
-// приходящие прямо из списка подсказок. Именно отправка частей пропускает
-// корпус или строение, ведь их не приходится выпарсивать обратно из строки.
-type addressRequest struct {
-	Address string   `json:"address"`
-	Region  string   `json:"region"`
-	City    string   `json:"city"`
-	Street  string   `json:"street"`
-	House   string   `json:"house"`
-	Flat    string   `json:"flat"`
-	FiasID  string   `json:"fias_id"`
-	Lat     *float64 `json:"lat"`
-	Lon     *float64 `json:"lon"`
-	Source  string   `json:"source"`
-}
-
-// toAddress предпочитает части и откатывается к разбору строки.
-func (r addressRequest) toAddress() service.Address {
-	if r.City == "" && r.Street == "" && r.House == "" {
-		addr := service.ParseAddressLine(r.Address)
-		// Квартира, присланная рядом с легаси-строкой, всё равно применяется: именно
-		// так её отправляет старый экран регистрации.
-		if r.Flat != "" {
-			addr = addr.WithFlat(r.Flat)
-		}
-		return addr
-	}
-
-	return service.Address{
-		Value:  r.Address,
-		Region: r.Region,
-		City:   r.City,
-		Street: r.Street,
-		House:  r.House,
-		Flat:   r.Flat,
-		FiasID: r.FiasID,
-		Lat:    r.Lat,
-		Lon:    r.Lon,
-		Source: firstNonEmpty(r.Source, service.SourceDaData),
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	writeJSON(w, res)
 }

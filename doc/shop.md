@@ -66,7 +66,12 @@
 
 ## 3. Покупка
 
-`POST /api/shop/orders` — одна транзакция (`ShopService.Purchase`):
+`POST /api/shop/orders` — одна транзакция (`Shop.Purchase`). Сервис магазина
+разрезан по разделам прав: `Shop` — витрина и покупка, `ShopCatalog` — товары и
+пункты выдачи (`shop`), `ShopOrders` — обработка покупок и выручка
+(`shop_orders`, `shop_revenue`), `PerkGrants` — ручная выдача и отзыв
+привилегий, напоминания. Проверки запроса собраны в `checkPurchase` и идут до
+первой записи.
 
 1. Повтор с тем же `request_id` возвращает уже созданную покупку без второго
    списания. Два одинаковых запроса одновременно не создают двух строк:
@@ -226,8 +231,15 @@
 | `GET` / `POST` | `/api/user/gifts`, `/api/user/gifts/{id}/reveal` — купоны любой роли |
 | `GET` | `/uploads/shop/{name}` — изображение товара, без аутентификации |
 
-`GET /api/executor/level` теперь отдаёт и `level_percent`, поля привилегии и
-`perk_queue`.
+`GET /api/me/perks` — единственный источник уровня со ставкой: `level` (тот
+же `service.Level`, что уходит в подтверждение заказа) и `queue` — действующая
+привилегия и очередь за ней. Отдельного `GET /api/executor/level` больше нет:
+экран уровня исполнителя читает `/me/perks`.
+
+Список покупок (`GET /api/shop/orders`) и карточка пользователя в админке
+(`GET /admin/users/{id}/shop`) подцепляют купоны и привилегии двумя запросами
+на весь список (`ListByShopOrders`), а не парой запросов на каждую покупку;
+оба отдают покупки в одном и том же виде.
 
 Админка — пути из §7 плана, плюс: `GET /admin/shop/products/{id}`,
 `GET /admin/shop/orders/count` (бейдж), `GET /admin/shop/orders/{id}/refund-quote`,

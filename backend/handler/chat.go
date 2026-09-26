@@ -104,7 +104,7 @@ func (h *ChatHandler) ServeAttachmentHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	fileURL := "/uploads/" + name
-	allowed, err := h.chatService.CanAccessAttachment(r.Context(), user.ID, user.Role, fileURL)
+	allowed, err := h.chatService.CanAccessAttachment(r.Context(), user, fileURL)
 	if err != nil {
 		http.Error(w, "failed to check access", http.StatusInternalServerError)
 		return
@@ -495,7 +495,7 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 	}
 
 	q := messageQueryFrom(r)
-	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user.ID, user.Role, q)
+	messages, err := h.chatService.GetSupportMessages(r.Context(), chatID, user, q)
 	if err != nil {
 		writeChatError(w, err)
 		return
@@ -514,7 +514,7 @@ func (h *ChatHandler) GetSupportMessagesHandler(w http.ResponseWriter, r *http.R
 	// идут по этому же адресу каждые несколько секунд, и раньше каждый из них
 	// стоил ещё одного UPDATE по всем сообщениям чата.
 	if q.After == nil && q.Before == nil {
-		_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user.ID, user.Role)
+		_ = h.chatService.MarkSupportMessagesAsRead(r.Context(), chatID, user)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -567,7 +567,7 @@ func (h *ChatHandler) SendSupportMessageHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	msg, err := h.chatService.SaveSupportMessage(r.Context(), chatID, user.ID, user.Role, req.Text)
+	msg, err := h.chatService.SaveSupportMessage(r.Context(), chatID, user, req.Text)
 	if err != nil {
 		writeChatError(w, err)
 		return
@@ -640,7 +640,7 @@ func (h *ChatHandler) UploadSupportAttachmentHandler(w http.ResponseWriter, r *h
 	}
 
 	text := r.FormValue("text")
-	msg, err := h.chatService.SaveSupportMessageWithAttachment(r.Context(), chatID, user.ID, user.Role, text, fileURL, header.Filename, fileType, header.Size)
+	msg, err := h.chatService.SaveSupportMessageWithAttachment(r.Context(), chatID, user, text, fileURL, header.Filename, fileType, header.Size)
 	if err != nil {
 		writeChatError(w, err)
 		return

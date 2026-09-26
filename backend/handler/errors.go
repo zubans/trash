@@ -13,7 +13,7 @@ import (
 // по её тексту и не одним кодом на всё:
 //
 //	не найдено                       — 404
-//	чужой заказ, не допущен          — 403
+//	чужой заказ, не допущен, не ADMIN — 403
 //	состояние или правило не пускает — 409 (в том числе ErrConflict репозитория)
 //	не хватает средств, негодный ввод — 422
 //	скрипт услуги недоступен         — 503
@@ -26,6 +26,7 @@ func writeDomainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, repository.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, service.ErrForbidden),
+		errors.Is(err, service.ErrAdminRequired),
 		errors.Is(err, service.ErrExecutorNotEligible),
 		errors.Is(err, service.ErrCustomerNotEligible):
 		http.Error(w, err.Error(), http.StatusForbidden)

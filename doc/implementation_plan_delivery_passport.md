@@ -338,7 +338,10 @@ CREATE TABLE passport_access_log (
   (`409 passport_required`). Скрипту не нужно помнить, пришёл ли паспорт, и
   заказ не повисает без документа. Паспорт модератор вносит своим эндпоинтом
   `PUT /api/executor/orders/{id}/passport` и `/passport/photo` — только по
-  своему заказу услуги с `require_passport`.
+  своему заказу услуги с `require_passport`. Кто вправе вносить, решает
+  `service.OrderSubmissions.PassportCustomer` — тот же пролог, что у сверки
+  данных; сервис паспортов получает его через `WithVerification`, а диспетчер
+  outbox о паспортах не знает.
 * **Без сети** паспорт встаёт в очередь фото-подтверждения действием
   `passport`. Данные и фото шифруются на устройстве ключом AES-GCM, созданным
   неизвлекаемым и хранящимся в IndexedDB (`modules/photo-proof/sealer.ts`);

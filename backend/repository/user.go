@@ -299,6 +299,24 @@ func (r *repo) SetUserRoles(ctx context.Context, id uuid.UUID, roles []string) e
 	})
 }
 
+// reassignPrimaryRole переводит users.role с роли fromRole на любую из
+// оставшихся у человека в user_roles, а если не осталось ни одной — на
+// заказчика, роль по умолчанию при регистрации. userID сужает до одного
+// пользователя; nil — все, у кого fromRole основная (удаление роли).
+//
+// Живёт здесь, а не в role.go, потому что users.role — колонка пользователя:
+// каждый писатель users должен быть виден из этого файла. RoleRepository зовёт
+// его внутри своей транзакции через Querier.
+func reassignPrimaryRole(ctx context.Context, q Querier, fromRole string, userID *uuid.UUID) error {
+	_, err := q.ExecContext(ctx, `
+		UPDATE users u
+		SET role = COALESCE(
+		    (SELECT ur.role FROM user_roles ur WHERE ur.user_id = u.id ORDER BY ur.role LIMIT 1),
+		    $2)
+		WHERE u.role = $1 AND ($3::uuid IS NULL OR u.id = $3)`, fromRole, RoleCustomer, userID)
+	return err
+}
+
 func (r *repo) Create(ctx context.Context, user *User) error {
 	id := user.ID
 	if id == uuid.Nil {

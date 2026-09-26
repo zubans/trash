@@ -213,7 +213,7 @@ func TestLoginHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to hash password: %v", err)
 	}
-	h.authService.Register(context.Background(), phone, "login@example.com", password, "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	h.authService.RegisterWithCoordinates(context.Background(), phone, "login@example.com", password, "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER", nil, nil)
 
 	body, _ := json.Marshal(AuthRequest{Phone: phone, Password: password})
 	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
@@ -237,7 +237,7 @@ func TestLoginHandler(t *testing.T) {
 
 func TestLoginHandlerInvalidCredentials(t *testing.T) {
 	h := newTestPublicHandler()
-	h.authService.Register(context.Background(), "+79001234567", "invalidcreds@example.com", "secret123", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER")
+	h.authService.RegisterWithCoordinates(context.Background(), "+79001234567", "invalidcreds@example.com", "secret123", "Иванов", "Иван", "Иванович", "1990-05-17", "Россия, Москва, Тверская улица, д. 1234 кв. 567", "CUSTOMER", nil, nil)
 
 	body, _ := json.Marshal(AuthRequest{Phone: "+79001234567", Password: "wrongpassword"})
 	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))

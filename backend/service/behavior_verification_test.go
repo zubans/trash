@@ -342,6 +342,7 @@ type verificationWorld struct {
 	submissions *verificationSubmissions
 	orderSvc    *OrderService
 	dispatcher  *BehaviorDispatcher
+	submit      *OrderSubmissions
 	behaviors   *Behaviors
 	settings    *orderMockSettingsRepo
 	passports   *verificationPassports
@@ -411,7 +412,10 @@ func newVerificationWorld(t *testing.T) *verificationWorld {
 		WithBehaviors(w.behaviors, w.claims, w.events)
 	w.dispatcher = NewBehaviorDispatcher(w.events, w.orders, w.users, w.catalog, w.claims, nil,
 		settings, ledger, w.behaviors, w.orderSvc).
-		WithSubmissions(w.submissions).
+		WithSubmissions(w.submissions)
+	// Поток отправок — отдельный сервис; диспетчер подключён к нему как
+	// обработчик уже опубликованного события.
+	w.submit = NewOrderSubmissions(w.orders, w.users, w.catalog, w.submissions, w.events, ledger, w.behaviors, w.dispatcher).
 		WithPassports(w.passports)
 
 	w.customer = w.users.add(repository.RoleCustomer, nil, false)
@@ -486,7 +490,7 @@ func TestVerificationServiceFullFlow(t *testing.T) {
 	}
 
 	beforeReward := w.tx.balances[w.moderator.ID]
-	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer))
+	result, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer))
 	if err != nil {
 		t.Fatalf("submit identity data: %v", err)
 	}
@@ -536,7 +540,7 @@ func TestRewardCommissionIsOptIn(t *testing.T) {
 			t.Fatalf("accept: %v", err)
 		}
 		w.rewardBase = w.tx.balances[w.moderator.ID]
-		if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
+		if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
 			t.Fatalf("submit: %v", err)
 		}
 		return w
@@ -581,7 +585,7 @@ func TestVerificationRewardIsPaidOnce(t *testing.T) {
 	if err := w.orderSvc.Accept(ctx, order.ID, w.moderator.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	paidOnce := w.tx.balances[w.moderator.ID]
@@ -759,7 +763,7 @@ func TestIdentityMismatchWarnsFirst(t *testing.T) {
 	wrong := passportOf(w.customer)
 	wrong["last_name"] = "Петров"
 
-	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	result, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -801,10 +805,10 @@ func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
 	wrong := passportOf(w.customer)
 	wrong["birth_date"] = "1980-01-01"
 
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
 		t.Fatalf("first submit: %v", err)
 	}
-	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	result, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
 	if err != nil {
 		t.Fatalf("second submit: %v", err)
 	}
@@ -824,7 +828,7 @@ func TestIdentityMismatchEscalatesAndLocksTheOrder(t *testing.T) {
 
 	// Даже верные данные после этого не принимаются: решение больше не за
 	// модератором.
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrSubmissionEscalated) {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrSubmissionEscalated) {
 		t.Errorf("submitting after an escalation returned %v, want ErrSubmissionEscalated", err)
 	}
 	if w.customer.Verified {
@@ -849,10 +853,10 @@ func TestResolvingEscalationGivesTheExecutorAFreshRound(t *testing.T) {
 	wrong["birth_date"] = "1980-01-01"
 
 	// Круг первый: предупреждение, затем модерация.
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
 		t.Fatalf("first submit: %v", err)
 	}
-	escalating, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	escalating, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
 	if err != nil {
 		t.Fatalf("second submit: %v", err)
 	}
@@ -872,7 +876,7 @@ func TestResolvingEscalationGivesTheExecutorAFreshRound(t *testing.T) {
 
 	// Круг второй. Первая попытка обязана быть предупреждением, а не мгновенной
 	// повторной эскалацией: иначе снятие с модерации ничего не даёт.
-	again, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	again, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
 	if err != nil {
 		t.Fatalf("submit after resolve: %v", err)
 	}
@@ -884,7 +888,7 @@ func TestResolvingEscalationGivesTheExecutorAFreshRound(t *testing.T) {
 	}
 
 	// А вторая — снова модерация: предел попыток действует в каждом круге.
-	repeated, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
+	repeated, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong)
 	if err != nil {
 		t.Fatalf("second submit after resolve: %v", err)
 	}
@@ -909,7 +913,7 @@ func TestFreshRoundStillCompletesTheOrderOnMatch(t *testing.T) {
 	wrong := passportOf(w.customer)
 	wrong["birth_date"] = "1980-01-01"
 	for i := 0; i < 2; i++ {
-		if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+		if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
 			t.Fatalf("submit %d: %v", i+1, err)
 		}
 	}
@@ -918,7 +922,7 @@ func TestFreshRoundStillCompletesTheOrderOnMatch(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	result, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer))
+	result, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer))
 	if err != nil {
 		t.Fatalf("submit correct data: %v", err)
 	}
@@ -945,7 +949,7 @@ func TestAdminResolvesAnEscalatedVerification(t *testing.T) {
 	wrong := passportOf(w.customer)
 	wrong["first_name"] = "Пётр"
 	for i := 0; i < 2; i++ {
-		if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
+		if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, wrong); err != nil {
 			t.Fatalf("submit %d: %v", i+1, err)
 		}
 	}
@@ -1100,7 +1104,7 @@ func TestVerificationRequiresThePassportBeforeTheCheck(t *testing.T) {
 	}
 
 	w.passports.missing[w.customer.ID] = true
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrPassportRequired) {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); !errors.Is(err, ErrPassportRequired) {
 		t.Fatalf("a check without the passport: %v, want ErrPassportRequired", err)
 	}
 	if len(w.submissions.submissions) != 0 {
@@ -1108,15 +1112,15 @@ func TestVerificationRequiresThePassportBeforeTheCheck(t *testing.T) {
 	}
 
 	// Модератор вносит паспорт по своему заказу — и только по своему.
-	if customer, err := w.dispatcher.PassportCustomer(ctx, order.ID, w.moderator.ID); err != nil || customer != w.customer.ID {
+	if customer, err := w.submit.PassportCustomer(ctx, order.ID, w.moderator.ID); err != nil || customer != w.customer.ID {
 		t.Fatalf("passport customer: %s, %v", customer, err)
 	}
-	if _, err := w.dispatcher.PassportCustomer(ctx, order.ID, w.executor.ID); err == nil {
+	if _, err := w.submit.PassportCustomer(ctx, order.ID, w.executor.ID); err == nil {
 		t.Error("an executor who does not hold the order may enter its passport")
 	}
 
 	delete(w.passports.missing, w.customer.ID)
-	if _, err := w.dispatcher.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
+	if _, err := w.submit.SubmitOrderData(ctx, order.ID, w.moderator.ID, passportOf(w.customer)); err != nil {
 		t.Fatalf("the check with the passport: %v", err)
 	}
 	if !w.customer.Verified {

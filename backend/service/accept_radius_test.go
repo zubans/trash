@@ -243,9 +243,8 @@ func TestRadiusSettingsRejectZero(t *testing.T) {
 	ctx := context.Background()
 	adminService := service.NewAdminService(
 		repository.New(db),
-		repository.NewAdminRepository(db),
+		repository.NewAdminUserRepository(db),
 		repository.NewSettingsRepository(db),
-		"test-secret-key-12345",
 		nil,
 	)
 

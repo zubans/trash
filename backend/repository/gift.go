@@ -43,6 +43,9 @@ const (
 // а не остаётся невыданной (см. service/achievement_dispatch.go).
 var ErrGiftUnavailable = errors.New("gift is not available")
 
+// ErrGiftNotFound — подарка с таким кодом нет. Класс — ErrNotFound.
+var ErrGiftNotFound = &notFoundError{"gift not found"}
+
 // Gift — строка каталога подарков.
 type Gift struct {
 	Code        string                 `json:"code"`
@@ -109,6 +112,9 @@ type GiftRepository interface {
 	IssueForShop(ctx context.Context, q Querier, gift *Gift, userID, shopOrderID uuid.UUID, fulfillment map[string]interface{}) (*UserGift, error)
 	// ListByShopOrder — купоны одной покупки, без секретов.
 	ListByShopOrder(ctx context.Context, q Querier, shopOrderID uuid.UUID) ([]*UserGift, error)
+	// ListByShopOrders — купоны нескольких покупок одним запросом, сгруппированные
+	// по покупке: список покупок не должен стоить запроса на каждую.
+	ListByShopOrders(ctx context.Context, q Querier, shopOrderIDs []uuid.UUID) (map[uuid.UUID][]*UserGift, error)
 	// CancelShopCoupons аннулирует непогашенные купоны покупки при её отмене.
 	// Код сертификата, который владелец ещё не открывал, возвращается в пул;
 	// показанный — нет: кто его прочитал, тот мог им и воспользоваться.
@@ -161,7 +167,11 @@ func (r *giftRepo) List(ctx context.Context, activeOnly bool) ([]*Gift, error) {
 }
 
 func (r *giftRepo) Get(ctx context.Context, code string) (*Gift, error) {
-	return scanGift(r.db.QueryRowContext(ctx, `SELECT `+giftColumns+` FROM gifts WHERE code = $1`, code))
+	gift, err := scanGift(r.db.QueryRowContext(ctx, `SELECT `+giftColumns+` FROM gifts WHERE code = $1`, code))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrGiftNotFound
+	}
+	return gift, err
 }
 
 func scanGift(row rowScanner) (*Gift, error) {
@@ -390,6 +400,33 @@ func (r *giftRepo) ListByShopOrder(ctx context.Context, q Querier, shopOrderID u
 	return scanUserGifts(rows)
 }
 
+func (r *giftRepo) ListByShopOrders(ctx context.Context, q Querier, shopOrderIDs []uuid.UUID) (map[uuid.UUID][]*UserGift, error) {
+	out := make(map[uuid.UUID][]*UserGift, len(shopOrderIDs))
+	if len(shopOrderIDs) == 0 {
+		return out, nil
+	}
+	rows, err := exec(r.db, q).QueryContext(ctx, `
+        SELECT `+userGiftColumns+`
+        FROM user_gifts ug
+        JOIN gifts g ON g.code = ug.gift_code
+        WHERE ug.shop_order_id = ANY($1)
+        ORDER BY ug.granted_at, ug.coupon_code
+    `, pq.Array(shopOrderIDs))
+	if err != nil {
+		return nil, err
+	}
+	gifts, err := scanUserGifts(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, ug := range gifts {
+		if ug.ShopOrderID != nil {
+			out[*ug.ShopOrderID] = append(out[*ug.ShopOrderID], ug)
+		}
+	}
+	return out, nil
+}
+
 const userGiftColumns = `ug.id, ug.user_id, ug.gift_code, ug.gift_code_id, ug.achievement_id, ug.shop_order_id,
                ug.coupon_code, ug.status, ug.fulfillment, ug.granted_at, ug.expires_at, ug.revealed_at, ug.redeemed_at,
                ` + giftColumnsPrefixed
@@ -434,12 +471,8 @@ func scanUserGifts(rows *sql.Rows) ([]*UserGift, error) {
 		if g.Kind == GiftKindPromo && g.PromoCode != nil {
 			ug.Secret = *g.PromoCode
 		}
-		// Просроченный купон показывается просроченным, даже если ночной проход
-		// не успел его пометить: состояние не должно зависеть от того, работал
-		// ли фоновый воркер.
-		if ug.Status == GiftStatusIssued && ug.ExpiresAt != nil && ug.ExpiresAt.Before(time.Now()) {
-			ug.Status = GiftStatusExpired
-		}
+		// Купон отдаётся таким, каким записан; «истёк, хотя ещё не помечен»
+		// решает сервис (service.MarkExpiredGifts), а не чтение строки.
 		out = append(out, &ug)
 	}
 	return out, rows.Err()

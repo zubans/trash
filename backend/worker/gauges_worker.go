@@ -19,11 +19,38 @@ import (
 // Prometheus снимает его с каждого. Цена — один count(*) в полминуты.
 type GaugeWorker struct {
 	incidents repository.MoneyIncidentRepository
+	// backlogs — очереди потребителей outbox: имя датчика и откуда его читать.
+	backlogs []backlogGauge
+}
+
+// pendingCounter — очередь одного потребителя outbox. Ему удовлетворяют
+// диспетчеры поведений и ачивок.
+type pendingCounter interface {
+	CountPending(ctx context.Context) (int, error)
+}
+
+type backlogGauge struct {
+	source pendingCounter
+	set    func(pending int)
 }
 
 // NewGaugeWorker создаёт GaugeWorker.
 func NewGaugeWorker() *GaugeWorker {
 	return &GaugeWorker{}
+}
+
+// WithBehaviorBacklog подключает датчик очереди поведений. Раньше его
+// публиковал тик диспетчера под блокировкой лидера — реплика без блокировки
+// показывала замёрзшее значение.
+func (w *GaugeWorker) WithBehaviorBacklog(source pendingCounter) *GaugeWorker {
+	w.backlogs = append(w.backlogs, backlogGauge{source: source, set: metrics.SetBehaviorBacklog})
+	return w
+}
+
+// WithAchievementBacklog — то же для очереди ачивок.
+func (w *GaugeWorker) WithAchievementBacklog(source pendingCounter) *GaugeWorker {
+	w.backlogs = append(w.backlogs, backlogGauge{source: source, set: metrics.SetAchievementBacklog})
+	return w
 }
 
 // WithIncidents подключает датчик открытых денежных инцидентов. Он читается
@@ -36,7 +63,7 @@ func (w *GaugeWorker) WithIncidents(incidents repository.MoneyIncidentRepository
 
 // Start периодически обновляет датчики.
 func (w *GaugeWorker) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
-	if w.incidents == nil {
+	if w.incidents == nil && len(w.backlogs) == 0 {
 		return stopped
 	}
 	return periodic{name: "GaugeWorker", metric: "ops_gauges"}.Start(ctx, interval, w.Run)
@@ -44,12 +71,25 @@ func (w *GaugeWorker) Start(ctx context.Context, interval time.Duration) <-chan 
 
 // Run — один проход. При ошибке чтения датчик остаётся при прежнем значении:
 // не сумев прочитать таблицу, сказать «инцидентов нет» было бы хуже, чем не
-// сказать ничего.
+// сказать ничего. Первая ошибка не мешает остальным датчикам обновиться.
 func (w *GaugeWorker) Run(ctx context.Context) error {
-	open, err := w.incidents.CountOpen(ctx)
-	if err != nil {
-		return err
+	var first error
+	if w.incidents != nil {
+		if open, err := w.incidents.CountOpen(ctx); err != nil {
+			first = err
+		} else {
+			metrics.SetMoneyIncidentsOpen(open)
+		}
 	}
-	metrics.SetMoneyIncidentsOpen(open)
-	return nil
+	for _, g := range w.backlogs {
+		pending, err := g.source.CountPending(ctx)
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		g.set(pending)
+	}
+	return first
 }

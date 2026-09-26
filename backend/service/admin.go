@@ -27,28 +27,110 @@ type SessionRevoker interface {
 	RevokeAllSessions(ctx context.Context, userID uuid.UUID) error
 }
 
-// AdminService управляет административной бизнес-логикой.
+// Ошибки административных действий. Класс каждой — из errors.go, поэтому
+// обработчик отвечает кодом по классу, а текст показывает как есть.
+var (
+	// ErrTopUpRequestNotFound и ErrWithdrawalRequestNotFound — заявки с таким id нет.
+	ErrTopUpRequestNotFound      = notFoundError("заявка на пополнение не найдена")
+	ErrWithdrawalRequestNotFound = notFoundError("заявка на вывод не найдена")
+	// ErrRequestNotPending — по заявке уже принято решение.
+	ErrRequestNotPending = stateError("request is not in PENDING status")
+	// ErrSelfAction — админ пытается применить действие к самому себе там, где
+	// это запрещено: заблокировать, снять роль администратора, пополнить баланс.
+	ErrSelfBan       = ruleError("нельзя заблокировать самого себя")
+	ErrSelfDemote    = ruleError("нельзя снять роль администратора с самого себя")
+	ErrSelfTopUp     = ruleError("admin cannot top up their own balance")
+	ErrAdminTopUp    = ruleError("cannot top up an admin balance")
+	ErrLastAdmin     = ruleError("нельзя снять роль с последнего администратора")
+	ErrNoRoles       = validationError("у пользователя должна быть хотя бы одна роль")
+	ErrCommissionLow = &DomainError{Kind: repository.ErrInsufficientFunds, Msg: "commission account holds less than the requested amount"}
+	// ErrMailerNotConfigured — рассылка без транспорта. Это ошибка сборки, а не
+	// запроса: без настроенного SMTP отчёт об успехе был бы ложью.
+	ErrMailerNotConfigured = fmt.Errorf("%w: email transport", ErrNotConfigured)
+)
+
+// AdminService управляет административной бизнес-логикой: пользователи,
+// решения по заявкам, журнал, настройки, рассылки. Самообслуживание
+// пользователя (профиль, адреса, собственные заявки) — в ProfileService и
+// WalletService.
 type AdminService struct {
-	userRepo      repository.UserRepository
-	adminRepo     repository.AdminRepository
-	settingsRepo  repository.SettingsRepository
-	addressRepo   repository.AddressRepository
+	userRepo     repository.UserRepository
+	adminUsers   repository.AdminUserRepository
+	settingsRepo repository.SettingsRepository
+	addressRepo  repository.AddressRepository
+	// payouts — заявки на пополнение и вывод; journal — журнал проводок;
+	// orders — список заказов панели; shifts — активные смены. Каждый
+	// подключается своим With*: сервис собирается из того, что панели нужно, и
+	// тест подключает только то, что проверяет.
+	payouts repository.PayoutRepository
+	journal repository.TransactionJournalRepository
+	orders  repository.AdminOrderRepository
+	shifts  repository.ShiftMonitorRepository
+	// txFacets и orderFacets кэшируют значения фильтров списков: DISTINCT по
+	// всей таблице на каждой странице — то, ради чего кэш и есть.
+	txFacets    *facetCache[repository.TransactionFacets]
+	orderFacets *facetCache[repository.OrderFacets]
+
 	ledger        *Ledger
 	reconcileRepo repository.ReconciliationRepository
 	sessions      SessionRevoker
-	mailer        MailSender
-	jwtSecret     []byte
+	// mailer отправляет письма рассылок. nil — рассылки отвечают ErrNotConfigured.
+	mailer EmailSender
 	// events, когда подключён, записывает доменные события, порождаемые действием
 	// админа, — сегодня только user.verified, которое закрывает заказ верификации
 	// и оплачивает выполнившему его модератору.
 	events repository.EventRepository
-	// roleRepo — справочник ролей. Через него проверяется, что назначаемая роль
-	// вообще существует; nil означает «справочник не подключён», и тогда
-	// допустимы только четыре системные роли.
+	// roleRepo — справочник ролей. Через него проверяется, что назначаемая или
+	// фильтруемая роль вообще существует; nil означает «справочник не
+	// подключён», и тогда допустимы только четыре системные роли.
 	roleRepo repository.RoleRepository
 	// penalties записывает, кто и почему поставил мягкий бан. nil — статус
 	// SOFT_BANNED ставится без причины, как любой другой.
 	penalties repository.PenaltyRepository
+}
+
+// NewAdminService создаёт AdminService. mailer может быть nil — тогда рассылки
+// недоступны; SMTP-транспорт здесь не создаётся сам: сервис, который молча
+// заводит себе почту, отправлял бы живые письма из тестов и из процессов, где
+// её не просили.
+func NewAdminService(
+	userRepo repository.UserRepository,
+	adminUsers repository.AdminUserRepository,
+	settingsRepo repository.SettingsRepository,
+	mailer EmailSender,
+) *AdminService {
+	return &AdminService{
+		userRepo:     userRepo,
+		adminUsers:   adminUsers,
+		settingsRepo: settingsRepo,
+		mailer:       mailer,
+		txFacets:     newFacetCache[repository.TransactionFacets](facetCacheTTL),
+		orderFacets:  newFacetCache[repository.OrderFacets](facetCacheTTL),
+	}
+}
+
+// WithPayouts подключает заявки на пополнение и вывод.
+func (s *AdminService) WithPayouts(payouts repository.PayoutRepository) *AdminService {
+	s.payouts = payouts
+	return s
+}
+
+// WithJournal подключает журнал проводок.
+func (s *AdminService) WithJournal(journal repository.TransactionJournalRepository) *AdminService {
+	s.journal = journal
+	return s
+}
+
+// WithOrders подключает список заказов панели.
+func (s *AdminService) WithOrders(orders repository.AdminOrderRepository) *AdminService {
+	s.orders = orders
+	return s
+}
+
+// WithShifts подключает экран активных смен.
+func (s *AdminService) WithShifts(shifts repository.ShiftMonitorRepository) *AdminService {
+	s.shifts = shifts
+	return s
 }
 
 // WithPenalties подключает штрафное состояние к смене статуса пользователя.
@@ -70,77 +152,11 @@ func (s *AdminService) WithEvents(events repository.EventRepository) *AdminServi
 	return s
 }
 
-// NewAdminService создаёт новый AdminService.
-func NewAdminService(
-	userRepo repository.UserRepository,
-	adminRepo repository.AdminRepository,
-	settingsRepo repository.SettingsRepository,
-	jwtSecret string,
-	mailer MailSender,
-) *AdminService {
-	secret := jwtSecret
-	if secret == "" {
-		secret = "dev-secret-change-me"
-	}
-	if mailer == nil {
-		mailer = NewSmtpMailSender()
-	}
-	return &AdminService{
-		userRepo:     userRepo,
-		adminRepo:    adminRepo,
-		settingsRepo: settingsRepo,
-		mailer:       mailer,
-		jwtSecret:    []byte(secret),
-	}
-}
-
-// WithAddresses присоединяет хранилище сохранённых адресов, используемое профилями.
+// WithAddresses присоединяет хранилище сохранённых адресов: админ правит адрес
+// подачи с карточки пользователя.
 func (s *AdminService) WithAddresses(addressRepo repository.AddressRepository) *AdminService {
 	s.addressRepo = addressRepo
 	return s
-}
-
-// ListAddresses возвращает сохранённые адреса подачи пользователя.
-func (s *AdminService) ListAddresses(ctx context.Context, userID uuid.UUID) ([]repository.Address, error) {
-	if s.addressRepo == nil {
-		return nil, errors.New("address storage is not configured")
-	}
-	return s.addressRepo.List(ctx, userID)
-}
-
-// AddAddress сохраняет новый адрес подачи.
-func (s *AdminService) AddAddress(ctx context.Context, userID uuid.UUID, address Address) ([]repository.Address, error) {
-	if s.addressRepo == nil {
-		return nil, errors.New("address storage is not configured")
-	}
-	if err := address.Validate(); err != nil {
-		return nil, err
-	}
-	return s.addressRepo.Add(ctx, nil, userID, address.ToRecord())
-}
-
-// DeleteAddress удаляет один из адресов пользователя.
-func (s *AdminService) DeleteAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.Address, error) {
-	if s.addressRepo == nil {
-		return nil, errors.New("address storage is not configured")
-	}
-	return s.addressRepo.Delete(ctx, userID, addressID)
-}
-
-// SetDefaultAddress отмечает, с какого адреса должны начинаться новые заказы.
-func (s *AdminService) SetDefaultAddress(ctx context.Context, userID, addressID uuid.UUID) ([]repository.Address, error) {
-	if s.addressRepo == nil {
-		return nil, errors.New("address storage is not configured")
-	}
-	return s.addressRepo.SetDefault(ctx, userID, addressID)
-}
-
-// SetDefaultAddressByValue — то же для клиентов, опознающих адрес по его тексту.
-func (s *AdminService) SetDefaultAddressByValue(ctx context.Context, userID uuid.UUID, address string) ([]repository.Address, error) {
-	if s.addressRepo == nil {
-		return nil, errors.New("address storage is not configured")
-	}
-	return s.addressRepo.SetDefaultByValue(ctx, userID, strings.TrimSpace(address))
 }
 
 // WithLedger присоединяет реестр. Пополнения и выводы двигают деньги, а реестр —
@@ -156,11 +172,36 @@ func (s *AdminService) WithReconciliation(repo repository.ReconciliationReposito
 	return s
 }
 
+// WithSessions позволяет сервису завершать сессии пользователя при изменении
+// его доступа. Без этого бан или понижение вступали бы в силу лишь по истечении
+// refresh-токена.
+func (s *AdminService) WithSessions(sessions SessionRevoker) *AdminService {
+	s.sessions = sessions
+	return s
+}
+
+// notConfigured — ErrNotConfigured с именем недостающей зависимости.
+func notConfigured(what string) error {
+	return fmt.Errorf("%w: %s", ErrNotConfigured, what)
+}
+
+// findUser читает пользователя, переводя «нет строки» в ErrUserNotFound.
+func (s *AdminService) findUser(ctx context.Context, userID uuid.UUID) (*repository.User, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, userNotFound(err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	return user, nil
+}
+
 // Reconcile сравнивает каждый сохранённый баланс с суммой проводок этого
 // пользователя. Только чтение: расхождение сообщается, но не правится молча.
 func (s *AdminService) Reconcile(ctx context.Context, tolerance money.Amount) (*repository.ReconciliationReport, error) {
 	if s.reconcileRepo == nil {
-		return nil, errors.New("reconciliation is not configured")
+		return nil, notConfigured("reconciliation")
 	}
 	if tolerance.IsNegative() {
 		tolerance = money.Zero
@@ -190,14 +231,6 @@ func (s *AdminService) Reconcile(ctx context.Context, tolerance money.Amount) (*
 	return report, nil
 }
 
-// WithSessions позволяет сервису завершать сессии пользователя при изменении
-// его доступа. Без этого бан или понижение вступали бы в силу лишь по истечении
-// refresh-токена.
-func (s *AdminService) WithSessions(sessions SessionRevoker) *AdminService {
-	s.sessions = sessions
-	return s
-}
-
 // revokeSessions завершает все сессии пользователя, логируя ошибку, но не падая
 // на ней: само изменение доступа уже сохранено.
 func (s *AdminService) revokeSessions(ctx context.Context, userID uuid.UUID, reason string) {
@@ -211,20 +244,22 @@ func (s *AdminService) revokeSessions(ctx context.Context, userID uuid.UUID, rea
 
 // GetUsers отдаёт список пользователей с фильтрами и поиском.
 //
-// role и status проверяются здесь, а не передаются прямо в enum-колонки:
-// неожиданное значение раньше всплывало ошибкой базы и кодом 500, а это и
-// плохой ответ, и способ прощупать схему.
+// role и status проверяются здесь, а не передаются прямо в запрос: неожиданное
+// значение раньше всплывало ошибкой базы и кодом 500, а это и плохой ответ, и
+// способ прощупать схему. Роль — любая из справочника (или из четырёх
+// системных, когда справочник не подключён): список фильтруется по тому же
+// набору, из которого роли назначаются.
 func (s *AdminService) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*repository.User, int, error) {
-	if role != "" && role != "CUSTOMER" && role != "EXECUTOR" && role != "ADMIN" {
-		return nil, 0, errors.New("invalid role filter")
+	if role != "" && !s.knownRole(ctx, role) {
+		return nil, 0, validationError("invalid role filter")
 	}
 	if status != "" && status != repository.UserStatusActive && status != repository.UserStatusSoftBanned && status != repository.UserStatusBanned {
-		return nil, 0, errors.New("invalid status filter")
+		return nil, 0, validationError("invalid status filter")
 	}
 	if limit > maxAdminPageSize {
 		limit = maxAdminPageSize
 	}
-	return s.adminRepo.GetUsers(ctx, page, limit, role, status, search)
+	return s.adminUsers.GetUsers(ctx, page, limit, role, status, search)
 }
 
 // UpdateUserStatus обновляет статус пользователя: ACTIVE, SOFT_BANNED или
@@ -233,10 +268,10 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uui
 	switch status {
 	case repository.UserStatusActive, repository.UserStatusSoftBanned, repository.UserStatusBanned:
 	default:
-		return errors.New("invalid status")
+		return validationError("invalid status")
 	}
 	if status != repository.UserStatusActive && userID == adminID {
-		return errors.New("нельзя заблокировать самого себя")
+		return ErrSelfBan
 	}
 
 	switch {
@@ -246,14 +281,14 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uui
 		// запроса после истечения кэша пользователя.
 		if err := s.penalties.ApplySoftBan(ctx, nil, userID, &adminID, strings.TrimSpace(reason)); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return errors.New("user not found")
+				return ErrUserNotFound
 			}
 			return err
 		}
 	case status == repository.UserStatusActive && s.penalties != nil:
-		user, err := s.userRepo.FindByID(ctx, userID)
+		user, err := s.findUser(ctx, userID)
 		if err != nil {
-			return errors.New("user not found")
+			return err
 		}
 		if user.Status == repository.UserStatusSoftBanned {
 			// Снятие мягкого бана заодно стирает его причину.
@@ -286,8 +321,8 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, userID, adminID uui
 // истинным, что, в свою очередь, управляет видимостью заказов для заказчика и
 // услугами, требующими верифицированной учётной записи.
 func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid.UUID, verified bool) error {
-	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
-		return errors.New("user not found")
+	if _, err := s.findUser(ctx, userID); err != nil {
+		return err
 	}
 	if s.events == nil {
 		if err := s.userRepo.UpdateVerified(ctx, nil, userID, verified); err != nil {
@@ -318,11 +353,16 @@ func (s *AdminService) SetUserVerified(ctx context.Context, userID, adminID uuid
 	return nil
 }
 
+// unknownRole — отказ назначить или отфильтровать роль, которой нет в справочнике.
+func unknownRole(role string) error {
+	return validationError("роль не найдена: " + role)
+}
+
 // UpdateUserRole меняет роль пользователя. Смена роли вступает в силу на
 // следующем запросе, потому что авторизация читает роль из базы.
 func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.UUID, role string) error {
 	if !s.knownRole(ctx, role) {
-		return fmt.Errorf("роль не найдена: %s", role)
+		return unknownRole(role)
 	}
 	if s.privilegedRole(ctx, role) {
 		if err := requireAdminActor(ctx, s.userRepo, adminID); err != nil {
@@ -330,20 +370,13 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 		}
 	}
 
-	current, err := s.userRepo.FindByID(ctx, userID)
+	current, err := s.findUser(ctx, userID)
 	if err != nil {
-		return errors.New("user not found")
+		return err
 	}
-	if current.Role == "ADMIN" && role != "ADMIN" {
-		if userID == adminID {
-			return errors.New("нельзя снять роль администратора с самого себя")
-		}
-		admins, err := s.adminRepo.CountAdmins(ctx)
-		if err != nil {
+	if current.Role == repository.RoleAdmin && role != repository.RoleAdmin {
+		if err := s.guardLastAdmin(ctx, userID, adminID); err != nil {
 			return err
-		}
-		if admins <= 1 {
-			return errors.New("нельзя снять роль с последнего администратора")
 		}
 	}
 
@@ -358,6 +391,22 @@ func (s *AdminService) UpdateUserRole(ctx context.Context, userID, adminID uuid.
 	return nil
 }
 
+// guardLastAdmin отказывает снять роль администратора с самого себя и с
+// последнего администратора платформы.
+func (s *AdminService) guardLastAdmin(ctx context.Context, userID, adminID uuid.UUID) error {
+	if userID == adminID {
+		return ErrSelfDemote
+	}
+	admins, err := s.adminUsers.CountAdmins(ctx)
+	if err != nil {
+		return err
+	}
+	if admins <= 1 {
+		return ErrLastAdmin
+	}
+	return nil
+}
+
 // systemRoles — роли, которые есть всегда, независимо от справочника. Они
 // остаются запасным набором для процесса, поднятого без него: назначить роль,
 // которой нет в базе, нельзя, но четыре базовые обязаны работать и тогда.
@@ -368,9 +417,6 @@ var systemRoles = map[string]struct{}{
 	repository.RoleAdmin:     {},
 }
 
-// knownRole сообщает, есть ли такая роль в справочнике. Набор допустимых ролей
-// больше не зашит в код: администратор заводит их на странице ролей, и
-// назначение обязано следовать за справочником, а не за константами.
 // privilegedRole — роль, которую назначает только администратор: сам ADMIN и
 // любая роль с правом roles.*, потому что её носитель раздаёт права дальше.
 func (s *AdminService) privilegedRole(ctx context.Context, role string) bool {
@@ -384,6 +430,10 @@ func (s *AdminService) privilegedRole(ctx context.Context, role string) bool {
 	return err == nil && managesRoles(found.Permissions)
 }
 
+// knownRole сообщает, есть ли такая роль в справочнике. Набор допустимых ролей
+// больше не зашит в код: администратор заводит их на странице ролей, и
+// назначение и фильтр списка обязаны следовать за справочником, а не за
+// константами.
 func (s *AdminService) knownRole(ctx context.Context, role string) bool {
 	if s.roleRepo == nil {
 		_, ok := systemRoles[role]
@@ -408,7 +458,7 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 	privileged := false
 	for _, role := range roles {
 		if !s.knownRole(ctx, role) {
-			return fmt.Errorf("роль не найдена: %s", role)
+			return unknownRole(role)
 		}
 		if _, dup := seen[role]; dup {
 			continue
@@ -418,7 +468,7 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 		privileged = privileged || s.privilegedRole(ctx, role)
 	}
 	if len(clean) == 0 {
-		return errors.New("у пользователя должна быть хотя бы одна роль")
+		return ErrNoRoles
 	}
 	if privileged {
 		if err := requireAdminActor(ctx, s.userRepo, adminID); err != nil {
@@ -426,23 +476,16 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 		}
 	}
 
-	current, err := s.userRepo.FindByID(ctx, userID)
+	current, err := s.findUser(ctx, userID)
 	if err != nil {
-		return errors.New("user not found")
+		return err
 	}
 
 	// Охраняем роль админа так же, как это делают однорольные обновления.
 	_, keepsAdmin := seen[repository.RoleAdmin]
 	if current.HasRole(repository.RoleAdmin) && !keepsAdmin {
-		if userID == adminID {
-			return errors.New("нельзя снять роль администратора с самого себя")
-		}
-		admins, err := s.adminRepo.CountAdmins(ctx)
-		if err != nil {
+		if err := s.guardLastAdmin(ctx, userID, adminID); err != nil {
 			return err
-		}
-		if admins <= 1 {
-			return errors.New("нельзя снять роль с последнего администратора")
 		}
 	}
 
@@ -461,17 +504,17 @@ func (s *AdminService) UpdateUserRoles(ctx context.Context, userID, adminID uuid
 // меняет тот, с которого заказчик и правда заказывает, а не добавляет второй.
 func (s *AdminService) UpdateUserAddress(ctx context.Context, userID uuid.UUID, address string) error {
 	if strings.TrimSpace(address) == "" {
-		return errors.New("address is required")
+		return validationError("address is required")
 	}
 	parsed := ParseAddressLine(address)
 	if err := parsed.Validate(); err != nil {
-		return err
+		return validationError(err.Error())
 	}
 	if s.addressRepo == nil {
-		return errors.New("address storage is not configured")
+		return notConfigured("address storage")
 	}
-	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
-		return errors.New("user not found")
+	if _, err := s.findUser(ctx, userID); err != nil {
+		return err
 	}
 	record := parsed.ToRecord()
 	record.IsDefault = true
@@ -485,10 +528,10 @@ func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, las
 	firstName = strings.TrimSpace(firstName)
 	patronymic = strings.TrimSpace(patronymic)
 	if lastName == "" || firstName == "" || patronymic == "" {
-		return errors.New("last_name, first_name and patronymic are required")
+		return validationError("last_name, first_name and patronymic are required")
 	}
-	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
-		return errors.New("user not found")
+	if _, err := s.findUser(ctx, userID); err != nil {
+		return err
 	}
 	return s.userRepo.UpdateUserName(ctx, nil, userID, lastName, firstName, patronymic)
 }
@@ -499,10 +542,10 @@ func (s *AdminService) UpdateUserName(ctx context.Context, userID uuid.UUID, las
 func (s *AdminService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID, birthDate string) error {
 	parsed, err := parseBirthDate(birthDate)
 	if err != nil {
-		return err
+		return validationError(err.Error())
 	}
-	if _, err := s.userRepo.FindByID(ctx, userID); err != nil {
-		return errors.New("user not found")
+	if _, err := s.findUser(ctx, userID); err != nil {
+		return err
 	}
 	return s.userRepo.UpdateUserBirthDate(ctx, nil, userID, parsed)
 }
@@ -511,20 +554,19 @@ func (s *AdminService) UpdateUserBirthDate(ctx context.Context, userID uuid.UUID
 // Пополнять можно только не-админов, и админ не может зачислить самому себе.
 func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {
 	if !amount.IsPositive() {
-		return errors.New("amount must be greater than zero")
+		return ErrAmountNotPositive
 	}
-
 	if userID == adminID {
-		return errors.New("admin cannot top up their own balance")
+		return ErrSelfTopUp
 	}
 
 	// Проверяем, что пользователь существует и не является админом
-	user, err := s.userRepo.FindByID(ctx, userID)
+	user, err := s.findUser(ctx, userID)
 	if err != nil {
-		return errors.New("user not found")
+		return err
 	}
-	if user.Role == "ADMIN" {
-		return errors.New("cannot top up an admin balance")
+	if user.HasRole(repository.RoleAdmin) {
+		return ErrAdminTopUp
 	}
 
 	// Через реестр, как и любое другое движение денег. Прежняя реализация
@@ -533,7 +575,7 @@ func (s *AdminService) TopUpUserBalance(ctx context.Context, userID, adminID uui
 	// поэтому пользовательская сверка продолжала проходить, а книги платформы
 	// расходились чуть сильнее с каждым пополнением.
 	if s.ledger == nil {
-		return errors.New("ledger is not configured")
+		return notConfigured("ledger")
 	}
 	if err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
 		return s.ledger.Deposit(ctx, tx, userID, amount, &adminID)
@@ -562,26 +604,11 @@ func page(limit, offset int) (int, int) {
 
 // GetTopUpRequests перечисляет заявки на пополнение баланса, сначала новые.
 func (s *AdminService) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*repository.TopUpRequest, error) {
+	if s.payouts == nil {
+		return nil, notConfigured("payouts")
+	}
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetTopUpRequests(ctx, limit, offset)
-}
-
-// CreateTopUpRequest создаёт ожидающую заявку на пополнение баланса.
-func (s *AdminService) CreateTopUpRequest(ctx context.Context, userID uuid.UUID, amount money.Amount) (*repository.TopUpRequest, error) {
-	if !amount.IsPositive() {
-		return nil, errors.New("amount must be greater than zero")
-	}
-
-	// Проверяем, что пользователь существует
-	user, err := s.userRepo.FindByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if user.Status == "BANNED" {
-		return nil, errors.New("cannot request top-up for a banned user")
-	}
-
-	return s.adminRepo.CreateTopUpRequest(ctx, nil, userID, amount)
+	return s.payouts.GetTopUpRequests(ctx, limit, offset)
 }
 
 // ApproveTopUpRequest зачисляет запрошенную сумму пользователю.
@@ -598,19 +625,19 @@ func (s *AdminService) RejectTopUpRequest(ctx context.Context, requestID uuid.UU
 }
 
 func (s *AdminService) decideTopUp(ctx context.Context, requestID, adminID uuid.UUID, status string) error {
-	if s.ledger == nil {
-		return errors.New("ledger is not configured")
+	if s.ledger == nil || s.payouts == nil {
+		return notConfigured("ledger")
 	}
 
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		req, err := s.adminRepo.LockTopUpRequest(ctx, tx, requestID)
+		req, err := s.payouts.LockTopUpRequest(ctx, tx, requestID)
 		if err != nil {
-			return errors.New("request not found")
+			return ErrTopUpRequestNotFound
 		}
 		if req.Status != "PENDING" {
-			return errors.New("request is not in PENDING status")
+			return ErrRequestNotPending
 		}
-		if err := s.adminRepo.SetTopUpStatus(ctx, tx, requestID, adminID, status); err != nil {
+		if err := s.payouts.SetTopUpStatus(ctx, tx, requestID, adminID, status); err != nil {
 			return err
 		}
 		if status != "APPROVED" {
@@ -620,7 +647,7 @@ func (s *AdminService) decideTopUp(ctx context.Context, requestID, adminID uuid.
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {
-			return errors.New("request is not in PENDING status")
+			return ErrRequestNotPending
 		}
 		return err
 	}
@@ -630,65 +657,11 @@ func (s *AdminService) decideTopUp(ctx context.Context, requestID, adminID uuid.
 
 // GetWithdrawalRequests перечисляет все заявки на вывод средств.
 func (s *AdminService) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*repository.WithdrawalRequest, error) {
+	if s.payouts == nil {
+		return nil, notConfigured("payouts")
+	}
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetWithdrawalRequests(ctx, limit, offset)
-}
-
-// CreateWithdrawalRequest резервирует запрошенную сумму и записывает ожидающую
-// заявку на неё.
-//
-// Деньги уходят с баланса немедленно, ровно как удержание по заказу. Раньше
-// заявка лишь проверяла баланс и оставляла средства тратимыми, поэтому
-// пользователь мог поставить в очередь несколько заявок на одни и те же деньги
-// и потратить их за время ожидания, а очередь выплат тогда содержала суммы,
-// которые нельзя было выполнить все.
-func (s *AdminService) CreateWithdrawalRequest(ctx context.Context, userID uuid.UUID, amount money.Amount) (*repository.WithdrawalRequest, error) {
-	if !amount.IsPositive() {
-		return nil, errors.New("amount must be greater than zero")
-	}
-	if s.ledger == nil {
-		return nil, errors.New("ledger is not configured")
-	}
-
-	user, err := s.userRepo.FindByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if user.Status == "BANNED" {
-		return nil, errors.New("cannot request withdrawal for a banned user")
-	}
-
-	pending, err := s.adminRepo.HasPendingWithdrawal(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if pending {
-		return nil, errors.New("у вас уже есть заявка на вывод в обработке")
-	}
-
-	var created *repository.WithdrawalRequest
-	err = s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		// Охраняемое списание: баланс обязан покрыть заявку в этот момент,
-		// а не при каком-то более раннем чтении.
-		// Деньги уходят с баланса на счёт выплат, где они ждут
-		// решения администратора.
-		if err := s.ledger.Reserve(ctx, tx, userID, repository.AccountPayouts, amount, repository.TransactionTypeWithdrawalHold, nil); err != nil {
-			return err
-		}
-		req, err := s.adminRepo.CreateWithdrawalRequest(ctx, tx, userID, amount)
-		if err != nil {
-			return err
-		}
-		created = req
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, repository.ErrInsufficientFunds) {
-			return nil, errors.New("insufficient balance for withdrawal")
-		}
-		return nil, err
-	}
-	return created, nil
+	return s.payouts.GetWithdrawalRequests(ctx, limit, offset)
 }
 
 // ApproveWithdrawalRequest помечает зарезервированный вывод выплаченным.
@@ -704,20 +677,20 @@ func (s *AdminService) RejectWithdrawalRequest(ctx context.Context, requestID uu
 }
 
 func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID uuid.UUID, status string) error {
-	if s.ledger == nil {
-		return errors.New("ledger is not configured")
+	if s.ledger == nil || s.payouts == nil {
+		return notConfigured("ledger")
 	}
 
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
-		req, err := s.adminRepo.LockWithdrawalRequest(ctx, tx, requestID)
+		req, err := s.payouts.LockWithdrawalRequest(ctx, tx, requestID)
 		if err != nil {
-			return errors.New("request not found")
+			return ErrWithdrawalRequestNotFound
 		}
 		if req.Status != "PENDING" {
-			return errors.New("request is not in PENDING status")
+			return ErrRequestNotPending
 		}
 
-		if err := s.adminRepo.SetWithdrawalStatus(ctx, tx, requestID, adminID, status); err != nil {
+		if err := s.payouts.SetWithdrawalStatus(ctx, tx, requestID, adminID, status); err != nil {
 			return err
 		}
 
@@ -732,7 +705,7 @@ func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID 
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {
-			return errors.New("request is not in PENDING status")
+			return ErrRequestNotPending
 		}
 		return err
 	}
@@ -740,93 +713,77 @@ func (s *AdminService) decideWithdrawal(ctx context.Context, requestID, adminID 
 	return nil
 }
 
-// GetTransactions отдаёт историю транзакций.
+// GetTransactions отдаёт страницу журнала проводок. Счётчик считается только
+// по просьбе (f.Page.WithTotal).
 func (s *AdminService) GetTransactions(ctx context.Context, f repository.TransactionsFilter) ([]*repository.Transaction, int, error) {
-	f.Limit, f.Offset = page(f.Limit, f.Offset)
-	return s.adminRepo.GetTransactions(ctx, f)
+	if s.journal == nil {
+		return nil, 0, notConfigured("transaction journal")
+	}
+	f.Page.Limit, f.Page.Offset = page(f.Page.Limit, f.Page.Offset)
+	return s.journal.GetTransactions(ctx, f)
 }
 
 // GetUserTransactions возвращает проводки одного пользователя для его карточки.
 func (s *AdminService) GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.Transaction, int, error) {
+	if s.journal == nil {
+		return nil, 0, notConfigured("transaction journal")
+	}
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetUserTransactions(ctx, userID, limit, offset)
+	return s.journal.GetUserTransactions(ctx, userID, limit, offset)
 }
 
 // GetUserOrders возвращает заказы пользователя в обеих ролях для его карточки.
 func (s *AdminService) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.AdminOrder, int, error) {
+	if s.orders == nil {
+		return nil, 0, notConfigured("admin orders")
+	}
 	limit, offset = page(limit, offset)
-	return s.adminRepo.GetUserOrders(ctx, userID, limit, offset)
+	return s.orders.GetUserOrders(ctx, userID, limit, offset)
 }
 
 // TransactionFacets возвращает значения, которые предлагают фильтры журнала.
+// Из кэша: см. facetCache.
 func (s *AdminService) TransactionFacets(ctx context.Context) (repository.TransactionFacets, error) {
-	return s.adminRepo.TransactionFacets(ctx)
+	if s.journal == nil {
+		return repository.TransactionFacets{}, notConfigured("transaction journal")
+	}
+	return s.txFacets.get("", func() (repository.TransactionFacets, error) {
+		return s.journal.TransactionFacets(ctx)
+	})
 }
 
 // GetActiveShifts возвращает все активные сейчас смены исполнителей.
 func (s *AdminService) GetActiveShifts(ctx context.Context) ([]*repository.AdminShift, error) {
-	return s.adminRepo.GetActiveShifts(ctx)
+	if s.shifts == nil {
+		return nil, notConfigured("shift monitor")
+	}
+	return s.shifts.ListActiveWithExecutors(ctx)
 }
 
-// GetOrders возвращает одну страницу списка заказов вместе с общим числом
-// подходящих под фильтр, чтобы клиент мог листать и выгружать, не гадая,
-// сколько стоит за имеющейся у него страницей.
+// GetOrders возвращает одну страницу списка заказов. Общее число подходящих
+// под фильтр считается только по просьбе (f.Page.WithTotal): клиент берёт его
+// с первой страницы и держит у себя, пока листает и выгружает.
 func (s *AdminService) GetOrders(ctx context.Context, f repository.OrdersFilter) ([]*repository.AdminOrder, int, error) {
-	f.Limit, f.Offset = page(f.Limit, f.Offset)
-	return s.adminRepo.GetOrders(ctx, f)
+	if s.orders == nil {
+		return nil, 0, notConfigured("admin orders")
+	}
+	f.Page.Limit, f.Page.Offset = page(f.Page.Limit, f.Page.Offset)
+	return s.orders.GetOrders(ctx, f)
 }
 
-// OrderFacets возвращает значения фильтров услуги и периода для группы статусов.
+// OrderFacets возвращает значения фильтров услуги и периода для группы
+// статусов. Из кэша, ключ — сама группа.
 func (s *AdminService) OrderFacets(ctx context.Context, statuses []repository.OrderStatus) (repository.OrderFacets, error) {
-	return s.adminRepo.OrderFacets(ctx, statuses)
-}
-
-// GetProfile возвращает профиль аутентифицированного пользователя, включая адрес заказчика.
-func (s *AdminService) GetProfile(ctx context.Context, userID uuid.UUID) (map[string]interface{}, error) {
-	user, err := s.userRepo.FindByID(ctx, userID)
-	if err != nil {
-		return nil, err
+	if s.orders == nil {
+		return repository.OrderFacets{}, notConfigured("admin orders")
 	}
-	user.Password = ""
-
-	profile := map[string]interface{}{
-		"id":         user.ID,
-		"role":       user.Role,
-		"roles":      user.Roles,
-		"phone":      user.Phone,
-		"email":      user.Email,
-		"balance":    user.Balance,
-		"status":     user.Status,
-		"created_at": user.CreatedAt,
-		"first_name": user.FirstName,
-		"last_name":  user.LastName,
-		"patronymic": user.Patronymic,
-		"birth_date": user.BirthDateString(),
-		"age":        user.GetAge(),
-		"address":    "",
+	key := make([]string, len(statuses))
+	for i, st := range statuses {
+		key[i] = string(st)
 	}
-
-	profile["addresses"] = []repository.Address{}
-	if s.addressRepo != nil {
-		addresses, err := s.addressRepo.List(ctx, userID)
-		if err != nil {
-			log.Printf("[GetProfile] failed to load addresses for %s: %v", userID, err)
-		} else {
-			profile["addresses"] = addresses
-			for _, a := range addresses {
-				if a.IsDefault {
-					profile["default_address"] = a.Address
-					profile["address"] = a.Address
-					break
-				}
-			}
-		}
-	}
-	if _, ok := profile["default_address"]; !ok {
-		profile["default_address"] = profile["address"]
-	}
-
-	return profile, nil
+	return s.orderFacets.get(strings.Join(key, ","), func() (repository.OrderFacets, error) {
+		return s.orders.OrderFacets(ctx, statuses)
+	})
 }
 
 // GetSettings отдаёт глобальные настройки.
@@ -859,35 +816,35 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	// что держит сохранённую позицию свежей для карты и автоподбора. Принимаются
 	// только «1» и «0», чтобы его нельзя было включить опечаткой.
 	if v, ok := settings["geofence_tracking_enabled"]; ok && v != "0" && v != "1" {
-		return errors.New("setting geofence_tracking_enabled must be 0 or 1")
+		return validationError("setting geofence_tracking_enabled must be 0 or 1")
 	}
 	// Назначает ли фоновый воркер заказы автоматически. По умолчанию выключено;
 	// только «1» или «0», чтобы его нельзя было включить опечаткой.
 	if v, ok := settings["auto_matching_enabled"]; ok && v != "0" && v != "1" {
-		return errors.New("setting auto_matching_enabled must be 0 or 1")
+		return validationError("setting auto_matching_enabled must be 0 or 1")
 	}
 	// Открывать ли смену за исполнителя, который берёт заказ без неё.
 	if v, ok := settings[SettingAutoShiftOnAcceptEnabled]; ok && v != "0" && v != "1" {
-		return errors.New("setting " + SettingAutoShiftOnAcceptEnabled + " must be 0 or 1")
+		return validationError("setting " + SettingAutoShiftOnAcceptEnabled + " must be 0 or 1")
 	}
 	// Длительность такой смены ограничена тем же списком, что и ручной старт:
 	// автоматика не должна уметь открыть смену, которую исполнителю выбрать не дают.
 	if v, ok := settings[SettingAutoShiftDurationHours]; ok {
 		hours, err := strconv.Atoi(v)
 		if err != nil || !IsValidShiftDuration(hours) {
-			return fmt.Errorf("setting %s must be one of %v", SettingAutoShiftDurationHours, ShiftDurationsHours)
+			return validationError(fmt.Sprintf("setting %s must be one of %v", SettingAutoShiftDurationHours, ShiftDurationsHours))
 		}
 	}
 	// Магазин открывается и закрывается только явным «1» или «0»: опечатка не
 	// должна ни открыть витрину, ни закрыть её посреди дня.
 	if v, ok := settings[SettingShopEnabled]; ok && v != "0" && v != "1" {
-		return errors.New("setting " + SettingShopEnabled + " must be 0 or 1")
+		return validationError("setting " + SettingShopEnabled + " must be 0 or 1")
 	}
 	// Редакция оферты — целое число от 1: покупка сверяет её с той, что
 	// принял покупатель, и «1.5» или «0» не совпали бы ни с одной.
 	if v, ok := settings[SettingShopOfferVersion]; ok {
 		if n, err := strconv.Atoi(v); err != nil || n < 1 {
-			return errors.New("setting " + SettingShopOfferVersion + " must be a positive integer")
+			return validationError("setting " + SettingShopOfferVersion + " must be a positive integer")
 		}
 	}
 	numericKeys["reject_penalty_share"] = true
@@ -911,25 +868,25 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 	}
 	for key, value := range settings {
 		if err := validatePenaltySetting(key, value); err != nil {
-			return err
+			return validationError(err.Error())
 		}
 		if numericKeys[key] {
 			v, err := strconv.ParseFloat(value, 64)
 			if err != nil {
-				return errors.New("setting " + key + " must be numeric")
+				return validationError("setting " + key + " must be numeric")
 			}
 			if v < 0 {
-				return errors.New("setting " + key + " value cannot be negative")
+				return validationError("setting " + key + " value cannot be negative")
 			}
 			if key == "reject_penalty_share" && v > 1 {
-				return errors.New("setting reject_penalty_share must be between 0 and 1")
+				return validationError("setting reject_penalty_share must be between 0 and 1")
 			}
 			// Радиусы обязаны быть положительными. Ноль читался бы кодом как «не
 			// задано» и молча уводил на умолчание — то есть поле показывало бы 0,
 			// а действовало бы 0.5. Настройка, которой нельзя верить на слово,
 			// хуже отсутствующей, поэтому ноль отвергается сразу.
 			if (key == SettingAcceptRadiusKM || key == SettingMapOverviewRadiusKM) && v <= 0 {
-				return errors.New("setting " + key + " must be greater than zero")
+				return validationError("setting " + key + " must be greater than zero")
 			}
 			// Верхняя граница обзора: запрос читает заказы в круге, и радиус в
 			// тысячу километров превратил бы экран, открытый у каждого
@@ -938,31 +895,31 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings map[string]s
 			// взятия» на мгновение допустима; на чтении resolveMapOverviewRadiusKM
 			// всё равно поднимет обзор до зоны взятия.
 			if key == SettingMapOverviewRadiusKM && v > maxMapOverviewRadiusKM {
-				return fmt.Errorf("setting %s must not exceed %.0f km", key, maxMapOverviewRadiusKM)
+				return validationError(fmt.Sprintf("setting %s must not exceed %.0f km", key, maxMapOverviewRadiusKM))
 			}
 			if key == SettingOrderCommissionPercent && v > 100 {
-				return errors.New("setting " + SettingOrderCommissionPercent + " must be between 0 and 100")
+				return validationError("setting " + SettingOrderCommissionPercent + " must be between 0 and 100")
 			}
 			// Шаг скидки за уровень выше базовой ставки означал бы, что первый же
 			// уровень обнуляет комиссию, а второй уводит её в минус. Зажим в
 			// расчёте это переживёт, но настройка, которую зажимают молча, —
 			// это настройка, которой никто не верит.
 			if key == SettingAchievementLevelDiscountPP && v > 100 {
-				return errors.New("setting " + SettingAchievementLevelDiscountPP + " must be between 0 and 100")
+				return validationError("setting " + SettingAchievementLevelDiscountPP + " must be between 0 and 100")
 			}
 			// Ноль баллов на уровень — это деление на ноль в буквальном смысле:
 			// любой набор баллов давал бы бесконечный уровень.
 			if key == SettingAchievementLevelPoints && v < 1 {
-				return errors.New("setting " + SettingAchievementLevelPoints + " must be at least 1")
+				return validationError("setting " + SettingAchievementLevelPoints + " must be at least 1")
 			}
 		}
 		if positiveIntKeys[key] {
 			v, err := strconv.Atoi(value)
 			if err != nil {
-				return errors.New("setting " + key + " must be an integer")
+				return validationError("setting " + key + " must be an integer")
 			}
 			if v < 1 {
-				return errors.New("setting " + key + " must be at least 1 second")
+				return validationError("setting " + key + " must be at least 1 second")
 			}
 		}
 	}
@@ -977,48 +934,33 @@ type Commission struct {
 	Percent float64      `json:"percent"`
 }
 
-// GetCommission сообщает баланс счёта комиссии и текущую ставку.
+// GetCommission сообщает баланс счёта комиссии и текущую ставку. Ставка
+// читается общим ридером настроек: отсутствующая или нечитаемая — ноль, не
+// брать ничего — безопасное направление отказа.
 func (s *AdminService) GetCommission(ctx context.Context) (*Commission, error) {
 	if s.ledger == nil {
-		return nil, errors.New("ledger is not configured")
+		return nil, notConfigured("ledger")
 	}
 	account, err := s.ledger.AccountBalance(ctx, repository.AccountCommission)
 	if err != nil {
 		return nil, err
 	}
-	return &Commission{Balance: account.Balance, Percent: s.commissionPercent(ctx)}, nil
-}
-
-// commissionPercent читает настроенную ставку, откатываясь к нулю, когда
-// настройка отсутствует или нечитаема: не брать ничего — безопасное направление
-// отказа.
-func (s *AdminService) commissionPercent(ctx context.Context) float64 {
-	if s.settingsRepo == nil {
-		return 0
-	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return 0
-	}
-	percent, err := strconv.ParseFloat(settings[SettingOrderCommissionPercent], 64)
-	if err != nil {
-		return 0
-	}
-	return percent
+	percent := settingFloat(ctx, s.settingsRepo, SettingOrderCommissionPercent, 0)
+	return &Commission{Balance: account.Balance, Percent: percent}, nil
 }
 
 // PayoutCommission выводит собранную комиссию из системы. Сюда дотягивается
-// только админ — маршрут требует роли, — и админ записывается в проводку,
+// только носитель права commission.edit, и он записывается в проводку,
 // поэтому у выплаты всегда есть имя.
 //
 // Списание охраняется балансом счёта, поэтому два админа, выплачивающих
 // одновременно, не могут вместе вывести больше, чем собрано.
 func (s *AdminService) PayoutCommission(ctx context.Context, adminID uuid.UUID, amount money.Amount) (*Commission, error) {
 	if !amount.IsPositive() {
-		return nil, errors.New("amount must be greater than zero")
+		return nil, ErrAmountNotPositive
 	}
 	if s.ledger == nil {
-		return nil, errors.New("ledger is not configured")
+		return nil, notConfigured("ledger")
 	}
 
 	err := s.ledger.RunInTx(ctx, func(tx *sql.Tx) error {
@@ -1027,7 +969,7 @@ func (s *AdminService) PayoutCommission(ctx context.Context, adminID uuid.UUID, 
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrInsufficientFunds) {
-			return nil, errors.New("commission account holds less than the requested amount")
+			return nil, ErrCommissionLow
 		}
 		return nil, err
 	}
@@ -1055,22 +997,24 @@ type BroadcastEmailResult struct {
 	Failures   []string `json:"failures,omitempty"`
 }
 
-// SendBroadcastEmail рассылает письма выбранным группам пользователей или произвольному списку получателей.
+// SendBroadcastEmail рассылает письма выбранным группам пользователей или
+// произвольному списку получателей. Без транспорта — ErrNotConfigured, и ни
+// одно письмо не считается отправленным.
 func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmailRequest) (*BroadcastEmailResult, error) {
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.BodyHTML = strings.TrimSpace(req.BodyHTML)
 	if req.Subject == "" || req.BodyHTML == "" {
-		return nil, errors.New("subject and body_html are required")
+		return nil, validationError("subject and body_html are required")
 	}
 
 	var recipientEmails []string
 	switch strings.ToUpper(req.TargetGroup) {
 	case "CUSTOMERS", "EXECUTORS":
-		role := "CUSTOMER"
+		role := repository.RoleCustomer
 		if strings.ToUpper(req.TargetGroup) == "EXECUTORS" {
-			role = "EXECUTOR"
+			role = repository.RoleExecutor
 		}
-		emails, err := s.adminRepo.BroadcastEmails(ctx, role, req.IncludeUnverified)
+		emails, err := s.adminUsers.BroadcastEmails(ctx, role, req.IncludeUnverified)
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve recipients: %w", err)
 		}
@@ -1078,13 +1022,13 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 			// Самый частый случай пустой рассылки — адреса есть, но их никто не
 			// подтвердил: ссылка живёт час, и по ней переходят не все. Отказ
 			// обязан это сказать, иначе он выглядит как сломанная рассылка.
-			all, err := s.adminRepo.BroadcastEmails(ctx, role, true)
+			all, err := s.adminUsers.BroadcastEmails(ctx, role, true)
 			if err != nil {
 				return nil, fmt.Errorf("cannot resolve recipients: %w", err)
 			}
 			if len(all) > 0 {
-				return nil, fmt.Errorf("подтверждённых адресов в группе нет: почта указана у %d, но не подтверждена. "+
-					"Отметьте «Включая неподтверждённые адреса», чтобы отправить им", len(all))
+				return nil, validationError(fmt.Sprintf("подтверждённых адресов в группе нет: почта указана у %d, но не подтверждена. "+
+					"Отметьте «Включая неподтверждённые адреса», чтобы отправить им", len(all)))
 			}
 		}
 		recipientEmails = emails
@@ -1097,32 +1041,31 @@ func (s *AdminService) SendBroadcastEmail(ctx context.Context, req BroadcastEmai
 			// Отвергаем всё, что не является обычным адресом: заголовки письма
 			// собираются конкатенацией, поэтому CR/LF здесь — инъекция заголовков.
 			if !validRecipient.MatchString(trimmed) {
-				return nil, fmt.Errorf("invalid recipient address: %s", trimmed)
+				return nil, validationError("invalid recipient address: " + trimmed)
 			}
 			recipientEmails = append(recipientEmails, trimmed)
 		}
 		if len(recipientEmails) == 0 {
-			return nil, errors.New("список адресов пуст: укажите хотя бы один адрес")
+			return nil, validationError("список адресов пуст: укажите хотя бы один адрес")
 		}
 	default:
-		return nil, errors.New("invalid target_group: must be CUSTOMERS, EXECUTORS, or CUSTOM_EMAILS")
+		return nil, validationError("invalid target_group: must be CUSTOMERS, EXECUTORS, or CUSTOM_EMAILS")
 	}
 
 	if len(recipientEmails) == 0 {
-		return nil, errors.New("у выбранной группы нет ни одного адреса электронной почты")
+		return nil, validationError("у выбранной группы нет ни одного адреса электронной почты")
+	}
+
+	if s.mailer == nil {
+		// Без настоящего транспорта ничего не отправляется; отчёт об успехе был бы ложью.
+		return nil, ErrMailerNotConfigured
 	}
 
 	result := &BroadcastEmailResult{
 		Total: len(recipientEmails),
 	}
-
-	smtpSender, ok := s.mailer.(*SmtpMailSender)
-	if !ok {
-		// Без настоящего транспорта ничего не отправляется; отчёт об успехе был бы ложью.
-		return nil, errors.New("email transport is not available")
-	}
 	for _, email := range recipientEmails {
-		err := smtpSender.SendEmail(email, req.Subject, req.BodyHTML)
+		err := s.mailer.SendEmail(email, req.Subject, req.BodyHTML)
 		if err != nil {
 			result.Failed++
 			result.Failures = append(result.Failures, fmt.Sprintf("%s: %v", email, err))

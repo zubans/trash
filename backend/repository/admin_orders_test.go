@@ -19,7 +19,7 @@ func TestGetOrdersHandlesUnassignedOrder(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	repo := repository.NewAdminRepository(db)
+	repo := repository.NewAdminOrderRepository(db)
 
 	customerID := createTestUser(t, db, "CUSTOMER")
 
@@ -42,8 +42,12 @@ func TestGetOrdersHandlesUnassignedOrder(t *testing.T) {
 		t.Fatalf("insert order: %v", err)
 	}
 
+	// Поиск по полному uuid: база общая с другими тестами и не чистится, и
+	// среди сотен накопленных активных заказов первая страница без фильтра
+	// свой заказ может и не показать.
 	orders, _, err := repo.GetOrders(ctx, repository.OrdersFilter{
-		Statuses: repository.OrderStatusGroup(repository.OrderGroupActive), Limit: 50,
+		Statuses: repository.OrderStatusGroup(repository.OrderGroupActive), Search: orderID.String(),
+		Page: repository.PageRequest{Limit: 50},
 	})
 	if err != nil {
 		t.Fatalf("GetOrders вернул ошибку на заказе без исполнителя: %v", err)
@@ -63,7 +67,7 @@ func TestGetOrdersHandlesUnassignedOrder(t *testing.T) {
 	}
 
 	review, _, err := repo.GetOrders(ctx, repository.OrdersFilter{
-		Statuses: repository.OrderStatusGroup(repository.OrderGroupReview), Search: orderID.String(), Limit: 50,
+		Statuses: repository.OrderStatusGroup(repository.OrderGroupReview), Search: orderID.String(), Page: repository.PageRequest{Limit: 50},
 	})
 	if err != nil {
 		t.Fatalf("GetOrders(review): %v", err)

@@ -15,13 +15,13 @@ import (
 // сверх обычного потока заказа: отправку данных на проверку исполнителем и
 // разбор администратором случаев, переданных поведением.
 type BehaviorHandler struct {
-	dispatcher  *service.BehaviorDispatcher
+	orderData   *service.OrderSubmissions
 	submissions repository.SubmissionRepository
 }
 
 // NewBehaviorHandler создаёт BehaviorHandler.
-func NewBehaviorHandler(dispatcher *service.BehaviorDispatcher, submissions repository.SubmissionRepository) *BehaviorHandler {
-	return &BehaviorHandler{dispatcher: dispatcher, submissions: submissions}
+func NewBehaviorHandler(orderData *service.OrderSubmissions, submissions repository.SubmissionRepository) *BehaviorHandler {
+	return &BehaviorHandler{orderData: orderData, submissions: submissions}
 }
 
 // SubmitOrderData обслуживает POST /executor/orders/{id}/submission.
@@ -47,20 +47,20 @@ func (h *BehaviorHandler) SubmitOrderData(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := h.dispatcher.SubmitOrderData(r.Context(), orderID, executor.ID, fields)
+	result, err := h.orderData.SubmitOrderData(r.Context(), orderID, executor.ID, fields)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSubmissionNotSupported):
 			http.Error(w, err.Error(), http.StatusBadRequest)
-		case errors.Is(err, service.ErrSubmissionEscalated):
-			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, service.ErrPassportRequired):
 			// Код, а не текст: приложение по нему досылает паспорт из очереди.
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "passport_required", "message": err.Error()})
 		default:
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			// По классу: нет заказа — 404, не тот исполнитель или заказ не в
+			// работе — 409, эскалирован — 409, сбой — 500 без текста.
+			writeDomainError(w, err)
 		}
 		return
 	}

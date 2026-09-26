@@ -4,265 +4,43 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"regexp"
-	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/lib/pq"
-
-	"healthlogin/backend/money"
 )
 
-// TopUpRequest представляет ручную заявку на пополнение баланса.
-type TopUpRequest struct {
-	ID        uuid.UUID    `json:"id"`
-	UserID    uuid.UUID    `json:"user_id"`
-	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
-	Amount    money.Amount `json:"amount"`
-	Status    string       `json:"status"`
-	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
-}
+// Админские выборки по пользователям: список с фильтрами, адреса для рассылки,
+// счётчик администраторов. Записью в users владеет UserRepository; здесь
+// только чтение для панели.
 
-// WithdrawalRequest представляет ручную заявку на вывод средств.
-type WithdrawalRequest struct {
-	ID        uuid.UUID    `json:"id"`
-	UserID    uuid.UUID    `json:"user_id"`
-	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
-	Amount    money.Amount `json:"amount"`
-	Status    string       `json:"status"`
-	AdminID   *uuid.UUID   `json:"admin_id,omitempty"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt *time.Time   `json:"updated_at,omitempty"`
-}
-
-// Transaction представляет запись финансового журнала.
-type Transaction struct {
-	ID        uuid.UUID    `json:"id"`
-	UserID    uuid.UUID    `json:"user_id"`
-	UserPhone string       `json:"user_phone"` // Заполняется через JOIN
-	OrderID   *uuid.UUID   `json:"order_id,omitempty"`
-	Type      string       `json:"type"`
-	Amount    money.Amount `json:"amount"`
-	// Counterparty — системный счёт по другую сторону этой проводки.
-	// Пусто в строках, записанных до появления системных счетов.
-	Counterparty string `json:"counterparty,omitempty"`
-	// ShopOrderID — покупка магазина, которой принадлежит проводка. Пусто у
-	// проводок заказов: order_id занят ими, а оплату и возвраты покупки иначе
-	// не найти.
-	ShopOrderID *uuid.UUID `json:"shop_order_id,omitempty"`
-	AdminID     *uuid.UUID `json:"admin_id,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	// Direction — как этот тип двигает баланс пользователя: +1, -1 или 0.
-	// Берётся из ledgerSigns, чтобы клиент не выводил соглашение о знаках
-	// заново: суммы в таблице все положительные, направление живёт в типе.
-	Direction int `json:"direction"`
-}
-
-// AdminShift дополняет Shift телефоном исполнителя для админских представлений.
-type AdminShift struct {
-	Shift
-	ExecutorPhone string `json:"executor_phone"`
-}
-
-// AdminOrder дополняет Order телефонами заказчика/исполнителя и названием варианта услуги для админских представлений.
-type AdminOrder struct {
-	Order
-	CustomerPhone      string `json:"customer_phone"`
-	ExecutorPhone      string `json:"executor_phone,omitempty"`
-	ServiceVariantName string `json:"service_variant_name"`
-}
-
-// AdminRepository описывает операции админа с базой.
-type AdminRepository interface {
+// AdminUserRepository описывает чтение пользователей для панели.
+type AdminUserRepository interface {
+	// GetUsers — страница списка пользователей. role — любая роль справочника:
+	// пользователь попадает в выборку, если роль есть в его наборе user_roles
+	// (или она основная — для учёток старше наполнения user_roles).
 	GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error)
 	// BroadcastEmails перечисляет адреса для рассылки по роли: подтверждённые,
 	// а с includeUnverified — и те, по ссылке подтверждения которых не переходили.
 	BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error)
-	GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error)
-	CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error)
-	LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error)
-	SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
-	GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*WithdrawalRequest, error)
-	// Выводы — денежный процесс и живут в AdminService; репозиторий предоставляет
-	// заблокированное чтение и отдельные записи, которые ему нужны.
-	CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error)
-	LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error)
-	SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error
-	HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error)
 	CountAdmins(ctx context.Context) (int, error)
-	GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error)
-	TransactionFacets(ctx context.Context) (TransactionFacets, error)
-	// GetUserTransactions — проводки одного пользователя, новые сверху.
-	//
-	// Отдельный метод, а не GetTransactions с поиском по телефону: поиск там
-	// нестрогий (LIKE по цифрам), поэтому «792» подтянул бы чужие проводки, а
-	// на карточке пользователя показывать чужие деньги нельзя. Здесь отбор идёт
-	// по user_id.
-	GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, int, error)
-	// GetUserOrders — заказы пользователя в обеих ролях и всех статусах, новые
-	// сверху. Тот, кто и заказывает, и исполняет, видит здесь одну общую ленту:
-	// на карточке спрашивают «что у этого человека было», а не «что у него было
-	// в роли заказчика».
-	GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*AdminOrder, int, error)
-	GetActiveShifts(ctx context.Context) ([]*AdminShift, error)
-	// GetOrders — страница списка заказов админки с фильтрами и общим числом.
-	GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrder, int, error)
-	// OrderFacets — значения фильтров услуги и периода для группы статусов.
-	OrderFacets(ctx context.Context, statuses []OrderStatus) (OrderFacets, error)
 }
 
-// OrderFacets — значения, в которые можно выставить фильтры списка заказов.
-// Они считаются по всем заказам выбранной группы статусов, а не по текущей
-// странице, поэтому выбор одного фильтра никогда не опустошает другой.
-type OrderFacets struct {
-	Services []string `json:"services"`
-	Periods  []string `json:"periods"`
-}
+// AdminRepository — прежнее имя AdminUserRepository. Оставлено, потому что на
+// него ссылается RoleService (service/role.go); новый код пишет
+// AdminUserRepository. Заявки на пополнение и вывод живут в PayoutRepository,
+// журнал проводок — в TransactionJournalRepository, список заказов — в
+// AdminOrderRepository, активные смены — в ShiftMonitorRepository.
+type AdminRepository = AdminUserRepository
 
-// TransactionsFilter описывает одну страницу журнала проводок. Как и фильтр
-// завершённых заказов, всё сужение идёт в SQL, поэтому страница, счётчик и
-// выгрузка описывают один и тот же набор.
-type TransactionsFilter struct {
-	Search string // телефон, id заказа или id админа
-	Type   string // точный тип проводки
-	Period string // YYYY-MM по created_at
-	Sort   string // один из transactionSorts; всё прочее откатывается к умолчанию
-	Desc   bool
-	Limit  int
-	Offset int
-}
-
-// TransactionFacets — значения, которые предлагают фильтры журнала. Считаются
-// по всей таблице, а не по текущей странице.
-type TransactionFacets struct {
-	Types   []string `json:"types"`
-	Periods []string `json:"periods"`
-}
-
-// transactionSorts — белый список того, что может дойти до ORDER BY.
-var transactionSorts = map[string]string{
-	"created_at": "t.created_at",
-	"amount":     "t.amount",
-	"type":       "t.type",
-	"user":       "u.phone",
-}
-
-// Группы статусов списка заказов админки. «На проверке» — исполнитель отметил
-// заказ исполненным и ждёт подтверждения заказчика.
-const (
-	OrderGroupActive    = "active"
-	OrderGroupReview    = "review"
-	OrderGroupCompleted = "completed"
-	OrderGroupCanceled  = "canceled"
-	OrderGroupAll       = "all"
-)
-
-// orderStatusGroups — статусы каждой группы. Спор (DISPUTED) — в активных: его
-// разбирают, и заказ не должен пропадать из списка, пока спор открыт.
-var orderStatusGroups = map[string][]OrderStatus{
-	OrderGroupActive:    {OrderStatusSearching, OrderStatusAssigned, OrderStatusDisputed},
-	OrderGroupReview:    {OrderStatusExecuted},
-	OrderGroupCompleted: {OrderStatusCompleted},
-	OrderGroupCanceled:  {OrderStatusCanceled},
-}
-
-// OrderStatusGroup отдаёт статусы группы списка заказов; для неизвестной группы
-// (в том числе OrderGroupAll) — nil, что фильтр читает как «все статусы».
-// Возвращается копия: карта — общее состояние пакета, и вызывающий не должен
-// уметь его переписать.
-func OrderStatusGroup(group string) []OrderStatus {
-	statuses, ok := orderStatusGroups[group]
-	if !ok {
-		return nil
-	}
-	return append([]OrderStatus(nil), statuses...)
-}
-
-// OrdersFilter описывает одну страницу списка заказов. Statuses сужает набор до
-// группы (пусто — все статусы); search, service и period сужают дальше; Sort
-// выбирает колонку. Всё выполняется в SQL, поэтому то, что админ видит и
-// выгружает, покрывает все подходящие заказы, а не загруженные строки.
-type OrdersFilter struct {
-	Statuses []OrderStatus
-	Search   string // телефон, id заказа или название услуги, нестрогое совпадение
-	Service  string // точное название услуги
-	Period   string // YYYY-MM по дате последнего события заказа (orderEventAt)
-	Sort     string // один из orderSorts; всё прочее откатывается к умолчанию
-	Desc     bool
-	Limit    int
-	Offset   int
-}
-
-// orderEventAt — дата последнего события заказа: завершения, отмены, отметки
-// исполнителя или создания. По ней список показывает дату, сортирует и
-// группирует периоды, какой бы ни была группа статусов.
-const orderEventAt = "COALESCE(o.completed_at, o.canceled_at, o.executed_at, o.created_at)"
-
-// orderSorts — белый список того, что может дойти до ORDER BY. Ключ приходит от
-// клиента, поэтому его нельзя подставлять в запрос: выбрать можно только эти
-// фиксированные выражения.
-var orderSorts = map[string]string{
-	"date":         orderEventAt,
-	"final_amount": "o.final_amount",
-	"service":      "COALESCE(sn.name->>'ru', sn.code)",
-	"customer":     "cu.phone",
-	"executor":     "eu.phone",
-	"status":       "o.status",
-}
-
-// periodPattern — единственная форма периода, которую принимают фильтры: YYYY-MM.
-var periodPattern = regexp.MustCompile(`^\d{4}-(0[1-9]|1[0-2])$`)
-
-// periodArgs дописывает условие «column попадает в месяц period» как диапазон
-// column >= начало месяца AND column < начало следующего, а не как
-// to_char(column, 'YYYY-MM') = period: диапазон использует индекс по колонке,
-// а to_char вычислялся для каждой строки таблицы. Границы считает база через
-// to_timestamp в часовом поясе сессии — в том же, в котором фасеты собирают
-// список периодов через to_char, поэтому оба видят месяц одинаково.
-//
-// Период не по форме раньше просто не совпадал ни с одной строкой; здесь он
-// делает то же самое, а не роняет запрос ошибкой разбора даты.
-func periodArgs(where string, args []interface{}, column, period string) (string, []interface{}) {
-	period = strings.TrimSpace(period)
-	if period == "" {
-		return where, args
-	}
-	if !periodPattern.MatchString(period) {
-		return where + " AND FALSE", args
-	}
-	args = append(args, period)
-	n := len(args)
-	return where + fmt.Sprintf(
-		" AND %s >= to_timestamp($%d, 'YYYY-MM') AND %s < to_timestamp($%d, 'YYYY-MM') + interval '1 month'",
-		column, n, column, n), args
-}
-
-// statusArgs дописывает условие по статусам в where и аргументы.
-func statusArgs(where string, args []interface{}, statuses []OrderStatus) (string, []interface{}) {
-	if len(statuses) == 0 {
-		return where, args
-	}
-	placeholders := make([]string, len(statuses))
-	for i, st := range statuses {
-		args = append(args, st)
-		placeholders[i] = fmt.Sprintf("$%d", len(args))
-	}
-	return where + " AND o.status IN (" + strings.Join(placeholders, ", ") + ")", args
-}
-
-type adminRepo struct {
+type adminUserRepo struct {
 	db *sql.DB
 }
 
-// NewAdminRepository создаёт репозиторий для админских операций.
-func NewAdminRepository(db *sql.DB) AdminRepository {
-	return &adminRepo{db: db}
+// NewAdminUserRepository создаёт репозиторий админских выборок по пользователям.
+func NewAdminUserRepository(db *sql.DB) AdminUserRepository {
+	return &adminUserRepo{db: db}
 }
 
-func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error) {
+func (r *adminUserRepo) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*User, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -276,23 +54,33 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 	argCount := 1
 
 	if role != "" {
-		whereClause += fmt.Sprintf(" AND role = $%d", argCount)
+		// Набор ролей пользователя — user_roles (миграция 039), и с миграции 048
+		// в нём бывают роли справочника, которых в users.role нет ни у кого как
+		// основной. Фильтр по одной колонке role показывал бы «исполнителей»
+		// без тех, у кого исполнитель — вторая роль. users.role остаётся
+		// запасным условием для учёток старше наполнения user_roles, как в
+		// BroadcastEmails и RoleRepository.ListUsers.
+		whereClause += fmt.Sprintf(
+			" AND (EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = $%d) OR u.role = $%d)",
+			argCount, argCount)
 		args = append(args, role)
 		argCount++
 	}
 	if status != "" {
-		whereClause += fmt.Sprintf(" AND status = $%d", argCount)
+		whereClause += fmt.Sprintf(" AND u.status = $%d", argCount)
 		args = append(args, status)
 		argCount++
 	}
 	if search != "" {
-		whereClause += fmt.Sprintf(" AND phone LIKE $%d", argCount)
+		whereClause += fmt.Sprintf(" AND u.phone LIKE $%d", argCount)
 		args = append(args, "%"+search+"%")
 		argCount++
 	}
 
-	// Получаем общее количество
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users %s", whereClause)
+	// Общее число: таблица пользователей на порядки меньше проводок и заказов,
+	// и список листается по номеру страницы, а не по offset, поэтому счётчик
+	// нужен на каждой странице.
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users u %s", whereClause)
 	var total int
 	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
@@ -355,7 +143,7 @@ func (r *adminRepo) GetUsers(ctx context.Context, page, limit int, role, status,
 // Неподтверждённые адреса отдаются только по явной просьбе: регистрация пишет
 // адрес сразу, но подтверждённым он становится лишь после перехода по ссылке,
 // а в неподтверждённом бывает опечатка или чужой ящик.
-func (r *adminRepo) BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error) {
+func (r *adminUserRepo) BroadcastEmails(ctx context.Context, role string, includeUnverified bool) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
         SELECT DISTINCT u.email
         FROM users u
@@ -380,532 +168,9 @@ func (r *adminRepo) BroadcastEmails(ctx context.Context, role string, includeUnv
 	return emails, rows.Err()
 }
 
-func (r *adminRepo) GetTopUpRequests(ctx context.Context, limit, offset int) ([]*TopUpRequest, error) {
-	query := `
-		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
-		FROM balance_topup_requests r
-		JOIN users u ON r.user_id = u.id
-		ORDER BY r.created_at DESC
-		LIMIT $1 OFFSET $2`
-
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var reqs []*TopUpRequest
-	for rows.Next() {
-		var req TopUpRequest
-		err := rows.Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		reqs = append(reqs, &req)
-	}
-	return reqs, rows.Err()
-}
-
-func (r *adminRepo) CreateTopUpRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*TopUpRequest, error) {
-	id := uuid.New()
-	query := `
-		INSERT INTO balance_topup_requests (id, user_id, amount, status, created_at)
-		VALUES ($1, $2, $3, 'PENDING', now())
-		RETURNING id, user_id, amount, status, created_at`
-
-	var req TopUpRequest
-	err := exec(r.db, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-// LockTopUpRequest читает заявку, беря блокировку строки, чтобы два админа,
-// решающих одновременно, сериализовались, а не зачислили баланс оба.
-func (r *adminRepo) LockTopUpRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*TopUpRequest, error) {
-	var req TopUpRequest
-	err := exec(r.db, q).QueryRowContext(ctx, `
-		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
-		FROM balance_topup_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
-		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-// SetTopUpStatus решает судьбу ожидающей заявки; охрана не даёт второму решению
-// зачислить баланс дважды.
-func (r *adminRepo) SetTopUpStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
-	return execExpectingOne(ctx, exec(r.db, q), `
-		UPDATE balance_topup_requests
-		SET status = $1::topup_status, admin_id = $2, updated_at = now()
-		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
-}
-
-func (r *adminRepo) GetWithdrawalRequests(ctx context.Context, limit, offset int) ([]*WithdrawalRequest, error) {
-	query := `
-		SELECT r.id, r.user_id, u.phone, r.amount, r.status, r.admin_id, r.created_at, r.updated_at
-		FROM balance_withdrawal_requests r
-		JOIN users u ON r.user_id = u.id
-		ORDER BY r.created_at DESC
-		LIMIT $1 OFFSET $2`
-
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var reqs []*WithdrawalRequest
-	for rows.Next() {
-		var req WithdrawalRequest
-		err := rows.Scan(&req.ID, &req.UserID, &req.UserPhone, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		reqs = append(reqs, &req)
-	}
-	return reqs, rows.Err()
-}
-
-func (r *adminRepo) CreateWithdrawalRequest(ctx context.Context, q Querier, userID uuid.UUID, amount money.Amount) (*WithdrawalRequest, error) {
-	id := uuid.New()
-	query := `
-		INSERT INTO balance_withdrawal_requests (id, user_id, amount, status, created_at)
-		VALUES ($1, $2, $3, 'PENDING', now())
-		RETURNING id, user_id, amount, status, created_at`
-
-	var req WithdrawalRequest
-	err := exec(r.db, q).QueryRowContext(ctx, query, id, userID, amount).Scan(&req.ID, &req.UserID, &req.Amount, &req.Status, &req.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-// LockWithdrawalRequest читает заявку, беря блокировку строки, чтобы два
-// действующих одновременно админа сериализовались, а не увидели её оба как PENDING.
-func (r *adminRepo) LockWithdrawalRequest(ctx context.Context, q Querier, requestID uuid.UUID) (*WithdrawalRequest, error) {
-	var req WithdrawalRequest
-	err := exec(r.db, q).QueryRowContext(ctx, `
-		SELECT id, user_id, amount, status, admin_id, created_at, updated_at
-		FROM balance_withdrawal_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(
-		&req.ID, &req.UserID, &req.Amount, &req.Status, &req.AdminID, &req.CreatedAt, &req.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-// SetWithdrawalStatus решает судьбу ожидающей заявки. Охрана заставляет второе
-// решение по той же заявке упасть, а не переписать первое.
-func (r *adminRepo) SetWithdrawalStatus(ctx context.Context, q Querier, requestID, adminID uuid.UUID, status string) error {
-	return execExpectingOne(ctx, exec(r.db, q), `
-		UPDATE balance_withdrawal_requests
-		SET status = $1::withdrawal_status, admin_id = $2, updated_at = now()
-		WHERE id = $3 AND status = 'PENDING'`, status, adminID, requestID)
-}
-
-// HasPendingWithdrawal сообщает, есть ли у пользователя уже открытая заявка.
-// Заявки не резервируют средства, поэтому несколько открытых на один баланс
-// заставили бы админа одобрять выплаты, которые нельзя выполнить все.
-func (r *adminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
-	var exists bool
-	err := r.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM balance_withdrawal_requests WHERE user_id = $1 AND status = 'PENDING')`,
-		userID,
-	).Scan(&exists)
-	return exists, err
-}
-
 // CountAdmins используется, чтобы не дать понизить последнего администратора.
-func (r *adminRepo) CountAdmins(ctx context.Context) (int, error) {
+func (r *adminUserRepo) CountAdmins(ctx context.Context) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'ADMIN'`).Scan(&count)
 	return count, err
-}
-
-func (r *adminRepo) GetTransactions(ctx context.Context, f TransactionsFilter) ([]*Transaction, int, error) {
-	where := "WHERE 1=1"
-	var args []interface{}
-
-	if search := strings.TrimSpace(f.Search); search != "" {
-		// Телефон хранится как +79997454656, а вводят его с маской, поэтому обе
-		// стороны приводятся к цифрам. Цифровое условие добавляется, только если
-		// в запросе есть цифры: иначе пустой шаблон совпал бы со всем.
-		digits := digitsOnly(search)
-		args = append(args, "%"+search+"%")
-		like := fmt.Sprintf("$%d", len(args))
-		conds := []string{
-			fmt.Sprintf("t.id::text ILIKE %s", like),
-			fmt.Sprintf("COALESCE(t.order_id::text, '') ILIKE %s", like),
-			fmt.Sprintf("COALESCE(t.admin_id::text, '') ILIKE %s", like),
-		}
-		if digits != "" {
-			args = append(args, "%"+digits+"%")
-			conds = append(conds, fmt.Sprintf(
-				"regexp_replace(u.phone, '[^0-9]', '', 'g') LIKE $%d", len(args)))
-		}
-		where += " AND (" + strings.Join(conds, " OR ") + ")"
-	}
-
-	if txType := strings.TrimSpace(f.Type); txType != "" {
-		args = append(args, txType)
-		where += fmt.Sprintf(" AND t.type = $%d", len(args))
-	}
-
-	where, args = periodArgs(where, args, "t.created_at", f.Period)
-
-	from := `
-		FROM transactions t
-		JOIN users u ON t.user_id = u.id
-		` + where
-
-	var total int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) "+from, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	sortExpr, ok := transactionSorts[f.Sort]
-	if !ok {
-		sortExpr = transactionSorts["created_at"]
-	}
-	direction := "ASC"
-	if f.Desc {
-		direction = "DESC"
-	}
-
-	args = append(args, f.Limit, f.Offset)
-	query := fmt.Sprintf(`
-		SELECT `+transactionColumns+`, u.phone
-		%s
-		ORDER BY %s %s NULLS LAST, t.created_at DESC
-		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	var txs []*Transaction
-	for rows.Next() {
-		var phone string
-		tx, err := scanTransaction(rows, &phone)
-		if err != nil {
-			return nil, 0, err
-		}
-		tx.UserPhone = phone
-		txs = append(txs, tx)
-	}
-	return txs, total, rows.Err()
-}
-
-func (r *adminRepo) TransactionFacets(ctx context.Context) (TransactionFacets, error) {
-	facets := TransactionFacets{Types: []string{}, Periods: []string{}}
-
-	typeRows, err := r.db.QueryContext(ctx,
-		`SELECT DISTINCT type FROM transactions ORDER BY type`)
-	if err != nil {
-		return facets, err
-	}
-	defer typeRows.Close()
-	for typeRows.Next() {
-		var t string
-		if err := typeRows.Scan(&t); err != nil {
-			return facets, err
-		}
-		facets.Types = append(facets.Types, t)
-	}
-	if err := typeRows.Err(); err != nil {
-		return facets, err
-	}
-
-	periodRows, err := r.db.QueryContext(ctx,
-		`SELECT DISTINCT to_char(created_at, 'YYYY-MM') AS period
-		 FROM transactions
-		 ORDER BY period DESC`)
-	if err != nil {
-		return facets, err
-	}
-	defer periodRows.Close()
-	for periodRows.Next() {
-		var p string
-		if err := periodRows.Scan(&p); err != nil {
-			return facets, err
-		}
-		facets.Periods = append(facets.Periods, p)
-	}
-	return facets, periodRows.Err()
-}
-
-func (r *adminRepo) GetActiveShifts(ctx context.Context) ([]*AdminShift, error) {
-	query := `
-		SELECT s.id, s.executor_id, s.duration_hours, s.started_at, s.planned_end_at, s.actual_end_at, s.status, s.fine_amount,
-		       u.phone
-		FROM shifts s
-		JOIN users u ON s.executor_id = u.id
-		WHERE s.status = $1
-		ORDER BY s.started_at DESC`
-
-	rows, err := r.db.QueryContext(ctx, query, ShiftStatusActive)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var shifts []*AdminShift
-	for rows.Next() {
-		var s AdminShift
-		err := rows.Scan(
-			&s.ID, &s.ExecutorID, &s.DurationHours, &s.StartedAt, &s.PlannedEndAt, &s.ActualEndAt, &s.Status, &s.FineAmount,
-			&s.ExecutorPhone,
-		)
-		if err != nil {
-			return nil, err
-		}
-		shifts = append(shifts, &s)
-	}
-	return shifts, rows.Err()
-}
-
-// GetUserTransactions отдаёт проводки одного пользователя. Отбор строгий, по
-// user_id: карточка пользователя показывает его деньги и только его.
-func (r *adminRepo) GetUserTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, int, error) {
-	limit, offset = clampPage(limit, offset)
-
-	var total int
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM transactions WHERE user_id = $1`, userID).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT `+transactionColumns+`, u.phone
-		FROM transactions t
-		JOIN users u ON t.user_id = u.id
-		WHERE t.user_id = $1
-		ORDER BY t.created_at DESC
-		LIMIT $2 OFFSET $3`, userID, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	txs := make([]*Transaction, 0, limit)
-	for rows.Next() {
-		var phone string
-		tx, err := scanTransaction(rows, &phone)
-		if err != nil {
-			return nil, 0, err
-		}
-		tx.UserPhone = phone
-		txs = append(txs, tx)
-	}
-	return txs, total, rows.Err()
-}
-
-// GetUserOrders отдаёт заказы пользователя в обеих ролях и всех статусах.
-func (r *adminRepo) GetUserOrders(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*AdminOrder, int, error) {
-	limit, offset = clampPage(limit, offset)
-
-	var total int
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM orders WHERE customer_id = $1 OR executor_id = $1`, userID).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT `+adminOrderColumns+`
-		FROM orders o
-		JOIN users cu ON o.customer_id = cu.id
-		LEFT JOIN users eu ON o.executor_id = eu.id
-		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		WHERE o.customer_id = $1 OR o.executor_id = $1
-		ORDER BY o.created_at DESC
-		LIMIT $2 OFFSET $3`, userID, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	orders := make([]*AdminOrder, 0, limit)
-	for rows.Next() {
-		o, err := scanAdminOrder(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		orders = append(orders, o)
-	}
-	return orders, total, rows.Err()
-}
-
-// adminOrderColumns — заказ целиком плюс телефоны сторон и название услуги.
-// Таблицы обязаны идти под псевдонимами o, cu, eu и sn. Телефон исполнителя —
-// через COALESCE: у заказа в поиске исполнителя нет, и NULL из LEFT JOIN,
-// прочитанный в строку, — ошибка драйвера, а не пустое значение.
-const adminOrderColumns = orderColumns + `, cu.phone, COALESCE(eu.phone, ''), COALESCE(sn.name->>'ru', sn.code)`
-
-// scanAdminOrder читает строку adminOrderColumns.
-func scanAdminOrder(row rowScanner) (*AdminOrder, error) {
-	var a AdminOrder
-	o, err := scanOrder(row, &a.CustomerPhone, &a.ExecutorPhone, &a.ServiceVariantName)
-	if err != nil {
-		return nil, err
-	}
-	a.Order = o
-	return &a, nil
-}
-
-// clampPage приводит страницу к разумным границам: без верхнего предела один
-// запрос мог бы попросить всю историю пользователя целиком.
-func clampPage(limit, offset int) (int, int) {
-	if limit < 1 {
-		limit = 20
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return limit, offset
-}
-
-func (r *adminRepo) GetOrders(ctx context.Context, f OrdersFilter) ([]*AdminOrder, int, error) {
-	where, args := statusArgs("WHERE TRUE", nil, f.Statuses)
-
-	if search := strings.TrimSpace(f.Search); search != "" {
-		// Телефон хранится как +79997454656, а набирают его как
-		// «+7 (999) 745-46-56» или просто «9997»: обе стороны перед сравнением
-		// сводятся к цифрам, поэтому админу не нужно воспроизводить сохранённое
-		// написание. Цифры используются, только когда они в запросе реально
-		// есть, — иначе пустой строке соответствовала бы каждая строка.
-		digits := digitsOnly(search)
-		args = append(args, "%"+search+"%")
-		like := fmt.Sprintf("$%d", len(args))
-		conds := []string{
-			fmt.Sprintf("o.id::text ILIKE %s", like),
-			fmt.Sprintf("COALESCE(sn.name->>'ru', sn.code) ILIKE %s", like),
-			fmt.Sprintf("COALESCE(o.address, '') ILIKE %s", like),
-		}
-		if digits != "" {
-			args = append(args, "%"+digits+"%")
-			digitsLike := fmt.Sprintf("$%d", len(args))
-			conds = append(conds,
-				fmt.Sprintf("regexp_replace(cu.phone, '[^0-9]', '', 'g') LIKE %s", digitsLike),
-				fmt.Sprintf("regexp_replace(COALESCE(eu.phone, ''), '[^0-9]', '', 'g') LIKE %s", digitsLike),
-			)
-		}
-		where += " AND (" + strings.Join(conds, " OR ") + ")"
-	}
-
-	if service := strings.TrimSpace(f.Service); service != "" {
-		args = append(args, service)
-		where += fmt.Sprintf(" AND COALESCE(sn.name->>'ru', sn.code) = $%d", len(args))
-	}
-
-	where, args = periodArgs(where, args, orderEventAt, f.Period)
-
-	from := `
-		FROM orders o
-		JOIN users cu ON o.customer_id = cu.id
-		LEFT JOIN users eu ON o.executor_id = eu.id
-		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		` + where
-
-	var total int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) "+from, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	sortExpr, ok := orderSorts[f.Sort]
-	if !ok {
-		sortExpr = orderSorts["date"]
-	}
-	direction := "ASC"
-	if f.Desc {
-		direction = "DESC"
-	}
-
-	args = append(args, f.Limit, f.Offset)
-	query := fmt.Sprintf(`
-		SELECT `+adminOrderColumns+`
-		%s
-		ORDER BY %s %s NULLS LAST, o.created_at DESC
-		LIMIT $%d OFFSET $%d`, from, sortExpr, direction, len(args)-1, len(args))
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	orders := []*AdminOrder{}
-	for rows.Next() {
-		o, err := scanAdminOrder(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		orders = append(orders, o)
-	}
-	return orders, total, rows.Err()
-}
-
-func (r *adminRepo) OrderFacets(ctx context.Context, statuses []OrderStatus) (OrderFacets, error) {
-	facets := OrderFacets{Services: []string{}, Periods: []string{}}
-	where, args := statusArgs("WHERE TRUE", nil, statuses)
-
-	serviceRows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT COALESCE(sn.name->>'ru', sn.code) AS name
-		FROM orders o
-		JOIN service_nodes sn ON sn.id = o.service_variant_id
-		`+where+`
-		ORDER BY name`, args...)
-	if err != nil {
-		return facets, err
-	}
-	defer serviceRows.Close()
-	for serviceRows.Next() {
-		var name string
-		if err := serviceRows.Scan(&name); err != nil {
-			return facets, err
-		}
-		facets.Services = append(facets.Services, name)
-	}
-	if err := serviceRows.Err(); err != nil {
-		return facets, err
-	}
-
-	periodRows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT to_char(`+orderEventAt+`, 'YYYY-MM') AS period
-		FROM orders o
-		`+where+`
-		ORDER BY period DESC`, args...)
-	if err != nil {
-		return facets, err
-	}
-	defer periodRows.Close()
-	for periodRows.Next() {
-		var period string
-		if err := periodRows.Scan(&period); err != nil {
-			return facets, err
-		}
-		facets.Periods = append(facets.Periods, period)
-	}
-	return facets, periodRows.Err()
-}
-
-// digitsOnly оставляет от поискового запроса цифры, чтобы набранный телефон
-// совпадал с сохранённым при любой пунктуации с обеих сторон.
-func digitsOnly(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }

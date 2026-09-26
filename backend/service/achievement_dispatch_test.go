@@ -828,3 +828,45 @@ def check(f):
 func compileAchievement(e *achievement.Engine, code, filename string, src []byte) error {
 	return e.CompileFiles(code, []achievement.SourceFile{{Name: filename, Src: src}})
 }
+
+// countingUsers считает обращения к пользователям: пересчёт по истории читает
+// заказчиков одним запросом, а не по строке на каждый заказ.
+type countingUsers struct {
+	*mockUserRepo
+	byID, byIDs int
+}
+
+func (u *countingUsers) FindByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
+	u.byID++
+	return u.mockUserRepo.FindByID(ctx, id)
+}
+
+func (u *countingUsers) FindByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*repository.User, error) {
+	u.byIDs++
+	return u.mockUserRepo.FindByIDs(ctx, ids)
+}
+
+func TestRecheckLoadsCustomersOnce(t *testing.T) {
+	h := newDispatchHarness(t, repository.ExecutorStats{OrdersCompleted: 3}, "500")
+	users := &countingUsers{mockUserRepo: newMockUserRepo()}
+	h.dispatcher.load = subjectLoader{orders: h.orders, users: users}
+	for i := 0; i < 2; i++ {
+		h.orders.orders = append(h.orders.orders, &repository.Order{
+			ID: uuid.New(), CustomerID: h.customerID, ExecutorID: &h.executorID,
+			Status: repository.OrderStatusCompleted, FinalAmount: money.FromRubles(1000),
+			CreatedAt: time.Now().Add(-time.Duration(i+1) * time.Hour),
+		})
+	}
+
+	result, err := h.dispatcher.RecheckUser(context.Background(), h.executorID)
+	if err != nil {
+		t.Fatalf("recheck: %v", err)
+	}
+	if result.OrdersReplayed != 3 {
+		t.Errorf("replayed %d orders, want 3", result.OrdersReplayed)
+	}
+	// Один FindByID — сам исполнитель; заказчики трёх заказов — одним FindByIDs.
+	if users.byID != 1 || users.byIDs != 1 {
+		t.Errorf("FindByID=%d, FindByIDs=%d; want 1 and 1", users.byID, users.byIDs)
+	}
+}

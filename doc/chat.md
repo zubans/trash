@@ -99,6 +99,11 @@ flowchart TD
 - **`POST /api/chats/{order_id}/messages`** — REST-отправка сообщения (fallback).
 - **`POST /api/chats/{order_id}/upload`** — загрузка файлов и изображений (сжатие 150–300 KB на клиенте).
 - **`GET /api/chats/{order_id}/ws?token={jwt}`** — точка подключения WebSocket сокета.
+  Origin рукопожатия проверяется по тому же набору источников, что и CORS
+  (`service.AllowedOrigins`, собирается в `main.go` из `CORS_ORIGIN`).
+- Чаты поддержки (`/api/support/chats/{chat_id}/...`): владелец чата или
+  администратор; администратор узнаётся по полному набору ролей
+  (`user.HasRole(ADMIN)`), а не по строке основной роли.
 
 ### Системные события:
 - `{"type":"system","action":"lock"}` — заказ завершен/отменен, чат заблокирован.

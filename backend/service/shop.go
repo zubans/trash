@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +16,12 @@ import (
 	"healthlogin/backend/money"
 	"healthlogin/backend/repository"
 )
+
+// Магазин разрезан по разделам прав (permission.go): Shop — витрина и покупка
+// для покупателя, ShopCatalog — товары и пункты выдачи (право shop),
+// ShopOrders — обработка покупок и выручка (shop_orders, shop_revenue),
+// PerkGrants — ручная выдача и отзыв привилегий. Общее у них — коды отказов,
+// снимок товара и подцепка деталей покупки, которые лежат в этом файле.
 
 // Настройки магазина.
 const (
@@ -84,11 +89,16 @@ func shopValidation(fields map[string]string) *ShopError {
 		Message: "Проверьте поля формы", Fields: fields}
 }
 
-// ShopService — магазин: витрина, покупка и её обработка.
+// shopDisabled — магазин закрыт выключателем.
+func shopDisabled() *ShopError {
+	return shopErr(http.StatusForbidden, ShopErrShopDisabled, "Магазин сейчас закрыт")
+}
+
+// Shop — магазин глазами покупателя: витрина, карточка, покупка и её история.
 //
 // Всё, что двигает деньги, идёт через Ledger, а выдача — через те же подарки,
 // что и у ачивок: склад один (implementation_plan_shop.md §2.1).
-type ShopService struct {
+type Shop struct {
 	shop     repository.ShopRepository
 	orders   repository.ShopOrderRepository
 	perks    repository.PerkRepository
@@ -99,44 +109,38 @@ type ShopService struct {
 	settings repository.SettingsRepository
 	events   repository.EventRepository
 	mail     repository.MailRepository
-	roles    repository.RoleRepository
+	details  shopOrderDetails
 	now      func() time.Time
 }
 
-// NewShopService собирает магазин.
-func NewShopService(shop repository.ShopRepository, orders repository.ShopOrderRepository,
+// NewShop собирает витрину и покупку.
+func NewShop(shop repository.ShopRepository, orders repository.ShopOrderRepository,
 	perks repository.PerkRepository, rules *PerkRules, gifts repository.GiftRepository, ledger *Ledger,
-	levels *Levels, settings repository.SettingsRepository) *ShopService {
-	return &ShopService{shop: shop, orders: orders, perks: perks, rules: rules, gifts: gifts, ledger: ledger,
-		levels: levels, settings: settings, now: time.Now}
+	levels *Levels, settings repository.SettingsRepository) *Shop {
+	return &Shop{shop: shop, orders: orders, perks: perks, rules: rules, gifts: gifts, ledger: ledger,
+		levels: levels, settings: settings, now: time.Now,
+		details: shopOrderDetails{orders: orders, gifts: gifts, perks: perks, now: time.Now}}
 }
 
 // WithEvents подключает outbox: покупка публикует shop.purchased.
-func (s *ShopService) WithEvents(events repository.EventRepository) *ShopService {
+func (s *Shop) WithEvents(events repository.EventRepository) *Shop {
 	s.events = events
 	return s
 }
 
-// WithMail подключает внутреннюю почту: письма об оплате и смене статуса.
-func (s *ShopService) WithMail(mail repository.MailRepository) *ShopService {
+// WithMail подключает внутреннюю почту: письмо об оплате.
+func (s *Shop) WithMail(mail repository.MailRepository) *Shop {
 	s.mail = mail
 	return s
 }
 
-// WithRoles подключает справочник ролей: товар нельзя открыть роли, которой
-// нет.
-func (s *ShopService) WithRoles(roles repository.RoleRepository) *ShopService {
-	s.roles = roles
-	return s
-}
-
 // Enabled сообщает, открыт ли магазин.
-func (s *ShopService) Enabled(ctx context.Context) bool {
+func (s *Shop) Enabled(ctx context.Context) bool {
 	return settingFloat(ctx, s.settings, SettingShopEnabled, 0) == 1
 }
 
 // OfferVersion — текущая редакция оферты.
-func (s *ShopService) OfferVersion(ctx context.Context) int {
+func (s *Shop) OfferVersion(ctx context.Context) int {
 	return int(settingFloat(ctx, s.settings, SettingShopOfferVersion, 1))
 }
 
@@ -171,7 +175,7 @@ type Storefront struct {
 // Storefront возвращает активные товары, открытые ролям пользователя. При
 // выключенном магазине витрина пуста, а флаг говорит клиенту спрятать пункт
 // меню.
-func (s *ShopService) Storefront(ctx context.Context, user *repository.User, category string) (*Storefront, error) {
+func (s *Shop) Storefront(ctx context.Context, user *repository.User, category string) (*Storefront, error) {
 	out := &Storefront{Enabled: s.Enabled(ctx), OfferVersion: s.OfferVersion(ctx),
 		Products: []*repository.ShopProduct{}}
 	if !out.Enabled {
@@ -231,9 +235,9 @@ type ProductCard struct {
 
 // Product возвращает карточку товара. Товар чужой роли — 404, а не 403: его
 // существование не раскрывается.
-func (s *ShopService) Product(ctx context.Context, user *repository.User, id uuid.UUID) (*ProductCard, error) {
+func (s *Shop) Product(ctx context.Context, user *repository.User, id uuid.UUID) (*ProductCard, error) {
 	if !s.Enabled(ctx) {
-		return nil, shopErr(http.StatusForbidden, ShopErrShopDisabled, "Магазин сейчас закрыт")
+		return nil, shopDisabled()
 	}
 	p, err := s.shop.GetProduct(ctx, id)
 	if errors.Is(err, repository.ErrShopProductNotFound) {
@@ -280,7 +284,10 @@ func perkDays(p *repository.ShopProduct) int {
 	return *p.PerkDays
 }
 
-func (s *ShopService) perkQuote(ctx context.Context, userID uuid.UUID, p *repository.ShopProduct) (*PerkQuote, error) {
+// perkQuote считает карточку привилегии. Уровень читается один раз; правило
+// разрешается через кэш PerkRules.Preview — карточку смотрят часто, а текст
+// правила меняется редко.
+func (s *Shop) perkQuote(ctx context.Context, userID uuid.UUID, p *repository.ShopProduct) (*PerkQuote, error) {
 	now := s.now()
 	level := s.levels.For(ctx, nil, userID)
 	withPerk, err := s.rules.Preview(ctx, perkRule(p), p.PerkConfig, level.BasePercent, level.LevelPercent, level.Level)
@@ -329,7 +336,7 @@ func (s *ShopService) perkQuote(ctx context.Context, userID uuid.UUID, p *reposi
 
 // PickupPoints — пункты выдачи, которые можно выбрать при оформлении. У
 // закрытого магазина их нет, как нет и витрины.
-func (s *ShopService) PickupPoints(ctx context.Context) ([]*repository.ShopPickupPoint, error) {
+func (s *Shop) PickupPoints(ctx context.Context) ([]*repository.ShopPickupPoint, error) {
 	if !s.Enabled(ctx) {
 		return []*repository.ShopPickupPoint{}, nil
 	}
@@ -359,9 +366,9 @@ type PurchaseRequest struct {
 // блокировка товара, проверки, запись покупки, списание, выдача, событие и
 // письмо. Любой отказ после списания откатывает всё: взять деньги и не выдать
 // купленное нельзя.
-func (s *ShopService) Purchase(ctx context.Context, user *repository.User, req PurchaseRequest) (*repository.ShopOrder, error) {
+func (s *Shop) Purchase(ctx context.Context, user *repository.User, req PurchaseRequest) (*repository.ShopOrder, error) {
 	if !s.Enabled(ctx) {
-		return nil, shopErr(http.StatusForbidden, ShopErrShopDisabled, "Магазин сейчас закрыт")
+		return nil, shopDisabled()
 	}
 	// Мягкий бан закрыт маршрутом (middleware/soft_ban.go), но проверка
 	// здесь не даёт открыть покупку, если маршрут когда-нибудь добавят в
@@ -394,40 +401,9 @@ func (s *ShopService) Purchase(ctx context.Context, user *repository.User, req P
 		if err != nil {
 			return err
 		}
-		if !productVisibleTo(product, user) {
-			return shopNotFound()
-		}
-		if !product.IsActive {
-			return shopErr(http.StatusConflict, ShopErrProductUnavailable, "Товар снят с продажи")
-		}
-		if product.RequiresVerified && !user.IsVerified() {
-			return shopErr(http.StatusForbidden, ShopErrVerificationRequired, "Товар доступен только верифицированным пользователям")
-		}
-		if version := s.OfferVersion(ctx); req.OfferVersion != version {
-			e := shopErr(http.StatusConflict, ShopErrOfferChanged, "Условия оферты изменились")
-			e.Details = map[string]interface{}{"offer_version": version}
-			return e
-		}
-		if req.ExpectedPrice != product.Price {
-			e := shopErr(http.StatusConflict, ShopErrPriceChanged, "Цена изменилась")
-			e.Details = map[string]interface{}{"price": product.Price}
-			return e
-		}
-		if product.Kind != repository.ShopKindPhysical && req.Quantity != 1 {
-			return shopErr(http.StatusBadRequest, ShopErrInvalidRequest, "Этот товар покупается по одному")
-		}
-		if req.Quantity > product.MaxQtyPerOrder {
-			return shopErr(http.StatusBadRequest, ShopErrInvalidRequest,
-				fmt.Sprintf("Не больше %d шт. в одной покупке", product.MaxQtyPerOrder))
-		}
-		if product.PerUserLimit != nil {
-			bought, err := s.orders.CountForUserProduct(ctx, tx, user.ID, product.ID)
-			if err != nil {
-				return err
-			}
-			if bought >= *product.PerUserLimit {
-				return shopErr(http.StatusConflict, ShopErrLimitReached, "Лимит покупок этого товара исчерпан")
-			}
+		// Все проверки запроса — до первой записи.
+		if err := s.checkPurchase(ctx, tx, product, user, req); err != nil {
+			return err
 		}
 
 		order := &repository.ShopOrder{
@@ -478,7 +454,7 @@ func (s *ShopService) Purchase(ctx context.Context, user *repository.User, req P
 		}
 		// Письмо — в той же транзакции: откаченная покупка не должна оставить
 		// письма «оплачено».
-		s.notify(ctx, tx, user.ID, order, purchaseMailBody(order, perk))
+		shopNotify(ctx, s.mail, tx, user.ID, order, purchaseMailBody(order, perk))
 		result = order
 		return nil
 	})
@@ -486,13 +462,57 @@ func (s *ShopService) Purchase(ctx context.Context, user *repository.User, req P
 		return nil, err
 	}
 	log.Printf("[shop] user %s bought %s: order №%d, %s", user.ID, result.ProductID, result.Number, result.Total)
-	return s.withDetails(ctx, result, false)
+	return s.details.attach(ctx, result)
+}
+
+// checkPurchase — проверки запроса покупки по заблокированному товару: кому
+// виден, продаётся ли, кому можно, та ли оферта и цена, сколько штук и не
+// исчерпан ли личный лимит. Ничего не пишет: любой отказ здесь стоит только
+// блокировки товара.
+func (s *Shop) checkPurchase(ctx context.Context, tx *sql.Tx, product *repository.ShopProduct,
+	user *repository.User, req PurchaseRequest) error {
+	if !productVisibleTo(product, user) {
+		return shopNotFound()
+	}
+	if !product.IsActive {
+		return shopErr(http.StatusConflict, ShopErrProductUnavailable, "Товар снят с продажи")
+	}
+	if product.RequiresVerified && !user.IsVerified() {
+		return shopErr(http.StatusForbidden, ShopErrVerificationRequired, "Товар доступен только верифицированным пользователям")
+	}
+	if version := s.OfferVersion(ctx); req.OfferVersion != version {
+		e := shopErr(http.StatusConflict, ShopErrOfferChanged, "Условия оферты изменились")
+		e.Details = map[string]interface{}{"offer_version": version}
+		return e
+	}
+	if req.ExpectedPrice != product.Price {
+		e := shopErr(http.StatusConflict, ShopErrPriceChanged, "Цена изменилась")
+		e.Details = map[string]interface{}{"price": product.Price}
+		return e
+	}
+	if product.Kind != repository.ShopKindPhysical && req.Quantity != 1 {
+		return shopErr(http.StatusBadRequest, ShopErrInvalidRequest, "Этот товар покупается по одному")
+	}
+	if req.Quantity > product.MaxQtyPerOrder {
+		return shopErr(http.StatusBadRequest, ShopErrInvalidRequest,
+			fmt.Sprintf("Не больше %d шт. в одной покупке", product.MaxQtyPerOrder))
+	}
+	if product.PerUserLimit != nil {
+		bought, err := s.orders.CountForUserProduct(ctx, tx, user.ID, product.ID)
+		if err != nil {
+			return err
+		}
+		if bought >= *product.PerUserLimit {
+			return shopErr(http.StatusConflict, ShopErrLimitReached, "Лимит покупок этого товара исчерпан")
+		}
+	}
+	return nil
 }
 
 // preparePerk проверяет привилегию и ставит её в очередь
 // (implementation_plan_shop.md §3.4, §3.6). Строка пользователя блокируется
 // до конца транзакции, чтобы две покупки подряд не начались в один момент.
-func (s *ShopService) preparePerk(ctx context.Context, tx *sql.Tx, userID uuid.UUID, product *repository.ShopProduct) (*repository.UserPerk, error) {
+func (s *Shop) preparePerk(ctx context.Context, tx *sql.Tx, userID uuid.UUID, product *repository.ShopProduct) (*repository.UserPerk, error) {
 	if err := s.perks.LockQueue(ctx, tx, userID); err != nil {
 		return nil, err
 	}
@@ -530,7 +550,7 @@ func (s *ShopService) preparePerk(ctx context.Context, tx *sql.Tx, userID uuid.U
 
 // physicalFulfillment проверяет выбор покупателя для вещи: вариант, способ
 // получения и его данные.
-func (s *ShopService) physicalFulfillment(ctx context.Context, product *repository.ShopProduct, req PurchaseRequest) (map[string]interface{}, *string, error) {
+func (s *Shop) physicalFulfillment(ctx context.Context, product *repository.ShopProduct, req PurchaseRequest) (map[string]interface{}, *string, error) {
 	fields := map[string]string{}
 	var variant *string
 	if len(product.Variants) > 0 {
@@ -602,7 +622,7 @@ func (s *ShopService) physicalFulfillment(ctx context.Context, product *reposito
 
 // deliver выдаёт купленное: привилегию — строкой в очереди, вещь и
 // сертификат — купоном на каждую единицу.
-func (s *ShopService) deliver(ctx context.Context, tx *sql.Tx, userID uuid.UUID, product *repository.ShopProduct,
+func (s *Shop) deliver(ctx context.Context, tx *sql.Tx, userID uuid.UUID, product *repository.ShopProduct,
 	order *repository.ShopOrder, perk *repository.UserPerk) error {
 	if perk != nil {
 		perk.ShopOrderID = &order.ID
@@ -654,7 +674,7 @@ func productSnapshot(p *repository.ShopProduct) map[string]interface{} {
 	return snapshot
 }
 
-func (s *ShopService) publishPurchase(ctx context.Context, tx *sql.Tx, userID uuid.UUID, product *repository.ShopProduct, order *repository.ShopOrder) error {
+func (s *Shop) publishPurchase(ctx context.Context, tx *sql.Tx, userID uuid.UUID, product *repository.ShopProduct, order *repository.ShopOrder) error {
 	if s.events == nil {
 		return nil
 	}
@@ -692,13 +712,14 @@ func purchaseMailBody(order *repository.ShopOrder, perk *repository.UserPerk) st
 	return body
 }
 
-// notify кладёт письмо о покупке во внутреннюю почту. Сбой письма не отменяет
-// покупку: письмо — уведомление, а не часть сделки.
-func (s *ShopService) notify(ctx context.Context, q repository.Querier, userID uuid.UUID, order *repository.ShopOrder, body string) {
-	if s.mail == nil {
+// shopNotify кладёт письмо о покупке во внутреннюю почту. Сбой письма не
+// отменяет покупку: письмо — уведомление, а не часть сделки. Без почты —
+// молча.
+func shopNotify(ctx context.Context, mail repository.MailRepository, q repository.Querier, userID uuid.UUID, order *repository.ShopOrder, body string) {
+	if mail == nil {
 		return
 	}
-	if err := s.mail.Send(ctx, q, &repository.Mail{
+	if err := mail.Send(ctx, q, &repository.Mail{
 		UserID: userID, Kind: repository.MailKindShop,
 		Subject: fmt.Sprintf("Заказ №%d", order.Number), Body: body,
 		RefType: "shop_order", RefID: order.ID.String(),
@@ -707,53 +728,92 @@ func (s *ShopService) notify(ctx context.Context, q repository.Querier, userID u
 	}
 }
 
-// withDetails подцепляет к покупке купоны и привилегии, а для админки — ещё
-// проводки, чат поддержки и обращение о возврате.
-func (s *ShopService) withDetails(ctx context.Context, order *repository.ShopOrder, admin bool) (*repository.ShopOrder, error) {
-	coupons, err := s.gifts.ListByShopOrder(ctx, nil, order.ID)
+// shopOrderDetails подцепляет к покупкам купоны и привилегии — пакетно, одним
+// запросом на таблицу, сколько бы покупок ни было. Для админки — ещё проводки,
+// чат поддержки и обращение о возврате.
+type shopOrderDetails struct {
+	orders repository.ShopOrderRepository
+	gifts  repository.GiftRepository
+	perks  repository.PerkRepository
+	now    func() time.Time
+}
+
+// attachAll подцепляет купоны и привилегии ко всем покупкам списка.
+func (d shopOrderDetails) attachAll(ctx context.Context, orders []*repository.ShopOrder) error {
+	if len(orders) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(orders))
+	for _, o := range orders {
+		ids = append(ids, o.ID)
+	}
+	coupons, err := d.gifts.ListByShopOrders(ctx, nil, ids)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	order.Coupons = coupons
-	perks, err := s.perks.ListByShopOrder(ctx, nil, order.ID)
+	perks, err := d.perks.ListByShopOrders(ctx, nil, ids)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	order.Perks = perks
-	if !admin {
-		return order, nil
+	now := d.now()
+	for _, o := range orders {
+		o.Coupons = coupons[o.ID]
+		if o.Coupons == nil {
+			o.Coupons = []*repository.UserGift{}
+		}
+		MarkExpiredGifts(o.Coupons, now)
+		o.Perks = perks[o.ID]
+		if o.Perks == nil {
+			o.Perks = []*repository.UserPerk{}
+		}
 	}
-	if order.UserPhone, order.UserName, err = s.orders.Buyer(ctx, order.UserID); err != nil {
-		return nil, err
-	}
-	if order.Transactions, err = s.orders.Transactions(ctx, order.ID); err != nil {
-		return nil, err
-	}
-	if order.SupportChatID, err = s.orders.SupportChatID(ctx, order.UserID); err != nil {
-		return nil, err
-	}
-	if order.RefundRequestAt, err = s.orders.RefundRequestAt(ctx, order.ID); err != nil {
+	return nil
+}
+
+// attach — то же для одной покупки.
+func (d shopOrderDetails) attach(ctx context.Context, order *repository.ShopOrder) (*repository.ShopOrder, error) {
+	if err := d.attachAll(ctx, []*repository.ShopOrder{order}); err != nil {
 		return nil, err
 	}
 	return order, nil
 }
 
-// MyOrders — покупки пользователя, свежие первыми.
-func (s *ShopService) MyOrders(ctx context.Context, user *repository.User) ([]*repository.ShopOrder, error) {
+// attachAdmin — карточка покупки для админки: детали плюс покупатель,
+// проводки, чат поддержки и обращение о возврате.
+func (d shopOrderDetails) attachAdmin(ctx context.Context, order *repository.ShopOrder) (*repository.ShopOrder, error) {
+	if _, err := d.attach(ctx, order); err != nil {
+		return nil, err
+	}
+	var err error
+	if order.UserPhone, order.UserName, err = d.orders.Buyer(ctx, order.UserID); err != nil {
+		return nil, err
+	}
+	if order.Transactions, err = d.orders.Transactions(ctx, order.ID); err != nil {
+		return nil, err
+	}
+	if order.SupportChatID, err = d.orders.SupportChatID(ctx, order.UserID); err != nil {
+		return nil, err
+	}
+	if order.RefundRequestAt, err = d.orders.RefundRequestAt(ctx, order.ID); err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+// MyOrders — покупки пользователя, свежие первыми, с купонами и привилегиями.
+func (s *Shop) MyOrders(ctx context.Context, user *repository.User) ([]*repository.ShopOrder, error) {
 	orders, err := s.orders.ListForUser(ctx, user.ID, 100)
 	if err != nil {
 		return nil, err
 	}
-	for _, o := range orders {
-		if _, err := s.withDetails(ctx, o, false); err != nil {
-			return nil, err
-		}
+	if err := s.details.attachAll(ctx, orders); err != nil {
+		return nil, err
 	}
 	return orders, nil
 }
 
 // MyOrder — одна покупка. Чужая не находится вовсе.
-func (s *ShopService) MyOrder(ctx context.Context, user *repository.User, id uuid.UUID) (*repository.ShopOrder, error) {
+func (s *Shop) MyOrder(ctx context.Context, user *repository.User, id uuid.UUID) (*repository.ShopOrder, error) {
 	order, err := s.orders.Get(ctx, nil, id)
 	if errors.Is(err, repository.ErrShopOrderNotFound) || (err == nil && order.UserID != user.ID) {
 		return nil, shopNotFound()
@@ -761,7 +821,7 @@ func (s *ShopService) MyOrder(ctx context.Context, user *repository.User, id uui
 	if err != nil {
 		return nil, err
 	}
-	return s.withDetails(ctx, order, false)
+	return s.details.attach(ctx, order)
 }
 
 // MyPerks — ставка с привилегией и очередь за ней.
@@ -770,11 +830,15 @@ type MyPerks struct {
 	Queue []*repository.UserPerk `json:"queue"`
 }
 
-// MyPerks возвращает действующую привилегию и очередь.
-func (s *ShopService) MyPerks(ctx context.Context, user *repository.User) (*MyPerks, error) {
+// MyPerks возвращает уровень, действующую привилегию и очередь. Это и есть
+// экран уровня исполнителя: отдельного /executor/level больше нет.
+func (s *Shop) MyPerks(ctx context.Context, user *repository.User) (*MyPerks, error) {
 	queue, err := s.perks.ListQueue(ctx, user.ID, s.now())
 	if err != nil {
 		return nil, err
+	}
+	if queue == nil {
+		queue = []*repository.UserPerk{}
 	}
 	return &MyPerks{Level: s.levels.For(ctx, nil, user.ID), Queue: queue}, nil
 }
@@ -783,30 +847,4 @@ func (s *ShopService) MyPerks(ctx context.Context, user *repository.User) (*MyPe
 func parseShopNumber(s string) (int64, bool) {
 	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 	return n, err == nil && n > 0
-}
-
-// proportionalRefund считает возврат за идущую привилегию — пропорционально
-// неиспользованным дням (оферта, п. 8.6). Начатый день считается
-// использованным: в первый день возвращается (дни − 1)/дни, в последний —
-// ничего. Не начавшаяся возвращается полностью, истёкшая — нет.
-func proportionalRefund(price money.Amount, perk *repository.UserPerk, now time.Time) money.Amount {
-	if perk.RevokedAt != nil {
-		return 0
-	}
-	if !now.After(perk.StartsAt) {
-		return price
-	}
-	if !now.Before(perk.ExpiresAt) {
-		return 0
-	}
-	total := perk.ExpiresAt.Sub(perk.StartsAt).Hours() / 24
-	days := int(math.Round(total))
-	if days <= 0 {
-		return 0
-	}
-	used := int(math.Ceil(now.Sub(perk.StartsAt).Hours() / 24))
-	if used >= days {
-		return 0
-	}
-	return money.Amount(int64(price) * int64(days-used) / int64(days))
 }

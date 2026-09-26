@@ -30,6 +30,8 @@ export interface AchievementCard {
   available: boolean
 }
 
+// ExecutorLevel — уровень со ставкой, как его отдаёт сервер (`level` в
+// GET /me/perks и в карточке пользователя админки).
 export interface ExecutorLevel {
   points: number
   level: number
@@ -46,6 +48,8 @@ export interface ExecutorLevel {
   perk_title?: string
   perk_expires_at?: string
   // Действующая привилегия и очередь за ней — для строки «дальше: …».
+  // Сервер отдаёт очередь отдельным полем queue в GET /me/perks; сюда её
+  // кладёт экран уровня (см. getMyPerks в api/shop.ts).
   perk_queue?: UserPerk[]
 }
 
@@ -82,11 +86,6 @@ export interface UserGift {
 export async function getAchievements(): Promise<AchievementCard[]> {
   const response = await api.get('/executor/achievements')
   return Array.isArray(response.data) ? response.data : []
-}
-
-export async function getLevel(): Promise<ExecutorLevel> {
-  const response = await api.get('/executor/level')
-  return response.data
 }
 
 // Купоны живут на общем маршруте: у заказчика ачивок нет, но купоны на

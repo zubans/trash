@@ -3,10 +3,10 @@ package service
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/smtp"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -93,6 +93,54 @@ type MailSender interface {
 	SendPasswordResetCode(toEmail, code string) error
 }
 
+// ErrMailNotConfigured — письмо не отправлено, потому что транспорта нет.
+var ErrMailNotConfigured = errors.New("mail transport is not configured")
+
+// NoopMailSender — отправитель без транспорта: каждое письмо отказывает с
+// ErrMailNotConfigured и пишет в лог, что письмо не ушло. Его получают сервисы,
+// собранные без почты (тесты, установка без SMTP): раньше они молча заводили
+// настоящий SMTP из окружения, и «нет почты» было неотличимо от «есть почта».
+type NoopMailSender struct{}
+
+// SendEmailVerification ничего не шлёт.
+func (NoopMailSender) SendEmailVerification(toEmail, token string) error {
+	log.Printf("[mail] no transport: verification mail to %s not sent", toEmail)
+	return ErrMailNotConfigured
+}
+
+// SendPasswordResetCode ничего не шлёт.
+func (NoopMailSender) SendPasswordResetCode(toEmail, code string) error {
+	log.Printf("[mail] no transport: password reset mail to %s not sent", toEmail)
+	return ErrMailNotConfigured
+}
+
+// SmtpConfig — параметры SMTP-транспорта. Собирается в composition root из
+// окружения: сервис не читает переменные сам.
+type SmtpConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	// From — адрес отправителя в заголовке письма.
+	From string
+	// BaseURL — адрес приложения для ссылок в письмах.
+	BaseURL string
+}
+
+// withDefaults подставляет умолчания вместо пустых полей.
+func (c SmtpConfig) withDefaults() SmtpConfig {
+	if c.Port == "" {
+		c.Port = "587"
+	}
+	if c.From == "" {
+		c.From = "system@moya-usluga.ru"
+	}
+	if c.BaseURL == "" {
+		c.BaseURL = "https://moya-usluga.ru"
+	}
+	return c
+}
+
 type SmtpMailSender struct {
 	host     string
 	port     string
@@ -102,30 +150,17 @@ type SmtpMailSender struct {
 	baseURL  string
 }
 
-func NewSmtpMailSender() *SmtpMailSender {
-	host := os.Getenv("SMTP_HOST")
-	port := os.Getenv("SMTP_PORT")
-	if port == "" {
-		port = "587"
-	}
-	user := os.Getenv("SMTP_USER")
-	password := os.Getenv("SMTP_PASSWORD")
-	from := os.Getenv("SMTP_FROM")
-	if from == "" {
-		from = "system@moya-usluga.ru"
-	}
-	baseURL := os.Getenv("APP_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://moya-usluga.ru"
-	}
-
+// NewSmtpMailSender собирает SMTP-отправитель по конфигурации. Пустой Host
+// означает, что транспорта нет: письма отказывают, а не уходят в никуда.
+func NewSmtpMailSender(cfg SmtpConfig) *SmtpMailSender {
+	cfg = cfg.withDefaults()
 	return &SmtpMailSender{
-		host:     host,
-		port:     port,
-		user:     user,
-		password: password,
-		from:     from,
-		baseURL:  baseURL,
+		host:     cfg.Host,
+		port:     cfg.Port,
+		user:     cfg.User,
+		password: cfg.Password,
+		from:     cfg.From,
+		baseURL:  cfg.BaseURL,
 	}
 }
 

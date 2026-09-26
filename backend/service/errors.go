@@ -46,12 +46,21 @@ var (
 type DomainError struct {
 	Kind error
 	Msg  string
+	// Cause — исходная ошибка, если она несёт больше, чем класс: отказ скрипта
+	// поведения (*behavior.DeniedError) остаётся доступным через errors.As.
+	Cause error
 }
 
 func (e *DomainError) Error() string { return e.Msg }
 
-// Unwrap отдаёт класс, чтобы errors.Is видел его сквозь текст.
-func (e *DomainError) Unwrap() error { return e.Kind }
+// Unwrap отдаёт класс и причину, чтобы errors.Is видел класс сквозь текст, а
+// errors.As доставал причину.
+func (e *DomainError) Unwrap() []error {
+	if e.Cause == nil {
+		return []error{e.Kind}
+	}
+	return []error{e.Kind, e.Cause}
+}
 
 func notFoundError(msg string) error   { return &DomainError{Kind: repository.ErrNotFound, Msg: msg} }
 func forbiddenError(msg string) error  { return &DomainError{Kind: ErrForbidden, Msg: msg} }
@@ -103,6 +112,15 @@ var (
 	ErrManualExecuteDisabled = stateError("этот заказ закрывается автоматически после проверки, отметить его исполненным вручную нельзя")
 	// ErrReviewAlreadySubmitted — второй отзыв по заказу от того же автора.
 	ErrReviewAlreadySubmitted = stateError("you have already submitted a review for this order")
+	// ErrOrderNotInProgress — действие возможно только по заказу в работе
+	// (назначен или исполнен, ждёт подтверждения).
+	ErrOrderNotInProgress = stateError("заказ не в работе")
+	// ErrNotAssigned — заказ назначен другому исполнителю.
+	ErrNotAssigned = stateError("заказ назначен не вам")
+	// ErrOrderNotBiddable — ставки принимаются только по заказу в поиске.
+	ErrOrderNotBiddable = stateError("order is not open for bidding")
+	// ErrNotAuction — услуга заказа не аукционная: ставок по ней нет.
+	ErrNotAuction = ruleError("cannot bid on non-auction orders")
 
 	// ErrInsufficientBalance — на балансе не хватает на удержание или чаевые.
 	// Класс — repository.ErrInsufficientFunds, чтобы обработчик и тесты видели

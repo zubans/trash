@@ -38,13 +38,18 @@ var shopImageTypes = map[string]string{
 // ShopHandler обслуживает магазин: витрину и покупку для покупателя, каталог,
 // обработку покупок и выручку для админки.
 type ShopHandler struct {
-	shop  *service.ShopService
-	rules *service.PerkRules
+	shop    *service.Shop
+	catalog *service.ShopCatalog
+	orders  *service.ShopOrders
+	grants  *service.PerkGrants
+	rules   *service.PerkRules
 }
 
-// NewShopHandler создаёт ShopHandler.
-func NewShopHandler(shop *service.ShopService, rules *service.PerkRules) *ShopHandler {
-	return &ShopHandler{shop: shop, rules: rules}
+// NewShopHandler создаёт ShopHandler. Четыре сервиса — по разделам прав:
+// витрина и покупка, каталог, обработка покупок с выручкой, выдача привилегий.
+func NewShopHandler(shop *service.Shop, catalog *service.ShopCatalog, orders *service.ShopOrders,
+	grants *service.PerkGrants, rules *service.PerkRules) *ShopHandler {
+	return &ShopHandler{shop: shop, catalog: catalog, orders: orders, grants: grants, rules: rules}
 }
 
 // RegisterUserRoutes подключает маршруты покупателя. purchase — ограничитель
@@ -329,7 +334,7 @@ func saveShopImage(path string, src io.Reader) error {
 
 // AdminProducts обслуживает GET /admin/shop/products.
 func (h *ShopHandler) AdminProducts(w http.ResponseWriter, r *http.Request) {
-	products, err := h.shop.AdminProducts(r.Context(), r.URL.Query().Get("kind"), r.URL.Query().Get("category"))
+	products, err := h.catalog.AdminProducts(r.Context(), r.URL.Query().Get("kind"), r.URL.Query().Get("category"))
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -343,7 +348,7 @@ func (h *ShopHandler) AdminProduct(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	product, err := h.shop.AdminProduct(r.Context(), id)
+	product, err := h.catalog.AdminProduct(r.Context(), id)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -362,7 +367,7 @@ func (h *ShopHandler) saveProduct(w http.ResponseWriter, r *http.Request, id uui
 		return
 	}
 	product.ID = id
-	saved, err := h.shop.SaveProduct(r.Context(), admin.ID, &product)
+	saved, err := h.catalog.SaveProduct(r.Context(), admin.ID, &product)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -386,7 +391,7 @@ func (h *ShopHandler) AdminUpdateProduct(w http.ResponseWriter, r *http.Request)
 
 // AdminPickupPoints обслуживает GET /admin/shop/pickup-points.
 func (h *ShopHandler) AdminPickupPoints(w http.ResponseWriter, r *http.Request) {
-	points, err := h.shop.AdminPickupPoints(r.Context())
+	points, err := h.catalog.AdminPickupPoints(r.Context())
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -405,7 +410,7 @@ func (h *ShopHandler) savePickupPoint(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	point.ID = id
-	saved, err := h.shop.SavePickupPoint(r.Context(), admin.ID, &point)
+	saved, err := h.catalog.SavePickupPoint(r.Context(), admin.ID, &point)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -446,7 +451,7 @@ func (h *ShopHandler) AdminOrders(w http.ResponseWriter, r *http.Request) {
 		end := to.AddDate(0, 0, 1)
 		filter.To = &end
 	}
-	orders, total, err := h.shop.AdminOrders(r.Context(), filter)
+	orders, total, err := h.orders.AdminOrders(r.Context(), filter)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -464,7 +469,7 @@ func parseDay(value string) (time.Time, bool) {
 
 // AdminOrdersCount обслуживает GET /admin/shop/orders/count — бейдж меню.
 func (h *ShopHandler) AdminOrdersCount(w http.ResponseWriter, r *http.Request) {
-	paid, err := h.shop.CountPaid(r.Context())
+	paid, err := h.orders.CountPaid(r.Context())
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -478,7 +483,7 @@ func (h *ShopHandler) AdminOrder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	order, err := h.shop.AdminOrder(r.Context(), id)
+	order, err := h.orders.AdminOrder(r.Context(), id)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -492,7 +497,7 @@ func (h *ShopHandler) AdminRefundQuote(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	quote, err := h.shop.RefundQuote(r.Context(), id)
+	quote, err := h.orders.RefundQuote(r.Context(), id)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -518,7 +523,7 @@ func (h *ShopHandler) AdminSetStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	order, err := h.shop.SetStatus(r.Context(), admin.ID, id, strings.ToUpper(req.Status), req.Track)
+	order, err := h.orders.SetStatus(r.Context(), admin.ID, id, strings.ToUpper(req.Status), req.Track)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -541,7 +546,7 @@ func (h *ShopHandler) AdminCancel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	order, err := h.shop.Cancel(r.Context(), admin.ID, id, req)
+	order, err := h.orders.Cancel(r.Context(), admin.ID, id, req)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -556,7 +561,7 @@ func (h *ShopHandler) AdminUserShop(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	history, err := h.shop.UserHistory(r.Context(), id)
+	history, err := h.orders.UserHistory(r.Context(), id)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -579,7 +584,7 @@ func (h *ShopHandler) AdminGrantPerk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	perk, err := h.shop.GrantPerk(r.Context(), admin.ID, id, req)
+	perk, err := h.grants.GrantPerk(r.Context(), admin.ID, id, req)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -597,7 +602,7 @@ func (h *ShopHandler) AdminRevokePerk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	perk, err := h.shop.RevokePerk(r.Context(), admin.ID, id)
+	perk, err := h.grants.RevokePerk(r.Context(), admin.ID, id)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -617,7 +622,7 @@ func (h *ShopHandler) AdminRevenue(w http.ResponseWriter, r *http.Request) {
 	if day, ok := parseDay(r.URL.Query().Get("to")); ok {
 		to = day.AddDate(0, 0, 1)
 	}
-	revenue, err := h.shop.Revenue(r.Context(), from, to)
+	revenue, err := h.orders.Revenue(r.Context(), from, to)
 	if err != nil {
 		writeShopError(w, err)
 		return
@@ -638,7 +643,7 @@ func (h *ShopHandler) AdminPayout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	balance, err := h.shop.Payout(r.Context(), admin.ID, req.Amount)
+	balance, err := h.orders.Payout(r.Context(), admin.ID, req.Amount)
 	if err != nil {
 		writeShopError(w, err)
 		return

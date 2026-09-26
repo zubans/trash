@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // ErrPerkNotFound возвращается для привилегии, которой нет или которая уже
@@ -71,6 +72,9 @@ type PerkRepository interface {
 	Get(ctx context.Context, q Querier, id uuid.UUID) (*UserPerk, error)
 	// ListByShopOrder — привилегии одной покупки, для отмены с возвратом.
 	ListByShopOrder(ctx context.Context, q Querier, shopOrderID uuid.UUID) ([]*UserPerk, error)
+	// ListByShopOrders — привилегии нескольких покупок одним запросом,
+	// сгруппированные по покупке.
+	ListByShopOrders(ctx context.Context, q Querier, shopOrderIDs []uuid.UUID) (map[uuid.UUID][]*UserPerk, error)
 	// ListQueue — действующая и ждущие своей очереди, в порядке начала.
 	ListQueue(ctx context.Context, userID uuid.UUID, now time.Time) ([]*UserPerk, error)
 	// ListForUser — вся история привилегий пользователя, свежие первыми, для
@@ -223,6 +227,24 @@ func (r *perkRepo) Get(ctx context.Context, q Querier, id uuid.UUID) (*UserPerk,
 func (r *perkRepo) ListByShopOrder(ctx context.Context, q Querier, shopOrderID uuid.UUID) ([]*UserPerk, error) {
 	return r.list(ctx, q, `SELECT `+perkColumns+perkFrom+`
 		WHERE p.shop_order_id = $1 ORDER BY p.starts_at`, shopOrderID)
+}
+
+func (r *perkRepo) ListByShopOrders(ctx context.Context, q Querier, shopOrderIDs []uuid.UUID) (map[uuid.UUID][]*UserPerk, error) {
+	out := make(map[uuid.UUID][]*UserPerk, len(shopOrderIDs))
+	if len(shopOrderIDs) == 0 {
+		return out, nil
+	}
+	perks, err := r.list(ctx, q, `SELECT `+perkColumns+perkFrom+`
+		WHERE p.shop_order_id = ANY($1) ORDER BY p.starts_at`, pq.Array(shopOrderIDs))
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range perks {
+		if p.ShopOrderID != nil {
+			out[*p.ShopOrderID] = append(out[*p.ShopOrderID], p)
+		}
+	}
+	return out, nil
 }
 
 func (r *perkRepo) ListQueue(ctx context.Context, userID uuid.UUID, now time.Time) ([]*UserPerk, error) {

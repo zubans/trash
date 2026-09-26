@@ -113,10 +113,12 @@ func (h *ExecutorGeoHandler) GetMapOrders(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(orders)
 }
 
+// GetGeoAlerts обслуживает GET /admin/geo-alerts. Кого сюда пускать, решает
+// право shifts.view на маршруте, а не роль: модератор с этим правом видит
+// аномалии так же, как администратор.
 func (h *ExecutorGeoHandler) GetGeoAlerts(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil || user.Role != "ADMIN" {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+	if userFromContext(r) == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

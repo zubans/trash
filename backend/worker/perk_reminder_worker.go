@@ -16,12 +16,12 @@ import (
 // пятнадцать минут. Почасовой пришлось бы вносить в исключения правила, иначе
 // он будил бы дежурного после каждого здорового прохода.
 type PerkReminderWorker struct {
-	shop  *service.ShopService
+	shop  *service.PerkGrants
 	guard Guard
 }
 
 // NewPerkReminderWorker создаёт PerkReminderWorker.
-func NewPerkReminderWorker(shop *service.ShopService) *PerkReminderWorker {
+func NewPerkReminderWorker(shop *service.PerkGrants) *PerkReminderWorker {
 	return &PerkReminderWorker{shop: shop}
 }
 

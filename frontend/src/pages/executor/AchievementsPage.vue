@@ -155,12 +155,8 @@ import { useRouter } from 'vue-router'
 
 import PixelAchievementIcon from '../../components/PixelAchievementIcon.vue'
 import PerkBadge from '../../components/shop/PerkBadge.vue'
-import {
-  getAchievements,
-  getLevel,
-  type AchievementCard,
-  type ExecutorLevel,
-} from '../../api/achievements'
+import { getAchievements, type AchievementCard, type ExecutorLevel } from '../../api/achievements'
+import { emptyLevel, getMyPerks } from '../../api/shop'
 
 export default defineComponent({
   name: 'AchievementsPage',
@@ -169,16 +165,7 @@ export default defineComponent({
     const router = useRouter()
 
     const cards = ref<AchievementCard[]>([])
-    const level = ref<ExecutorLevel>({
-      points: 0,
-      level: 0,
-      next_level_points: 0,
-      base_percent: 0,
-      discount_pp: 0,
-      percent: 0,
-      max_useful_level: 0,
-      level_percent: 0,
-    })
+    const level = ref<ExecutorLevel>({ ...emptyLevel })
     const loading = ref(true)
     const error = ref('')
 
@@ -186,9 +173,11 @@ export default defineComponent({
       loading.value = true
       error.value = ''
       try {
-        const [list, current] = await Promise.all([getAchievements(), getLevel()])
+        // Уровень и очередь привилегий — один запрос GET /me/perks: он же кормит
+        // плашку на дашборде, и второго источника у ставки нет.
+        const [list, mine] = await Promise.all([getAchievements(), getMyPerks()])
         cards.value = list
-        level.value = current
+        level.value = { ...mine.level, perk_queue: mine.queue }
       } catch {
         error.value = 'Не удалось загрузить достижения. Попробуйте обновить страницу.'
       } finally {

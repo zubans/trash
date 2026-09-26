@@ -26,13 +26,17 @@ import (
 //	    go test ./service/ -run Shop
 
 type shopFixture struct {
-	t      *testing.T
-	db     *sql.DB
-	srv    *ShopService
-	gifts  repository.GiftRepository
-	shop   repository.ShopRepository
-	perks  repository.PerkRepository
-	orders repository.ShopOrderRepository
+	t  *testing.T
+	db *sql.DB
+	// Четыре сервиса магазина — по разделам прав.
+	srv     *Shop
+	catalog *ShopCatalog
+	admin   *ShopOrders
+	grants  *PerkGrants
+	gifts   repository.GiftRepository
+	shop    repository.ShopRepository
+	perks   repository.PerkRepository
+	orders  repository.ShopOrderRepository
 }
 
 func newShopFixture(t *testing.T, overrides map[string]string) *shopFixture {
@@ -58,10 +62,13 @@ func newShopFixture(t *testing.T, overrides map[string]string) *shopFixture {
 		t.Fatalf("perk rules: %v", err)
 	}
 	levels := NewLevels(repository.NewAchievementRepository(db), settings).WithPerks(f.perks, rules, nil)
-	f.srv = NewShopService(f.shop, f.orders, f.perks, rules, f.gifts, ledger, levels, settings).
+	mail := repository.NewMailRepository(db)
+	f.srv = NewShop(f.shop, f.orders, f.perks, rules, f.gifts, ledger, levels, settings).
 		WithEvents(repository.NewEventRepository(db)).
-		WithMail(repository.NewMailRepository(db)).
-		WithRoles(repository.NewRoleRepository(db))
+		WithMail(mail)
+	f.catalog = NewShopCatalog(f.shop, f.gifts, rules).WithRoles(repository.NewRoleRepository(db))
+	f.admin = NewShopOrders(f.orders, f.gifts, f.perks, ledger).WithMail(mail)
+	f.grants = NewPerkGrants(f.perks, rules, ledger).WithMail(mail)
 	return f
 }
 
@@ -251,7 +258,7 @@ func TestShopGrantedPerkQueuesBehindThePurchasedOneIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("purchase: %v", err)
 	}
-	granted, err := f.srv.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Rule: ruleFree, Days: 1, Reason: "компенсация"})
+	granted, err := f.grants.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Rule: ruleFree, Days: 1, Reason: "компенсация"})
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -264,13 +271,13 @@ func TestShopGrantedPerkQueuesBehindThePurchasedOneIntegration(t *testing.T) {
 		t.Errorf("active perk %s at %v%%, want the multiplier at 5%%", level.PerkRule, level.Percent)
 	}
 
-	if _, err := f.srv.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Rule: ruleMultiplier, Config: perkValue(floatPtr(1.5)), Days: 3, Reason: "x"}); shopCode(err) != ShopErrValidation {
+	if _, err := f.grants.GrantPerk(ctx, admin.ID, buyer.ID, GrantPerkRequest{Rule: ruleMultiplier, Config: perkValue(floatPtr(1.5)), Days: 3, Reason: "x"}); shopCode(err) != ShopErrValidation {
 		t.Errorf("multiplier 1.5 granted: %v", err)
 	}
-	if _, err := f.srv.RevokePerk(ctx, admin.ID, granted.ID); err != nil {
+	if _, err := f.grants.RevokePerk(ctx, admin.ID, granted.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	if _, err := f.srv.RevokePerk(ctx, admin.ID, granted.ID); shopCode(err) != ShopErrNotFound {
+	if _, err := f.grants.RevokePerk(ctx, admin.ID, granted.ID); shopCode(err) != ShopErrNotFound {
 		t.Errorf("second revoke: %v, want not_found", err)
 	}
 }
@@ -403,16 +410,16 @@ func TestShopPhysicalOrderLifecycleIntegration(t *testing.T) {
 		t.Fatalf("order = %s, %d coupons, total %s", order.Status, len(order.Coupons), order.Total)
 	}
 
-	if _, err := f.srv.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderShipped, ""); shopCode(err) != ShopErrInvalidTransition {
+	if _, err := f.admin.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderShipped, ""); shopCode(err) != ShopErrInvalidTransition {
 		t.Fatalf("PAID → SHIPPED: %v, want invalid_transition", err)
 	}
-	if _, err := f.srv.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderProcessing, ""); err != nil {
+	if _, err := f.admin.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderProcessing, ""); err != nil {
 		t.Fatalf("→ PROCESSING: %v", err)
 	}
-	if _, err := f.srv.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderShipped, ""); shopCode(err) != ShopErrValidation {
+	if _, err := f.admin.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderShipped, ""); shopCode(err) != ShopErrValidation {
 		t.Fatalf("delivery shipped without a track: %v", err)
 	}
-	shipped, err := f.srv.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderShipped, "RA123456789RU")
+	shipped, err := f.admin.SetStatus(ctx, admin.ID, order.ID, repository.ShopOrderShipped, "RA123456789RU")
 	if err != nil || shipped.Fulfillment["track"] != "RA123456789RU" {
 		t.Fatalf("→ SHIPPED: %v, fulfillment %v", err, shipped)
 	}
@@ -423,10 +430,10 @@ func TestShopPhysicalOrderLifecycleIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("redeem: %v", err)
 		}
-		if err := f.srv.OnCouponRedeemed(ctx, redeemed); err != nil {
+		if err := f.admin.OnCouponRedeemed(ctx, redeemed); err != nil {
 			t.Fatalf("complete: %v", err)
 		}
-		got, _ := f.srv.AdminOrder(ctx, order.ID)
+		got, _ := f.admin.AdminOrder(ctx, order.ID)
 		want := repository.ShopOrderShipped
 		if i == len(order.Coupons)-1 {
 			want = repository.ShopOrderCompleted
@@ -450,10 +457,10 @@ func TestShopCancelPhysicalRefundsAndRestocksIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("purchase: %v", err)
 	}
-	if _, err := f.srv.Cancel(ctx, admin.ID, order.ID, CancelRequest{Restock: true}); shopCode(err) != ShopErrValidation {
+	if _, err := f.admin.Cancel(ctx, admin.ID, order.ID, CancelRequest{Restock: true}); shopCode(err) != ShopErrValidation {
 		t.Fatalf("cancel without a reason: %v", err)
 	}
-	canceled, err := f.srv.Cancel(ctx, admin.ID, order.ID, CancelRequest{Reason: "обращение в поддержку", Restock: true})
+	canceled, err := f.admin.Cancel(ctx, admin.ID, order.ID, CancelRequest{Reason: "обращение в поддержку", Restock: true})
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -480,7 +487,7 @@ func TestShopCancelPhysicalRefundsAndRestocksIntegration(t *testing.T) {
 	if refunds != 1 {
 		t.Errorf("%d SHOP_REFUND entries on the order, want 1", refunds)
 	}
-	if _, err := f.srv.Cancel(ctx, admin.ID, order.ID, CancelRequest{Reason: "ещё раз"}); shopCode(err) != ShopErrAlreadyCanceled {
+	if _, err := f.admin.Cancel(ctx, admin.ID, order.ID, CancelRequest{Reason: "ещё раз"}); shopCode(err) != ShopErrAlreadyCanceled {
 		t.Errorf("second cancel: %v, want already_canceled", err)
 	}
 }
@@ -501,15 +508,15 @@ func TestShopCancelQueuedPerkRefundsInFullIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second purchase: %v", err)
 	}
-	quote, err := f.srv.RefundQuote(ctx, queued.ID)
+	quote, err := f.admin.RefundQuote(ctx, queued.ID)
 	if err != nil || quote.Suggested != money.FromRubles(1000) {
 		t.Fatalf("quote = %+v, %v; want the full price for a perk that has not started", quote, err)
 	}
 	tooMuch := money.FromRubles(1001)
-	if _, err := f.srv.Cancel(ctx, admin.ID, queued.ID, CancelRequest{Reason: "x", Amount: &tooMuch}); shopCode(err) != ShopErrValidation {
+	if _, err := f.admin.Cancel(ctx, admin.ID, queued.ID, CancelRequest{Reason: "x", Amount: &tooMuch}); shopCode(err) != ShopErrValidation {
 		t.Fatalf("refund above the price: %v", err)
 	}
-	canceled, err := f.srv.Cancel(ctx, admin.ID, queued.ID, CancelRequest{Reason: "передумал"})
+	canceled, err := f.admin.Cancel(ctx, admin.ID, queued.ID, CancelRequest{Reason: "передумал"})
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -539,7 +546,7 @@ func TestShopOrderLinksOnlyTheOwnersOrdersIntegration(t *testing.T) {
 	}
 	message := &repository.Message{SenderID: owner.ID,
 		Text: "Возврат по покупке №" + itoa(mine.Number) + ", и ещё №" + itoa(theirs.Number)}
-	if err := f.srv.ShopOrderLinks(ctx, owner.ID, []*repository.Message{message}); err != nil {
+	if err := f.admin.ShopOrderLinks(ctx, owner.ID, []*repository.Message{message}); err != nil {
 		t.Fatalf("links: %v", err)
 	}
 	if len(message.ShopOrders) != 1 || message.ShopOrders[0].ID != mine.ID {
@@ -564,10 +571,10 @@ func TestShopPerkReminderIsSentOnceIntegration(t *testing.T) {
 			t.Fatalf("seed perk: %v", err)
 		}
 	}
-	if _, err := f.srv.SendPerkReminders(ctx); err != nil {
+	if _, err := f.grants.SendPerkReminders(ctx); err != nil {
 		t.Fatalf("remind: %v", err)
 	}
-	if _, err := f.srv.SendPerkReminders(ctx); err != nil {
+	if _, err := f.grants.SendPerkReminders(ctx); err != nil {
 		t.Fatalf("second pass: %v", err)
 	}
 	count := func(id uuid.UUID) int {
@@ -711,7 +718,7 @@ func TestShopSaveProductValidatesByKindIntegration(t *testing.T) {
 		}, "fulfillment_methods"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := f.srv.SaveProduct(ctx, admin.ID, tc.build())
+			_, err := f.catalog.SaveProduct(ctx, admin.ID, tc.build())
 			var shopErr *ShopError
 			if !errors.As(err, &shopErr) || shopErr.Code != ShopErrValidation || shopErr.Fields[tc.field] == "" {
 				t.Fatalf("got %v, want a validation error on %q", err, tc.field)
@@ -723,7 +730,7 @@ func TestShopSaveProductValidatesByKindIntegration(t *testing.T) {
 	for _, build := range []func() *repository.ShopProduct{perkBase, shirtBase, certBase} {
 		p := build()
 		p.MaxQtyPerOrder = 7
-		saved, err := f.srv.SaveProduct(ctx, admin.ID, p)
+		saved, err := f.catalog.SaveProduct(ctx, admin.ID, p)
 		if err != nil {
 			t.Fatalf("save %s: %v", p.Kind, err)
 		}
@@ -753,12 +760,12 @@ func TestShopSoldProductKeepsItsKindAndGiftIntegration(t *testing.T) {
 	}
 	moved := *shirt
 	moved.GiftCode = &otherGift
-	if _, err := f.srv.SaveProduct(ctx, admin.ID, &moved); shopCode(err) != ShopErrValidation {
+	if _, err := f.catalog.SaveProduct(ctx, admin.ID, &moved); shopCode(err) != ShopErrValidation {
 		t.Fatalf("changing the gift of a sold product: %v", err)
 	}
 	repriced := *shirt
 	repriced.Price = money.FromRubles(1700)
-	if _, err := f.srv.SaveProduct(ctx, admin.ID, &repriced); err != nil {
+	if _, err := f.catalog.SaveProduct(ctx, admin.ID, &repriced); err != nil {
 		t.Fatalf("repricing a sold product: %v", err)
 	}
 }
@@ -810,7 +817,7 @@ func TestShopUpdatingAMissingProductIsNotFoundIntegration(t *testing.T) {
 	f := newShopFixture(t, nil)
 	admin := f.user("ADMIN", 0)
 	days, rule := 1, ruleFree
-	_, err := f.srv.SaveProduct(context.Background(), admin.ID, &repository.ShopProduct{
+	_, err := f.catalog.SaveProduct(context.Background(), admin.ID, &repository.ShopProduct{
 		ID: uuid.New(), Kind: repository.ShopKindPerk, Category: "perks",
 		Title: map[string]interface{}{"ru": "x"}, Price: money.FromRubles(100), PerkRule: &rule, PerkDays: &days,
 	})
@@ -825,7 +832,7 @@ func TestShopPickupPointsIntegration(t *testing.T) {
 	f := newShopFixture(t, nil)
 	ctx := context.Background()
 	admin := f.user("ADMIN", 0)
-	point, err := f.srv.SavePickupPoint(ctx, admin.ID, &repository.ShopPickupPoint{
+	point, err := f.catalog.SavePickupPoint(ctx, admin.ID, &repository.ShopPickupPoint{
 		Title: map[string]interface{}{"ru": "Офис"}, Address: "Москва, Тверская, 1", IsActive: true,
 	})
 	if err != nil {
@@ -833,7 +840,7 @@ func TestShopPickupPointsIntegration(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = f.db.Exec(`DELETE FROM shop_pickup_points WHERE id = $1`, point.ID) })
 
-	listed := func(srv *ShopService) bool {
+	listed := func(srv *Shop) bool {
 		points, err := srv.PickupPoints(ctx)
 		if err != nil {
 			t.Fatalf("pickup points: %v", err)
@@ -849,18 +856,18 @@ func TestShopPickupPointsIntegration(t *testing.T) {
 		t.Error("an active point is not offered")
 	}
 	point.IsActive = false
-	if _, err := f.srv.SavePickupPoint(ctx, admin.ID, point); err != nil {
+	if _, err := f.catalog.SavePickupPoint(ctx, admin.ID, point); err != nil {
 		t.Fatalf("disable point: %v", err)
 	}
 	if listed(f.srv) {
 		t.Error("a disabled point is still offered")
 	}
-	if _, err := f.srv.SavePickupPoint(ctx, admin.ID, &repository.ShopPickupPoint{Title: map[string]interface{}{"ru": "x"}}); shopCode(err) != ShopErrValidation {
+	if _, err := f.catalog.SavePickupPoint(ctx, admin.ID, &repository.ShopPickupPoint{Title: map[string]interface{}{"ru": "x"}}); shopCode(err) != ShopErrValidation {
 		t.Errorf("point without an address: %v", err)
 	}
 
 	point.IsActive = true
-	if _, err := f.srv.SavePickupPoint(ctx, admin.ID, point); err != nil {
+	if _, err := f.catalog.SavePickupPoint(ctx, admin.ID, point); err != nil {
 		t.Fatalf("enable point: %v", err)
 	}
 	if listed(newShopFixture(t, map[string]string{SettingShopEnabled: "0"}).srv) {

@@ -115,11 +115,21 @@ func (m *mockUserRepository) UpdateUserName(ctx context.Context, q repository.Qu
 	return nil
 }
 
-// mockAdminRepository реализует repository.AdminRepository.
+// mockAdminRepository подменяет разом все админские репозитории
+// (AdminUserRepository, PayoutRepository, TransactionJournalRepository,
+// AdminOrderRepository, ShiftMonitorRepository), чтобы setupTestHandler
+// собирал сервис одним дублёром.
 type mockAdminRepository struct {
 	users       []*repository.User
 	requests    map[uuid.UUID]*repository.TopUpRequest
 	withdrawals map[uuid.UUID]*repository.WithdrawalRequest
+	// Что спрашивали у списков и сколько раз считали фасеты.
+	lastTxFilter     repository.TransactionsFilter
+	lastOrdersFilter repository.OrdersFilter
+	txFacetCalls     int
+	orderFacetCalls  int
+	facetTypes       []string
+	facetServices    []string
 }
 
 func (m *mockAdminRepository) GetUsers(ctx context.Context, page, limit int, role, status, search string) ([]*repository.User, int, error) {
@@ -170,6 +180,7 @@ func (m *mockAdminRepository) CreateWithdrawalRequest(ctx context.Context, q rep
 }
 
 func (m *mockAdminRepository) GetTransactions(ctx context.Context, f repository.TransactionsFilter) ([]*repository.Transaction, int, error) {
+	m.lastTxFilter = f
 	return nil, 0, nil
 }
 
@@ -182,23 +193,26 @@ func (m *mockAdminRepository) GetUserOrders(ctx context.Context, userID uuid.UUI
 }
 
 func (m *mockAdminRepository) TransactionFacets(ctx context.Context) (repository.TransactionFacets, error) {
-	return repository.TransactionFacets{}, nil
+	m.txFacetCalls++
+	return repository.TransactionFacets{Types: m.facetTypes, Periods: []string{}}, nil
 }
 
 func (m *mockAdminRepository) TopUpUserBalance(ctx context.Context, userID, adminID uuid.UUID, amount money.Amount) error {
 	return nil
 }
 
-func (m *mockAdminRepository) GetActiveShifts(ctx context.Context) ([]*repository.AdminShift, error) {
+func (m *mockAdminRepository) ListActiveWithExecutors(ctx context.Context) ([]*repository.AdminShift, error) {
 	return nil, nil
 }
 
 func (m *mockAdminRepository) GetOrders(ctx context.Context, f repository.OrdersFilter) ([]*repository.AdminOrder, int, error) {
+	m.lastOrdersFilter = f
 	return nil, 0, nil
 }
 
 func (m *mockAdminRepository) OrderFacets(ctx context.Context, statuses []repository.OrderStatus) (repository.OrderFacets, error) {
-	return repository.OrderFacets{}, nil
+	m.orderFacetCalls++
+	return repository.OrderFacets{Services: m.facetServices, Periods: []string{}}, nil
 }
 
 // mockSettingsRepository реализует repository.SettingsRepository.
@@ -217,23 +231,16 @@ func (m *mockSettingsRepository) UpdateSettings(ctx context.Context, settings ma
 	return nil
 }
 
-// mockTokenRepository реализует repository.TokenRepository.
-type mockTokenRepository struct{}
-
-func (m *mockTokenRepository) IsTokenRevoked(ctx context.Context, tokenHash string) (bool, error) {
-	return false, nil
-}
-
-func (m *mockTokenRepository) RevokeToken(ctx context.Context, tokenHash string, expiresAt time.Time) error {
-	return nil
-}
-
 func setupTestHandler() (*AdminHandler, *mockUserRepository, *mockAdminRepository, *mockSettingsRepository) {
 	ur := &mockUserRepository{users: make(map[uuid.UUID]*repository.User)}
 	ar := &mockAdminRepository{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	sr := &mockSettingsRepository{settings: make(map[string]string)}
 
-	svc := service.NewAdminService(ur, ar, sr, "secret", nil).
+	svc := service.NewAdminService(ur, ar, sr, nil).
+		WithPayouts(ar).
+		WithJournal(ar).
+		WithOrders(ar).
+		WithShifts(ar).
 		WithLedger(service.NewLedger(&mockLedgerTxRepo{balances: map[uuid.UUID]money.Amount{}}, &mockLedgerAccounts{}))
 	h := NewAdminHandler(svc)
 	return h, ur, ar, sr
@@ -342,7 +349,7 @@ func (m *mockAdminRepository) CountAdmins(ctx context.Context) (int, error) {
 }
 
 // HasPendingWithdrawal сообщает о существующей открытой заявке на вывод.
-func (m *mockAdminRepository) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
+func (m *mockAdminRepository) HasPendingWithdrawal(ctx context.Context, q repository.Querier, userID uuid.UUID) (bool, error) {
 	return false, nil
 }
 
@@ -480,7 +487,8 @@ func TestUpdateSettingsHandlerAcceptsNumbers(t *testing.T) {
 }
 
 // Ставка, которую валидатор настроек отвергает, всё равно должна вернуться
-// как 400 с именем настройки, а не сохраняться молча.
+// как 422 с именем настройки, а не сохраняться молча: негодное значение — это
+// ошибка ввода (ErrValidation), а не негодное тело запроса.
 func TestUpdateSettingsHandlerRejectsOutOfRangeCommission(t *testing.T) {
 	h, _, _, sr := setupTestHandler()
 
@@ -490,8 +498,11 @@ func TestUpdateSettingsHandlerRejectsOutOfRangeCommission(t *testing.T) {
 
 	h.UpdateSettingsHandler(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", w.Code)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status 422, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "order_commission_percent") {
+		t.Errorf("error does not name the setting: %s", w.Body.String())
 	}
 	if _, stored := sr.settings["order_commission_percent"]; stored {
 		t.Error("a rejected rate was stored anyway")

@@ -262,16 +262,16 @@ func TestChatService_SupportChatOwnership(t *testing.T) {
 	chatRepo := &mockChatRepo{supportOwners: map[uuid.UUID]uuid.UUID{chatID: owner}}
 	svc := NewChatService(chatRepo, &mockOrderRepo{})
 
-	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "CUSTOMER", repository.MessageQuery{}); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, &repository.User{ID: stranger, Role: "CUSTOMER"}, repository.MessageQuery{}); !errors.Is(err, ErrForbidden) {
 		t.Errorf("stranger must not read the chat, got %v", err)
 	}
-	if _, err := svc.SaveSupportMessage(context.Background(), chatID, stranger, "CUSTOMER", "hi"); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SaveSupportMessage(context.Background(), chatID, &repository.User{ID: stranger, Role: "CUSTOMER"}, "hi"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("stranger must not write to the chat, got %v", err)
 	}
-	if _, err := svc.GetSupportMessages(context.Background(), chatID, owner, "CUSTOMER", repository.MessageQuery{}); err != nil {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, &repository.User{ID: owner, Role: "CUSTOMER"}, repository.MessageQuery{}); err != nil {
 		t.Errorf("owner must be able to read the chat: %v", err)
 	}
-	if _, err := svc.GetSupportMessages(context.Background(), chatID, stranger, "ADMIN", repository.MessageQuery{}); err != nil {
+	if _, err := svc.GetSupportMessages(context.Background(), chatID, &repository.User{ID: stranger, Role: "CUSTOMER", Roles: []string{"CUSTOMER", "ADMIN"}}, repository.MessageQuery{}); err != nil {
 		t.Errorf("admin must be able to read any chat: %v", err)
 	}
 }

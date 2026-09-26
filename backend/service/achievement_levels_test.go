@@ -306,3 +306,19 @@ func TestExpiryIsNilForEternalGrants(t *testing.T) {
 		t.Errorf("expiry = %v, want 30 days later", got)
 	}
 }
+
+// Порог суммы заказа по умолчанию — ноль, как и в миграции 050: при
+// отсутствующей строке настройки Go-фолбэк не должен молча отсекать заказы по
+// ценам каталога, выключая ачивки целиком.
+func TestMinOrderAmountDefaultsToZero(t *testing.T) {
+	levels := NewLevels(&pointsRepo{}, levelSettings("12", "500", "1"))
+	if got := levels.MinOrderAmount(context.Background()); got != 0 {
+		t.Errorf("default min order amount = %v, want 0", got)
+	}
+	levels = NewLevels(&pointsRepo{}, &orderMockSettingsRepo{settings: map[string]string{
+		SettingAchievementMinOrderAmount: "300",
+	}})
+	if got := levels.MinOrderAmount(context.Background()); got != 300 {
+		t.Errorf("configured min order amount = %v, want 300", got)
+	}
+}

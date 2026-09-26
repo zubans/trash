@@ -36,7 +36,7 @@ func TestAdminTopUpKeepsBooksClosed(t *testing.T) {
 	accounts := newMockAccounts()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(newMockUserRepo(), adminRepo, settingsRepo, "secret", nil).
+	srv := newAdminTestService(newMockUserRepo(), adminRepo, settingsRepo).
 		WithLedger(NewLedger(txRepo, accounts))
 
 	userID := uuid.New()

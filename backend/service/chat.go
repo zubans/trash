@@ -18,14 +18,18 @@ import (
 	"healthlogin/backend/repository"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	// Открывать сокет могут только те источники, которым доверяет сам API. Без
-	// этой проверки любая веб-страница могла бы открыть аутентифицированный сокет с
-	// cookie посетителя и читать или писать его чат (межсайтовый перехват
-	// WebSocket) — политика CORS на рукопожатия WebSocket не распространяется.
-	CheckOrigin: IsAllowedOrigin,
+// upgrader собирает WebSocket-апгрейдер сервиса.
+//
+// Открывать сокет могут только те источники, которым доверяет сам API. Без
+// этой проверки любая веб-страница могла бы открыть аутентифицированный сокет с
+// cookie посетителя и читать или писать его чат (межсайтовый перехват
+// WebSocket) — политика CORS на рукопожатия WebSocket не распространяется.
+func (s *ChatService) upgrader() websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     s.origins.AllowsRequest,
+	}
 }
 
 // maxMessageRunes ограничивает одно сообщение чата, чтобы клиент не мог
@@ -174,6 +178,15 @@ type ChatService struct {
 	mu        sync.RWMutex
 	// wsTimeouts выдаётся каждому новому соединению; см. wsTimeouts.
 	wsTimeouts wsTimeouts
+	// origins — источники, которым позволено открывать сокет. nil — только
+	// встроенные локальные.
+	origins *AllowedOrigins
+}
+
+// WithOrigins подключает доверенные источники — те же, что у CORS.
+func (s *ChatService) WithOrigins(origins *AllowedOrigins) *ChatService {
+	s.origins = origins
+	return s
 }
 
 // NewChatService создаёт новый ChatService.
@@ -563,6 +576,7 @@ func (s *ChatService) HandleWS(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 	}
 
+	upgrader := s.upgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[ChatService] Upgrade error: %v", err)
@@ -690,18 +704,23 @@ var (
 	ErrChatLocked = errors.New("chat is locked (read-only)")
 )
 
-// authorizeSupportChat пропускает владельца чата и любого админа. Переписки
+// authorizeSupportChat пропускает владельца чата и администратора. Переписки
 // поддержки адресуются по id чата, поэтому без этой проверки любой
 // аутентифицированный пользователь мог бы читать или писать в чужой чат.
-func (s *ChatService) authorizeSupportChat(ctx context.Context, chatID, userID uuid.UUID, role string) error {
-	if role == "ADMIN" {
+// Администратор узнаётся по полному набору ролей (HasRole), а не по строке
+// основной роли: у модератора с ролью ADMIN в наборе основная может быть другой.
+func (s *ChatService) authorizeSupportChat(ctx context.Context, chatID uuid.UUID, caller *repository.User) error {
+	if caller == nil {
+		return ErrForbidden
+	}
+	if caller.HasRole(repository.RoleAdmin) {
 		return nil
 	}
 	owner, err := s.chatRepo.SupportChatOwner(ctx, chatID)
 	if err != nil {
 		return ErrForbidden
 	}
-	if owner != userID {
+	if owner != caller.ID {
 		return ErrForbidden
 	}
 	return nil
@@ -713,16 +732,16 @@ func (s *ChatService) SupportChatOwner(ctx context.Context, chatID uuid.UUID) (u
 }
 
 // GetSupportMessages возвращает окно чата поддержки, которым владеет вызывающий.
-func (s *ChatService) GetSupportMessages(ctx context.Context, chatID, userID uuid.UUID, role string, q repository.MessageQuery) ([]*repository.Message, error) {
-	if err := s.authorizeSupportChat(ctx, chatID, userID, role); err != nil {
+func (s *ChatService) GetSupportMessages(ctx context.Context, chatID uuid.UUID, caller *repository.User, q repository.MessageQuery) ([]*repository.Message, error) {
+	if err := s.authorizeSupportChat(ctx, chatID, caller); err != nil {
 		return nil, err
 	}
 	return s.chatRepo.GetSupportMessages(ctx, chatID, q)
 }
 
 // SaveSupportMessage сохраняет новое текстовое сообщение поддержки.
-func (s *ChatService) SaveSupportMessage(ctx context.Context, chatID, senderID uuid.UUID, role, text string) (*repository.Message, error) {
-	if err := s.authorizeSupportChat(ctx, chatID, senderID, role); err != nil {
+func (s *ChatService) SaveSupportMessage(ctx context.Context, chatID uuid.UUID, sender *repository.User, text string) (*repository.Message, error) {
+	if err := s.authorizeSupportChat(ctx, chatID, sender); err != nil {
 		return nil, err
 	}
 	text = strings.TrimSpace(text)
@@ -732,7 +751,7 @@ func (s *ChatService) SaveSupportMessage(ctx context.Context, chatID, senderID u
 	if len([]rune(text)) > maxMessageRunes {
 		return nil, errors.New("сообщение слишком длинное")
 	}
-	msg, err := s.chatRepo.SaveSupportMessage(ctx, chatID, senderID, text)
+	msg, err := s.chatRepo.SaveSupportMessage(ctx, chatID, sender.ID, text)
 	if err != nil {
 		return nil, err
 	}
@@ -741,19 +760,22 @@ func (s *ChatService) SaveSupportMessage(ctx context.Context, chatID, senderID u
 }
 
 // SaveSupportMessageWithAttachment сохраняет новое сообщение поддержки с вложением.
-func (s *ChatService) SaveSupportMessageWithAttachment(ctx context.Context, chatID, senderID uuid.UUID, role, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
-	if err := s.authorizeSupportChat(ctx, chatID, senderID, role); err != nil {
+func (s *ChatService) SaveSupportMessageWithAttachment(ctx context.Context, chatID uuid.UUID, sender *repository.User, text, fileURL, fileName, fileType string, fileSize int64) (*repository.Message, error) {
+	if err := s.authorizeSupportChat(ctx, chatID, sender); err != nil {
 		return nil, err
 	}
-	return s.chatRepo.SaveSupportMessageWithAttachment(ctx, chatID, senderID, text, fileURL, fileName, fileType, fileSize)
+	return s.chatRepo.SaveSupportMessageWithAttachment(ctx, chatID, sender.ID, text, fileURL, fileName, fileType, fileSize)
 }
 
 // CanAccessAttachment сообщает, может ли пользователь скачать сохранённый файл.
-func (s *ChatService) CanAccessAttachment(ctx context.Context, userID uuid.UUID, role, fileURL string) (bool, error) {
-	if role == "ADMIN" {
+func (s *ChatService) CanAccessAttachment(ctx context.Context, caller *repository.User, fileURL string) (bool, error) {
+	if caller == nil {
+		return false, nil
+	}
+	if caller.HasRole(repository.RoleAdmin) {
 		return true, nil
 	}
-	return s.chatRepo.CanAccessAttachment(ctx, userID, fileURL)
+	return s.chatRepo.CanAccessAttachment(ctx, caller.ID, fileURL)
 }
 
 // GetAdminSupportChatList возвращает недавно активные чаты поддержки для
@@ -763,11 +785,11 @@ func (s *ChatService) GetAdminSupportChatList(ctx context.Context) ([]*repositor
 }
 
 // MarkSupportMessagesAsRead помечает непрочитанные сообщения чата поддержки прочитанными.
-func (s *ChatService) MarkSupportMessagesAsRead(ctx context.Context, chatID, readerID uuid.UUID, role string) error {
-	if err := s.authorizeSupportChat(ctx, chatID, readerID, role); err != nil {
+func (s *ChatService) MarkSupportMessagesAsRead(ctx context.Context, chatID uuid.UUID, reader *repository.User) error {
+	if err := s.authorizeSupportChat(ctx, chatID, reader); err != nil {
 		return err
 	}
-	return s.chatRepo.MarkSupportMessagesAsRead(ctx, chatID, readerID)
+	return s.chatRepo.MarkSupportMessagesAsRead(ctx, chatID, reader.ID)
 }
 
 // BanSupportChat банит чат поддержки на указанный срок («10m», «1h», «forever»).

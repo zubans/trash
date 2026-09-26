@@ -35,7 +35,9 @@ const (
 	defaultAchievementWeight = 5.0
 	defaultMaxPointsPerDay   = 50.0
 	defaultAchievementBonus  = 5000.0
-	defaultMinOrderAmount    = 300.0
+	// defaultMinOrderAmount — ноль, как в миграции 050: порог включает только
+	// настройка, а не отсутствие её строки.
+	defaultMinOrderAmount = 0.0
 )
 
 // Level — уровень исполнителя и всё, что из него следует.
@@ -200,15 +202,6 @@ func (l *Levels) recordFailedPerk(ctx context.Context, q repository.Querier, per
 	}); err != nil {
 		log.Printf("[levels] cannot record perk incident: %v", err)
 	}
-}
-
-// Queue возвращает действующую привилегию и ждущие своей очереди — для
-// плашки на экране уровня. Без подключённых привилегий очередь пуста.
-func (l *Levels) Queue(ctx context.Context, userID uuid.UUID) ([]*repository.UserPerk, error) {
-	if l == nil || l.perks == nil {
-		return []*repository.UserPerk{}, nil
-	}
-	return l.perks.ListQueue(ctx, userID, l.clock())
 }
 
 // fromPoints — сама формула, отделённая от чтения, чтобы её можно было

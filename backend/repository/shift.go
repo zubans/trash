@@ -32,6 +32,26 @@ type Shift struct {
 	FineAmount    money.Amount `json:"fine_amount"`
 }
 
+// AdminShift дополняет Shift телефоном исполнителя для админских представлений.
+type AdminShift struct {
+	Shift
+	ExecutorPhone string `json:"executor_phone"`
+}
+
+// ShiftMonitorRepository — то, что нужно экрану «Активные смены» в панели.
+// Отделён от ShiftRepository, которым живёт сама смена: моки жизненного цикла
+// смены не обязаны уметь показывать телефоны.
+type ShiftMonitorRepository interface {
+	// ListActiveWithExecutors — все активные сейчас смены с телефонами
+	// исполнителей, новые сверху.
+	ListActiveWithExecutors(ctx context.Context) ([]*AdminShift, error)
+}
+
+// NewShiftMonitorRepository создаёт ShiftMonitorRepository поверх того же хранилища.
+func NewShiftMonitorRepository(db *sql.DB) ShiftMonitorRepository {
+	return &shiftRepo{db: db}
+}
+
 // ShiftRepository описывает операции хранения смен.
 type ShiftRepository interface {
 	Create(ctx context.Context, shift *Shift) error
@@ -127,6 +147,34 @@ func (r *shiftRepo) GetActiveShifts(ctx context.Context) ([]*Shift, error) {
 	var shifts []*Shift
 	for rows.Next() {
 		s, err := scanShift(rows)
+		if err != nil {
+			return nil, err
+		}
+		shifts = append(shifts, &s)
+	}
+	return shifts, rows.Err()
+}
+
+func (r *shiftRepo) ListActiveWithExecutors(ctx context.Context) ([]*AdminShift, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT s.id, s.executor_id, s.duration_hours, s.started_at, s.planned_end_at, s.actual_end_at, s.status, s.fine_amount,
+		       u.phone
+		FROM shifts s
+		JOIN users u ON s.executor_id = u.id
+		WHERE s.status = $1
+		ORDER BY s.started_at DESC`, ShiftStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shifts []*AdminShift
+	for rows.Next() {
+		var s AdminShift
+		err := rows.Scan(
+			&s.ID, &s.ExecutorID, &s.DurationHours, &s.StartedAt, &s.PlannedEndAt, &s.ActualEndAt, &s.Status, &s.FineAmount,
+			&s.ExecutorPhone,
+		)
 		if err != nil {
 			return nil, err
 		}

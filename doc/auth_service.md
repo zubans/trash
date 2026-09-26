@@ -104,7 +104,16 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) (*repositor
 func (s *AuthService) Authenticate(phone, password string) (*repository.User, error)
 ```
 
-Проверяет учётные данные. Возвращает единый `invalid credentials` при любой проблеме.
+Проверяет учётные данные. Возвращает единый `ErrInvalidCredentials` при любой
+проблеме — и на неизвестную учётку, и на неверный пароль.
+
+### Ошибки
+
+Сервис отдаёт сентинелы, обработчик отвечает по классу через `errors.Is`, а не
+по тексту: `ErrPhoneTaken`/`ErrEmailTaken` — `409`; негодные поля формы
+(`ErrValidation`) — `400` с текстом; `ErrVerificationTokenExpired` — `400` с
+кодом `TOKEN_EXPIRED`; `ErrVerificationTokenInvalid` — `400`; всё прочее —
+сбой, `500` без внутреннего текста.
 
 ### GenerateJWT
 
@@ -120,7 +129,7 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
 
 ## Модуль отправки почты (`SmtpMailSender`)
 
-В бэкенде реализована служба [`service.SmtpMailSender`](file:///Users/sergeyzyuban/projects/trash/backend/service/mailer.go), интегрированная с встроенным **Maddy Mail Server** (`system@moya-usluga.ru`):
+В бэкенде реализована служба [`service.SmtpMailSender`](file:///Users/sergeyzyuban/projects/trash/backend/service/mailer.go), интегрированная с встроенным **Maddy Mail Server** (`system@moya-usluga.ru`). Параметры (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `APP_BASE_URL`) читает `main.go` и передаёт `SmtpConfig`; сервис окружение не читает. Сервис, собранный без отправителя (тесты, установка без SMTP), получает `NoopMailSender`: письмо не уходит, вызов отвечает `ErrMailNotConfigured`, настоящий SMTP при этом не создаётся.
 
 * **`SendEmailVerification(toEmail, token)`**: генерирует HTML-письмо с кнопкой подтверждения аккаунта или смены почты (`/api/auth/verify-email?token=...`).
 * **`SendPasswordResetCode(toEmail, code)`**: генерирует HTML-письмо с одноразовым 6-значным цифровым кодом безопасности.

@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"healthlogin/backend/perk"
+	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
@@ -16,7 +17,17 @@ import (
 // поля скрипта и таблицу прогона по сетке, если он успел начаться.
 func perkRuleError(w http.ResponseWriter, err error, grid []perk.GridRow) {
 	if !errors.Is(err, service.ErrInvalidPerk) {
-		writeShopError(w, err)
+		// Занятый код и отсутствующее правило — ошибки домена; форма админки
+		// читает их в том же JSON, что и остальные отказы магазина, поэтому
+		// класс переводится в код отказа здесь. Сбой — 500 без текста.
+		switch {
+		case errors.Is(err, repository.ErrConflict):
+			writeShopError(w, &service.ShopError{Status: http.StatusConflict, Code: service.ShopErrValidation, Message: err.Error()})
+		case errors.Is(err, repository.ErrNotFound):
+			writeShopError(w, &service.ShopError{Status: http.StatusNotFound, Code: service.ShopErrNotFound, Message: err.Error()})
+		default:
+			writeDomainError(w, err)
+		}
 		return
 	}
 	writeShopError(w, &service.ShopError{

@@ -36,12 +36,12 @@ type AchievementHandler struct {
 	// dispatcher выдаёт ачивки — и по событию, и по кнопке администратора.
 	dispatcher *service.AchievementDispatcher
 	// shop закрывает покупку магазина, когда погашен её последний купон.
-	shop *service.ShopService
+	shop *service.ShopOrders
 }
 
 // WithShop подключает магазин: купон вещи из магазина гасится тем же
 // эндпоинтом, что и подарок ачивки.
-func (h *AchievementHandler) WithShop(shop *service.ShopService) *AchievementHandler {
+func (h *AchievementHandler) WithShop(shop *service.ShopOrders) *AchievementHandler {
 	h.shop = shop
 	return h
 }
@@ -194,27 +194,6 @@ func shelvedCard(row *repository.Achievement, granted repository.GrantSummary) a
 	}
 }
 
-// GetLevel обслуживает GET /executor/level: баллы, уровень и ставка комиссии,
-// которая из него следует.
-func (h *AchievementHandler) GetLevel(w http.ResponseWriter, r *http.Request) {
-	user := userFromContext(r)
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	// Вместе с уровнем — привилегии магазина: действующая и очередь за ней,
-	// чтобы плашка показала «дальше: …» без второго запроса.
-	queue, err := h.levels.Queue(r.Context(), user.ID)
-	if err != nil {
-		log.Printf("[achievements] cannot read perk queue of %s: %v", user.ID, err)
-		queue = []*repository.UserPerk{}
-	}
-	writeJSON(w, struct {
-		service.Level
-		PerkQueue []*repository.UserPerk `json:"perk_queue"`
-	}{h.levels.For(r.Context(), nil, user.ID), queue})
-}
-
 // factsFor собирает факты для хуков, которые вызываются не диспетчером, а
 // экраном: видимость и прогресс. Заказа в них нет — они о человеке целиком.
 func (h *AchievementHandler) factsFor(ctx context.Context, user *repository.User, summary map[string]repository.GrantSummary) achievement.Facts {
@@ -267,6 +246,7 @@ func (h *AchievementHandler) GetGifts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot load gifts", http.StatusInternalServerError)
 		return
 	}
+	service.MarkExpiredGifts(gifts, time.Now())
 	writeJSON(w, gifts)
 }
 

@@ -12,7 +12,10 @@ import (
 	"healthlogin/backend/repository"
 )
 
-// mockAdminRepo подменяет repository.AdminRepository.
+// mockAdminRepo подменяет разом все админские репозитории: AdminUserRepository,
+// PayoutRepository, TransactionJournalRepository, AdminOrderRepository и
+// ShiftMonitorRepository. Один дублёр на всё — чтобы тест собирал сервис одной
+// строкой (newAdminTestService); в проде каждый интерфейс реализован отдельно.
 type mockAdminRepo struct {
 	users        []*repository.User
 	requests     map[uuid.UUID]*repository.TopUpRequest
@@ -103,7 +106,7 @@ func (m *mockAdminRepo) TopUpUserBalance(ctx context.Context, userID, adminID uu
 	return nil
 }
 
-func (m *mockAdminRepo) GetActiveShifts(ctx context.Context) ([]*repository.AdminShift, error) {
+func (m *mockAdminRepo) ListActiveWithExecutors(ctx context.Context) ([]*repository.AdminShift, error) {
 	return nil, nil
 }
 
@@ -131,25 +134,14 @@ func (m *mockSettingsRepo) UpdateSettings(ctx context.Context, settings map[stri
 	return nil
 }
 
-// mockTokenRepo подменяет repository.TokenRepository.
-type mockTokenRepo struct {
-	blacklisted map[string]time.Time
-}
-
-func (m *mockTokenRepo) IsTokenRevoked(ctx context.Context, tokenHash string) (bool, error) {
-	exp, ok := m.blacklisted[tokenHash]
-	if !ok {
-		return false, nil
-	}
-	if time.Now().After(exp) {
-		return false, nil
-	}
-	return true, nil
-}
-
-func (m *mockTokenRepo) RevokeToken(ctx context.Context, tokenHash string, expiresAt time.Time) error {
-	m.blacklisted[tokenHash] = expiresAt
-	return nil
+// newAdminTestService собирает AdminService на моках, подключая один дублёр
+// ко всем админским репозиториям.
+func newAdminTestService(userRepo repository.UserRepository, adminRepo *mockAdminRepo, settingsRepo repository.SettingsRepository) *AdminService {
+	return NewAdminService(userRepo, adminRepo, settingsRepo, nil).
+		WithPayouts(adminRepo).
+		WithJournal(adminRepo).
+		WithOrders(adminRepo).
+		WithShifts(adminRepo)
 }
 
 func TestAdminService_UpdateUserStatus(t *testing.T) {
@@ -157,7 +149,7 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+	svc := newAdminTestService(userRepo, adminRepo, settingsRepo).
 		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	user := &repository.User{
@@ -183,10 +175,18 @@ func TestAdminService_UpdateUserStatus(t *testing.T) {
 		t.Errorf("expected BANNED, got %s", updated.Status)
 	}
 
-	// Проверяем недопустимый статус
+	// Недопустимый статус — ошибка ввода, а не сбой.
 	err = svc.UpdateUserStatus(context.Background(), user.ID, adminID, "INVALID", "")
-	if err == nil {
-		t.Error("expected error for invalid status")
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation for invalid status, got %v", err)
+	}
+	// Себя заблокировать нельзя — это правило, а не негодный ввод.
+	if err := svc.UpdateUserStatus(context.Background(), adminID, adminID, "BANNED", ""); !errors.Is(err, ErrRule) {
+		t.Errorf("expected ErrRule for self-ban, got %v", err)
+	}
+	// Незнакомый пользователь — «не найдено».
+	if err := svc.SetUserVerified(context.Background(), uuid.New(), adminID, true); !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for unknown user, got %v", err)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+	svc := newAdminTestService(userRepo, adminRepo, settingsRepo).
 		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	user := &repository.User{
@@ -205,8 +205,9 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 	}
 	userRepo.users[user.Phone] = user
 
-	// 1. Создаём заявку на пополнение
-	req, err := svc.CreateTopUpRequest(context.Background(), user.ID, money.FromRubles(500.0))
+	// 1. Создаём заявку на пополнение — это делает пользователь, через WalletService.
+	wallet := NewWalletService(userRepo, adminRepo, nil)
+	req, err := wallet.CreateTopUpRequest(context.Background(), user.ID, money.FromRubles(500.0))
 	if err != nil {
 		t.Fatalf("unexpected error creating top-up: %v", err)
 	}
@@ -229,10 +230,14 @@ func TestAdminService_TopUpRequests(t *testing.T) {
 		t.Errorf("request was not approved correctly: %+v", approvedReq)
 	}
 
-	// 3. Пробуем одобрить повторно (должно упасть)
+	// 3. Пробуем одобрить повторно: заявка уже решена, класс ошибки — состояние.
 	err = svc.ApproveTopUpRequest(context.Background(), req.ID, adminID)
-	if err == nil {
-		t.Error("expected error trying to approve an already approved request")
+	if !errors.Is(err, ErrOrderState) {
+		t.Errorf("expected ErrOrderState approving an already approved request, got %v", err)
+	}
+	// Несуществующая заявка — «не найдено», а не отказ по состоянию.
+	if err := svc.ApproveTopUpRequest(context.Background(), uuid.New(), adminID); !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for an unknown request, got %v", err)
 	}
 }
 
@@ -241,7 +246,7 @@ func TestAdminService_Settings(t *testing.T) {
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
 
-	svc := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+	svc := newAdminTestService(userRepo, adminRepo, settingsRepo).
 		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	newSettings := map[string]string{
@@ -271,7 +276,12 @@ func (m *mockAdminRepo) CountAdmins(ctx context.Context) (int, error) {
 }
 
 // HasPendingWithdrawal сообщает о существующей открытой заявке на вывод.
-func (m *mockAdminRepo) HasPendingWithdrawal(ctx context.Context, userID uuid.UUID) (bool, error) {
+func (m *mockAdminRepo) HasPendingWithdrawal(ctx context.Context, q repository.Querier, userID uuid.UUID) (bool, error) {
+	for _, req := range m.withdrawals {
+		if req.UserID == userID && req.Status == "PENDING" {
+			return true, nil
+		}
+	}
 	return false, nil
 }
 
@@ -346,7 +356,7 @@ func (m *mockPenaltyRepo) GetFlags(ctx context.Context, q repository.Querier, us
 func TestAdminService_SoftBan(t *testing.T) {
 	userRepo := newMockRepo()
 	penalties := &mockPenaltyRepo{users: userRepo, reasons: map[uuid.UUID]string{}, by: map[uuid.UUID]*uuid.UUID{}}
-	svc := NewAdminService(userRepo, &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}, "secret", nil).
+	svc := newAdminTestService(userRepo, &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}).
 		WithPenalties(penalties)
 	ctx := context.Background()
 
@@ -398,7 +408,7 @@ func TestAdminService_OnlyAdminGrantsAdminRole(t *testing.T) {
 	roles := newFakeRoleRepo()
 	roles.roles["MANAGER"] = &repository.Role{Code: "MANAGER", Name: "Управляющий"}
 	roles.perms["MANAGER"] = []string{"roles.edit"}
-	srv := NewAdminService(userRepo, &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}, "test-secret", nil).
+	srv := newAdminTestService(userRepo, &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}).
 		WithRoles(roles)
 	ctx := context.Background()
 
@@ -416,5 +426,61 @@ func TestAdminService_OnlyAdminGrantsAdminRole(t *testing.T) {
 	}
 	if err := srv.UpdateUserRole(ctx, manager.ID, admin.ID, repository.RoleAdmin); err != nil {
 		t.Fatalf("администратор назначает ADMIN: %v", err)
+	}
+}
+
+// Фильтр списка пользователей следует справочнику ролей: MODERATOR и роль,
+// заведённая администратором, проходят; выдуманная — отказ по классу ввода.
+// Раньше набор был зашит тремя константами, и роли справочника отвергались.
+func TestAdminService_GetUsersRoleFilterFollowsCatalog(t *testing.T) {
+	ctx := context.Background()
+	// Справочник — единственный источник: MODERATOR в нём есть, потому что
+	// миграция 048 заводит его как системную роль; FINANCE завёл администратор.
+	roles := newFakeRoleRepo()
+	roles.roles[repository.RoleModerator] = &repository.Role{Code: repository.RoleModerator, Name: "Модератор", IsSystem: true}
+	roles.roles["FINANCE"] = &repository.Role{Code: "FINANCE", Name: "Финансист"}
+	svc := newAdminTestService(newMockRepo(), &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}}).
+		WithRoles(roles)
+
+	for _, role := range []string{repository.RoleModerator, "FINANCE", ""} {
+		if _, _, err := svc.GetUsers(ctx, 1, 20, role, "", ""); err != nil {
+			t.Errorf("role filter %q rejected: %v", role, err)
+		}
+	}
+	if _, _, err := svc.GetUsers(ctx, 1, 20, "NOPE", "", ""); !errors.Is(err, ErrValidation) {
+		t.Errorf("unknown role filter: expected ErrValidation, got %v", err)
+	}
+	if _, _, err := svc.GetUsers(ctx, 1, 20, "", "WEIRD", ""); !errors.Is(err, ErrValidation) {
+		t.Errorf("unknown status filter: expected ErrValidation, got %v", err)
+	}
+
+	// Без справочника действуют четыре системные роли — и только они.
+	bare := newAdminTestService(newMockRepo(), &mockAdminRepo{}, &mockSettingsRepo{settings: map[string]string{}})
+	if _, _, err := bare.GetUsers(ctx, 1, 20, repository.RoleModerator, "", ""); err != nil {
+		t.Errorf("system role MODERATOR rejected without catalog: %v", err)
+	}
+	if _, _, err := bare.GetUsers(ctx, 1, 20, "FINANCE", "", ""); !errors.Is(err, ErrValidation) {
+		t.Errorf("catalog role without catalog: expected ErrValidation, got %v", err)
+	}
+}
+
+// Ставка комиссии читается общим ридером настроек: отсутствующая или
+// нечитаемая — ноль, а «12.5» — 12.5.
+func TestAdminService_CommissionPercentReadsSetting(t *testing.T) {
+	ctx := context.Background()
+	for raw, want := range map[string]float64{"12.5": 12.5, "abc": 0, "": 0} {
+		settings := &mockSettingsRepo{settings: map[string]string{}}
+		if raw != "" {
+			settings.settings[SettingOrderCommissionPercent] = raw
+		}
+		svc := newAdminTestService(newMockRepo(), &mockAdminRepo{}, settings).
+			WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
+		c, err := svc.GetCommission(ctx)
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if c.Percent != want {
+			t.Errorf("%q: percent %v, want %v", raw, c.Percent, want)
+		}
 	}
 }

@@ -336,7 +336,7 @@ func TestAdminService_Extended(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "test-secret", nil).
+	srv := newAdminTestService(userRepo, adminRepo, settingsRepo).
 		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	u := &repository.User{ID: uuid.New(), Phone: "70000000000", Role: "CUSTOMER"}
@@ -359,7 +359,7 @@ func TestAdminService_Extended(t *testing.T) {
 	_, _ = srv.GetActiveShifts(context.Background())
 	_, _, _ = srv.GetOrders(context.Background(), repository.OrdersFilter{})
 
-	prof, err := srv.GetProfile(context.Background(), u.ID)
+	prof, err := NewProfileService(userRepo, nil).GetProfile(context.Background(), u.ID)
 	if err != nil || prof["phone"] != "70000000000" {
 		t.Errorf("expected user profile with phone, got %v", prof)
 	}
@@ -498,13 +498,13 @@ func TestAdminService_TopUpRequestAndSettings(t *testing.T) {
 	userRepo := newMockRepo()
 	adminRepo := &mockAdminRepo{requests: make(map[uuid.UUID]*repository.TopUpRequest)}
 	settingsRepo := &mockSettingsRepo{settings: make(map[string]string)}
-	srv := NewAdminService(userRepo, adminRepo, settingsRepo, "secret", nil).
+	srv := newAdminTestService(userRepo, adminRepo, settingsRepo).
 		WithLedger(NewLedger(&mockTransactionRepo{}, newMockAccounts()))
 
 	u := &repository.User{ID: uuid.New(), Phone: "79998887766"}
 	userRepo.users[u.Phone] = u
 
-	req, err := srv.CreateTopUpRequest(context.Background(), u.ID, money.FromRubles(300.0))
+	req, err := NewWalletService(userRepo, adminRepo, nil).CreateTopUpRequest(context.Background(), u.ID, money.FromRubles(300.0))
 	if err != nil || req.Amount != money.FromRubles(300) {
 		t.Fatalf("unexpected error creating top up request: %v", err)
 	}
