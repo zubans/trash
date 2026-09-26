@@ -1006,8 +1006,9 @@ func (s *OrderService) TipOrder(ctx context.Context, customerID, orderID uuid.UU
 // Фильтр — тот же canViewOrTakeOrder, что и у карты, списка ближайших и самой
 // ставки: раньше список проверял верификацию и возраст сам и показывал заказы,
 // по которым ставку затем отклоняли (бан, тихая блокировка, только для
-// модераторов, скрипт услуги, собственный заказ). Сверх предиката действует
-// правило аукционов: показываются только заказы верифицированных заказчиков.
+// модераторов, скрипт услуги, собственный заказ). Правило «аукцион только по
+// заказу верифицированного заказчика» живёт в самом предикате, поэтому список
+// и ставка отказывают по одним и тем же заказам.
 func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Context, executorID uuid.UUID) ([]*OrderView, error) {
 	orders, err := s.orderRepo.GetAvailableAuctionOrders(ctx)
 	if err != nil {
@@ -1030,11 +1031,7 @@ func (s *OrderService) GetAvailableConstructionOrdersForExecutor(ctx context.Con
 		if v.CustomerID == executorID {
 			continue
 		}
-		customer := customers[v.CustomerID]
-		if customer != nil && !customer.IsVerified() {
-			continue
-		}
-		if canViewOrTakeOrder(ctx, s.behaviors, blocked, viewer, customer, v.ServiceVariant) != nil {
+		if canViewOrTakeOrder(ctx, s.behaviors, blocked, viewer, customers[v.CustomerID], v.ServiceVariant) != nil {
 			continue
 		}
 		filtered = append(filtered, v)

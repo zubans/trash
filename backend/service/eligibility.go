@@ -63,6 +63,12 @@ func canCustomerOrderVariant(ctx context.Context, behaviors *Behaviors, blocks p
 	if variant.RequiresVerification && !customer.IsVerified() {
 		return customerRefusal("для этой услуги требуется подтверждённый аккаунт")
 	}
+	// Аукцион — только для заказчика с подтверждённой личностью: заказ
+	// неподтверждённого исполнители не увидят и ставку по нему не подадут
+	// (canViewOrTakeOrder), поэтому создавать его незачем.
+	if variant.IsAuction && !customer.IsVerified() {
+		return customerRefusal("аукцион доступен только заказчикам с подтверждённой личностью")
+	}
 	if err := behaviors.CanOrder(ctx, customer, variant); err != nil {
 		return behaviorRefusal(err, ErrCustomerNotEligible)
 	}
@@ -125,6 +131,8 @@ func canExecutorTakeOrder(executor *repository.User, variant *repository.Service
 // на всех кандидатов, вместо чтения по одному на каждую пару заказ×исполнитель.
 //
 // Правила:
+//   - Аукцион: заказ неверифицированного заказчика (или без строки заказчика)
+//     не виден никому, ставку по нему нельзя ни подать, ни принять.
 //   - Услуга только для модераторов: видеть и брать заказ может только
 //     MODERATOR; обычные проверки исполнителя не применяются (это доверенный персонал).
 //   - Скриптовая услуга: что скажет хук can_view_or_take её поведения, поверх
@@ -143,6 +151,13 @@ func canViewOrTakeOrder(ctx context.Context, behaviors *Behaviors, viewerBlocked
 	// он их не может — тем же отказом, что и любой недоступный заказ.
 	if viewerBlocked {
 		return ErrExecutorNotEligible
+	}
+	// Аукцион открыт только по заказу верифицированного заказчика. Правило
+	// одно для списка аукционов, подачи ставки и принятия ставки. Заказчик без
+	// строки здесь не «нет сведений», а отказ: подтверждённость без строки не
+	// установить.
+	if variant != nil && variant.IsAuction && (customer == nil || !customer.IsVerified()) {
+		return ErrAuctionCustomerNotVerified
 	}
 	if variant != nil && variant.ModeratorOnly {
 		if !viewer.HasRole(repository.RoleModerator) {

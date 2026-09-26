@@ -121,6 +121,10 @@ var (
 	ErrOrderNotBiddable = stateError("order is not open for bidding")
 	// ErrNotAuction — услуга заказа не аукционная: ставок по ней нет.
 	ErrNotAuction = ruleError("cannot bid on non-auction orders")
+	// ErrAuctionCustomerNotVerified — аукцион открыт только по заказу
+	// заказчика с подтверждённой личностью: иначе заказ не виден в списке, и
+	// ставку по нему нельзя ни подать, ни принять.
+	ErrAuctionCustomerNotVerified = ruleError("аукцион доступен только по заказу заказчика с подтверждённой личностью")
 
 	// ErrInsufficientBalance — на балансе не хватает на удержание или чаевые.
 	// Класс — repository.ErrInsufficientFunds, чтобы обработчик и тесты видели
