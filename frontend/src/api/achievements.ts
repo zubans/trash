@@ -1,5 +1,6 @@
 import api from '../services/api'
 import type { UserPerk } from './shop'
+import type { PageParams } from '../utils/pagination'
 
 // Геймификация исполнителя: значки, уровень и подарки. Письма, которыми о них
 // сообщают, живут в api/mail.ts.
@@ -253,8 +254,11 @@ export async function adminGetGifts(): Promise<(Gift & { free_codes: number })[]
   return Array.isArray(response.data) ? response.data : []
 }
 
-export async function adminSaveGift(code: string, gift: Partial<Gift>): Promise<void> {
-  await api.put(`/admin/gifts/${code}`, gift)
+// Ответ — строка из базы после сохранения: служебные поля тела сервер
+// игнорирует, поэтому верить стоит ему, а не отправленному.
+export async function adminSaveGift(code: string, gift: Partial<Gift>): Promise<Gift> {
+  const response = await api.put(`/admin/gifts/${code}`, gift)
+  return response.data
 }
 
 export async function adminAddGiftCodes(code: string, codes: string[]): Promise<number> {
@@ -267,8 +271,16 @@ export async function adminRedeemCoupon(coupon: string): Promise<UserGift> {
   return response.data
 }
 
-export async function adminGetIncidents(all = false): Promise<MoneyIncident[]> {
-  const response = await api.get('/admin/finances/incidents', { params: all ? { all: '1' } : {} })
+// Размер страницы инцидентов — прежний потолок списка на сервере.
+export const INCIDENTS_PAGE = 200
+
+export async function adminGetIncidents(
+  all = false,
+  page: PageParams = { limit: INCIDENTS_PAGE, offset: 0 },
+): Promise<MoneyIncident[]> {
+  const response = await api.get('/admin/finances/incidents', {
+    params: { ...(all ? { all: '1' } : {}), ...page },
+  })
   return Array.isArray(response.data) ? response.data : []
 }
 

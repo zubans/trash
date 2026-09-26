@@ -89,7 +89,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
-import api from '../../../services/api'
+import api, { formatApiError } from '../../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../../components/AddressAutocomplete.vue'
 
 type Step = 'intro' | 'form' | 'pending'
@@ -136,12 +136,7 @@ export default defineComponent({
       emit('close')
     }
 
-    const apiError = (err: any, fallback: string) => {
-      const data = err?.response?.data
-      if (typeof data === 'string' && data) return data
-      if (data?.error) return data.error
-      return fallback
-    }
+    const apiError = (err: any, fallback: string) => formatApiError(err, fallback)
 
     // Кнопка размещает заказ на услугу верификации — тот же, что заказчик берёт
     // из каталога, его выполняет модератор. Если адрес и данные уже есть в

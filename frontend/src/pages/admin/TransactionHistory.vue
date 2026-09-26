@@ -18,7 +18,8 @@
       <div class="toolbar">
         <div class="search-box">
           <i class="ph-bold ph-magnifying-glass"></i>
-          <input v-model="searchQuery" type="text" placeholder="Поиск по телефону или ID..." />
+          <!-- Идентификаторы (операции, заказа, админа) ищутся точным совпадением: нужен полный uuid. -->
+          <input v-model="searchQuery" type="text" placeholder="Телефон или полный ID…" />
         </div>
 
         <select v-model="typeFilter" class="filter-btn">
@@ -233,9 +234,14 @@ export default defineComponent({
           params: queryParams(PAGE_SIZE, (page.value - 1) * PAGE_SIZE),
         })
         transactions.value = response.data?.transactions || []
-        total.value = response.data?.total || 0
-        typeOptions.value = response.data?.types || []
-        periodKeys.value = response.data?.periods || []
+        // Счётчик и фасеты (типы, периоды) сервер отдаёт только с первой
+        // страницей выборки либо по просьбе total=1/facets=1: COUNT(*) и
+        // DISTINCT по журналу стоят дороже самой страницы. При листании их в
+        // ответе нет, поэтому прежние значения сохраняются, а не обнуляются —
+        // иначе со второй страницы пропадали бы счётчик и списки фильтров.
+        total.value = response.data?.total ?? total.value
+        typeOptions.value = response.data?.types ?? typeOptions.value
+        periodKeys.value = response.data?.periods ?? periodKeys.value
       } catch (err) {
         console.error('Error fetching transactions:', err)
       } finally {

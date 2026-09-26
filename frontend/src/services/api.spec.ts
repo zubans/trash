@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import axios from 'axios'
 import api, {
+  formatApiError,
+  isStaleStateError,
+  statusDetail,
   clearSession,
   storeSession,
   getRefreshToken,
@@ -226,5 +229,79 @@ describe('подготовка сессии к рукопожатию', () => {
     })
 
     await expect(ensureFreshSession()).resolves.toBe('ended')
+  })
+})
+
+// Ответ с ошибкой в той форме, в какой его отдаёт axios.
+const httpError = (status: number, data: unknown) => ({ response: { status, data } })
+
+describe('текст ошибки для человека (formatApiError)', () => {
+  it('показывает русский текст сервера на 404/403/409/422/503 как есть', () => {
+    expect(formatApiError(httpError(404, 'заказ не найден'), 'Ошибка')).toBe('заказ не найден')
+    expect(formatApiError(httpError(403, 'доступ запрещён\n'), 'Ошибка')).toBe('доступ запрещён')
+    expect(formatApiError(httpError(409, 'заказ уже взят другим исполнителем'), 'Ошибка')).toBe(
+      'заказ уже взят другим исполнителем',
+    )
+    expect(formatApiError(httpError(422, 'недостаточно средств'), 'Ошибка')).toBe('недостаточно средств')
+    expect(formatApiError(httpError(503, 'услуга временно недоступна'), 'Ошибка')).toBe(
+      'услуга временно недоступна',
+    )
+  })
+
+  it('не показывает «internal error» 500, а дописывает к своему тексту понятную причину', () => {
+    const text = formatApiError(httpError(500, 'internal error\n'), 'Ошибка отмены')
+    expect(text).toBe('Ошибка отмены: сбой на сервере, попробуйте позже')
+    expect(text).not.toContain('internal')
+  })
+
+  it('без своего текста у вызывающего отдаёт пояснение по коду с заглавной буквы', () => {
+    expect(formatApiError(httpError(500, 'internal error'))).toBe('Сбой на сервере, попробуйте позже')
+    expect(formatApiError(httpError(409, ''))).toBe('Данные изменились, обновите страницу')
+  })
+
+  it('прячет HTML-страницы прокси и голый «Bad request»', () => {
+    expect(formatApiError(httpError(502, '<html><body>Bad Gateway</body></html>'), 'Не сохранено')).toBe(
+      'Не сохранено: сервер недоступен, попробуйте позже',
+    )
+    expect(formatApiError(httpError(400, 'Bad request\n'), 'Не сохранено')).toBe('Не сохранено: запрос отклонён')
+    // Осмысленный текст 400 (каталог услуг) остаётся как был.
+    expect(formatApiError(httpError(400, 'код услуги уже занят'), 'Не сохранено')).toBe('код услуги уже занят')
+  })
+
+  it('обрыв связи называет обрывом, а не ошибкой сервера', () => {
+    expect(formatApiError(new Error('Network Error'), 'Не отправлено')).toBe('Не отправлено: нет связи с сервером')
+  })
+
+  it('у JSON-ошибок берёт message, а машинный код в error не показывает', () => {
+    expect(
+      formatApiError(httpError(409, { error: 'passport_required', message: 'Внесите паспорт заново' }), 'Ошибка'),
+    ).toBe('Внесите паспорт заново')
+    expect(formatApiError(httpError(403, { error: 'account_soft_banned' }), 'Ошибка')).toBe(
+      'Ошибка: действие недоступно',
+    )
+    // Русский текст в error (подтверждение почты) показывается.
+    expect(formatApiError(httpError(400, { error: 'Ссылка устарела' }), 'Ошибка')).toBe('Ссылка устарела')
+  })
+})
+
+describe('пояснение по коду ответа (statusDetail)', () => {
+  it('знает классы ошибок бэкенда и сводит незнакомые 5xx к сбою сервера', () => {
+    expect(statusDetail(404)).toBe('не найдено')
+    expect(statusDetail(409)).toBe('данные изменились, обновите страницу')
+    expect(statusDetail(422)).toBe('проверьте введённые данные')
+    expect(statusDetail(507)).toBe('сбой на сервере, попробуйте позже')
+    expect(statusDetail(undefined)).toBe('нет связи с сервером')
+    expect(statusDetail(418)).toBe('')
+  })
+})
+
+describe('устаревшая карточка (isStaleStateError)', () => {
+  it('404 и 409 требуют перечитать данные, прочие коды — нет', () => {
+    expect(isStaleStateError(httpError(404, 'заказ не найден'))).toBe(true)
+    expect(isStaleStateError(httpError(409, 'заказ уже взят другим исполнителем'))).toBe(true)
+    expect(isStaleStateError(httpError(403, 'доступ запрещён'))).toBe(false)
+    expect(isStaleStateError(httpError(422, 'недостаточно средств'))).toBe(false)
+    expect(isStaleStateError(httpError(500, 'internal error'))).toBe(false)
+    expect(isStaleStateError(new Error('Network Error'))).toBe(false)
   })
 })

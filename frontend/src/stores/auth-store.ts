@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import api, { getCookie, clearSession, storeSession } from '../services/api'
+import api, { getCookie, clearSession, storeSession, formatApiError } from '../services/api'
 
 // CurrentUser повторяет полезную нагрузку GET /auth/me. Это единственный
 // источник истины о вошедшем пользователе на всех экранах: страницы не должны
@@ -261,7 +261,7 @@ export const useAuthStore = defineStore('auth', {
       } catch (err: any) {
         // Прежнее значение сохраняется: неудачное обновление не должно обнулять
         // баланс, который мгновение назад был верным.
-        this.userError = err?.response?.data || 'Не удалось обновить профиль'
+        this.userError = formatApiError(err, 'Не удалось обновить профиль')
         return this.user
       } finally {
         this.userLoading = false

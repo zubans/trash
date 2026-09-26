@@ -1,4 +1,5 @@
 import api from '../services/api'
+import type { PageParams } from '../utils/pagination'
 
 // Внутренняя почта: ящик пользователя и переписка с администрацией.
 //
@@ -49,8 +50,16 @@ export interface MailDialog {
   total: number
 }
 
-export async function getMail(): Promise<{ messages: MailMessage[]; unread: number }> {
-  const response = await api.get('/user/mail')
+// Размеры страниц — прежние потолки списков на сервере: первая страница та
+// же, что до постраничной выдачи, а дальше списки дочитываются по offset.
+export const MAIL_INBOX_PAGE = 100
+export const MAIL_DIALOGS_PAGE = 200
+export const MAIL_USER_PAGE = 500
+
+export async function getMail(
+  page: PageParams = { limit: MAIL_INBOX_PAGE, offset: 0 },
+): Promise<{ messages: MailMessage[]; unread: number }> {
+  const response = await api.get('/user/mail', { params: page })
   return { messages: response.data?.messages ?? [], unread: response.data?.unread ?? 0 }
 }
 
@@ -85,9 +94,10 @@ export async function deleteMail(id: string): Promise<void> {
 
 export async function adminGetMailDialogs(
   onlyUnanswered = false,
+  page: PageParams = { limit: MAIL_DIALOGS_PAGE, offset: 0 },
 ): Promise<{ dialogs: MailDialog[]; unread: number }> {
   const response = await api.get('/admin/mail/dialogs', {
-    params: onlyUnanswered ? { unanswered: '1' } : {},
+    params: { ...(onlyUnanswered ? { unanswered: '1' } : {}), ...page },
   })
   return { dialogs: response.data?.dialogs ?? [], unread: response.data?.unread ?? 0 }
 }
@@ -99,8 +109,9 @@ export async function adminGetMailUnread(): Promise<number> {
 
 export async function adminGetUserMail(
   userId: string,
+  page: PageParams = { limit: MAIL_USER_PAGE, offset: 0 },
 ): Promise<{ messages: MailMessage[]; user: { id: string; full_name: string; phone: string } }> {
-  const response = await api.get(`/admin/mail/users/${userId}`)
+  const response = await api.get(`/admin/mail/users/${userId}`, { params: page })
   return {
     messages: Array.isArray(response.data?.messages) ? response.data.messages : [],
     user: response.data?.user ?? { id: userId, full_name: '', phone: '' },

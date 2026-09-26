@@ -55,7 +55,7 @@
 
 <script lang="ts">
 import { defineComponent, onMounted, ref } from 'vue'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import UserHistoryModal from './UserHistoryModal.vue'
 
 // Очередь заявок на статус «проверенный»
@@ -94,7 +94,7 @@ export default defineComponent({
       try {
         requests.value = (await api.get('/admin/check-requests')).data || []
       } catch (err: any) {
-        error.value = err.response?.data?.message || 'Не удалось загрузить заявки'
+        error.value = formatApiError(err, 'Не удалось загрузить заявки')
       } finally {
         loading.value = false
       }

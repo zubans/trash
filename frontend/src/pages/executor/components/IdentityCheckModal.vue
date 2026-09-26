@@ -86,7 +86,7 @@
 <script lang="ts">
 import { defineComponent, onMounted, reactive, ref, type PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
-import api from '../../../services/api'
+import api, { formatApiError } from '../../../services/api'
 import PassportFields from '../../../components/passport/PassportFields.vue'
 import {
   emptyPassport,
@@ -282,7 +282,7 @@ export default defineComponent({
           errorText.value = data.message
           return
         }
-        errorText.value = typeof data === 'string' && data ? data : 'Не удалось отправить данные'
+        errorText.value = formatApiError(err, 'Не удалось отправить данные')
       } finally {
         busy.value = false
       }

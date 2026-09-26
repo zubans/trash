@@ -15,19 +15,17 @@
 
         <div class="filters">
           <div class="filter-select-wrapper">
-            <select v-model="selectedRole" class="btn-filter-select" @change="fetchUsers">
-              <option value="">Все роли</option>
-              <option value="CUSTOMER">CUSTOMER</option>
-              <option value="EXECUTOR">EXECUTOR</option>
-              <option value="ADMIN">ADMIN</option>
+            <!-- Роли — из справочника (GET /admin/roles): фильтр принимает любую
+                 роль справочника, а неизвестную сервер отвергает с 422. -->
+            <select v-model="selectedRole" class="btn-filter-select" @change="reloadUsers">
+              <option v-for="o in roleOptions" :key="o.value" :value="o.value">{{ o.text }}</option>
             </select>
           </div>
 
           <div class="filter-select-wrapper">
-            <select v-model="selectedStatus" class="btn-filter-select" @change="fetchUsers">
-              <option value="">Все статусы</option>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="BLOCKED">BLOCKED</option>
+            <!-- Только статусы, которые знает сервер: прежний BLOCKED он отвергал с 422. -->
+            <select v-model="selectedStatus" class="btn-filter-select" @change="reloadUsers">
+              <option v-for="o in statusOptions" :key="o.value" :value="o.value">{{ o.text }}</option>
             </select>
           </div>
 
@@ -36,6 +34,8 @@
           </button>
         </div>
       </div>
+
+      <p v-if="listError" class="list-error">{{ listError }}</p>
 
       <!-- Современная табличная сетка -->
       <div class="grid-table">
@@ -98,6 +98,7 @@
           <div class="cell-actions">
             <!-- Кнопка-иконка быстрого пополнения -->
             <button
+              v-if="canTopUp"
               class="btn-ghost topup"
               data-tooltip="Пополнить"
               @click="openTopUpModal(u)"
@@ -131,7 +132,7 @@
                 <button class="dropdown-item" @click="openNameModal(u)">
                   <i class="ph-bold ph-user"></i> Личные данные
                 </button>
-                <button class="dropdown-item" @click="openTopUpModal(u)">
+                <button v-if="canTopUp" class="dropdown-item" @click="openTopUpModal(u)">
                   <i class="ph-bold ph-wallet"></i> Пополнить баланс
                 </button>
                 <button class="dropdown-item" @click="openRolesModal(u)">
@@ -248,7 +249,7 @@
           </div>
         </div>
 
-        <div class="uc-quick">
+        <div v-if="canTopUp" class="uc-quick">
           <button class="uc-quick-btn topup" @click="openTopUpModal(u)">
             <i class="ph-bold ph-plus-circle"></i> Пополнить
           </button>
@@ -440,7 +441,7 @@ import { defineComponent, ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth-store'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
 import { getRoles } from '../../api/roles'
 import UserHistoryModal from './UserHistoryModal.vue'
@@ -550,6 +551,11 @@ export default defineComponent({
     const canSeeAchievements = computed(() => authStore.can('achievements.view'))
 
     const canSeeUsers = computed(() => authStore.can('users.view'))
+    // Пополнение баланса — движение денег, а не правка карточки: эндпоинт
+    // POST /admin/users/{id}/balance стоит за правом topups.edit (раньше
+    // users.edit). Показываем кнопку по тому же праву, иначе она была бы видна
+    // тому, кто получит от неё 403.
+    const canTopUp = computed(() => authStore.can('topups.edit'))
     // Покупки и привилегии в магазине — вкладка истории для тех, кто видит заказы магазина.
     const canSeeShop = computed(() => authStore.can('shop_orders.view'))
     const canSeePassport = computed(() => authStore.can('checks.view'))
@@ -574,7 +580,7 @@ export default defineComponent({
     // мультиролей, — иначе роль, заведённую администратором, можно было бы
     // подключить, но не найти по ней в списке.
     const roleOptions = computed(() => [
-      { text: t('roles.all'), value: '' },
+      { text: 'Все роли', value: '' },
       ...allRoles.value.map((role) => ({ text: role.label, value: role.value })),
     ])
 
@@ -583,7 +589,7 @@ export default defineComponent({
     )
 
     const statusOptions = computed(() => [
-      { text: t('statuses.all'), value: '' },
+      { text: 'Все статусы', value: '' },
       { text: t('statuses.active'), value: 'ACTIVE' },
       { text: t('statuses.softBanned'), value: 'SOFT_BANNED' },
       { text: t('statuses.banned'), value: 'BANNED' },
@@ -605,8 +611,13 @@ export default defineComponent({
 
     const totalPages = computed(() => Math.ceil(totalUsers.value / limit.value) || 1)
 
+    // Ошибка загрузки списка. Без неё отказ сервера (422 на негодный фильтр,
+    // 500) выглядел как пустой список «Пользователи не найдены».
+    const listError = ref('')
+
     const fetchUsers = async () => {
       loading.value = true
+      listError.value = ''
       try {
         const response = await api.get('/admin/users', {
           params: {
@@ -621,6 +632,7 @@ export default defineComponent({
         totalUsers.value = response.data.total || 0
       } catch (err) {
         console.error('Error fetching users:', err)
+        listError.value = formatApiError(err, 'Не удалось загрузить пользователей')
       } finally {
         loading.value = false
       }
@@ -633,6 +645,13 @@ export default defineComponent({
         page.value = 1
         fetchUsers()
       }, 300)
+    }
+
+    // Смена фильтра начинает с первой страницы: на пятой странице прежней
+    // выборки новой может и не быть.
+    const reloadUsers = () => {
+      page.value = 1
+      fetchUsers()
     }
 
     const clearFilters = () => {
@@ -663,7 +682,7 @@ export default defineComponent({
         await api.post(`/admin/users/${user.id}/status`, { status: 'SOFT_BANNED', reason })
         user.status = 'SOFT_BANNED'
       } catch (err: any) {
-        alert(err.response?.data || t('users.updateStatusError'))
+        alert(formatApiError(err, t('users.updateStatusError')))
       }
     }
 
@@ -673,7 +692,7 @@ export default defineComponent({
         await api.post(`/admin/users/${user.id}/verified`, { verified: newVerified })
         user.is_verified = newVerified
       } catch (err: any) {
-        alert(err.response?.data || 'Ошибка обновления верификации')
+        alert(formatApiError(err, 'Ошибка обновления верификации'))
         console.error(err)
       }
     }
@@ -739,7 +758,7 @@ export default defineComponent({
         }
         closeRolesModal()
       } catch (err: any) {
-        alert(err.response?.data || 'Ошибка обновления ролей')
+        alert(formatApiError(err, 'Ошибка обновления ролей'))
         console.error(err)
       }
     }
@@ -764,7 +783,7 @@ export default defineComponent({
         selectedUser.value.role = roleValue
         closeRoleModal()
       } catch (err: any) {
-        alert(err.response?.data || t('users.updateRoleError'))
+        alert(formatApiError(err, t('users.updateRoleError')))
         console.error(err)
       }
     }
@@ -847,7 +866,7 @@ export default defineComponent({
         selectedUser.value.patronymic = newPatronymic.value.trim()
         closeNameModal()
       } catch (err: any) {
-        alert(err.response?.data || 'Ошибка обновления личных данных')
+        alert(formatApiError(err, 'Ошибка обновления личных данных'))
         console.error(err)
       }
     }
@@ -874,7 +893,7 @@ export default defineComponent({
         selectedUser.value.balance = (selectedUser.value.balance || 0) + topUpAmount.value
         closeTopUpModal()
       } catch (err: any) {
-        alert(err.response?.data || t('users.topUpError'))
+        alert(formatApiError(err, t('users.topUpError')))
         console.error(err)
       }
     }
@@ -909,7 +928,7 @@ export default defineComponent({
         selectedUser.value.address = chosen.value.trim()
         closeAddressModal()
       } catch (err: any) {
-        alert(err.response?.data || t('users.updateAddressError'))
+        alert(formatApiError(err, t('users.updateAddressError')))
         console.error(err)
       }
     }
@@ -969,6 +988,7 @@ export default defineComponent({
       canSeeUsers,
       canSeeShop,
       canSeePassport,
+      canTopUp,
       softBanUser,
       totalUsers,
       page,
@@ -986,6 +1006,8 @@ export default defineComponent({
       getAvatarClass,
       getAvatarChar,
       fetchUsers,
+      reloadUsers,
+      listError,
       debouncedFetch,
       clearFilters,
       toggleUserStatus,
@@ -1743,6 +1765,12 @@ export default defineComponent({
 .uc-actions button.danger i {
   color: #ef4444;
 }
+.list-error {
+  margin: 0 0 12px;
+  color: #b91c1c;
+  font-size: 14px;
+}
+
 .uc-empty {
   text-align: center;
   color: #94a3b8;

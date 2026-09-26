@@ -211,6 +211,7 @@
 
 <script lang="ts">
 import { computed, defineComponent, onMounted, reactive, ref } from 'vue'
+import { formatApiError } from '../../services/api'
 
 import PixelAchievementIcon from '../../components/PixelAchievementIcon.vue'
 import {
@@ -319,10 +320,10 @@ export default defineComponent({
     }
 
     const failWith = (e: unknown, fallback: string) => {
-      const message = (e as { response?: { data?: string } })?.response?.data
-      // Ошибка компиляции приходит текстом Starlark — с файлом, строкой и
-      // сутью. Её и показываем как есть, а не «не удалось сохранить».
-      errorMsg.value = (typeof message === 'string' && message.trim()) || fallback
+      // Ошибка компиляции приходит текстом Starlark (422) — с файлом, строкой
+      // и сутью. Её и показываем как есть, а не «не удалось сохранить»;
+      // служебный текст 500 formatApiError заменяет запасным.
+      errorMsg.value = formatApiError(e, fallback)
     }
 
     const payloadFor = (item: AdminAchievement, isActive: boolean): AchievementPayload => {

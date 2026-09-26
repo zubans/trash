@@ -54,7 +54,7 @@
 import { defineComponent, ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
-import api from '../../services/api'
+import api, { formatApiError, isStaleStateError } from '../../services/api'
 
 export default defineComponent({
   name: 'WithdrawalRequests',
@@ -110,7 +110,9 @@ export default defineComponent({
         await api.post(`/admin/finances/withdrawals/${reqId}/${endpoint}`)
         fetchRequests() // Перезагрузка
       } catch (err: any) {
-        alert(err.response?.data || t('withdrawals.operationFailed'))
+        alert(formatApiError(err, t('withdrawals.operationFailed')))
+        // 404/409 — заявку уже решил другой администратор: список устарел.
+        if (isStaleStateError(err)) fetchRequests()
       } finally {
         selectedRequest.value = null
         showConfirm.value = false

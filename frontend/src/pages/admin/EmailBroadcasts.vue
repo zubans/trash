@@ -126,7 +126,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 
 const targetGroup = ref<'CUSTOMERS' | 'EXECUTORS' | 'CUSTOM_EMAILS'>('CUSTOMERS')
 const customEmailsInput = ref('')
@@ -177,7 +177,7 @@ async function sendBroadcast() {
     const response = await api.post('/admin/broadcast-email', payload)
     result.value = response.data
   } catch (err: any) {
-    error.value = err.response?.data || err.message || 'Произошла ошибка при выполнении рассылки'
+    error.value = formatApiError(err, 'Произошла ошибка при выполнении рассылки')
   } finally {
     sending.value = false
   }

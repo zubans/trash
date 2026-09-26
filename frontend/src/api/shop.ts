@@ -1,4 +1,4 @@
-import api from '../services/api'
+import api, { formatApiError } from '../services/api'
 import type { ExecutorLevel } from './achievements'
 import type { UserGift } from './achievements'
 
@@ -198,10 +198,7 @@ export function shopError(err: any): ShopApiError | null {
 // Текст отказа для человека: перевод по коду, иначе текст сервера, иначе запасной.
 export function shopErrorText(err: any, t: (key: string) => string, fallback: string): string {
   const e = shopError(err)
-  if (!e) {
-    const data = err?.response?.data
-    return typeof data === 'string' && data.trim() ? data : fallback
-  }
+  if (!e) return formatApiError(err, fallback)
   const key = `shop.errors.${e.error}`
   const translated = t(key)
   return translated !== key ? translated : e.message || fallback

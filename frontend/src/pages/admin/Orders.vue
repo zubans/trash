@@ -22,7 +22,12 @@
 
         <div class="search-box">
           <i class="ph-bold ph-magnifying-glass"></i>
-          <input v-model="searchQuery" type="text" placeholder="Поиск по телефону или ID..." />
+          <!-- Идентификатор ищется точным совпадением, поэтому вводить нужно uuid целиком. -->
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Телефон, услуга, адрес или полный ID…"
+          />
         </div>
 
         <select v-model="serviceFilter" class="filter-btn">
@@ -153,7 +158,7 @@
 import { defineComponent, ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth-store'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import { formatPhoneMask } from '../../utils/phoneMask'
 import {
   ORDER_STATUS_LABELS,
@@ -292,16 +297,23 @@ export default defineComponent({
       offset,
     })
 
-    const fetchOrders = async () => {
+    // Счётчик и фасеты (услуги, периоды) сервер кладёт в ответ только на первой
+    // странице выборки либо по явной просьбе total=1/facets=1: COUNT(*) и два
+    // DISTINCT-прохода стоят не меньше самой страницы. Поэтому при листании их
+    // в ответе нет, и прежние значения сохраняются (`??`), а не обнуляются.
+    // Свежий счётчик просим только после действия над заказом: заказ уходит из
+    // группы статусов, и число страниц меняется под пользователем.
+    const fetchOrders = async (opts: { freshTotal?: boolean } = {}) => {
       loading.value = true
+      const offset = (page.value - 1) * PAGE_SIZE
+      const params: Record<string, unknown> = queryParams(PAGE_SIZE, offset)
+      if (offset > 0 && opts.freshTotal) params.total = 1
       try {
-        const response = await api.get('/admin/orders', {
-          params: queryParams(PAGE_SIZE, (page.value - 1) * PAGE_SIZE),
-        })
+        const response = await api.get('/admin/orders', { params })
         orders.value = response.data?.orders || []
-        total.value = response.data?.total || 0
-        serviceOptions.value = response.data?.services || []
-        periodKeys.value = response.data?.periods || []
+        total.value = response.data?.total ?? total.value
+        serviceOptions.value = response.data?.services ?? serviceOptions.value
+        periodKeys.value = response.data?.periods ?? periodKeys.value
       } catch (err) {
         console.error('Error fetching orders:', err)
       } finally {
@@ -370,13 +382,11 @@ export default defineComponent({
       try {
         await returnOrderToWork(o.id)
         actionMsg.value = 'Заказ возвращён в работу.'
-        await fetchOrders()
+        await fetchOrders({ freshTotal: true })
       } catch (err: any) {
         actionIsError.value = true
         actionMsg.value =
-          typeof err?.response?.data === 'string' && err.response.data
-            ? err.response.data
-            : 'Не удалось вернуть заказ в работу'
+          formatApiError(err, 'Не удалось вернуть заказ в работу')
       } finally {
         returning.value = ''
       }

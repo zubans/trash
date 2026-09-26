@@ -442,6 +442,7 @@
 
 <script lang="ts">
 import { computed, defineComponent, PropType, reactive, ref, watch } from 'vue'
+import { formatApiError } from '../../services/api'
 import { useI18n } from 'vue-i18n'
 import {
   getUserOrders,
@@ -598,8 +599,7 @@ export default defineComponent({
       catalog.value.find((item) => item.code === code)?.title || code
 
     const fail = (err: any, fallback: string) => {
-      const data = err?.response?.data
-      errorMsg.value = (typeof data === 'string' ? data : data?.error) || fallback
+      errorMsg.value = formatApiError(err, fallback)
     }
 
     const loadAchievements = async () => {
@@ -766,7 +766,9 @@ export default defineComponent({
         await load()
       } catch (err: any) {
         const data = err?.response?.data
-        errorMsg.value = data?.fields ? Object.values(data.fields).join('; ') : data?.message || 'Не удалось выполнить действие'
+        errorMsg.value = data?.fields
+          ? Object.values(data.fields).join('; ')
+          : formatApiError(err, 'Не удалось выполнить действие')
       } finally {
         busy.value = false
       }

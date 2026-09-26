@@ -112,7 +112,7 @@
 import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth-store'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 
 export default defineComponent({
   name: 'PlatformCommission',
@@ -158,7 +158,7 @@ export default defineComponent({
         const response = await api.get('/admin/finances/commission')
         apply(response.data)
       } catch (err: any) {
-        errorMsg.value = err.response?.data || t('commission.loadFailed')
+        errorMsg.value = formatApiError(err, t('commission.loadFailed'))
       } finally {
         loading.value = false
       }
@@ -180,7 +180,7 @@ export default defineComponent({
         amount.value = 0
         successMsg.value = t('commission.success')
       } catch (err: any) {
-        errorMsg.value = err.response?.data || t('commission.payoutFailed')
+        errorMsg.value = formatApiError(err, t('commission.payoutFailed'))
       } finally {
         submitting.value = false
         showConfirm.value = false

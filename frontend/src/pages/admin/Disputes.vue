@@ -159,7 +159,7 @@ import {
   type DisputeDecision,
   type DisputeEvidence,
 } from '../../api/disputes'
-import { resolveFileUrl } from '../../services/api'
+import { resolveFileUrl, formatApiError } from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
 import {
   CLOSURE_LABELS,
@@ -199,7 +199,7 @@ export default defineComponent({
       try {
         disputes.value = await listDisputes(status.value)
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось загрузить споры'
+        errorMsg.value = formatApiError(err, 'Не удалось загрузить споры')
       } finally {
         loading.value = false
       }
@@ -217,7 +217,7 @@ export default defineComponent({
       try {
         evidence.value = await getDisputeEvidence(item.id)
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось загрузить доказательства'
+        errorMsg.value = formatApiError(err, 'Не удалось загрузить доказательства')
       } finally {
         evidenceLoading.value = false
       }
@@ -236,7 +236,7 @@ export default defineComponent({
         errorMsg.value =
           err.response?.status === 409
             ? 'Спор уже закрыт — заказчиком, исполнителем или другим арбитром. Список обновлён.'
-            : err.response?.data || 'Не удалось закрыть спор'
+            : formatApiError(err, 'Не удалось закрыть спор')
         if (err.response?.status === 409) await load()
       } finally {
         busyId.value = ''

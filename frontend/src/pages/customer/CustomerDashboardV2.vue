@@ -529,7 +529,7 @@ import SupportChatModal from '../../components/SupportChatModal.vue'
 import SkeletonList from '../../components/SkeletonList.vue'
 import { useStorefront } from '../../composables/useShop'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
-import api, { pollIntervalMs } from '../../services/api'
+import api, { pollIntervalMs, formatApiError, isStaleStateError } from '../../services/api'
 import { getMailUnread } from '../../api/mail'
 import { useCachedResource } from '../../composables/useCachedResource'
 import { acceptPresentedOrders } from '../../components/order/cachedOrders'
@@ -896,7 +896,7 @@ export default defineComponent({
         await fetchProfile()
         await fetchOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка создания заказа'
+        errorMsg.value = formatApiError(err, 'Ошибка создания заказа')
       } finally {
         creatingOrder.value = false
       }
@@ -927,7 +927,8 @@ export default defineComponent({
           openReviewModal(order)
         }
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка подтверждения'
+        errorMsg.value = formatApiError(err, 'Ошибка подтверждения')
+        if (isStaleStateError(err)) await fetchOrders()
       }
     }
 
@@ -959,7 +960,9 @@ export default defineComponent({
         successMsg.value = 'Заказ отменен'
         await fetchOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка отмены'
+        errorMsg.value = formatApiError(err, 'Ошибка отмены')
+        // Заказ успел уйти в работу или закрыться — показываем его настоящее состояние.
+        if (isStaleStateError(err)) await fetchOrders()
       }
     }
 
@@ -970,7 +973,7 @@ export default defineComponent({
         successMsg.value = 'Заявка отправлена'
         showTopUpModal.value = false
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка запроса'
+        errorMsg.value = formatApiError(err, 'Ошибка запроса')
       } finally {
         submitting.value = false
       }
@@ -1442,7 +1445,7 @@ export default defineComponent({
           }
         }
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка отправки сообщения'
+        errorMsg.value = formatApiError(err, 'Ошибка отправки сообщения')
       }
     }
 
@@ -1527,7 +1530,7 @@ export default defineComponent({
         editingAddressId.value = null
       } catch (err: any) {
         addressError.value =
-          err?.response?.data?.error || err?.response?.data || 'Не удалось сохранить адрес'
+          formatApiError(err, 'Не удалось сохранить адрес')
       } finally {
         addressSaving.value = false
       }

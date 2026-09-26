@@ -75,6 +75,17 @@
             <i class="ph ph-trash"></i>
           </button>
         </div>
+
+        <button
+          v-if="hasMore"
+          type="button"
+          class="btn-more"
+          :disabled="loadingMore"
+          @click="loadMore"
+        >
+          {{ loadingMore ? 'Загружаем…' : 'Показать ещё' }}
+        </button>
+        <div v-if="moreError" class="state-note error">{{ moreError }}</div>
       </div>
     </div>
 
@@ -136,10 +147,13 @@
 
 <script lang="ts">
 import { computed, defineComponent, nextTick, onMounted, ref } from 'vue'
+import { formatApiError } from '../services/api'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth-store'
 
+import { appendPage, hasMorePages } from '../utils/pagination'
 import {
+  MAIL_INBOX_PAGE,
   deleteMail,
   getMail,
   getMailThread,
@@ -178,17 +192,41 @@ export default defineComponent({
     const replyError = ref('')
     const sending = ref(false)
 
+    // Ящик приходит страницами по MAIL_INBOX_PAGE писем, свежие первыми.
+    // Следующая страница есть, пока предыдущая пришла полной.
+    const hasMore = ref(false)
+    const loadingMore = ref(false)
+    const moreError = ref('')
+
     const load = async () => {
       loading.value = true
       error.value = ''
+      moreError.value = ''
       try {
-        const inbox = await getMail()
+        const inbox = await getMail({ limit: MAIL_INBOX_PAGE, offset: 0 })
         messages.value = inbox.messages
         unread.value = inbox.unread
+        hasMore.value = hasMorePages(inbox.messages.length, MAIL_INBOX_PAGE)
       } catch {
         error.value = 'Не удалось загрузить почту. Попробуйте обновить страницу.'
       } finally {
         loading.value = false
+      }
+    }
+
+    const loadMore = async () => {
+      if (loadingMore.value) return
+      loadingMore.value = true
+      moreError.value = ''
+      try {
+        const inbox = await getMail({ limit: MAIL_INBOX_PAGE, offset: messages.value.length })
+        messages.value = appendPage(messages.value, inbox.messages, (m) => m.id)
+        unread.value = inbox.unread
+        hasMore.value = hasMorePages(inbox.messages.length, MAIL_INBOX_PAGE)
+      } catch (err: any) {
+        moreError.value = formatApiError(err, 'Не удалось загрузить письма')
+      } finally {
+        loadingMore.value = false
       }
     }
 
@@ -281,9 +319,7 @@ export default defineComponent({
         scrollThreadDown()
       } catch (err: any) {
         replyError.value =
-          typeof err?.response?.data === 'string' && err.response.data
-            ? err.response.data
-            : 'Не удалось отправить ответ. Попробуйте ещё раз.'
+          formatApiError(err, 'Не удалось отправить ответ. Попробуйте ещё раз.')
       } finally {
         sending.value = false
       }
@@ -363,6 +399,10 @@ export default defineComponent({
       unread,
       loading,
       error,
+      hasMore,
+      loadingMore,
+      moreError,
+      loadMore,
       thread,
       threadLoading,
       threadBody,
@@ -466,6 +506,22 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.btn-more {
+  align-self: center;
+  border: none;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 18px;
+  font-size: 14px;
+  color: #4b5563;
+  cursor: pointer;
+}
+
+.btn-more:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .mail-card {

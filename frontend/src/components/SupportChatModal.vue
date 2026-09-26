@@ -93,6 +93,7 @@
 
       <!-- Строка ввода — единая скруглённая «пилюля», как в чате заказа -->
       <div v-else class="support-input-bar">
+        <p v-if="sendError" class="send-error">{{ sendError }}</p>
         <form class="chat-pill" @submit.prevent="sendMessage">
           <button
             type="button"
@@ -134,7 +135,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useScrollLock } from '../composables/useScrollLock'
-import api, { resolveFileUrl } from '../services/api'
+import api, { formatApiError, resolveFileUrl } from '../services/api'
 import { useAuthStore } from '../stores/auth-store'
 import { Capacitor } from '@capacitor/core'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
@@ -165,6 +166,10 @@ export default defineComponent({
     const chatId = ref<string | null>(null)
     const messages = ref<any[]>([])
     const inputText = ref('')
+    // Отказ отправки: 422 — пустой или слишком длинный текст, 403 — чат закрыт
+    // или заблокирован, 500 — сбой. Раньше ошибка уходила только в консоль, а
+    // набранный текст пропадал.
+    const sendError = ref('')
     const messagesContainerRef = ref<any>(null)
     const fileInputRef = ref<HTMLInputElement | null>(null)
     const isBanned = ref(false)
@@ -205,6 +210,9 @@ export default defineComponent({
     const isImageAttachment = (msg: any) => {
       if (!msg) return false
       if (msg.file_type === 'image') return true
+      // Тип вложения сервер определяет по содержимому: документ в
+      // /uploads/support/ — не картинка, хоть путь и начинается с /uploads/.
+      if (msg.file_type) return false
       const path = msg.file_url || msg.content || ''
       const url = path.toLowerCase()
       return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.webp') || url.endsWith('.gif') || url.startsWith('/uploads/')
@@ -346,6 +354,7 @@ export default defineComponent({
       if (!inputText.value.trim() || !chatId.value || sending.value) return
       const text = inputText.value.trim()
       inputText.value = ''
+      sendError.value = ''
       sending.value = true
 
       try {
@@ -356,6 +365,8 @@ export default defineComponent({
         }
       } catch (err) {
         console.error('[SupportChatModal] send message failed:', err)
+        sendError.value = formatApiError(err, 'Не удалось отправить сообщение')
+        if (!inputText.value) inputText.value = text
       } finally {
         sending.value = false
       }
@@ -411,6 +422,7 @@ export default defineComponent({
       if (!target.files || target.files.length === 0 || !chatId.value) return
       let file = target.files[0]
       uploading.value = true
+      sendError.value = ''
 
       try {
         if (file.type.startsWith('image/')) {
@@ -434,6 +446,7 @@ export default defineComponent({
         }
       } catch (err) {
         console.error('[SupportChatModal] upload failed:', err)
+        sendError.value = formatApiError(err, 'Не удалось отправить файл')
       } finally {
         uploading.value = false
         target.value = ''
@@ -462,6 +475,7 @@ export default defineComponent({
     })
 
     return {
+      sendError,
       canLoadOlder,
       loadingOlder,
       loadOlderMessages,
@@ -493,6 +507,13 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.send-error {
+  margin: 0 0 6px;
+  padding: 0 12px;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
 .support-modal-overlay {
   position: fixed;
   top: 0;

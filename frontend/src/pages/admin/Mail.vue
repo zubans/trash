@@ -56,6 +56,15 @@
               </div>
             </div>
           </div>
+          <button
+            v-if="!loading && dialogsHasMore"
+            type="button"
+            class="btn-more"
+            :disabled="dialogsLoadingMore"
+            @click="loadMoreDialogs"
+          >
+            {{ dialogsLoadingMore ? 'Загружаем…' : 'Показать ещё' }}
+          </button>
         </div>
       </div>
 
@@ -97,6 +106,17 @@
                 <div class="bubble-text">{{ message.body }}</div>
               </div>
             </template>
+            <!-- Переписка приходит от старых писем к новым, поэтому продолжение —
+                 более поздние письма — дочитывается вниз. -->
+            <button
+              v-if="!dialogLoading && messagesHasMore"
+              type="button"
+              class="btn-more"
+              :disabled="messagesLoadingMore"
+              @click="loadMoreMessages"
+            >
+              {{ messagesLoadingMore ? 'Загружаем…' : 'Показать более поздние письма' }}
+            </button>
           </div>
 
           <div class="reply-bar">
@@ -245,8 +265,11 @@
 import { computed, defineComponent, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
+import { appendPage, hasMorePages } from '../../utils/pagination'
 import {
+  MAIL_DIALOGS_PAGE,
+  MAIL_USER_PAGE,
   adminBroadcastMail,
   adminGetMailDialogs,
   adminGetUserMail,
@@ -303,14 +326,42 @@ export default defineComponent({
     const userResults = ref<PickedUser[]>([])
     const userSearching = ref(false)
 
+    // Списки приходят страницами (переписки — по MAIL_DIALOGS_PAGE, письма
+    // одного человека — по MAIL_USER_PAGE). Следующая страница есть, пока
+    // предыдущая пришла полной; смещение — число уже показанных строк.
+    const dialogsHasMore = ref(false)
+    const dialogsLoadingMore = ref(false)
+    const messagesHasMore = ref(false)
+    const messagesLoadingMore = ref(false)
+
     const loadDialogs = async () => {
       loading.value = true
       try {
-        const data = await adminGetMailDialogs(onlyUnanswered.value)
+        const data = await adminGetMailDialogs(onlyUnanswered.value, { limit: MAIL_DIALOGS_PAGE, offset: 0 })
         dialogs.value = data.dialogs
         unread.value = data.unread
+        dialogsHasMore.value = hasMorePages(data.dialogs.length, MAIL_DIALOGS_PAGE)
       } finally {
         loading.value = false
+      }
+    }
+
+    const loadMoreDialogs = async () => {
+      if (dialogsLoadingMore.value) return
+      dialogsLoadingMore.value = true
+      try {
+        const data = await adminGetMailDialogs(onlyUnanswered.value, {
+          limit: MAIL_DIALOGS_PAGE,
+          offset: dialogs.value.length,
+        })
+        // Переписка — одна строка на пользователя: он и ключ.
+        dialogs.value = appendPage(dialogs.value, data.dialogs, (d) => d.user_id)
+        unread.value = data.unread
+        dialogsHasMore.value = hasMorePages(data.dialogs.length, MAIL_DIALOGS_PAGE)
+      } catch (err) {
+        console.error('Error loading more dialogs:', err)
+      } finally {
+        dialogsLoadingMore.value = false
       }
     }
 
@@ -350,8 +401,9 @@ export default defineComponent({
       dialogLoading.value = true
       replyText.value = ''
       try {
-        const data = await adminGetUserMail(userID)
+        const data = await adminGetUserMail(userID, { limit: MAIL_USER_PAGE, offset: 0 })
         messages.value = data.messages
+        messagesHasMore.value = hasMorePages(data.messages.length, MAIL_USER_PAGE)
         recipient.value = data.user
         // Открыв переписку, администратор её и прочитал: строка в списке
         // перестаёт быть долгом ровно в этот момент.
@@ -366,9 +418,27 @@ export default defineComponent({
       }
     }
 
+    const loadMoreMessages = async () => {
+      const userID = selectedUserID.value
+      if (!userID || messagesLoadingMore.value) return
+      messagesLoadingMore.value = true
+      try {
+        const data = await adminGetUserMail(userID, { limit: MAIL_USER_PAGE, offset: messages.value.length })
+        // Пока шёл запрос, могли открыть другую переписку — чужие письма не дописываем.
+        if (selectedUserID.value !== userID) return
+        messages.value = appendPage(messages.value, data.messages, (m) => m.id)
+        messagesHasMore.value = hasMorePages(data.messages.length, MAIL_USER_PAGE)
+      } catch (err) {
+        console.error('Error loading more mail:', err)
+      } finally {
+        messagesLoadingMore.value = false
+      }
+    }
+
     const closeDialog = () => {
       selectedUserID.value = ''
       messages.value = []
+      messagesHasMore.value = false
     }
 
     const sendReply = async () => {
@@ -488,9 +558,7 @@ export default defineComponent({
         await openDialog(composeUser.value.id)
       } catch (err: any) {
         composeError.value =
-          typeof err?.response?.data === 'string' && err.response.data
-            ? err.response.data
-            : 'Не удалось отправить письмо.'
+          formatApiError(err, 'Не удалось отправить письмо.')
       } finally {
         sending.value = false
       }
@@ -534,6 +602,12 @@ export default defineComponent({
     })
 
     return {
+      dialogsHasMore,
+      dialogsLoadingMore,
+      loadMoreDialogs,
+      messagesHasMore,
+      messagesLoadingMore,
+      loadMoreMessages,
       dialogs,
       filteredDialogs,
       unread,
@@ -960,6 +1034,23 @@ export default defineComponent({
 
 .btn-send:disabled {
   background: #cbd5e1;
+  cursor: default;
+}
+
+.btn-more {
+  display: block;
+  margin: 10px auto;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #4b5563;
+  cursor: pointer;
+}
+
+.btn-more:disabled {
+  opacity: 0.6;
   cursor: default;
 }
 

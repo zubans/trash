@@ -39,7 +39,7 @@
 
 <script lang="ts">
 import { defineComponent, ref } from 'vue'
-import api from '../../../services/api'
+import api, { formatApiError } from '../../../services/api'
 
 export default defineComponent({
   name: 'DisputeClaimModal',
@@ -59,7 +59,7 @@ export default defineComponent({
         const { data } = await api.post(`/customer/orders/${props.orderId}/dispute`, { claim: claim.value })
         emit('opened', data)
       } catch (err: any) {
-        errorText.value = err.response?.data || 'Не удалось открыть спор'
+        errorText.value = formatApiError(err, 'Не удалось открыть спор')
       } finally {
         busy.value = false
       }

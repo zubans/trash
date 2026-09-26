@@ -95,7 +95,7 @@
 
 <script lang="ts">
 import {defineComponent, computed, ref, watch} from 'vue'
-import api from '../../../services/api'
+import api, { formatApiError } from '../../../services/api'
 
 export default defineComponent({
   name: 'ExecutorProfileModal',
@@ -141,7 +141,7 @@ export default defineComponent({
         emailMsg.value = 'Ссылка подтверждения отправлена на ' + emailInput.value + '. Email изменится после перехода по ссылке (действительна 60 минут).'
       } catch (err: any) {
         emailMsgIsError.value = true
-        emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
+        emailMsg.value = formatApiError(err, 'Ошибка обновления Email')
       } finally {
         savingEmail.value = false
       }
@@ -178,7 +178,7 @@ export default defineComponent({
         emit('addressUpdated', addressInput.value)
       } catch (err: any) {
         addressMsgIsError.value = true
-        addressMsg.value = err.response?.data || 'Ошибка обновления адреса'
+        addressMsg.value = formatApiError(err, 'Ошибка обновления адреса')
       } finally {
         savingAddress.value = false
       }

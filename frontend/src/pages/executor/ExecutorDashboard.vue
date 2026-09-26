@@ -829,7 +829,7 @@ import SkeletonList from '../../components/SkeletonList.vue'
 import PerkBadge from '../../components/shop/PerkBadge.vue'
 import { useMyPerks, useStorefront } from '../../composables/useShop'
 import RefreshingBadge from '../../components/RefreshingBadge.vue'
-import api, { pollIntervalMs, getRefreshToken } from '../../services/api'
+import api, { pollIntervalMs, getRefreshToken, formatApiError, isStaleStateError } from '../../services/api'
 import { useCachedResource } from '../../composables/useCachedResource'
 import { acceptPresentedOrders } from '../../components/order/cachedOrders'
 import { loadByPriority } from '../../utils/loadPriority'
@@ -938,11 +938,14 @@ export default defineComponent({
         try {
           const res = await api.get('/executor/shifts/active')
           return res.data
-        } catch (err) {
+        } catch (err: any) {
           // Отсутствие смены сервер сообщает ошибкой 404, и это нормальный
           // ответ, а не сбой: он обязан вытеснить кэш, иначе закрытая смена
-          // осталась бы на экране активной.
-          return null
+          // осталась бы на экране активной. Прочие коды (500 — сбой чтения) —
+          // именно сбой: смена на экране остаётся прежней до следующего опроса,
+          // а не пропадает из-за моргнувшей базы.
+          if (err?.response?.status === 404) return null
+          throw err
         }
       },
       onData: () => updateShiftCountdown(),
@@ -1060,7 +1063,8 @@ export default defineComponent({
         // Отказ от назначенного заказа штрафуется.
         authStore.fetchMe()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка отказа от заказа'
+        errorMsg.value = formatApiError(err, 'Ошибка отказа от заказа')
+        if (isStaleStateError(err)) fetchAssignedOrders()
       }
     }
 
@@ -1163,7 +1167,7 @@ export default defineComponent({
         showWithdrawalModal.value = false
         authStore.fetchMe()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка отправки заявки на вывод'
+        errorMsg.value = formatApiError(err, 'Ошибка отправки заявки на вывод')
       } finally {
         submittingWithdrawal.value = false
       }
@@ -1336,7 +1340,9 @@ export default defineComponent({
         successMsg.value = 'Смена успешно открыта!'
         await fetchActiveShift()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка открытия смены'
+        errorMsg.value = formatApiError(err, 'Ошибка открытия смены')
+        // 409 — смена уже открыта (например, с другого устройства): подтягиваем её.
+        if (err.response?.status === 409) await fetchActiveShift()
       } finally {
         startingShift.value = false
       }
@@ -1352,7 +1358,9 @@ export default defineComponent({
         // Ранний уход со смены штрафуется, поэтому баланс только что изменился.
         authStore.fetchMe()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка завершения смены'
+        errorMsg.value = formatApiError(err, 'Ошибка завершения смены')
+        // 409 — активной смены уже нет (закрыта сервером по времени): снимаем её с экрана.
+        if (err.response?.status === 409) await fetchActiveShift()
       } finally {
         endingShiftEarly.value = false
       }
@@ -1385,8 +1393,11 @@ export default defineComponent({
         } else if (rawText.includes('penalized') || rawText.includes('оштрафована')) {
           errorMsg.value = t('executor.shiftPenalized')
         } else {
-          errorMsg.value = rawText || t('executor.errorAcceptOrder', 'Ошибка принятия заказа')
+          errorMsg.value = formatApiError(err, t('executor.errorAcceptOrder', 'Ошибка принятия заказа'))
         }
+        // 409 «заказ уже взят другим исполнителем» и 404 «заказ не найден»
+        // значат, что карточка в списке устарела: перечитываем, чтобы она ушла.
+        if (isStaleStateError(err)) await fetchAvailableOrders()
       }
     }
 
@@ -1469,7 +1480,9 @@ export default defineComponent({
         successMsg.value = 'Спор закрыт: заказ отменён, штрафной балл не начислен.'
         await fetchAssignedOrders()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось закрыть спор'
+        errorMsg.value = formatApiError(err, 'Не удалось закрыть спор')
+        // 409 — спор уже закрыт заказчиком или арбитром: показываем итог.
+        if (isStaleStateError(err)) await fetchAssignedOrders()
       } finally {
         concedingId.value = null
       }

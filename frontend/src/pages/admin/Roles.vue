@@ -263,7 +263,7 @@
 
 <script lang="ts">
 import { defineComponent, computed, onMounted, reactive, ref } from 'vue'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
 import {
   assignRole,
@@ -548,12 +548,9 @@ export default defineComponent({
 
     // Тексты отказов бэкенд присылает на русском и адресует администратору
     // («нельзя снять роль с последнего администратора»), поэтому показываются
-    // как есть, а запасной вариант нужен только для сетевого сбоя.
-    const message = (e: unknown, fallback: string) => {
-      const data = (e as { response?: { data?: unknown } })?.response?.data
-      const text = typeof data === 'string' ? data.trim() : ''
-      return text || fallback
-    }
+    // как есть; сбой сервера (500 «internal error») и обрыв связи получают
+    // запасной текст с пояснением — это решает formatApiError.
+    const message = (e: unknown, fallback: string) => formatApiError(e, fallback)
 
     onMounted(load)
 

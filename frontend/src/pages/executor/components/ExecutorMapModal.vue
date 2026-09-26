@@ -146,7 +146,7 @@ import { defineComponent, ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import api from '../../../services/api'
+import api, { formatApiError } from '../../../services/api'
 import { getCurrentCoordinates, geolocationMessage, GeolocationError } from '../../../services/geolocation'
 
 export default defineComponent({
@@ -364,7 +364,7 @@ export default defineComponent({
           anchorTo(res.data.lat ?? serverLat.value, res.data.lon ?? serverLon.value)
         }
       } catch (err: any) {
-        alert(err.response?.data?.message || err.response?.data || 'Ошибка изменения метки (10 мин кулдаун)')
+        alert(formatApiError(err, 'Ошибка изменения метки (10 мин кулдаун)'))
         anchorTo(serverLat.value, serverLon.value)
       } finally {
         moving = false
@@ -516,7 +516,7 @@ export default defineComponent({
         if (err instanceof GeolocationError) {
           emit('error', geolocationMessage(err))
         } else {
-          emit('error', err?.response?.data?.message || err?.response?.data || 'Не удалось обновить местоположение')
+          emit('error', formatApiError(err, 'Не удалось обновить местоположение'))
         }
       } finally {
         locating.value = false
@@ -540,7 +540,7 @@ export default defineComponent({
         } else if (rawText.includes('penalized') || rawText.includes('оштрафована')) {
           alert(t('executor.shiftPenalized'))
         } else {
-          alert(rawText || t('executor.errorAcceptOrder', 'Ошибка принятия заказа'))
+          alert(formatApiError(err, t('executor.errorAcceptOrder', 'Ошибка принятия заказа')))
         }
       } finally {
         accepting.value = false

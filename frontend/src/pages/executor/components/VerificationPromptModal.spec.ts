@@ -4,7 +4,9 @@ import VerificationPromptModal from './VerificationPromptModal.vue'
 import { i18n, setLocale } from '../../../i18n'
 import api from '../../../services/api'
 
-vi.mock('../../../services/api', () => ({
+// Подменяется только транспорт: разбор ошибок (formatApiError) — настоящий.
+vi.mock('../../../services/api', async (orig) => ({
+  ...(await orig<typeof import('../../../services/api')>()),
   default: {
     get: vi.fn(),
     post: vi.fn(),

@@ -1,4 +1,4 @@
-import api from '../services/api'
+import api, { formatApiError } from '../services/api'
 
 // Паспорт, статус «проверенный» и согласие на обработку персональных данных
 // (doc/implementation_plan_delivery_passport.md §2–§4). Полные данные паспорта
@@ -46,8 +46,7 @@ export function passportError(err: any): PassportApiError | null {
 export function passportErrorText(err: any, fallback: string): string {
   const e = passportError(err)
   if (e?.message) return e.message
-  const data = err?.response?.data
-  return typeof data === 'string' && data.trim() ? data.trim() : fallback
+  return formatApiError(err, fallback)
 }
 
 // takenAt — время съёмки по часам телефона. Сервер проверяет им подпись снимка;

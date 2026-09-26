@@ -143,6 +143,7 @@
 
 <script lang="ts">
 import { defineComponent, onMounted, reactive, ref } from 'vue'
+import { formatApiError } from '../../services/api'
 
 import {
   adminAddGiftCodes,
@@ -258,8 +259,7 @@ export default defineComponent({
         successMsg.value = `Подарок «${draft.code}» сохранён.`
         await load()
       } catch (e) {
-        const message = (e as { response?: { data?: string } })?.response?.data
-        errorMsg.value = message || 'Не удалось сохранить подарок.'
+        errorMsg.value = formatApiError(e, 'Не удалось сохранить подарок.')
       } finally {
         savingGift.value = false
       }

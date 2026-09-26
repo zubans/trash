@@ -44,7 +44,7 @@
 <script lang="ts">
 import { defineComponent, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import api, { storeSession } from '../../services/api'
+import api, { storeSession, formatApiError } from '../../services/api'
 
 // Смена пароля — отдельная страница, а не раздел профиля: профиль про данные
 // человека, а пароль — про вход, и путь к нему один для всех ролей. Ссылка живёт
@@ -88,7 +88,7 @@ export default defineComponent({
         confirmPassword.value = ''
       } catch (err: any) {
         messageIsError.value = true
-        message.value = err.response?.data?.error || err.response?.data || 'Ошибка при смене пароля'
+        message.value = formatApiError(err, 'Ошибка при смене пароля')
       } finally {
         changing.value = false
       }

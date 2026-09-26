@@ -121,6 +121,7 @@
 
 <script lang="ts">
 import {defineComponent, ref, computed, watch} from 'vue'
+import { formatApiError } from '../../../services/api'
 import { submitOrderReview, sendOrderTip } from '../../../api/review'
 
 export default defineComponent({
@@ -247,7 +248,7 @@ export default defineComponent({
         emit('reviewed', { tipped: tip > 0 })
         show.value = false
       } catch (err: any) {
-        errorText.value = err.response?.data || 'Ошибка отправки отзыва'
+        errorText.value = formatApiError(err, 'Ошибка отправки отзыва')
       } finally {
         submitting.value = false
       }

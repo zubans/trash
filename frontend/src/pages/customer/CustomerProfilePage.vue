@@ -197,7 +197,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import { useAuthStore } from '../../stores/auth-store'
 import PassportCard from '../../components/passport/PassportCard.vue'
 import AddressAutocomplete, { StructuredAddress } from '../../components/AddressAutocomplete.vue'
@@ -282,7 +282,7 @@ export default defineComponent({
         emailMsg.value = 'Ссылка для подтверждения отправлена на ' + emailInput.value + '. Почта изменится после перехода по ссылке (действительна 60 минут).'
       } catch (err: any) {
         emailMsgIsError.value = true
-        emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
+        emailMsg.value = formatApiError(err, 'Ошибка обновления Email')
       } finally {
         savingEmail.value = false
       }
@@ -302,7 +302,7 @@ export default defineComponent({
         birthDateMsg.value = 'Дата рождения сохранена'
       } catch (err: any) {
         birthDateMsgIsError.value = true
-        birthDateMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка сохранения даты рождения'
+        birthDateMsg.value = formatApiError(err, 'Ошибка сохранения даты рождения')
       } finally {
         savingBirthDate.value = false
       }
@@ -389,7 +389,7 @@ export default defineComponent({
         // Раньше это доходило только до консоли, поэтому отклонённый адрес
         // выглядел как кнопка, которая ничего не делает.
         addressError.value =
-          err?.response?.data?.error || err?.response?.data || 'Не удалось сохранить адрес'
+          formatApiError(err, 'Не удалось сохранить адрес')
       } finally {
         addingAddress.value = false
       }

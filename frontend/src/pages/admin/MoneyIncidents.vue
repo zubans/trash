@@ -80,13 +80,30 @@
         </button>
       </div>
     </div>
+
+    <button
+      v-if="!loading && hasMore"
+      type="button"
+      class="btn-more"
+      :disabled="loadingMore"
+      @click="loadMore"
+    >
+      {{ loadingMore ? 'Загружаем…' : 'Показать ещё' }}
+    </button>
   </div>
 </template>
 
 <script lang="ts">
 import { defineComponent, onMounted, reactive, ref } from 'vue'
 
-import { adminGetIncidents, adminResolveIncident, type MoneyIncident } from '../../api/achievements'
+import { formatApiError, isStaleStateError } from '../../services/api'
+import { appendPage, hasMorePages } from '../../utils/pagination'
+import {
+  INCIDENTS_PAGE,
+  adminGetIncidents,
+  adminResolveIncident,
+  type MoneyIncident,
+} from '../../api/achievements'
 
 const KIND_LABELS: Record<string, string> = {
   reward_exceeds_payment: 'Вознаграждение больше уплаченного',
@@ -106,15 +123,40 @@ export default defineComponent({
     const showAll = ref(false)
     const errorMsg = ref('')
 
+    // Журнал приходит страницами по INCIDENTS_PAGE; следующая есть, пока
+    // предыдущая пришла полной.
+    const hasMore = ref(false)
+    const loadingMore = ref(false)
+
     const load = async () => {
       loading.value = true
       errorMsg.value = ''
       try {
-        incidents.value = await adminGetIncidents(showAll.value)
-      } catch {
-        errorMsg.value = 'Не удалось загрузить инциденты.'
+        const page = await adminGetIncidents(showAll.value, { limit: INCIDENTS_PAGE, offset: 0 })
+        incidents.value = page
+        hasMore.value = hasMorePages(page.length, INCIDENTS_PAGE)
+      } catch (err) {
+        errorMsg.value = formatApiError(err, 'Не удалось загрузить инциденты')
       } finally {
         loading.value = false
+      }
+    }
+
+    const loadMore = async () => {
+      if (loadingMore.value) return
+      loadingMore.value = true
+      errorMsg.value = ''
+      try {
+        const page = await adminGetIncidents(showAll.value, {
+          limit: INCIDENTS_PAGE,
+          offset: incidents.value.length,
+        })
+        incidents.value = appendPage(incidents.value, page, (i) => i.id)
+        hasMore.value = hasMorePages(page.length, INCIDENTS_PAGE)
+      } catch (err) {
+        errorMsg.value = formatApiError(err, 'Не удалось загрузить инциденты')
+      } finally {
+        loadingMore.value = false
       }
     }
 
@@ -123,8 +165,12 @@ export default defineComponent({
       try {
         await adminResolveIncident(incident.id, resolutions[incident.id])
         await load()
-      } catch {
-        errorMsg.value = 'Не удалось закрыть инцидент.'
+      } catch (err) {
+        // 422 — пустой или слишком длинный разбор, 409 — инцидент уже закрыт
+        // другим администратором: тогда список устарел и перечитывается.
+        const message = formatApiError(err, 'Не удалось закрыть инцидент')
+        if (isStaleStateError(err)) await load()
+        errorMsg.value = message
       } finally {
         resolving.value = ''
       }
@@ -150,7 +196,10 @@ export default defineComponent({
       resolving,
       showAll,
       errorMsg,
+      hasMore,
+      loadingMore,
       load,
+      loadMore,
       resolve,
       kindLabel,
       formatAmount,
@@ -162,6 +211,23 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.btn-more {
+  display: block;
+  margin: 12px auto 0;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: #4b5563;
+  cursor: pointer;
+}
+
+.btn-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .incidents-page {
   padding: 20px;
   max-width: 900px;

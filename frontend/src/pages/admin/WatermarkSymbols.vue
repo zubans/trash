@@ -97,6 +97,7 @@
 
 <script lang="ts">
 import { computed, defineComponent, onMounted, ref } from 'vue'
+import { formatApiError } from '../../services/api'
 import {
   createSymbol,
   deleteSymbol,
@@ -124,7 +125,7 @@ export default defineComponent({
     const canEdit = computed(() => authStore.can('watermarks.edit'))
     const canDelete = computed(() => authStore.can('watermarks.delete'))
 
-    const apiError = (err: any, fallback: string) => (typeof err.response?.data === 'string' ? err.response.data : fallback)
+    const apiError = (err: any, fallback: string) => formatApiError(err, fallback)
 
     const load = async () => {
       errorMsg.value = ''

@@ -631,7 +631,12 @@ export default defineComponent({
           message.value = res.data?.message || 'Email успешно подтверждён!'
         } catch (err: any) {
           const errData = err.response?.data
-          if (errData?.code === 'TOKEN_EXPIRED' || errData?.error?.includes('expired')) {
+          const status = err.response?.status
+          if (!status || status >= 500) {
+            // Сбой сервера или связи — не «недействительная ссылка»: ссылка может
+            // быть цела, и повтор позже её подтвердит.
+            error.value = formatApiError(err, 'Не удалось подтвердить email')
+          } else if (errData?.code === 'TOKEN_EXPIRED' || errData?.error?.includes('expired')) {
             error.value = 'Срок действия ссылки подтверждения истек (60 минут). Запросите подтверждение или смену почты заново в профиле.'
           } else if (typeof errData?.error === 'string') {
             error.value = errData.error

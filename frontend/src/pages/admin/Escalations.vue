@@ -100,6 +100,7 @@
 
 <script lang="ts">
 import { computed, defineComponent, onMounted, ref } from 'vue'
+import { formatApiError } from '../../services/api'
 import {
   getEscalations,
   resolveEscalation,
@@ -141,7 +142,7 @@ export default defineComponent({
       try {
         escalations.value = await getEscalations(status.value)
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось загрузить список'
+        errorMsg.value = formatApiError(err, 'Не удалось загрузить список')
       } finally {
         loading.value = false
       }
@@ -156,7 +157,7 @@ export default defineComponent({
         successMsg.value = 'Случай снят с модерации: заказ вернулся исполнителю, попытки начинаются заново'
         await load()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось закрыть случай'
+        errorMsg.value = formatApiError(err, 'Не удалось закрыть случай')
       } finally {
         busyId.value = ''
       }
@@ -179,7 +180,7 @@ export default defineComponent({
         successMsg.value = 'Заказчик верифицирован, заказ закрыт'
         await load()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось верифицировать заказчика'
+        errorMsg.value = formatApiError(err, 'Не удалось верифицировать заказчика')
       } finally {
         busyId.value = ''
       }

@@ -75,6 +75,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, onMounted, computed } from 'vue'
+import { formatApiError } from '../../services/api'
 import type { ServiceNode } from '../../api/services'
 import {
   getAdminServiceNodes,
@@ -132,7 +133,7 @@ export default defineComponent({
       try {
         tree.value = await getAdminServiceNodes(showDeleted.value)
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Не удалось загрузить каталог'
+        errorMsg.value = formatApiError(err, 'Не удалось загрузить каталог')
       } finally {
         loading.value = false
       }
@@ -166,9 +167,9 @@ export default defineComponent({
         showFormModal.value = false
         await fetchTree()
       } catch (err: any) {
-        const message = err.response?.data || 'Ошибка при сохранении'
+        const message = formatApiError(err, 'Ошибка при сохранении')
         errorMsg.value = message
-        saveError.value = typeof message === 'string' ? message : 'Ошибка при сохранении'
+        saveError.value = message
       }
     }
 
@@ -204,7 +205,7 @@ export default defineComponent({
         }
         await fetchTree()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка при удалении'
+        errorMsg.value = formatApiError(err, 'Ошибка при удалении')
       }
     }
 
@@ -217,7 +218,7 @@ export default defineComponent({
           'Элемент восстановлен. Включите «Активно в приложении», чтобы он снова появился у пользователей.'
         await fetchTree()
       } catch (err: any) {
-        errorMsg.value = err.response?.data || 'Ошибка при восстановлении'
+        errorMsg.value = formatApiError(err, 'Ошибка при восстановлении')
       }
     }
 

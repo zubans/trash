@@ -144,7 +144,7 @@
 
 <script lang="ts">
 import { defineComponent, computed, onMounted, ref, watch, PropType } from 'vue'
-import api from '../../../services/api'
+import api, { formatApiError } from '../../../services/api'
 import AddressAutocomplete, { StructuredAddress } from '../../../components/AddressAutocomplete.vue'
 
 export default defineComponent({
@@ -213,7 +213,7 @@ export default defineComponent({
         emailMsg.value = 'Ссылка для подтверждения отправлена на ' + emailInput.value + '. Почта изменится после перехода по ссылке (действительна 60 минут).'
       } catch (err: any) {
         emailMsgIsError.value = true
-        emailMsg.value = err.response?.data?.error || err.response?.data || 'Ошибка обновления Email'
+        emailMsg.value = formatApiError(err, 'Ошибка обновления Email')
       } finally {
         savingEmail.value = false
       }

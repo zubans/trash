@@ -493,7 +493,7 @@
 <script lang="ts">
 import { defineComponent, ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import api from '../../services/api'
+import api, { formatApiError } from '../../services/api'
 import { toSettingsPayload } from '../../utils/settingsPayload'
 
 export default defineComponent({
@@ -595,7 +595,7 @@ export default defineComponent({
         initialValues.value = { ...payload }
         successMsg.value = t('settings.saveSuccess')
       } catch (err: any) {
-        errorMsg.value = err.response?.data || t('settings.saveError')
+        errorMsg.value = formatApiError(err, t('settings.saveError'))
         console.error(err)
       } finally {
         loading.value = false

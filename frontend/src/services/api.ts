@@ -37,20 +37,103 @@ export const isDebug = import.meta.env.VITE_DEBUG === 'true'
 // заказам и непрочитанному тесный цикл не нужен. Переопределяется через VITE_POLL_INTERVAL_SEC.
 export const pollIntervalMs = (Number(import.meta.env.VITE_POLL_INTERVAL_SEC) || 30) * 1000
 
-export function formatApiError(err: any, fallbackMessage: string): string {
-  const data = err.response?.data
-  const serverText = (typeof data === 'string' ? data : data?.error || data?.message || '').trim()
+// Разбор ошибки ответа в текст для человека.
+//
+// Бэкенд отвечает по классу ошибки, а не одним кодом на всё (writeDomainError):
+// 404 — не найдено, 403 — не допущен, 409 — состояние или правило не пускает,
+// 422 — негодный ввод и нехватка средств, 503 — поведение услуги недоступно. На
+// этих кодах в теле лежит короткий русский текст, написанный для человека, и
+// показывать его как есть — самое полезное, что можно сделать.
+//
+// Всё остальное — 500 с телом «internal error», 502/504 от прокси, обрыв связи —
+// про внутренности, а не про пользователя: раньше страницы подставляли тело
+// ответа прямо в сообщение и человек видел «internal error» или HTML-страницу
+// nginx. Такие коды получают собственное пояснение.
+
+// Коды, чьё тело написано для пользователя.
+const STATUS_WITH_USER_TEXT = new Set([400, 403, 404, 409, 422, 503])
+
+// Пояснение по коду ответа — когда своего текста в теле нет или показывать его
+// нельзя. Со строчной буквы: дописывается к сообщению вызывающего.
+const STATUS_DETAILS: Record<number, string> = {
+  400: 'запрос отклонён',
+  401: 'нужно войти заново',
+  403: 'действие недоступно',
+  404: 'не найдено',
+  409: 'данные изменились, обновите страницу',
+  422: 'проверьте введённые данные',
+  429: 'слишком много запросов, попробуйте позже',
+  500: 'сбой на сервере, попробуйте позже',
+  502: 'сервер недоступен, попробуйте позже',
+  503: 'сервис временно недоступен',
+  504: 'сервер не ответил вовремя, попробуйте позже',
+}
+
+const NO_RESPONSE_DETAIL = 'нет связи с сервером'
+
+// Тела, которые нельзя показывать, даже если код обещает текст для человека:
+// служебная строка 500, «Bad request» от неразобранного JSON и страницы ошибок
+// прокси.
+function isInternalErrorText(text: string): boolean {
+  return /^(internal (server )?error|bad request)\.?$/i.test(text) || text.startsWith('<')
+}
+
+// Пояснение к коду ответа. Пустая строка — код ничего не добавляет к тому, что
+// вызывающий уже сказал сам.
+export function statusDetail(status?: number): string {
+  if (status === undefined) return NO_RESPONSE_DETAIL
+  return STATUS_DETAILS[status] || (status >= 500 ? STATUS_DETAILS[500] : '')
+}
+
+// Текст из тела ответа. У JSON-ошибок message предпочитается error: в error
+// лежит либо тот же текст, либо машинный код (account_soft_banned,
+// passport_required), который человеку ничего не говорит — такие ответы
+// разбираются по месту, а здесь уступают пояснению по коду.
+function bodyText(data: any): string {
+  if (typeof data === 'string') return data.trim()
+  if (!data || typeof data !== 'object') return ''
+  const message = typeof data.message === 'string' ? data.message.trim() : ''
+  if (message) return message
+  const code = typeof data.error === 'string' ? data.error.trim() : ''
+  return code && !/^[a-z0-9_]+$/i.test(code) ? code : ''
+}
+
+// Отказ, после которого карточка на экране устарела: 404 — объекта уже нет,
+// 409 — его состояние изменилось (заказ взят другим исполнителем, отменён,
+// закрыт, смена уже открыта). Экран, получивший такой ответ, перечитывает
+// данные, а не только показывает текст.
+export function isStaleStateError(err: any): boolean {
+  const status = err?.response?.status
+  return status === 404 || status === 409
+}
+
+function capitalize(text: string): string {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
+export function formatApiError(err: any, fallbackMessage = ''): string {
+  const status: number | undefined = err?.response?.status
+  const data = err?.response?.data
+  const serverText = bodyText(data)
+  const userText =
+    status !== undefined && STATUS_WITH_USER_TEXT.has(status) && !isInternalErrorText(serverText)
+      ? serverText
+      : ''
 
   if (isDebug) {
     const baseURL = err.config?.baseURL || ''
     const url = err.config?.url || ''
     const fullURL = url.startsWith('http') ? url : `${baseURL}${url}`
-    const status = err.response?.status ? `HTTP ${err.response.status}` : 'no response'
+    const statusText = status ? `HTTP ${status}` : 'no response'
     const errorText = serverText || err.message || 'Unknown error'
-    return `${errorText}\n\n[Debug Info]\nURL: ${fullURL || 'unknown'}\nStatus: ${status}`
+    return `${errorText}\n\n[Debug Info]\nURL: ${fullURL || 'unknown'}\nStatus: ${statusText}`
   }
 
-  return serverText || fallbackMessage
+  if (userText) return userText
+
+  const detail = statusDetail(status)
+  if (!fallbackMessage) return capitalize(detail) || 'Неизвестная ошибка'
+  return detail ? `${fallbackMessage}: ${detail}` : fallbackMessage
 }
 
 const api = axios.create({
