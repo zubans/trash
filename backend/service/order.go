@@ -26,11 +26,14 @@ type OrderService struct {
 	orderRepo    repository.OrderRepository
 	ledger       *Ledger
 	settingsRepo repository.SettingsRepository
-	userRepo     repository.UserRepository
-	shiftRepo    repository.ShiftRepository
-	chatRepo     repository.ChatRepository
-	catalogRepo  repository.ServiceCatalogRepository
-	resolver     AddressResolver
+	// acceptRadiusFallbackKM — запасной радиус взятия из окружения (см.
+	// acceptRadiusKM); ноль — умолчание.
+	acceptRadiusFallbackKM float64
+	userRepo               repository.UserRepository
+	shiftRepo              repository.ShiftRepository
+	chatRepo               repository.ChatRepository
+	catalogRepo            repository.ServiceCatalogRepository
+	resolver               AddressResolver
 	// Необязательно. Когда подключено, список ближайших привязывается к
 	// собственной сохранённой рабочей позиции исполнителя, а не к присланным
 	// клиентом координатам — к той же точке, что используют карта и проверка
@@ -62,6 +65,13 @@ type OrderService struct {
 // NewOrderService создаёт OrderService.
 func NewOrderService(orderRepo repository.OrderRepository, ledger *Ledger, settingsRepo repository.SettingsRepository, userRepo repository.UserRepository, shiftRepo repository.ShiftRepository, chatRepo repository.ChatRepository, catalogRepo repository.ServiceCatalogRepository, resolver AddressResolver) *OrderService {
 	return &OrderService{orderRepo: orderRepo, ledger: ledger, settingsRepo: settingsRepo, userRepo: userRepo, shiftRepo: shiftRepo, chatRepo: chatRepo, catalogRepo: catalogRepo, resolver: resolver}
+}
+
+// WithAcceptRadiusFallback задаёт запасной радиус взятия, который действует,
+// пока в админке радиус не настроен. main.go читает его из ACCEPT_RADIUS_KM.
+func (s *OrderService) WithAcceptRadiusFallback(km float64) *OrderService {
+	s.acceptRadiusFallbackKM = km
+	return s
 }
 
 // WithAchievements подключает уровни и агрегаты. Пока их нет, ставка комиссии
@@ -708,7 +718,7 @@ func (s *OrderService) checkAcceptRadius(ctx context.Context, settings settingsM
 		return ErrWorkPositionUnknown
 	}
 
-	radiusKM := acceptRadiusKM(settings)
+	radiusKM := acceptRadiusKM(settings, s.acceptRadiusFallbackKM)
 	distanceKM := HaversineDistanceKM(*lat, *lon, *order.PickupLat, *order.PickupLon)
 	if distanceKM > radiusKM {
 		return ruleError(fmt.Sprintf("заказ вне зоны взятия: до него %.1f км, разрешено %.1f км", distanceKM, radiusKM))

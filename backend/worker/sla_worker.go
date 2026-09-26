@@ -2,37 +2,40 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"time"
 
 	"github.com/google/uuid"
 
-	"healthlogin/backend/metrics"
-	"healthlogin/backend/money"
-	"healthlogin/backend/repository"
 	"healthlogin/backend/service"
 )
 
-// SLAWorker автоматически понижает просроченные заказы ASAP/URGENT.
-type SLAWorker struct {
-	db           *sql.DB
-	orderService *service.OrderService
-	chatService  *service.ChatService
-	ledger       *service.Ledger
-	guard        Guard
+// slaBatchSize — сколько просроченных заказов воркер понижает за проход.
+const slaBatchSize = 100
+
+// slaOrders — то, что SLA-воркеру нужно от сервиса заказов. Правило понижения
+// живёт в сервисе; воркер только выбирает заказы и оповещает чат.
+type slaOrders interface {
+	OverdueUrgentOrders(ctx context.Context, limit int) ([]uuid.UUID, error)
+	DowngradeOverdue(ctx context.Context, orderID uuid.UUID) (service.DowngradeResult, error)
 }
 
-// NewSLAWorker создаёт новый SLAWorker. Реестр обязателен: понижение возвращает
-// часть удержания, а возврат, который не выходит со счёта эскроу, — ровно то
-// одностороннее движение, ради предотвращения которого реестр и существует.
-func NewSLAWorker(db *sql.DB, orderService *service.OrderService, chatService *service.ChatService, ledger *service.Ledger) *SLAWorker {
-	return &SLAWorker{
-		db:           db,
-		orderService: orderService,
-		chatService:  chatService,
-		ledger:       ledger,
-	}
+// systemBroadcaster рассылает системное сообщение в комнату чата заказа.
+type systemBroadcaster interface {
+	BroadcastSystemMessage(ctx context.Context, orderID uuid.UUID, msg interface{})
+}
+
+// SLAWorker автоматически понижает просроченные заказы ASAP/URGENT.
+type SLAWorker struct {
+	orders slaOrders
+	chat   systemBroadcaster
+	guard  Guard
+}
+
+// NewSLAWorker создаёт SLAWorker. chat необязателен: без него понижение
+// проходит, но открытые чаты об этом не узнают до перечитывания.
+func NewSLAWorker(orders slaOrders, chat systemBroadcaster) *SLAWorker {
+	return &SLAWorker{orders: orders, chat: chat}
 }
 
 // Start периодически выполняет цикл воркера.
@@ -41,127 +44,40 @@ func (w *SLAWorker) Start(ctx context.Context, interval time.Duration) <-chan st
 		Start(ctx, interval, w.CheckSLAOverdue)
 }
 
-type overdueOrder struct {
-	ID               uuid.UUID
-	CustomerID       uuid.UUID
-	ServiceVariantID uuid.UUID
-	HoldAmount       money.Amount
-}
-
-// CheckSLAOverdue ищет просроченные заказы и обновляет их.
+// CheckSLAOverdue понижает просроченные заказы. Каждый заказ — отдельная
+// транзакция в сервисе, поэтому сбой одного не мешает остальным, а при
+// выключении проход останавливается между заказами.
 func (w *SLAWorker) CheckSLAOverdue(ctx context.Context) error {
-	query := `
-		SELECT id, customer_id, service_variant_id, hold_amount 
-		FROM orders 
-		WHERE status = 'ASSIGNED' 
-		  AND is_downgraded = FALSE 
-		  AND deadline_at < now() 
-		  AND (is_urgent = TRUE OR is_asap = TRUE)`
-
-	rows, err := w.db.QueryContext(ctx, query)
+	ids, err := w.orders.OverdueUrgentOrders(ctx, slaBatchSize)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-
-	var list []overdueOrder
-	for rows.Next() {
-		var o overdueOrder
-		err := rows.Scan(&o.ID, &o.CustomerID, &o.ServiceVariantID, &o.HoldAmount)
-		if err != nil {
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		list = append(list, o)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, o := range list {
-		err := w.downgradeOrder(ctx, o)
+		res, err := w.orders.DowngradeOverdue(ctx, id)
 		if err != nil {
-			log.Printf("[SLAWorker] Failed to downgrade order %s: %v", o.ID, err)
-		} else {
-			metrics.OrderEvent("downgraded")
-			log.Printf("[SLAWorker] Downgraded order %s to REGULAR due to delay. Customer refunded.", o.ID)
+			log.Printf("[SLAWorker] Failed to downgrade order %s: %v", id, err)
+			continue
 		}
-	}
-
-	return nil
-}
-
-func (w *SLAWorker) downgradeOrder(ctx context.Context, o overdueOrder) error {
-	tx, err := w.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// 1. Считаем базовую (несрочную) цену варианта.
-	basePrice, err := w.orderService.CalculatePrice(ctx, o.ServiceVariantID, false, false, false)
-	if err != nil {
-		return err
-	}
-	if basePrice > o.HoldAmount {
-		// Никогда не поднимаем удержание задним числом; заказчик авторизовал только
-		// ту сумму, которая была взята в момент заказа.
-		basePrice = o.HoldAmount
-	}
-
-	refund := o.HoldAmount.Sub(basePrice)
-	if refund.IsNegative() {
-		refund = money.Zero
-	}
-
-	// 2. Обновляем колонки заказа. hold_amount обязан следовать за возвратом:
-	// выплата в момент подтверждения выводится из удержания, поэтому оставленное
-	// исходное срочное удержание выплатило бы исполнителю полную срочную цену уже
-	// после того, как заказчику вернули разницу.
-	res, err := tx.ExecContext(ctx, `
-		UPDATE orders
-		SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, hold_amount = $1, is_downgraded = TRUE
-		WHERE id = $2 AND status = 'ASSIGNED' AND is_downgraded = FALSE`, basePrice, o.ID)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		// Другой воркер или подтверждение уже сдвинули этот заказ дальше.
-		return nil
-	}
-
-	// 3. Выдаём возврат, если он положен.
-	//
-	// Из эскроу, через реестр. Удержание сокращается до basePrice чуть выше,
-	// поэтому эскроу обязан отдать ровно разницу; заменённый этим сырой UPDATE
-	// зачислял заказчику и оставлял эскроу держать деньги, на которые больше не
-	// претендовал ни один заказ, — один из путей, которыми книги платформы
-	// разошлись с суммой балансов пользователей.
-	if refund.IsPositive() {
-		if err := w.ledger.Release(ctx, tx, repository.AccountEscrow, o.CustomerID, refund, repository.TransactionTypeRefund, &o.ID, nil); err != nil {
-			return err
+		if !res.Downgraded {
+			continue
 		}
+		log.Printf("[SLAWorker] Downgraded order %s to REGULAR due to delay. Refunded %s.", id, res.Refund)
+		if w.chat == nil {
+			continue
+		}
+		// Возврат уже зафиксирован, и уведомление о нём должно дойти, даже если
+		// проход застало выключение процесса: отмена ctx его не отменяет.
+		w.chat.BroadcastSystemMessage(context.WithoutCancel(ctx), id, map[string]interface{}{
+			"type":         "system",
+			"action":       "downgrade",
+			"is_urgent":    false,
+			"is_asap":      false,
+			"final_amount": res.FinalAmount,
+		})
 	}
-
-	err = tx.Commit()
-	if err != nil {
-		return err
-	}
-
-	// 4. Отправляем уведомление по websocket в активные комнаты. Возврат уже
-	// зафиксирован, и уведомление о нём должно дойти, даже если проход застало
-	// выключение процесса: отмена ctx его не отменяет.
-	w.chatService.BroadcastSystemMessage(context.WithoutCancel(ctx), o.ID, map[string]interface{}{
-		"type":         "system",
-		"action":       "downgrade",
-		"is_urgent":    false,
-		"is_asap":      false,
-		"final_amount": basePrice,
-	})
-
 	return nil
 }
 

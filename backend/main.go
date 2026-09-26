@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -203,7 +204,7 @@ func main() {
 	// ней спрятало бы ошибку конфигурации за наполовину работающим вводом адреса.
 	// Кэш избавляет провайдера от повторных разрешений одного и того же адреса на
 	// запасном пути.
-	addressSuggester := service.NewAddressSuggester(service.NewDaData(), repository.NewGeocodeCacheRepository(db))
+	addressSuggester := service.NewAddressSuggester(service.NewDaData(daDataConfigFromEnv()), repository.NewGeocodeCacheRepository(db))
 	if addressSuggester.Configured() {
 		log.Printf("[address] suggestions served by DaData")
 	} else {
@@ -246,7 +247,11 @@ func main() {
 	roleService := service.NewRoleService(roleRepo, userRepo, adminUserRepo, permissions).
 		WithSessions(authService)
 	disputeNotifier := service.NewDisputeNotifier(mailRepo, userRepo, mailer)
+	// Радиус взятия настраивается в админке; ACCEPT_RADIUS_KM — запасное
+	// значение для установок, поднятых до появления настройки.
+	acceptRadiusFallbackKM := acceptRadiusFromEnv()
 	orderService := service.NewOrderService(orderRepo, ledger, settingsRepo, userRepo, shiftRepo, chatRepo, catalogRepo, addressSuggester).
+		WithAcceptRadiusFallback(acceptRadiusFallbackKM).
 		WithExecutorGeo(executorGeoRepo).
 		WithBehaviors(serviceBehaviors, serviceClaimRepo, eventRepo).
 		WithAchievements(levels, executorStatsRepo).
@@ -263,6 +268,7 @@ func main() {
 	// Карта берёт заказы у сервиса заказов: у неё и списка «Заказы поблизости»
 	// одна реализация.
 	executorGeoService := service.NewExecutorGeoService(executorGeoRepo, settingsRepo).
+		WithAcceptRadiusFallback(acceptRadiusFallbackKM).
 		WithNearbyOrders(orderService).
 		WithTrack(photoProofService)
 	// Отчёты о местоположении в смене пишутся через гео-сервис, поэтому у
@@ -337,11 +343,11 @@ func main() {
 		Start(ctx, 5*time.Second))
 
 	// Запускаем фоновые воркеры
-	workers.Add(worker.NewSLAWorker(db, orderService, chatService, ledger).
+	workers.Add(worker.NewSLAWorker(orderService, chatService).
 		WithLeader(leader, "sla").
 		Start(ctx, 30*time.Second))
 
-	workers.Add(worker.NewAuctionWorker(db, orderService).
+	workers.Add(worker.NewAuctionWorker(orderService).
 		WithLeader(leader, "auction").
 		Start(ctx, 1*time.Minute))
 
@@ -645,4 +651,21 @@ func getEnvInt(key string, fallback int) int {
 		log.Printf("[config] %s=%q is not a positive integer, using %d", key, v, fallback)
 	}
 	return fallback
+}
+
+// acceptRadiusFromEnv читает запасной радиус взятия из ACCEPT_RADIUS_KM.
+// Пусто, мусор или неположительное значение — ноль, то есть умолчание сервиса.
+func acceptRadiusFromEnv() float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(getEnv("ACCEPT_RADIUS_KM", "")), 64)
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return v
+}
+
+// daDataConfigFromEnv читает параметры провайдера подсказок адресов. Мусор в
+// DADATA_MAX_CONCURRENCY — ноль, то есть умолчание провайдера.
+func daDataConfigFromEnv() service.DaDataConfig {
+	n, _ := strconv.Atoi(strings.TrimSpace(getEnv("DADATA_MAX_CONCURRENCY", "")))
+	return service.DaDataConfig{APIKey: getEnv("DADATA_API_KEY", ""), MaxConcurrency: n}
 }

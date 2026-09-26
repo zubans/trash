@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -28,6 +27,9 @@ type NearbyOrdersSource interface {
 type ExecutorGeoService struct {
 	geoRepo      repository.ExecutorGeoRepository
 	settingsRepo repository.SettingsRepository
+	// acceptRadiusFallbackKM — запасной радиус взятия из окружения (см.
+	// acceptRadiusKM); ноль — умолчание.
+	acceptRadiusFallbackKM float64
 	// orders собирает заказы вокруг позиции для карты. Необязательно: без
 	// него карта пуста.
 	orders NearbyOrdersSource
@@ -42,6 +44,13 @@ type ExecutorGeoService struct {
 // NewExecutorGeoService создаёт ExecutorGeoService.
 func NewExecutorGeoService(geoRepo repository.ExecutorGeoRepository, settingsRepo repository.SettingsRepository) *ExecutorGeoService {
 	return &ExecutorGeoService{geoRepo: geoRepo, settingsRepo: settingsRepo}
+}
+
+// WithAcceptRadiusFallback задаёт запасной радиус взятия, который действует,
+// пока в админке радиус не настроен. main.go читает его из ACCEPT_RADIUS_KM.
+func (s *ExecutorGeoService) WithAcceptRadiusFallback(km float64) *ExecutorGeoService {
+	s.acceptRadiusFallbackKM = km
+	return s
 }
 
 // WithNearbyOrders подключает источник заказов для карты.
@@ -101,35 +110,33 @@ const (
 // Разойтись они не могут — а разойдясь, давали бы ровно ту картину, с которой
 // всё началось: карта пишет «нельзя взять», а сервер заказ отдаёт.
 //
-// Порядок источников: настройка из админки, затем ACCEPT_RADIUS_KM из
-// окружения, затем умолчание. Окружение остаётся ради установок, поднятых до
-// появления настройки, и однажды его можно будет убрать.
-func acceptRadiusKM(settings settingsMap) float64 {
-	return settings.positiveFloat(SettingAcceptRadiusKM, acceptRadiusFromEnv())
+// Порядок источников: настройка из админки, затем fallbackKM — запасной радиус,
+// который main.go один раз читает из ACCEPT_RADIUS_KM (ради установок, поднятых
+// до появления настройки), а без него — умолчание defaultAcceptRadiusKM.
+func acceptRadiusKM(settings settingsMap, fallbackKM float64) float64 {
+	return settings.positiveFloat(SettingAcceptRadiusKM, acceptRadiusFallback(fallbackKM))
 }
 
-func acceptRadiusFromEnv() float64 {
-	valStr := os.Getenv("ACCEPT_RADIUS_KM")
-	if valStr == "" {
-		return defaultAcceptRadiusKM
+// acceptRadiusFallback подставляет умолчание вместо незаданного запасного
+// радиуса: сервис, собранный без WithAcceptRadiusFallback, ведёт себя так же,
+// как с пустой ACCEPT_RADIUS_KM.
+func acceptRadiusFallback(km float64) float64 {
+	if km > 0 {
+		return km
 	}
-	var val float64
-	if _, err := fmt.Sscanf(valStr, "%f", &val); err != nil || val <= 0 {
-		return defaultAcceptRadiusKM
-	}
-	return val
+	return defaultAcceptRadiusKM
 }
 
 // mapOverviewRadiusKM возвращает радиус обзора — тот, в котором заказы
 // показываются. Он всегда не меньше радиуса взятия: обзор уже зоны взятия
 // означал бы, что исполнителю не показывают то, что ему разрешено брать.
-func mapOverviewRadiusKM(settings settingsMap) float64 {
+func mapOverviewRadiusKM(settings settingsMap, acceptKM float64) float64 {
 	radius := settings.positiveFloat(SettingMapOverviewRadiusKM, defaultMapOverviewRadiusKM)
 	if radius > maxMapOverviewRadiusKM {
 		radius = maxMapOverviewRadiusKM
 	}
-	if accept := acceptRadiusKM(settings); radius < accept {
-		radius = accept
+	if radius < acceptKM {
+		radius = acceptKM
 	}
 	return radius
 }
@@ -145,7 +152,7 @@ func (s *ExecutorGeoService) SetLocation(ctx context.Context, executorID uuid.UU
 	}
 
 	now := time.Now()
-	radiusKM := acceptRadiusKM(loadSettingsMap(ctx, s.settingsRepo))
+	radiusKM := acceptRadiusKM(loadSettingsMap(ctx, s.settingsRepo), s.acceptRadiusFallbackKM)
 
 	// Проверяем дистанцию ручного сдвига смены
 	var shiftDist float64

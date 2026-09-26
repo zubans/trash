@@ -235,6 +235,39 @@ func (m *mockOrderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*repos
 	return list, nil
 }
 
+func (m *mockOrderRepo) ListOverdueUrgent(ctx context.Context, limit int) ([]*repository.Order, error) {
+	now := time.Now()
+	var list []*repository.Order
+	for _, o := range m.orders {
+		if o.Status == repository.OrderStatusAssigned && !o.IsDowngraded && (o.IsUrgent || o.IsAsap) &&
+			o.DeadlineAt != nil && o.DeadlineAt.Before(now) {
+			list = append(list, o)
+		}
+	}
+	return list, nil
+}
+
+func (m *mockOrderRepo) Downgrade(ctx context.Context, q repository.Querier, orderID uuid.UUID, amount money.Amount) error {
+	for _, o := range m.orders {
+		if o.ID == orderID && o.Status == repository.OrderStatusAssigned && !o.IsDowngraded {
+			o.IsUrgent, o.IsAsap, o.IsDowngraded = false, false, true
+			o.HoldAmount, o.FinalAmount = amount, amount
+			return nil
+		}
+	}
+	return repository.ErrConflict
+}
+
+func (m *mockOrderRepo) ListExpiredAuctions(ctx context.Context, createdBefore time.Time, limit int) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	for _, o := range m.orders {
+		if o.ServiceVariantID == constructionVariantID && o.Status == repository.OrderStatusSearching && o.CreatedAt.Before(createdBefore) {
+			ids = append(ids, o.ID)
+		}
+	}
+	return ids, nil
+}
+
 // Методы, требуемые интерфейсом OrderRepository.
 func (m *mockOrderRepo) Create(ctx context.Context, q repository.Querier, order *repository.Order) error {
 	m.orders = append(m.orders, order)

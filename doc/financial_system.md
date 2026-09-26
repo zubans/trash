@@ -280,7 +280,7 @@ DISPUTES −выплата   = исполнитель +(выплата − ко�
 | Было | Стало |
 | :--- | :--- |
 | `AuctionWorker.cancelAuction` — свой SQL: кредитовал заказчика, не дебетовал ESCROW, не обнулял `hold_amount` | Вызывает `OrderService.CancelUnclaimedAuction` — единственный корректный путь отмены |
-| `SLAWorker.downgradeOrder` — возврат разницы прямым UPDATE | `Ledger.Release` из `ESCROW` |
+| `SLAWorker.downgradeOrder` — возврат разницы прямым UPDATE | `OrderService.DowngradeOverdue`: под блокировкой строки заказа, возврат `Ledger.Release` из `ESCROW`; воркер только выбирает заказы и оповещает чат |
 | `adminRepo.TopUpUserBalance` — прямое пополнение | `Ledger.Deposit`, а сырой метод удалён из репозитория и из интерфейса |
 
 Последнее важно отдельно: метод не просто перестали звать, его **больше нет**, поэтому вернуться к нему случайно нельзя.

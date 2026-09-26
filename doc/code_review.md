@@ -77,12 +77,10 @@ backend/
    релизам (`UPLOADS_DIR`, `RELEASES_DIR`), SMTP, `CORS_ORIGIN`,
    `AUTH_CACHE_TTL_SEC`, TTL кэшей читаются один раз при сборке и передаются
    зависимостями; параметры базы (`DB_*`, включая `DB_SSLMODE`) — в
-   `dbconn.FromEnv`, общем для сервера и `cmd/*`. Известные исключения:
-   `service.NewDaData` читает `DADATA_API_KEY` и `DADATA_MAX_CONCURRENCY` (но
-   вызывается один раз из `main.go`), а `acceptRadiusFromEnv` в
-   `service/executor_geo.go` — запасной `ACCEPT_RADIUS_KM` для баз старше
-   миграции 049 — читает окружение на пути запроса. Новых таких мест не
-   добавлять.
+   `dbconn.FromEnv`, общем для сервера и `cmd/*`. Провайдер адресов получает
+   `service.DaDataConfig`, запасной радиус взятия `ACCEPT_RADIUS_KM` приходит
+   в `OrderService` и `ExecutorGeoService` через `WithAcceptRadiusFallback`.
+   Вне `main.go`, `dbconn` и `cmd/*` окружение не читается.
 
 Транзакции: границу открывает сервис. Проверки, решающие исход (лимиты,
 наличие pending-заявки, состояние смены), выполняются внутри той же

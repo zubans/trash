@@ -138,6 +138,16 @@ type OrderRepository interface {
 	// бы длинной ни была история заказчика.
 	FindOpenByCustomer(ctx context.Context, customerID uuid.UUID) ([]*Order, error)
 	GetAvailableAuctionOrders(ctx context.Context) ([]*Order, error)
+	// ListOverdueUrgent — назначенные срочные и ASAP-заказы, у которых вышел
+	// срок и которые ещё не понижены; старейшие по сроку первыми.
+	ListOverdueUrgent(ctx context.Context, limit int) ([]*Order, error)
+	// Downgrade переводит заказ в обычный тариф с новой суммой удержания.
+	// Охраняется статусом ASSIGNED и is_downgraded = FALSE: ErrConflict, если
+	// заказ уже понижен или ушёл дальше.
+	Downgrade(ctx context.Context, q Querier, orderID uuid.UUID, amount money.Amount) error
+	// ListExpiredAuctions — id аукционных заказов в поиске, созданных раньше
+	// createdBefore; старейшие первыми.
+	ListExpiredAuctions(ctx context.Context, createdBefore time.Time, limit int) ([]uuid.UUID, error)
 }
 
 // orderRepo реализует OrderRepository поверх *sql.DB.
@@ -466,6 +476,53 @@ func (r *orderRepo) GetAvailableAuctionOrders(ctx context.Context) ([]*Order, er
 		 WHERE sn.is_auction = TRUE AND o.status = $1`,
 		OrderStatusSearching,
 	)
+}
+
+// ListOverdueUrgent возвращает просроченные срочные и ASAP-заказы, ждущие
+// понижения. Выборка раньше жила сырым SQL в SLA-воркере.
+func (r *orderRepo) ListOverdueUrgent(ctx context.Context, limit int) ([]*Order, error) {
+	return r.queryOrders(ctx,
+		`SELECT `+orderColumns+` FROM orders o
+		 WHERE o.status = $1 AND o.is_downgraded = FALSE
+		   AND o.deadline_at < now() AND (o.is_urgent OR o.is_asap)
+		 ORDER BY o.deadline_at LIMIT $2`,
+		OrderStatusAssigned, historyLimit(limit),
+	)
+}
+
+// Downgrade переводит заказ в обычный тариф: срочность снимается, удержание и
+// итоговая сумма становятся amount. hold_amount обязан следовать за возвратом:
+// выплата при подтверждении выводится из удержания.
+func (r *orderRepo) Downgrade(ctx context.Context, q Querier, orderID uuid.UUID, amount money.Amount) error {
+	return execExpectingOne(ctx, exec(r.db, q),
+		`UPDATE orders
+		    SET is_urgent = FALSE, is_asap = FALSE, final_amount = $1, hold_amount = $1, is_downgraded = TRUE
+		  WHERE id = $2 AND status = $3 AND is_downgraded = FALSE`,
+		amount, orderID, OrderStatusAssigned)
+}
+
+// ListExpiredAuctions возвращает id аукционов, которые никто не забрал до
+// createdBefore. Выборка раньше жила сырым SQL в воркере аукционов.
+func (r *orderRepo) ListExpiredAuctions(ctx context.Context, createdBefore time.Time, limit int) ([]uuid.UUID, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT o.id FROM orders o
+		   JOIN service_nodes sn ON sn.id = o.service_variant_id
+		  WHERE o.status = $1 AND sn.is_auction = TRUE AND o.created_at < $2
+		  ORDER BY o.created_at LIMIT $3`,
+		OrderStatusSearching, createdBefore, historyLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // LockExecutor берёт транзакционную advisory-блокировку по id исполнителя.

@@ -26,7 +26,7 @@ Nominatim (OpenStreetMap) эти проблемы решить не мог: он
 
 - Файл: [`backend/service/dadata.go`](../backend/service/dadata.go)
 - API: `POST https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address`
-- Ключ: переменная окружения **`DADATA_API_KEY`**. Если ключ не задан, `NewDaData()` возвращает `nil`.
+- Ключ: переменная окружения **`DADATA_API_KEY`** (потолок параллельных запросов — `DADATA_MAX_CONCURRENCY`, по умолчанию 8). `main.go` собирает из них `service.DaDataConfig`; если ключ не задан, `NewDaData` возвращает `nil`.
 - Таймаут HTTP-клиента — **4 секунды**: ввод адреса интерактивный, подсказка после следующего нажатия клавиши бесполезна.
 - Запрос ограничен `locations: [{"country": "Россия"}]`, язык — `ru`, `count` по умолчанию `7` (максимум 20).
 - Запросы короче 3 символов не уходят к провайдеру — возвращается пустой список.

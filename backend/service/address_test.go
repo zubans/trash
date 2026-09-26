@@ -175,18 +175,20 @@ func TestSuggestionsFailLoudlyWithoutAProvider(t *testing.T) {
 // TestNewDaDataNeedsAKey покрывает переключатель, решающий, доступны ли
 // подсказки вообще.
 func TestNewDaDataNeedsAKey(t *testing.T) {
-	t.Setenv("DADATA_API_KEY", "")
-	if NewDaData() != nil {
+	if NewDaData(DaDataConfig{}) != nil {
 		t.Error("no key must yield no provider")
 	}
-
-	t.Setenv("DADATA_API_KEY", "  ")
-	if NewDaData() != nil {
+	if NewDaData(DaDataConfig{APIKey: "  "}) != nil {
 		t.Error("a blank key must yield no provider")
 	}
-
-	t.Setenv("DADATA_API_KEY", "test-key")
-	if NewDaData() == nil {
-		t.Error("a key must yield a provider")
+	d := NewDaData(DaDataConfig{APIKey: "test-key"})
+	if d == nil {
+		t.Fatal("a key must yield a provider")
+	}
+	if cap(d.inflight) != defaultDaDataConcurrency {
+		t.Errorf("unset concurrency = %d, want default %d", cap(d.inflight), defaultDaDataConcurrency)
+	}
+	if d := NewDaData(DaDataConfig{APIKey: "k", MaxConcurrency: 3}); cap(d.inflight) != 3 {
+		t.Errorf("configured concurrency = %d, want 3", cap(d.inflight))
 	}
 }

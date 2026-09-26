@@ -57,8 +57,8 @@ func (s *OrderService) FindNearbyOrdersForExecutor(ctx context.Context, executor
 // от координат, присланных клиентом, расстояние считать нельзя.
 func (s *OrderService) ordersAround(ctx context.Context, executorID uuid.UUID, lat, lon float64, positionKnown bool) ([]*MapOrderView, error) {
 	settings := loadSettingsMap(ctx, s.settingsRepo)
-	overviewKM := mapOverviewRadiusKM(settings)
-	acceptKM := acceptRadiusKM(settings)
+	acceptKM := acceptRadiusKM(settings, s.acceptRadiusFallbackKM)
+	overviewKM := mapOverviewRadiusKM(settings, acceptKM)
 
 	// Ограничиваем поиск в базе, а не в цикле ниже. Чтение каждого заказа в
 	// поиске по всей стране с отбрасыванием всех, кроме ближних, делало стоимость

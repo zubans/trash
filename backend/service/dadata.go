@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -54,20 +53,27 @@ var ErrNoAddressProvider = errors.New("address suggestions are not configured")
 // поэтому вызывающему стоит отступить и повторить, а не считать это «не найдено».
 var ErrAddressProviderBusy = errors.New("address provider is busy, try again")
 
-// NewDaData собирает подсказчик из DADATA_API_KEY. Он возвращает nil, когда
-// ключа нет, чтобы процесс всё равно стартовал; ввод и разрешение адреса тогда
-// сообщают ErrNoAddressProvider, пока ключ не задан, — вместо того чтобы весь
-// сервис не смог подняться.
-func NewDaData() *DaData {
-	key := strings.TrimSpace(os.Getenv("DADATA_API_KEY"))
+// DaDataConfig — параметры провайдера подсказок. main.go собирает их из
+// DADATA_API_KEY и DADATA_MAX_CONCURRENCY.
+type DaDataConfig struct {
+	APIKey string
+	// MaxConcurrency — потолок одновременных вызовов; ноль или меньше —
+	// defaultDaDataConcurrency.
+	MaxConcurrency int
+}
+
+// NewDaData собирает подсказчик. Он возвращает nil, когда ключа нет, чтобы
+// процесс всё равно стартовал; ввод и разрешение адреса тогда сообщают
+// ErrNoAddressProvider, пока ключ не задан, — вместо того чтобы весь сервис не
+// смог подняться.
+func NewDaData(cfg DaDataConfig) *DaData {
+	key := strings.TrimSpace(cfg.APIKey)
 	if key == "" {
 		return nil
 	}
-	concurrency := defaultDaDataConcurrency
-	if v := strings.TrimSpace(os.Getenv("DADATA_MAX_CONCURRENCY")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			concurrency = n
-		}
+	concurrency := cfg.MaxConcurrency
+	if concurrency <= 0 {
+		concurrency = defaultDaDataConcurrency
 	}
 	return &DaData{
 		// Ввод адреса интерактивен: подсказка, пришедшая после следующего
