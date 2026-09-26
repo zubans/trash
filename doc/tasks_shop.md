@@ -1,5 +1,7 @@
 # Задачи: магазин
 
+> Исторический документ: `ApplyPerk`, `ValidatePerk`, `ShopService.Purchase` и `handler/shop_admin.go` больше не существуют — привилегии считают правила-скрипты (`service/perk_rules.go`), покупку ведёт `Shop.Purchase`, админка магазина — в `handler/shop.go` через `ShopCatalog`/`ShopOrders`. Актуальное устройство — [`shop.md`](./shop.md).
+
 План и принятые решения — [`implementation_plan_shop.md`](./implementation_plan_shop.md).
 Issue-эпик: [#20](https://github.com/zubans/trash/issues/20); ветки — эпик
 `issue-20`, задачи `issue-20-<номер задачи>`.

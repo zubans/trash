@@ -1,5 +1,7 @@
 # Задачи: споры, штрафные баллы, фото-подтверждение
 
+> Исторический документ: проверки `RestrictSoftBanned` в коде нет — мягкий бан пропускает запросы по списку в `middleware/soft_ban.go` (`softBanAllows`); споры ведёт `DisputeService`. Актуальное устройство — [`disputes_and_penalties.md`](./disputes_and_penalties.md) и [`photo_proof.md`](./photo_proof.md).
+
 План и принятые решения — [`implementation_plan_disputes_penalties_photo_proof.md`](./implementation_plan_disputes_penalties_photo_proof.md).
 
 Issue: [zubans/trash#16](https://github.com/zubans/trash/issues/16).

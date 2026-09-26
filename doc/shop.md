@@ -18,10 +18,10 @@
 | Схема | `058_shop_money.sql` (счёт `SHOP`, типы проводок), `059_shop.sql` (таблицы), `061_shop_perks_and_mail.sql` (кто выдал привилегию, отметка напоминания, вид письма `SHOP`) |
 | Каталог и пункты выдачи | `repository/shop.go` |
 | Покупки | `repository/shop_order.go` |
-| Привилегии и очередь | `repository/perk.go`, `service/perk.go` (виды, `ApplyPerk`, `ValidatePerk`) |
+| Привилегии и очередь | `repository/perk.go`, `repository/perk_rule.go`; правила-скрипты — `backend/perk` и `service/perk_rules.go` (`PerkRules.Rate`, `Sellable`, `Preview`); ручная выдача, отзыв и напоминания — `service/perk_grants.go` (`PerkGrants`) |
 | Ставка с привилегией | `service/achievement.go` — `Levels.For` / `withPerk` |
 | Деньги | `service/ledger.go` — `ShopCharge`, `ShopRefund`, `ShopPayout` |
-| Витрина, покупка, обработка | `service/shop.go`, `service/shop_admin.go` |
+| Витрина, покупка, обработка | `service/shop.go` (`Shop`), `service/shop_catalog.go` (`ShopCatalog`), `service/shop_orders.go` (`ShopOrders`) |
 | HTTP | `handler/shop.go` |
 | Напоминание о конце привилегии | `worker/perk_reminder_worker.go` |
 | Покупатель | `pages/shared/ShopPage.vue`, `ShopProductPage.vue`, `ShopOfferPage.vue`, `components/shop/*` |

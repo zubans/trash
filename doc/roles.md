@@ -83,15 +83,17 @@
 
 ## 3. Как это охраняется
 
-**Бэкенд.** Группа админских маршрутов в `main.go` открывается не ролью `ADMIN`,
-а `RequireAdminPanel` — наличием хоть одного права в разделах панели. Что именно
-разрешено внутри, решает `RequirePermission` на каждом маршруте:
+**Бэкенд.** Группа админских маршрутов в `router.go` (`registerAPIRoutes`)
+открывается не ролью `ADMIN`, а `RequireAdminPanel` — наличием хоть одного права
+в разделах панели. Что именно разрешено внутри, решает `RequirePermission` на
+каждом маршруте; `can` передаётся в `Register<Группа>Routes(r, can)` каждого
+обработчика, и маршрут объявляет своё право рядом с собой (`handler/admin.go`):
 
 ```go
-r.With(can("users.view")).Get("/admin/users", ah.GetUsersHandler)
-r.With(can("users.edit")).Post("/admin/users/{id}/status", ah.UpdateUserStatusHandler)
-r.With(can("roles.edit")).Post("/admin/users/{id}/roles", ah.UpdateUserRolesHandler)
-r.With(can("topups.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalanceHandler)
+r.With(can("users.view")).Get("/admin/users", h.GetUsersHandler)
+r.With(can("users.edit")).Post("/admin/users/{id}/status", h.UpdateUserStatusHandler)
+r.With(can("roles.edit")).Post("/admin/users/{id}/roles", h.UpdateUserRolesHandler)
+r.With(can("topups.edit")).Post("/admin/users/{id}/balance", h.TopUpUserBalanceHandler)
 ```
 
 Смена ролей пользователя охраняется правом `roles.edit`, а не `users.edit`: это
@@ -100,9 +102,16 @@ r.With(can("topups.edit")).Post("/admin/users/{id}/balance", ah.TopUpUserBalance
 одобрить заявку на пополнение. `users.edit` покрывает статус, верификацию, имя,
 дату рождения и адрес.
 
-Обработчик сам роль не проверяет: `GET /admin/geo-alerts` открыт правом
-`shifts.view`, и модератор с этим правом получает `200`, а не `403` за то, что
-он не `ADMIN`.
+Обработчик сам роль не проверяет — ни строкой `Role != "ADMIN"`, ни иначе:
+`GET /admin/geo-alerts` открыт правом `shifts.view`, и модератор с этим правом
+получает `200`, а не `403` за то, что он не `ADMIN`. Чаты поддержки узнают
+администратора по полному набору ролей (`HasRole(ADMIN)`), а не по основной
+роли.
+
+Ответы страниц ролей идут по классу ошибки (`writeDomainError`): негодный ввод
+в `POST /admin/roles`, `PUT /admin/roles/{code}`,
+`DELETE /admin/roles/{code}/users/{user_id}` — `422`, нужна роль `ADMIN` —
+`403`.
 
 **Фронтенд.** `GET /auth/me` возвращает поле `permissions` — объединение прав
 всех ролей пользователя. По нему `auth-store` строит геттер `can(permission)`,

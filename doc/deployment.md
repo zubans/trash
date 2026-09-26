@@ -69,6 +69,20 @@ make monitoring-up
 | `APP_BASE_URL` | Базовый URL приложения для генерации ссылок подтверждения | `https://moya-usluga.ru:8443` |
 | `JWT_SECRET` | Секретный ключ подписи JWT-токенов | — |
 | `DADATA_API_KEY` | Ключ API подсказок адресов DaData. **Обязателен** — без него контейнер бэкенда не стартует, а `/geo/suggest` и `/geo/autocomplete` отвечали бы `503`. См. [`address_suggestions.md`](./address_suggestions.md) | — |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE` | Подключение к PostgreSQL. Читает `dbconn.FromEnv` — один и тот же для сервера, `cmd/migrate`, `cmd/reconcile` и остальных бинарников | `localhost`, `5432`, `healthlogin`, `healthlogin`, `healthlogin`, `disable` |
+| `CORS_ORIGIN` | Доверенные источники браузера через запятую; тот же набор проверяет Origin рукопожатия WebSocket чата (`service.AllowedOrigins`) | — |
+| `SKIP_MIGRATIONS` | Непустое значение — сервер не применяет миграции на старте (их применяет отдельный шаг `cmd/migrate`) | — |
+
+Окружение читается один раз при старте — в `main.go` и `dbconn`; сервисы и
+обработчики получают значения зависимостями, поэтому смена переменной требует
+перезапуска контейнера.
+
+По `SIGTERM` бэкенд выключается штатно: перестаёт принимать запросы, ждёт
+текущие запросы и начатые проходы фоновых воркеров не дольше 15 секунд
+(`shutdownTimeout` в `main.go`) и только потом закрывает базу. Таймаут
+остановки контейнера должен быть больше этого (у Docker по умолчанию — 10 с,
+в compose стоит задать `stop_grace_period` не меньше 20 с), иначе проход,
+начатый воркером, оборвёт `SIGKILL`.
 
 ---
 

@@ -34,7 +34,9 @@
 | поставляемые скрипты | `backend/achievements/<код>/*.star` |
 | компиляция собственных скриптов | `backend/service/achievement_scripts.go` |
 | уровни и ставка комиссии | `backend/service/achievement.go` |
-| диспетчер и проверки ядра | `backend/service/achievement_dispatch.go` |
+| диспетчер и проверки ядра | `backend/service/achievement_dispatch.go` (цикл outbox — общий `outboxConsumer` из `service/outbox.go`) |
+| каталог для экранов, подарки, инциденты | `service.AchievementCatalog` (`achievement_catalog.go`), `service.GiftCatalog` (`gift_catalog.go`), `service.MoneyIncidents` (`money_incidents.go`) |
+| датчики очереди и инцидентов | `backend/worker/gauges_worker.go` |
 | денежная граница | `Ledger.SettleOrder` в `backend/service/ledger.go` |
 | схема | `backend/migrations/047_achievements.sql` |
 | экраны | `frontend/src/pages/executor/AchievementsPage.vue`, `GiftsPage.vue`, `frontend/src/pages/MailPage.vue`, `frontend/src/pages/admin/{Achievements,Gifts,MoneyIncidents}.vue` |
@@ -618,9 +620,12 @@ CREATE INDEX idx_money_incidents_open ON money_incidents (created_at)
    `healthlogin_money_incidents_total{kind}`. Он считается в процессе, поэтому
    откат транзакции его переоценивает — та же оговорка, что уже стоит в
    `Ledger.record`;
-3. датчик `healthlogin_money_incidents_open`, который выставляет воркер сверки
-   из таблицы. Алерт вешается на него, а не на счётчик: алерт про деньги
-   обязан говорить только о закоммиченном;
+3. датчик `healthlogin_money_incidents_open`, который выставляет
+   `worker.GaugeWorker` из таблицы раз в 30 секунд на каждом процессе, без
+   защиты лидера (раньше — тик диспетчера ачивок под блокировкой лидера: на
+   реплике без блокировки датчик замирал, а упавший тик гасил алерт). Алерт
+   вешается на него, а не на счётчик: алерт про деньги обязан говорить только
+   о закоммиченном;
 4. правило в `monitoring/prometheus/rules/platform.yml`, группа `money`,
    `severity: page` — оттуда alertmanager уже шлёт в телеграм;
 5. `[AUDIT]`-строка в логе и экран открытых инцидентов рядом с
@@ -772,11 +777,13 @@ POST   /api/admin/achievements             новая ачивка со свои
 PUT    /api/admin/achievements/{code}      вкл/выкл, окно, вес, конфиг, скрипт
 DELETE /api/admin/achievements/{code}      в архив (выдачи и баллы остаются)
 POST   /api/admin/achievements/{code}/restore
-POST   /api/admin/users/{id}/achievements/{code}/revoke
+POST   /api/admin/achievements/grants/{id}/revoke
 POST /api/admin/users/{id}/achievements/recheck    прогнать условия по истории
 POST /api/admin/users/{id}/achievements/{code}    выдать вручную, минуя правило
 POST /api/admin/users/{id}/stats/recalculate      пересчитать агрегаты по заказам
-GET  /api/admin/gifts, /api/admin/gifts/{code}/codes
+GET  /api/admin/gifts
+PUT  /api/admin/gifts/{code}                      правка подарка; отдаёт строку из базы
+POST /api/admin/gifts/{code}/codes                пополнить пул кодов
 POST /api/admin/gifts/coupons/{coupon}/redeem     погасить купон при выдаче вещи
 GET  /api/admin/finances/incidents?all=1&limit=&offset=   инциденты (по умолчанию открытые, страница 200)
 POST /api/admin/finances/incidents/{id}/resolve

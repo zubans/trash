@@ -54,9 +54,10 @@ Content-Type: application/json
 ### 2.2 Заявки на пополнение баланса (`TopUpRequests.vue`)
 
 В текущей версии ручное пополнение происходит по заявкам:
-- **`GET /api/admin/topup-requests?status=PENDING`** — список нерассмотренных заявок.
-- **`POST /api/admin/topup-requests/{id}/approve`** — подтверждение заявки (баланс заказчика увеличивается, создается финансовая транзакция `TOPUP`).
-- **`POST /api/admin/topup-requests/{id}/reject`** — отклонение заявки.
+- **`GET /api/admin/finances/topups`** — список заявок (право `topups.view`).
+- **`POST /api/admin/finances/topups/{id}/approve`** — подтверждение заявки (баланс заказчика увеличивается, создается финансовая транзакция `TOP_UP`). Право `topups.edit`.
+- **`POST /api/admin/finances/topups/{id}/reject`** — отклонение заявки. Право `topups.edit`.
+- Коды: заявки нет — `404`, заявка уже решена — `409`. Так же отвечают заявки на вывод (`/api/admin/finances/withdrawals/{id}/approve|reject`).
 
 ### 2.2a Журнал проводок (`TransactionHistory.vue`)
 
@@ -81,8 +82,7 @@ Content-Type: application/json
 
 ### 2.3 Мониторинг смен исполнителей (`ActiveShifts.vue`)
 
-- **`GET /api/admin/shifts`** — отображение всех активных и завершенных смен с текущими статусами (`ACTIVE`, `COMPLETED`, `PENALIZED`).
-- Индикация количества нарушений геозоны и штрафов.
+- **`GET /api/admin/shifts/active`** (право `shifts.view`) — активные сейчас смены с телефонами исполнителей, новые сверху (`ShiftMonitorRepository.ListActiveWithExecutors`).
 
 ### 2.3a Заказы (`Orders.vue`)
 
@@ -117,23 +117,23 @@ Content-Type: application/json
 | Ключ настройки | Тип | Описание |
 | :--- | :--- | :--- |
 | `currency` | `STRING` | Валюта отображения в приложении (`RUB`, `USD`, `EUR`). |
-| `tariff_increased_mult` | `FLOAT` | Множитель тарифа «Увеличенный объем» (по умолчанию `2.0`). |
-| `tariff_urgent_mult` | `FLOAT` | Множитель тарифа «Срочный (1 час)» (по умолчанию `3.0`). |
-| `tariff_asap_mult` | `FLOAT` | Множитель тарифа «ASAP (15 минут)» (по умолчанию `8.0`). |
-| `geofence_penalty_amount` | `FLOAT` | Сумма штрафа за нарушение геозоны смены. |
-| `early_exit_penalty_amount` | `FLOAT` | Сумма штрафа за досрочное завершение смены. |
+| `urgent_tariff_coeff` | `FLOAT` | Множитель тарифа «Срочный (1 час)» (по умолчанию `3.0`). |
+| `asap_tariff_coeff` | `FLOAT` | Множитель тарифа «ASAP (15 минут)» (по умолчанию `8.0`). |
+| `shift_early_exit_penalty` | `FLOAT` | Сумма штрафа за досрочное завершение смены (по умолчанию `50`). |
 | `min_balance_limit` | `FLOAT` | Лимит отрицательного баланса (ухода в минус) исполнителя (по умолчанию `0`). |
 | `order_commission_percent` | `FLOAT` | Комиссия платформы с выполненного заказа, в процентах, `0..100` (по умолчанию `0`). |
 | `behavior_max_bonus` | `FLOAT` | Потолок одной выплаты, назначенной скриптом услуги, в рублях (по умолчанию `5000`). См. [`service_behaviors.md`](./service_behaviors.md). |
 | `auto_shift_on_accept_enabled` | `0`/`1` | Открывать ли смену автоматически исполнителю, который берёт заказ без активной смены (по умолчанию `1`). См. [`order_lifecycle.md`](./order_lifecycle.md#3-автооткрытие-смены-при-взятии-заказа). |
 | `auto_shift_duration_hours` | `1`/`3`/`5` | Длительность автоматически открытой смены (по умолчанию `1`). Список тот же, что у ручного старта смены. |
 
+Настройки читаются сервисами одним способом (`service/settings.go`): отсутствующий, пустой или нечитаемый ключ даёт умолчание, записанный `0` — это значение, а не «не задано» (кроме радиусов, порогов и длительностей, для которых ноль бессмыслен). `POST /api/admin/settings` на негодное значение отвечает `422`.
+
 ### 2.5 Комиссия платформы (`PlatformCommission.vue`)
 
 - **`GET /api/admin/finances/commission`** — накопленный остаток системного счёта `COMMISSION` и действующая ставка.
 - **`POST /api/admin/finances/commission/payout`** — вывод накопленного из системы, тело `{ "amount": <рубли> }`.
 
-Оба маршрута доступны только роли `ADMIN`; вывод ограничен остатком счёта, а
+Маршруты охраняются правами `commission.view` и `commission.edit`; вывод ограничен остатком счёта (негодная сумма — `422`), а
 идентификатор администратора записывается в журнал операции. Как считается сама
 комиссия — в [`financial_system.md`](./financial_system.md#4b-комиссия-платформы).
 

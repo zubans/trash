@@ -37,7 +37,7 @@ Nominatim (OpenStreetMap) эти проблемы решить не мог: он
 [address] WARNING: DADATA_API_KEY is not set — address suggestions will return 503 and registration cannot complete
 ```
 
-> Геокодирование (`service.Geocoder`, `GET /api/geo/geocode`) по-прежнему работает через Nominatim с кэшем в `geocoding_cache` — оно используется для обратного разбора произвольных строк, а не для ввода адреса.
+> Геокодирование произвольных строк (`AddressSuggester.Resolve`, `GET /api/geo/geocode`, создание заказа и регистрация без координат, воркер дозаполнения координат) тоже идёт через DaData: сначала кэш `geocoding_cache`, затем лучшая подсказка с координатами. Nominatim больше не используется.
 
 ---
 
@@ -74,17 +74,16 @@ Nominatim (OpenStreetMap) эти проблемы решить не мог: он
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/geo/suggest?q=...&count=7` | `[]service.Address` (части раздельно) | Основной эндпоинт подсказок. |
 | `GET` | `/api/geo/autocomplete?q=...` | `[]AutocompleteResult` (строка `Россия, Город, Улица, д. N`) | **Legacy.** Форма ответа сохранена ради установленных мобильных сборок: они перепроверяют строку своим регулярным выражением перед отправкой. Внутри теперь тоже DaData; подсказки без номера дома отфильтрованы, так как старый клиент их всё равно отклонит. |
-| `GET` | `/api/geo/geocode?q=...` | `{latitude, longitude}` | Геокодирование через Nominatim с кэшем. |
+| `GET` | `/api/geo/geocode?q=...` | `{latitude, longitude}` | Геокодирование: кэш `geocoding_cache`, затем лучшая подсказка DaData (`AddressSuggester.Resolve`). |
 
-Все три ограничены рейт-лимитером `geoLimiter` — **30 запросов в минуту** ([`backend/main.go`](../backend/main.go)).
+Все три ограничены рейт-лимитером — **30 запросов в минуту** (`limiters.geo`, собирается в [`backend/main.go`](../backend/main.go), навешивается в `GeoHandler.RegisterPublicRoutes`).
 
 ### Коды ошибок (`writeGeoError` в [`handler/geo.go`](../backend/handler/geo.go))
 
 | Код | Ошибка | Смысл |
 | :--- | :--- | :--- |
 | `503` | `ErrNoAddressProvider` | Провайдер не настроен — проблема деплоя, а не запроса. |
-| `502` | `ErrAddressProviderUnreachable` | DNS/TLS/соединение до провайдера не поднялось. Осознанно **не** `422`: с введённым текстом всё в порядке. |
-| `429` | `ErrGeocoderBusy` | Общий слот к апстриму не освободился вовремя. |
+| `429` | `ErrAddressProviderBusy` | Общий слот к апстриму не освободился вовремя. |
 | `422` | прочее | Запрос действительно некорректен. |
 
 ---
@@ -108,7 +107,7 @@ Nominatim (OpenStreetMap) эти проблемы решить не мог: он
 Приложение обновляется не у всех сразу, поэтому оба формата принимаются одновременно:
 
 - **Регистрация** `POST /api/register` — `RegisterRequest` принимает и `address` строкой, и части (`region`, `city`, `street`, `house`, `flat`, `fias_id`, `source`). Если части не пришли, строка раскладывается на сервере (`ParseAddressLine`).
-- **Адреса пользователя** `POST /api/user/address` — `addressRequest.toAddress()` предпочитает части и падает на разбор строки, если их нет. Квартира, присланная рядом со строкой, применяется — так её отправляет старый экран регистрации.
+- **Адреса пользователя** `POST /api/user/address` — `addressRequest.toAddress()` предпочитает части и падает на разбор строки, если их нет. Квартира, присланная рядом со строкой, применяется — так её отправляет старый экран регистрации. Ошибки валидации адреса и негодный id адреса — `422` (`ProfileService`, через `writeDomainError`).
 - **Legacy-подсказки** `GET /api/geo/autocomplete` — см. таблицу выше.
 
 Проверка формата адреса при регистрации теперь смысловая, а не текстовая: требуется населённый пункт, улица и дом (`Address.Validate`), а не совпадение с фиксированным написанием.

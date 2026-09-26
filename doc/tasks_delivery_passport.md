@@ -1,5 +1,7 @@
 # Задачи: привилегии-скрипты, доставка, паспорт, статус «проверенный»
 
+> Исторический документ: `ApplyPerk` больше не существует — ставку с привилегией считает `PerkRules.Rate` (`service/perk_rules.go`). Актуальное устройство — [`shop.md`](./shop.md).
+
 План и решения — [`implementation_plan_delivery_passport.md`](./implementation_plan_delivery_passport.md).
 
 Issue: продолжение [zubans/trash#20](https://github.com/zubans/trash/issues/20).

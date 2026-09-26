@@ -115,7 +115,24 @@ ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 -L 9093:127.0.0.1:9093 user@mo
 
 ### Зависимости и фон
 
-`upstream_requests_total{upstream,operation,result}` для DaData и Nominatim (отдельные значения `cache_hit`, `busy`, `rate_limited`, `unauthorized` — они лечатся по-разному), `mail_sends_total{kind,result}`, `worker_runs_total`, `worker_last_success_timestamp_seconds`, `chat_websocket_connections`.
+`upstream_requests_total{upstream,operation,result}` для DaData (отдельные значения `cache_hit`, `busy`, `rate_limited`, `unauthorized` — они лечатся по-разному), `mail_sends_total{kind,result}`, `worker_runs_total`, `worker_last_success_timestamp_seconds`, `chat_websocket_connections`.
+
+Датчики, которые читаются из базы, — `money_incidents_open` (на нём алерт про
+неразобранные денежные инциденты), `behavior_events_pending` и
+`achievement_events_pending` — публикует `worker.GaugeWorker` раз в 30 секунд
+на **каждом** процессе, без защиты лидера. Раньше их выставляли тики
+диспетчеров ачивок и поведений под блокировкой лидера: на реплике без
+блокировки датчик замирал на старом значении, а упавший тик ачивок молча гасил
+алерт про деньги. При ошибке чтения датчик остаётся при прежнем значении. Свой
+проход GaugeWorker считает в `worker_runs_total` под именем `ops_gauges`.
+
+Все периодические задачи идут через общий цикл `worker/periodic.go`: метрика
+прохода, защита лидера, перехват паники (паника прохода — неудавшийся проход, а
+не падение процесса). `refresh_token_cleanup` (раз в сутки, один `DELETE`)
+намеренно без метрики прохода — иначе его пришлось бы вносить в исключения
+`BackgroundWorkerStalled`. По `SIGINT`/`SIGTERM` процесс отменяет контекст
+воркеров (`signal.NotifyContext`), штатно гасит HTTP-серверы и ждёт начатые
+проходы (`worker.Group.Wait`) не дольше 15 секунд.
 
 ---
 

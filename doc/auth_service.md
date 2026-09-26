@@ -20,7 +20,7 @@ backend/
 │   ├── address.go    # модель адреса (части, сборка строки, валидация)
 │   ├── dadata.go     # подсказки адресов DaData
 │   ├── address_suggest.go # единая точка входа подсказок + legacy-формат
-│   ├── geocoder.go   # геокодирование адресов (Nominatim + кэш)
+│   ├── geocoding.go  # типы результата геокодирования (сам разрешатель — AddressSuggester.Resolve: кэш + DaData)
 │   └── auth_test.go  # юнит-тесты
 ├── repository/
 │   └── user.go       # контракт UserRepository и реализация на SQL
@@ -51,7 +51,12 @@ type UserRepository interface {
 `+7XXXXXXXXXX` (`normalizePhone`), почта — к нижнему регистру без пробелов по
 краям (`normalizeEmail`) на всех путях записи: регистрация, смена почты, запрос
 и выполнение сброса пароля. Репозиторий ищет по точному номеру и по
-`LOWER(email)`; повторного поиска по сырому вводу нет. Баланс меняет только
+`LOWER(email)`; повторного поиска по сырому вводу нет. Поиск по телефону —
+только точное совпадение с каноническим номером: прежний запасной
+`OR REGEXP_REPLACE(phone, ...)` читал всю таблицу на каждом входе. Миграция
+`066` привела уже сохранённые адреса к нижнему регистру и заменила индекс по
+`email` уникальным индексом по `LOWER(email)`: `A@x.ru` и `a@x.ru` больше не
+могут стать двумя учётками. Баланс меняет только
 `TransactionRepository` (дельтой), абсолютного сеттера у `UserRepository` нет.
 
 ## Создание сервиса
@@ -113,7 +118,12 @@ func (s *AuthService) Authenticate(phone, password string) (*repository.User, er
 по тексту: `ErrPhoneTaken`/`ErrEmailTaken` — `409`; негодные поля формы
 (`ErrValidation`) — `400` с текстом; `ErrVerificationTokenExpired` — `400` с
 кодом `TOKEN_EXPIRED`; `ErrVerificationTokenInvalid` — `400`; всё прочее —
-сбой, `500` без внутреннего текста.
+сбой, `500` без внутреннего текста (в том числе сбой базы на `POST /register`
+и `GET /auth/verify-email`, раньше отдававшийся как `400`).
+
+Остальные пути профиля отвечают через общий `writeDomainError`: ошибка ввода —
+`422`. Это `POST /auth/reset-password` (неверный или истёкший код — тоже `422`),
+`POST /user/email`, `POST /user/change-password`, `POST /user/birth-date`.
 
 ### GenerateJWT
 
@@ -195,4 +205,8 @@ func (s *AuthService) GenerateJWT(user *repository.User) (string, error)
 
 | Переменная | Назначение | Значение по умолчанию |
 |------------|------------|----------------------|
-| `JWT_SECRET` | Секрет для подписи JWT | `dev-secret-change-me` |
+| `JWT_SECRET` | Секрет для подписи JWT. **Обязателен**: без него процесс не стартует | — |
+| `AUTH_CACHE_TTL_SEC` | Время жизни кэша пользователя в `AuthMiddleware`; `0` выключает кэш | `5` |
+
+Окружение читает только `main.go` (и `dbconn` — параметры базы); сервисы и
+middleware получают значения зависимостями.

@@ -86,6 +86,10 @@
 - заказчик видит пустой каталог и не может создать заказ;
 - заказы в работе доводятся до конца.
 
+Списки (рядом, карта, аукционы) спрашивают блокировку зрителя один раз на
+запрос, а не на каждый заказ; автоподбор берёт её одним запросом на раунд для
+всех исполнителей на смене (`PenaltyService.SilentlyBlockedAmong`).
+
 `GET /api/me/penalty-status` о тихой блокировке молчит.
 
 ### Мягкий бан
@@ -105,17 +109,19 @@
 
 | Метод | Путь | Кто / право |
 | :--- | :--- | :--- |
-| `POST` | `/api/customer/orders/{id}/dispute` | заказчик |
-| `POST` | `/api/customer/orders/{id}/confirm` | заказчик; закрывает открытый спор |
-| `POST` | `/api/executor/orders/{id}/dispute/concede` | исполнитель |
+| `POST` | `/api/customer/orders/{id}/dispute` | заказчик; `404` нет заказа, `403` чужой, `409` не `EXECUTED` / спор уже открыт, `422` пустая или длинная претензия |
+| `POST` | `/api/customer/orders/{id}/confirm` | заказчик; закрывает открытый спор; `404`/`403`/`409` |
+| `POST` | `/api/executor/orders/{id}/dispute/concede` | исполнитель; `404`/`403`/`409` |
 | `GET` | `/api/me/penalty-status` | любой: период фото по ролям, мягкий бан |
-| `GET` | `/api/admin/disputes?status=OPEN\|CLOSED` | `disputes.view` |
+| `GET` | `/api/admin/disputes?status=OPEN\|CLOSED&limit=&offset=` | `disputes.view`; неизвестный статус — `422` |
 | `GET` | `/api/admin/disputes/{id}/evidence` | `disputes.view`; см. [`photo_proof.md`](./photo_proof.md#5-сверка-в-арбитраже) |
-| `POST` | `/api/admin/disputes/{id}/resolve` | `disputes.edit` |
+| `POST` | `/api/admin/disputes/{id}/resolve` | `disputes.edit`; `400` неизвестное решение, `404` нет спора, `409` уже закрыт, `422` комментарий длиннее 2000 символов |
 | `GET` | `/api/admin/users/{id}/penalties` | `users.view` |
 | `POST` | `/api/admin/users/{id}/penalties/{point_id}/revoke` | `penalties.edit` |
 | `POST` | `/api/admin/users/{id}/penalties/reset-silent-flag` | `penalties.edit` |
-| `POST` | `/api/admin/users/{id}/status` | `users.edit`; `ACTIVE` / `SOFT_BANNED` + `reason` / `BANNED` |
+| `POST` | `/api/admin/users/{id}/status` | `users.edit`; `ACTIVE` / `SOFT_BANNED` + `reason` / `BANNED`; `404` нет пользователя, `409` правило (себя, администратора), `422` ввод |
+
+Коды — по классу ошибки сервиса (`writeDomainError`); неизвестная ошибка — `500 internal error`.
 
 ## 4. Настройки
 
