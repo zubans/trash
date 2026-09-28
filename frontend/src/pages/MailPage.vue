@@ -103,7 +103,38 @@
           </button>
         </div>
 
-        <div ref="threadBody" class="thread-body">
+        <!-- Письмо без переписки: новость, акция, подарок. Ответить в него
+             некому, поэтому оно показывается листом, а не пузырями чата. -->
+        <div v-if="letter" class="thread-body">
+          <div class="letter-date">{{ formatDateTime(letter.created_at) }}</div>
+          <div class="letter-text">{{ letter.body }}</div>
+          <button
+            v-if="letter.ref_type === 'gift'"
+            type="button"
+            class="btn-link"
+            @click="goToGifts"
+          >
+            Открыть подарок
+          </button>
+          <button
+            v-else-if="letter.ref_type === 'achievement'"
+            type="button"
+            class="btn-link"
+            @click="goToAchievements"
+          >
+            Посмотреть достижения
+          </button>
+          <button
+            v-else-if="letter.ref_type === 'shop_order' || letter.ref_type === 'perk'"
+            type="button"
+            class="btn-link"
+            @click="goToShop(letter)"
+          >
+            {{ letter.ref_type === 'perk' ? $t('shop.perk.cta') : $t('shop.tabs.orders') }}
+          </button>
+        </div>
+
+        <div v-else ref="threadBody" class="thread-body">
           <div v-if="threadLoading" class="state-note">Загружаем переписку…</div>
           <div
             v-for="item in thread"
@@ -138,7 +169,7 @@
             <i class="ph-fill ph-paper-plane-right"></i>
           </button>
         </div>
-        <div v-else class="thread-note">На это письмо нельзя ответить.</div>
+        <div v-else-if="!letter" class="thread-note">На это письмо нельзя ответить.</div>
         <div v-if="replyError" class="thread-note error">{{ replyError }}</div>
       </div>
     </div>
@@ -245,12 +276,17 @@ export default defineComponent({
 
     // Открытое письмо помечается прочитанным сразу в списке: ждать ответа
     // сервера, чтобы убрать точку, значит показывать её ещё секунду после того,
-    // как человек уже прочитал.
+    // как человек уже прочитал. Письмо без переписки открывается из того, что
+    // уже пришло в ленте: текст там полный, обрезан он только вёрсткой.
     const open = async (message: MailMessage) => {
       if (message.kind === 'DIRECT') {
         await openThread(message)
         return
       }
+      threadRoot.value = message
+      thread.value = [message]
+      replyText.value = ''
+      replyError.value = ''
       if (!isUnread(message)) return
       markLocallyRead(message)
       try {
@@ -294,6 +330,10 @@ export default defineComponent({
     }
 
     const canReply = computed(() => threadRoot.value?.kind === 'DIRECT')
+
+    const letter = computed(() =>
+      threadRoot.value && threadRoot.value.kind !== 'DIRECT' ? threadRoot.value : null,
+    )
 
     const threadSubject = computed(() => threadRoot.value?.subject || 'Переписка')
 
@@ -408,6 +448,7 @@ export default defineComponent({
       threadBody,
       threadSubject,
       canReply,
+      letter,
       replyText,
       replyError,
       sending,
@@ -765,6 +806,18 @@ export default defineComponent({
 }
 
 .bubble-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.letter-date {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.letter-text {
+  font-size: 14px;
+  color: #111827;
   white-space: pre-wrap;
   word-break: break-word;
 }
