@@ -25,6 +25,14 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 
+import ru.rustore.sdk.appupdate.listener.InstallStateUpdateListener;
+import ru.rustore.sdk.appupdate.manager.RuStoreAppUpdateManager;
+import ru.rustore.sdk.appupdate.manager.factory.RuStoreAppUpdateManagerFactory;
+import ru.rustore.sdk.appupdate.model.AppUpdateOptions;
+import ru.rustore.sdk.appupdate.model.AppUpdateType;
+import ru.rustore.sdk.appupdate.model.InstallStatus;
+import ru.rustore.sdk.appupdate.model.UpdateAvailability;
+
 @CapacitorPlugin(name = "AppUpdate")
 public class UpdatePlugin extends Plugin {
 
@@ -32,6 +40,11 @@ public class UpdatePlugin extends Plugin {
     private static final String UPDATE_FILE_NAME = "healthlogin-update.apk";
     private static final String UPDATE_SUBDIR = Environment.DIRECTORY_DOWNLOADS;
     private static final int REQUEST_INSTALL_PERMISSION = 9001;
+    // ActivityResult.ACTIVITY_NOT_FOUND из RuStore SDK: RuStore не установлен или устарел
+    private static final int RUSTORE_ACTIVITY_NOT_FOUND = 2;
+
+    private RuStoreAppUpdateManager ruStoreManager;
+    private InstallStateUpdateListener ruStoreListener;
 
     private long currentDownloadId = -1;
     private BroadcastReceiver downloadReceiver;
@@ -118,6 +131,12 @@ public class UpdatePlugin extends Plugin {
             return;
         }
 
+        // REQUEST_INSTALL_PACKAGES есть только в debug-сборке — release обновляется через RuStore
+        if (!isInstallPermissionDeclared(activity)) {
+            startRuStoreUpdate(call, activity, url, Boolean.TRUE.equals(call.getBoolean("force", false)));
+            return;
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !activity.getPackageManager().canRequestPackageInstalls()) {
             pendingInstallCall = call;
@@ -126,6 +145,174 @@ public class UpdatePlugin extends Plugin {
         }
 
         startDownload(call, url);
+    }
+
+    /**
+     * Откуда ставится обновление: apk — скачиванием с нашего сервера (debug),
+     * rustore — через RuStore (available — есть ли там новая версия),
+     * browser — RuStore недоступен, APK открывается в браузере.
+     */
+    @PluginMethod
+    public void checkStoreUpdate(PluginCall call) {
+        Activity activity = getActivity();
+        if (activity == null || activity.isFinishing()) {
+            call.reject("Activity is not available");
+            return;
+        }
+
+        JSObject result = new JSObject();
+        if (isInstallPermissionDeclared(activity)) {
+            result.put("source", "apk");
+            call.resolve(result);
+            return;
+        }
+
+        getRuStoreManager().getAppUpdateInfo()
+                .addOnSuccessListener(info -> {
+                    result.put("source", "rustore");
+                    result.put("available", info.getUpdateAvailability() == UpdateAvailability.UPDATE_AVAILABLE);
+                    call.resolve(result);
+                })
+                .addOnFailureListener(throwable -> {
+                    Log.w(TAG, "RuStore update info is not available", throwable);
+                    result.put("source", "browser");
+                    call.resolve(result);
+                });
+    }
+
+    private RuStoreAppUpdateManager getRuStoreManager() {
+        if (ruStoreManager == null) {
+            ruStoreManager = RuStoreAppUpdateManagerFactory.INSTANCE.create(getContext());
+        }
+        return ruStoreManager;
+    }
+
+    // AppUpdateInfo одноразовый, поэтому запрашивается заново перед каждым startUpdateFlow
+    private void startRuStoreUpdate(PluginCall call, Activity activity, String url, boolean force) {
+        RuStoreAppUpdateManager manager = getRuStoreManager();
+        manager.getAppUpdateInfo()
+                .addOnSuccessListener(info -> {
+                    if (info.getUpdateAvailability() != UpdateAvailability.UPDATE_AVAILABLE) {
+                        call.setKeepAlive(false);
+                        call.reject("Update is not available in RuStore yet");
+                        return;
+                    }
+
+                    int type = force && info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)
+                            ? AppUpdateType.IMMEDIATE
+                            : AppUpdateType.FLEXIBLE;
+                    if (type == AppUpdateType.FLEXIBLE) {
+                        registerRuStoreListener(manager, call);
+                    }
+
+                    manager.startUpdateFlow(info, new AppUpdateOptions.Builder().appUpdateType(type).build())
+                            .addOnSuccessListener(resultCode -> {
+                                if (resultCode == RUSTORE_ACTIVITY_NOT_FOUND) {
+                                    unregisterRuStoreListener();
+                                    call.setKeepAlive(false);
+                                    openInBrowser(call, activity, url);
+                                } else if (resultCode == Activity.RESULT_CANCELED) {
+                                    unregisterRuStoreListener();
+                                    call.setKeepAlive(false);
+                                    JSObject result = new JSObject();
+                                    result.put("cancelled", true);
+                                    call.resolve(result);
+                                } else if (type == AppUpdateType.IMMEDIATE) {
+                                    // Экран обновления и установку ведёт сам RuStore
+                                    call.setKeepAlive(false);
+                                    call.resolve();
+                                }
+                                // FLEXIBLE: вызов завершит слушатель, когда загрузка закончится
+                            })
+                            .addOnFailureListener(throwable -> {
+                                Log.e(TAG, "RuStore update flow failed", throwable);
+                                unregisterRuStoreListener();
+                                call.setKeepAlive(false);
+                                call.reject("RuStore update failed: " + throwable.getMessage());
+                            });
+                })
+                .addOnFailureListener(throwable -> {
+                    // RuStore не установлен, устарел или пользователь не авторизован
+                    Log.w(TAG, "RuStore is not available, falling back to browser", throwable);
+                    call.setKeepAlive(false);
+                    openInBrowser(call, activity, url);
+                });
+    }
+
+    private void registerRuStoreListener(RuStoreAppUpdateManager manager, PluginCall call) {
+        unregisterRuStoreListener();
+        ruStoreListener = state -> {
+            switch (state.getInstallStatus()) {
+                case InstallStatus.DOWNLOADING: {
+                    long downloaded = state.getBytesDownloaded();
+                    long total = state.getTotalBytesToDownload();
+                    JSObject data = new JSObject();
+                    data.put("progress", total > 0 ? (int) ((downloaded * 100L) / total) : 0);
+                    data.put("bytesDownloaded", downloaded);
+                    data.put("totalBytes", total);
+                    notifyListeners("downloadProgress", data);
+                    break;
+                }
+                case InstallStatus.DOWNLOADED:
+                    unregisterRuStoreListener();
+                    manager.completeUpdate(new AppUpdateOptions.Builder().appUpdateType(AppUpdateType.FLEXIBLE).build())
+                            .addOnFailureListener(throwable -> Log.e(TAG, "RuStore install failed", throwable));
+                    call.setKeepAlive(false);
+                    call.resolve();
+                    break;
+                case InstallStatus.FAILED:
+                    unregisterRuStoreListener();
+                    call.setKeepAlive(false);
+                    call.reject("RuStore download failed (code=" + state.getInstallErrorCode() + ")");
+                    break;
+                case InstallStatus.DOWNLOAD_INTERRUPTED: {
+                    unregisterRuStoreListener();
+                    call.setKeepAlive(false);
+                    JSObject result = new JSObject();
+                    result.put("cancelled", true);
+                    call.resolve(result);
+                    break;
+                }
+                default:
+                    break;
+            }
+        };
+        manager.registerListener(ruStoreListener);
+    }
+
+    private void unregisterRuStoreListener() {
+        if (ruStoreListener != null && ruStoreManager != null) {
+            ruStoreManager.unregisterListener(ruStoreListener);
+        }
+        ruStoreListener = null;
+    }
+
+    private boolean isInstallPermissionDeclared(Activity activity) {
+        try {
+            PackageInfo info = activity.getPackageManager().getPackageInfo(
+                    activity.getPackageName(), PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions == null) {
+                return false;
+            }
+            for (String permission : info.requestedPermissions) {
+                if ("android.permission.REQUEST_INSTALL_PACKAGES".equals(permission)) {
+                    return true;
+                }
+            }
+        } catch (PackageManager.NameNotFoundException e) {
+            Log.e(TAG, "Unable to read declared permissions", e);
+        }
+        return false;
+    }
+
+    private void openInBrowser(PluginCall call, Activity activity, String url) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        try {
+            activity.startActivity(intent);
+            call.resolve();
+        } catch (android.content.ActivityNotFoundException e) {
+            call.reject("No application found to open update url");
+        }
     }
 
     private void openInstallPermissionSettings(Activity activity) {
@@ -167,6 +354,7 @@ public class UpdatePlugin extends Plugin {
     protected void handleOnDestroy() {
         super.handleOnDestroy();
         unregisterDownloadReceiver();
+        unregisterRuStoreListener();
     }
 
     private void startDownload(PluginCall call, String url) {

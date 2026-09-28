@@ -1611,6 +1611,12 @@ public class MainActivity extends BridgeActivity {
 
 `UpdatePlugin.downloadAndInstall` выполняет эту проверку перед запуском скачивания.
 
+Разрешение объявлено только в debug-сборке (`frontend/android/app/src/debug/AndroidManifest.xml`): release с `REQUEST_INSTALL_PACKAGES` не проходит модерацию RuStore. По наличию разрешения плагин выбирает, как ставить обновление:
+
+- **debug** — скачивание APK с нашего сервера и установка, как описано выше;
+- **release** — RuStore SDK (`ru.rustore.sdk:appupdate`). `checkStoreUpdate` спрашивает у RuStore, есть ли новая версия: пока она не прошла модерацию, баннер не показывается, даже если бэкенд уже отдаёт новый `version_code`. `downloadAndInstall` запускает отложенное обновление (`FLEXIBLE`: диалог RuStore, загрузка с прогрессом в `downloadProgress`, затем `completeUpdate`), а при `force_update` — принудительное (`IMMEDIATE`, экран ведёт RuStore). Отказ пользователя возвращается как `{ cancelled: true }`, без ошибки;
+- **release без RuStore** (не установлен, устарел, пользователь не авторизован) — ссылка на APK открывается в браузере.
+
 #### Формирование URL для скачивания
 
 Backend может возвращать либо абсолютный `download_url`, либо относительный путь. Для гибкости фронтенд дополняет относительный путь базовым `VITE_API_URL`:
@@ -2009,7 +2015,7 @@ ON CONFLICT (key) DO NOTHING;
 - [ ] Создать `frontend/src/plugins/app-update.ts` и `frontend/src/composables/useAppUpdate.ts`.
 - [ ] Создать `frontend/src/components/AppVersionFooter.vue`.
 - [ ] Добавить `UpdatePlugin.java` в `frontend/android/app/src/main/java/com/healthlogin/app/`.
-- [ ] Обновить `AndroidManifest.xml` (`REQUEST_INSTALL_PACKAGES`, FileProvider).
+- [ ] Обновить `AndroidManifest.xml` (FileProvider; `REQUEST_INSTALL_PACKAGES` — только в `src/debug`).
 - [ ] Обновить `res/xml/file_paths.xml` (`<files-path name="updates" path="updates/" />`).
 - [ ] Добавить `UpdateBanner` и `AppVersionFooter` в `App.vue`.
 - [ ] Убрать дублирующий `UpdateBanner` из `CustomerDashboard.vue` и `ExecutorDashboard.vue`.

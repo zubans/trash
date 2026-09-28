@@ -60,7 +60,11 @@ async function checkVersion() {
     const response = await api.get('/app/version', { params: { platform: 'android' } })
     const remote = response.data
 
-    if (remote.version_code > current.versionCode) {
+    // В RuStore версия появляется только после модерации — до этого баннер не показываем
+    const storeUpdateReady = remote.version_code > current.versionCode
+      && await isStoreUpdateReady()
+
+    if (storeUpdateReady) {
       versionCode.value = remote.version_code
       const dismissedCode = localStorage.getItem('dismissed_app_version_code')
       const isDismissed = dismissedCode && Number(dismissedCode) === remote.version_code
@@ -78,6 +82,11 @@ async function checkVersion() {
     errorMsg.value = err.message || 'Failed to check for updates'
     console.error('[AppUpdate] check failed:', err)
   }
+}
+
+async function isStoreUpdateReady(): Promise<boolean> {
+  const store = await AppUpdate.checkStoreUpdate()
+  return store.source !== 'rustore' || store.available === true
 }
 
 function reset() {
@@ -141,7 +150,7 @@ export function useAppUpdate() {
     bytesDownloaded.value = 0
     totalBytes.value = 0
     try {
-      await AppUpdate.downloadAndInstall({ url: downloadUrl.value })
+      await AppUpdate.downloadAndInstall({ url: downloadUrl.value, force: forceUpdate.value })
     } catch (err: any) {
       errorMsg.value = err.message || 'Failed to install update'
       console.error('[AppUpdate] install failed:', err)

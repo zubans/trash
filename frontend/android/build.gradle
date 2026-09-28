@@ -21,6 +21,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // SDK обновлений RuStore
+        maven { url 'https://nexus-external.rustore.ru/repository/maven-rustore-exposed' }
     }
 }
 
